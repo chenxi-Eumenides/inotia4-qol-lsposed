@@ -40,10 +40,10 @@ constexpr uint32_t kDividerGold = kFrameGold;
 constexpr uint32_t kTextGold = 0xFFA0E0FFu;      // RGB(255,224,160)
 
 // —— 文字 ——
-// 普通文字。
+// 次级 / 说明文字。
 constexpr uint32_t kTextNormal = 0xFFC8C7C1u;    // RGB(193,199,200) 柔和浅灰
-// 选项文字（原版 Options 菜单淡紫）。
-constexpr uint32_t kTextOption = 0xFFCB9EE2u;    // RGB(226,158,203)
+// 正文文字：纯白。
+constexpr uint32_t kTextBody = 0xFFFFFFFFu;      // RGB(255,255,255)
 // 禁用 / 次级文字：淡灰。
 constexpr uint32_t kTextDisabled = 0xFFA8AAA7u;  // RGB(167,170,168)，与深底保持可读对比
 

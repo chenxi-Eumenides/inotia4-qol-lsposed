@@ -1355,15 +1355,16 @@ int main() {
           g_back_draws == 0 && g_native_text_background_draws == 0 &&
           g_painted_buttons.empty());  // Restricted examples are described, not fabricated.
 
-    // 配色页：无交互控件，纯静态绘制；叠层容器在外壳之外追加 3 次容器框调用。
+    // 配色页：无交互控件，纯静态绘制；只有左右外壳两个容器框。
     request_category(7);
     render_panel_frame();
     CHECK(has_drawn_string(g_drawn_strings, category_names[7]));
     CHECK(has_category_heading(7));
-    CHECK(has_drawn_string(g_drawn_strings, "选中 #695031/90"));
-    CHECK(has_drawn_string(g_drawn_strings, "普通 #1C2024"));
-    CHECK(has_drawn_string(g_drawn_strings, "禁用遮罩 30%"));
-    CHECK(g_container_frame_calls.size() == 5);  // 2 外壳 + 3 层叠面板
+    CHECK(has_drawn_string(g_drawn_strings, "标题行（静态 · 无选中态）"));
+    CHECK(has_drawn_string(g_drawn_strings, "次级标题 / 选项行（静态 · 无选中态）"));
+    CHECK(has_drawn_string(g_drawn_strings, "可选行（动态 · 两态 + 按下金边）"));
+    CHECK(has_drawn_string(g_drawn_strings, "正文（白色）"));
+    CHECK(g_container_frame_calls.size() == 2);
 
     // Returning to category 0 rebuilds its page on process while preserving the preview style.
     const int creates_before_box_page = g_creates;
