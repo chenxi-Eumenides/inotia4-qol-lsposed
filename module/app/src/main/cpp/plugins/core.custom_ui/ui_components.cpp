@@ -2056,77 +2056,97 @@ QolResult dispatch_native_event(contracts::QolUiHandle root, uint64_t event, uin
     return g_adapter->control_tree_event(root, event, param, param2, consumed);
 }
 
-QolResult draw_container(UiRect rect) {
-    if (rect.w < 48 || rect.h < 48 ||
-        rect.x < INT32_MIN || rect.x > INT32_MAX || rect.y < INT32_MIN || rect.y > INT32_MAX ||
-        rect.w > INT32_MAX || rect.h > INT32_MAX ||
-        rect.x > static_cast<int64_t>(INT32_MAX) - rect.w ||
-        rect.y > static_cast<int64_t>(INT32_MAX) - rect.h) {
-        return invalid_argument();
-    }
-    if (!adapter_ready() || g_adapter->draw_border_rect == nullptr) return not_ready();
-    return g_adapter->draw_border_rect(static_cast<int32_t>(rect.x),
-                                       static_cast<int32_t>(rect.y),
-                                       static_cast<int32_t>(rect.w),
-                                       static_cast<int32_t>(rect.h));
-}
-
-QolResult draw_container_ornamented(UiRect rect) {
-    if (rect.w < 48 || rect.h < 48 ||
-        rect.x < static_cast<int64_t>(INT32_MIN) + 2 || rect.x > INT32_MAX ||
-        rect.y < static_cast<int64_t>(INT32_MIN) + 2 || rect.y > INT32_MAX ||
-        rect.w > INT32_MAX || rect.h > INT32_MAX ||
-        rect.x > static_cast<int64_t>(INT32_MAX) - rect.w ||
-        rect.y > static_cast<int64_t>(INT32_MAX) - rect.h) {
-        return invalid_argument();
-    }
-    if (!adapter_ready() || g_adapter->draw_border_rect == nullptr ||
-        g_adapter->image_group == nullptr || g_adapter->image_loc == nullptr ||
-        g_adapter->image_loc_size == nullptr || g_adapter->draw_part == nullptr) {
-        return not_ready();
-    }
-
+struct ContainerOrnamentPlan {
     contracts::QolUiHandle group = nullptr;
-    QolResult result = g_adapter->image_group(kFrameImageUnit, &group);
-    if (!contracts::succeeded(result)) return result;
-
-    constexpr int32_t kLocations[] = {0x30, 0x31, 0x35, 0x36};
     contracts::QolUiHandle parts[4]{};
     int32_t widths[4]{};
     int32_t heights[4]{};
-    for (size_t i = 0; i < 4; ++i) {
-        result = g_adapter->image_loc(kFrameImageUnit, kLocations[i], &parts[i]);
-        if (!contracts::succeeded(result)) return result;
-        result = g_adapter->image_loc_size(kFrameImageUnit, kLocations[i], &widths[i], &heights[i]);
-        if (!contracts::succeeded(result)) return result;
-        if (widths[i] <= 0 || heights[i] <= 0) return not_ready();
-    }
-
-    result = g_adapter->draw_border_rect(static_cast<int32_t>(rect.x),
-                                         static_cast<int32_t>(rect.y),
-                                         static_cast<int32_t>(rect.w),
-                                         static_cast<int32_t>(rect.h));
-    if (!contracts::succeeded(result)) return result;
-
-    const int64_t positions_x[] = {rect.x - 2, rect.x + rect.w - widths[1], rect.x - 2,
-                                   rect.x + rect.w - widths[3]};
-    const int64_t positions_y[] = {rect.y - 2, rect.y - 2, rect.y + rect.h - heights[2],
-                                   rect.y + rect.h - heights[3]};
     int32_t xs[4]{};
     int32_t ys[4]{};
+};
+
+bool valid_container_rect(UiRect rect, bool ornamented) {
+    const int64_t min_position = ornamented ? static_cast<int64_t>(INT32_MIN) + 2 : INT32_MIN;
+    return rect.w >= 48 && rect.h >= 48 && rect.x >= min_position && rect.x <= INT32_MAX &&
+        rect.y >= min_position && rect.y <= INT32_MAX && rect.w <= INT32_MAX &&
+        rect.h <= INT32_MAX && rect.x <= static_cast<int64_t>(INT32_MAX) - rect.w &&
+        rect.y <= static_cast<int64_t>(INT32_MAX) - rect.h;
+}
+
+QolResult prepare_container_ornaments(ContainerOrnamentPlan* plan) {
+    if (plan == nullptr || !adapter_ready() || g_adapter->image_group == nullptr ||
+        g_adapter->image_loc == nullptr || g_adapter->image_loc_size == nullptr ||
+        g_adapter->draw_part == nullptr) return not_ready();
+
+    ContainerOrnamentPlan prepared{};
+    QolResult result = g_adapter->image_group(kFrameImageUnit, &prepared.group);
+    if (!contracts::succeeded(result)) return result;
+
+    constexpr int32_t kLocations[] = {0x30, 0x31, 0x35, 0x36};
+    for (size_t i = 0; i < 4; ++i) {
+        result = g_adapter->image_loc(kFrameImageUnit, kLocations[i], &prepared.parts[i]);
+        if (!contracts::succeeded(result)) return result;
+        result = g_adapter->image_loc_size(kFrameImageUnit, kLocations[i],
+                                           &prepared.widths[i], &prepared.heights[i]);
+        if (!contracts::succeeded(result)) return result;
+        if (prepared.widths[i] <= 0 || prepared.heights[i] <= 0) return not_ready();
+    }
+
+    *plan = prepared;
+    return contracts::ok();
+}
+
+QolResult position_container_ornaments(UiRect rect, ContainerOrnamentPlan* plan) {
+    if (plan == nullptr) return invalid_argument();
+    const int64_t positions_x[] = {rect.x - 2, rect.x + rect.w - plan->widths[1], rect.x - 2,
+                                   rect.x + rect.w - plan->widths[3]};
+    const int64_t positions_y[] = {rect.y - 2, rect.y - 2,
+                                   rect.y + rect.h - plan->heights[2],
+                                   rect.y + rect.h - plan->heights[3]};
     for (size_t i = 0; i < 4; ++i) {
         if (positions_x[i] < INT32_MIN || positions_x[i] > INT32_MAX ||
             positions_y[i] < INT32_MIN || positions_y[i] > INT32_MAX) {
             return invalid_argument();
         }
-        xs[i] = static_cast<int32_t>(positions_x[i]);
-        ys[i] = static_cast<int32_t>(positions_y[i]);
+        plan->xs[i] = static_cast<int32_t>(positions_x[i]);
+        plan->ys[i] = static_cast<int32_t>(positions_y[i]);
     }
+    return contracts::ok();
+}
+
+QolResult draw_container_ornament_parts(const ContainerOrnamentPlan& plan) {
     for (size_t i = 0; i < 4; ++i) {
-        result = g_adapter->draw_part(group, xs[i], ys[i], parts[i], 0, 1);
+        const QolResult result = g_adapter->draw_part(
+            plan.group, plan.xs[i], plan.ys[i], plan.parts[i], 0, 1);
         if (!contracts::succeeded(result)) return result;
     }
     return contracts::ok();
+}
+
+QolResult draw_container_styled(const contracts::UiContainerStyleDesc* desc) {
+    if (desc == nullptr || desc->fill_rgb565 > 0xffffu || desc->alpha > 100u ||
+        desc->ornamented > 1 || !valid_container_rect(desc->rect, desc->ornamented != 0)) {
+        return invalid_argument();
+    }
+    constexpr size_t kDrawContainerFrameEnd =
+        offsetof(contracts::QolUiAdapter, draw_container_frame) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->draw_container_frame);
+    if (!adapter_ready() || g_adapter->minor < contracts::kUiAdapterMinor ||
+        g_adapter->size < kDrawContainerFrameEnd ||
+        g_adapter->draw_container_frame == nullptr) return not_ready();
+
+    ContainerOrnamentPlan ornaments{};
+    if (desc->ornamented != 0) {
+        QolResult prepared = prepare_container_ornaments(&ornaments);
+        if (contracts::succeeded(prepared)) {
+            prepared = position_container_ornaments(desc->rect, &ornaments);
+        }
+        if (!contracts::succeeded(prepared)) return prepared;
+    }
+    QolResult result = g_adapter->draw_container_frame(desc->rect, desc->fill_rgb565,
+                                                       desc->alpha);
+    if (!contracts::succeeded(result) || desc->ornamented == 0) return result;
+    return draw_container_ornament_parts(ornaments);
 }
 
 // 不经控件 data 的文本绘制原语：按控件绝对原点绘制传入字符串，颜色沿用控件文本口径。
@@ -2332,14 +2352,18 @@ QolResult help_page_draw(contracts::QolUiHandle handle) {
     if (x < static_cast<int64_t>(INT32_MIN) + 2 || y < static_cast<int64_t>(INT32_MIN) + 2 ||
         x > INT32_MAX - page->rect.w || y > INT32_MAX - page->rect.h) return invalid_argument();
     auto absolute = [x, y](UiRect rect) { rect.x += x; rect.y += y; return rect; };
+    const auto draw_help_frame = [](UiRect rect, uint8_t ornamented) {
+        const contracts::UiContainerStyleDesc style{rect, 0x0000u, 60u, ornamented};
+        return draw_container_styled(&style);
+    };
     // Full-screen help pages can use the two column frames as their only visible panels.
     if (page->rect.x != 0 || page->rect.y != 0 || page->rect.w < 960 || page->rect.h < 640) {
-        result = draw_container(absolute({0, 0, page->rect.w, page->rect.h}));
+        result = draw_help_frame(absolute({0, 0, page->rect.w, page->rect.h}), 0);
         if (!contracts::succeeded(result)) return result;
     }
-    result = draw_container_ornamented(absolute(help_column_frame(page->left_viewport, true)));
+    result = draw_help_frame(absolute(help_column_frame(page->left_viewport, true)), 1);
     if (!contracts::succeeded(result)) return result;
-    result = draw_container_ornamented(absolute(help_column_frame(page->right_viewport, false)));
+    result = draw_help_frame(absolute(help_column_frame(page->right_viewport, false)), 1);
     if (!contracts::succeeded(result)) return result;
     result = scroll_list_draw(page->help_list);
     if (!contracts::succeeded(result)) return result;
@@ -2495,8 +2519,6 @@ const contracts::QolUiComponents kUiComponents{
     &scroll_set_offset,
     &dispatch_touch,
     &destroy,
-    &draw_container,
-    &draw_container_ornamented,
     &scroll_list_create,
     &scroll_list_process,
     &scroll_list_draw,
@@ -2557,6 +2579,8 @@ const contracts::QolUiComponents kUiComponents{
     &draw_rect_shape,
     &draw_rounded_rect_shape,
     &draw_circle_shape,
+    // Minor 23 tail: independently styled native-textured container.
+    &draw_container_styled,
 };
 
 }  // namespace

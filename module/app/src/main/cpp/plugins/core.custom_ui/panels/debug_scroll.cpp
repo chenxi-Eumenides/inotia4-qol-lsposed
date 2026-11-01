@@ -159,9 +159,13 @@ void panel_process() {
     (void)components->draw_control_text(g_labels[1], kHintText, 0, 0, 0xFFC9BDABu, 0, 1);
     contracts::UiRect root_rect{};
     if (contracts::succeeded(ui->get_rect(g_root, &root_rect))) {
-        result = components->draw_container({root_rect.x + kViewport.x - 8,
-            root_rect.y + kViewport.y - 8, kViewport.w + 32, kViewport.h + 16});
-        if (!contracts::succeeded(result)) log_result("container", result);
+        const contracts::UiContainerStyleDesc style{
+            {root_rect.x + kViewport.x - 8, root_rect.y + kViewport.y - 8,
+             kViewport.w + 32, kViewport.h + 16}, 0x0000, 60, 0};
+        if (components->draw_container_styled != nullptr) {
+            result = components->draw_container_styled(&style);
+            if (!contracts::succeeded(result)) log_result("container", result);
+        }
     }
     result = components->scroll_list_draw(g_list);
     if (!contracts::succeeded(result)) log_result("draw list", result);

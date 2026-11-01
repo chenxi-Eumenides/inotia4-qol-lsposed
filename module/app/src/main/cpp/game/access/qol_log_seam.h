@@ -19,6 +19,7 @@ constexpr int32_t kQolLogDomainPlatform = 0;
 constexpr int32_t kQolLogDomainCore = 1;
 constexpr int32_t kQolLogDomainApi = 3;
 constexpr int32_t kQolLogDomainInventory = 5;
+constexpr int32_t kQolLogDomainUi = 12;
 constexpr int32_t kQolLogDomainCatalog = 14;
 
 // 级别序数（与 QolLogLevel 对齐）：0=Debug、1=Info、2=Warn。

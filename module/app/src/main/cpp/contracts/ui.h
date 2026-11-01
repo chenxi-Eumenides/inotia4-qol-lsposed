@@ -13,8 +13,8 @@
 namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
-constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 22;
-constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 33;
+constexpr uint16_t kUiContractMajor = 2, kUiContractMinor = 23;
+constexpr uint16_t kUiAdapterMajor = 2, kUiAdapterMinor = 34;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 2;
 constexpr uint32_t kUiStateMaxCustomPanels = 4;
@@ -144,6 +144,15 @@ struct UiShapeDesc {
     uint32_t alpha;
     uint32_t border_width;
     uint32_t radius;
+};
+
+// Native-textured container with an independent RGB565/alpha interior fill.
+// ornamented selects the shared four-corner overlay; it must be 0 or 1.
+struct UiContainerStyleDesc {
+    UiRect rect;
+    uint32_t fill_rgb565;
+    uint32_t alpha;
+    uint8_t ornamented;
 };
 
 // text_button_create interprets style as a native font choice; button_create keeps its own style.
@@ -372,8 +381,6 @@ struct QolUiComponents {
     QolResult (*scroll_set_offset)(QolUiHandle, int32_t);
     QolResult (*dispatch_touch)(QolUiHandle root, uint32_t phase, int64_t x, int64_t y);
     QolResult (*destroy)(QolUiHandle);
-    QolResult (*draw_container)(UiRect);
-    QolResult (*draw_container_ornamented)(UiRect);
     // 原生列表上限 1024 行、extent <= INT32_MAX；parent 可借用，但不得嵌套 scroll。
     // destroy 释放 owned native 子树；回调内 destroy 仅置 pending，下一 process 安全点执行。
     QolResult (*scroll_list_create)(const UiScrollListDesc*, QolUiHandle parent, QolUiHandle* out);
@@ -524,6 +531,8 @@ struct QolUiComponents {
     QolResult (*draw_rect)(const UiShapeDesc*);
     QolResult (*draw_rounded_rect)(const UiShapeDesc*);
     QolResult (*draw_circle)(const UiShapeDesc*);
+    // Minor 23 append-only: native-textured container with configurable fill and ornaments.
+    QolResult (*draw_container_styled)(const UiContainerStyleDesc*);
 };
 
 using QolUiDrawFn = void (*)(void* control);
@@ -662,7 +671,6 @@ struct QolUiAdapter {
     // 真实 pthread 主线程判定（minor 7 追加）；游戏 popup 读写的权威线程门，
     // 消费者不得以编译期常量替代。
     int32_t (*is_main_thread)();
-    QolResult (*draw_border_rect)(int32_t x, int32_t y, int32_t w, int32_t h);
     QolResult (*image_loc_size)(int32_t unit, int32_t loc, int32_t* out_width,
                                 int32_t* out_height);
     // 裁剪不支持嵌套；绘制后 reset_clip 复原整屏，不恢复上一层。
@@ -810,6 +818,9 @@ struct QolUiAdapter {
 
     // Minor 33 tail: restore native ControlItem On/MoveOn event eligibility.
     QolResult (*use_control_event_on)(QolUiHandle);
+
+    // Minor 34 tail: native-textured container frame and one independent interior fill.
+    QolResult (*draw_container_frame)(UiRect, uint32_t fill_rgb565, uint32_t alpha);
 };
 
 }  // namespace qol::contracts

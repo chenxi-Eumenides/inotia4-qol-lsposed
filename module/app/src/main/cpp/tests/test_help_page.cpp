@@ -129,8 +129,9 @@ QolResult event(QolUiHandle, uint64_t evt, uint64_t param, uint64_t param2, uint
     if (g_execute != nullptr) g_execute->click(g_execute->user);
     *consumed = 7; return ok();
 }
-QolResult container(int32_t x, int32_t y, int32_t w, int32_t h) {
-    assert(!g_clip); g_frames.push_back({x, y, w, h}); g_draw_order.emplace_back("container"); return ok();
+QolResult container_frame(UiRect rect, uint32_t fill_rgb565, uint32_t alpha) {
+    assert(!g_clip && fill_rgb565 == 0x0000u && alpha == 60u);
+    g_frames.push_back(rect); g_draw_order.emplace_back("container"); return ok();
 }
 // 游戏 IMGSYS fake：UnitLoad 幂等（已加载不重载、不增引用），UnitUnload 无引用计数、
 // 直接置失效并记录物理卸载次数。0x0f 边框图集由游戏共享，人物信息页等原生消费者在
@@ -184,7 +185,8 @@ QolUiAdapter adapter() {
     ui.set_click_proc = &set_click; ui.set_draw_proc = &set_draw; ui.delete_control = &remove_control;
     ui.scroll_create = &create_scroll; ui.scroll_set_target = &connect; ui.button_set_scroll = &connect;
     ui.scroll_process = &process; ui.scroll_draw = &draw_scroll; ui.draw_control = &draw_control;
-    ui.control_tree_event = &event; ui.draw_border_rect = &container; ui.image_group = &image_group;
+    ui.control_tree_event = &event; ui.draw_container_frame = &container_frame;
+    ui.image_group = &image_group;
     ui.image_loc = &image_loc; ui.image_loc_size = &image_size; ui.draw_part = &part;
     ui.begin_frame = &no_op; ui.end_frame = &no_op;
     ui.screen_inset_width = &inset; ui.screen_inset_height = &inset;

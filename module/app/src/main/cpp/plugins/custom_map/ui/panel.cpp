@@ -107,7 +107,7 @@ bool components_complete() {
         g_components->scroll_list_process != nullptr && g_components->scroll_list_draw != nullptr &&
         g_components->scroll_list_get_row != nullptr && g_components->destroy != nullptr &&
         g_components->draw_control_text != nullptr &&
-        g_components->draw_container_ornamented != nullptr &&
+        g_components->draw_container_styled != nullptr &&
         g_components->dispatch_native_event != nullptr && g_components->nav_button_create != nullptr &&
         g_components->nav_button_draw != nullptr;
 }
@@ -565,10 +565,10 @@ void custom_map_panel_process() {
                           kLeftView.w + 16, kLeftView.h + 16};
         const UiRect right{root_x + kMapView.x - 8, root_y + kMapView.y - 8,
                            kMapView.w + 16, kMapView.h + 16};
-        (void)g_ui->fill_rect(left, contracts::ui_theme::kPanelBg);
-        (void)g_components->draw_container_ornamented(left);
-        (void)g_ui->fill_rect(right, contracts::ui_theme::kPanelBg);
-        (void)g_components->draw_container_ornamented(right);
+        const contracts::UiContainerStyleDesc left_style{left, 0x1904, 100, 1};
+        const contracts::UiContainerStyleDesc right_style{right, 0x1904, 100, 1};
+        (void)g_components->draw_container_styled(&left_style);
+        (void)g_components->draw_container_styled(&right_style);
     }
     (void)g_components->draw_control_text(g_root, "自定义地图", 640, 54,
         contracts::ui_theme::kTextGold, 2, 2);

@@ -288,7 +288,7 @@ QolResult image_loc_size(int32_t, int32_t, int32_t* width, int32_t* height) {
 QolResult draw_part_scaled(QolUiHandle, int32_t, int32_t, QolUiHandle, int32_t, int32_t, int32_t) {
     return ok();
 }
-QolResult container(int32_t, int32_t, int32_t, int32_t) { return ok(); }
+QolResult container_frame(UiRect, uint32_t, uint32_t) { return ok(); }
 QolResult origin(QolUiHandle handle, int64_t* x, int64_t* y) {
     *x = 0;
     *y = 0;
@@ -325,7 +325,7 @@ QolUiAdapter make_adapter() {
     ui.scroll_get_offset = &get_offset; ui.scroll_set_offset = &set_offset;
     ui.control_tree_event = &event; ui.begin_frame = &no_op; ui.end_frame = &no_op;
     ui.screen_inset_width = &inset; ui.screen_inset_height = &inset;
-    ui.draw_border_rect = &container; ui.draw_custom_button = &custom_button;
+    ui.draw_container_frame = &container_frame; ui.draw_custom_button = &custom_button;
     ui.control_pressed = &pressed; ui.draw_back_button = &back;
     ui.control_absolute_origin = &origin; ui.set_font_color_rgb = &font_color_rgb;
     ui.draw_string_with_font = &string_with_font;
@@ -391,11 +391,12 @@ int main() {
     int checks = 0;
 #define CHECK(expr) do { assert(expr); ++checks; } while (false)
     static_assert(offsetof(QolUiComponents, scroll_list_create) ==
-        offsetof(QolUiComponents, draw_container_ornamented) + sizeof(void*));
+        offsetof(QolUiComponents, destroy) + sizeof(void*));
     auto ui = make_adapter();
     CHECK(ui_components_bind(&ui));
     g_api = ui_components_api();
-    CHECK(g_api->major == 1 && g_api->minor == qol::contracts::kUiContractMinor);
+    CHECK(g_api->major == qol::contracts::kUiContractMajor &&
+          g_api->minor == qol::contracts::kUiContractMinor);
     QolUiHandle root = nullptr, list = nullptr;
     CHECK(succeeded(create(0, nullptr, &root)));
     UiScrollListDesc desc{{12, 20, 200, 140}, 56, 24, 2, &draw_item, &select, &g_selected};

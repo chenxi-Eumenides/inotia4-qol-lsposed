@@ -12,6 +12,7 @@
 #include "game/access/attr_range_ui.h"
 #include "game/access/game_access.h"
 #include "game/access/ui_kit.h"
+#include "game/access/ui_container_frame_geometry.h"
 #include "game/access/ui_components.h"
 #include "host/ui_adapter.h"
 #include "infra/log/qol_log.h"
@@ -156,7 +157,11 @@ int g_popup_snapshot_reads = 0;
 bool g_game_main_thread = true;
 alignas(16) char g_uidesc_test_buffer[G_UIDESC_TEXT_BUF_SIZE + 8]{};
 bool g_uidesc_buffer_available = true;
-int32_t g_border_rect[4]{};
+UiRect g_container_frame_rect{};
+uint32_t g_container_frame_rgb565 = 0;
+uint32_t g_container_frame_alpha = 0;
+int g_container_frame_calls = 0;
+bool g_container_frame_result = true;
 int32_t g_clip_rect[4]{};
 int g_set_clip_calls = 0;
 int g_reset_clip_calls = 0;
@@ -169,12 +174,6 @@ void click_proc(void* user) { g_click_user = user; }
 void fake_set_text(void*, char*) { ++g_set_text_calls; }
 void fake_set_draw_proc(void*, NativeButtonDrawProc) { ++g_set_draw_proc_calls; }
 void fake_draw_control(void*) { ++g_draw_control_calls; }
-void fake_draw_border_rect(int32_t x, int32_t y, int32_t w, int32_t h) {
-    g_border_rect[0] = x;
-    g_border_rect[1] = y;
-    g_border_rect[2] = w;
-    g_border_rect[3] = h;
-}
 void fake_set_clip(int32_t x1, int32_t y1, int32_t x2, int32_t y2) {
     ++g_set_clip_calls;
     g_clip_rect[0] = x1;
@@ -311,7 +310,6 @@ void qol_log_write(QolLogLevel, QolDomain, const char*, int, const char*, ...) {
 ControlButtonSetTextFn fn_ctrl_btn_set_text = &fake_set_text;
 ControlButtonSetDrawProcFn fn_ctrl_btn_set_draw_proc = &fake_set_draw_proc;
 ControlButtonDrawFn fn_ctrl_btn_draw = &fake_draw_control;
-UiDrawBorderRectFn fn_ui_draw_border_rect = &fake_draw_border_rect;
 decltype(fn_grpx_set_clip) fn_grpx_set_clip = &fake_set_clip;
 decltype(fn_grpx_reset_clip) fn_grpx_reset_clip = &fake_reset_clip;
 decltype(fn_ctrl_scroll_create) fn_ctrl_scroll_create = &fake_scroll_create;
@@ -467,6 +465,13 @@ bool attr_insert_value_color(char* before, char* after, char code) {
     return true;
 }
 bool game_host_is_main_thread() { return g_game_main_thread; }
+bool ui_draw_container_frame(::UiRect rect, uint32_t fill_rgb565, uint32_t alpha) {
+    g_container_frame_rect = rect;
+    g_container_frame_rgb565 = fill_rgb565;
+    g_container_frame_alpha = alpha;
+    ++g_container_frame_calls;
+    return g_container_frame_result;
+}
 QolResult craft_stuff_slot_index(void* transient_control, int32_t* out_index) {
     if (out_index == nullptr) return contracts::error(kQolErrInvalidArgument, "invalid", 7);
     *out_index = -1;
@@ -842,8 +847,12 @@ int main() {
                   offsetof(qol::contracts::QolUiAdapter, use_control_event_on),
                   "native event-enable operation must append the UI adapter tail");
     static_assert(offsetof(qol::contracts::QolUiAdapter, use_control_event_on) +
-                      sizeof(adapter->use_control_event_on) == sizeof(qol::contracts::QolUiAdapter),
-                  "native event-enable operation must remain the final adapter field");
+                      sizeof(adapter->use_control_event_on) ==
+                  offsetof(qol::contracts::QolUiAdapter, draw_container_frame),
+                  "container paint operation must append after native event-enable");
+    static_assert(offsetof(qol::contracts::QolUiAdapter, draw_container_frame) +
+                      sizeof(adapter->draw_container_frame) == sizeof(qol::contracts::QolUiAdapter),
+                  "container paint operation must remain the final adapter field");
     uint64_t param[2]{};
     int source_control = 0;
     std::memcpy(&param[1], &source_control, sizeof(source_control));
@@ -895,15 +904,17 @@ int main() {
     CHECK(adapter->insert_inline_color != nullptr);
     CHECK(adapter->ui_desc_text_cursor != nullptr);
     CHECK(adapter->insert_inline_color_span != nullptr);
-    qol::contracts::QolUiAdapter adapter_before_minor_23{};
-    adapter_before_minor_23.size = offsetof(qol::contracts::QolUiAdapter, draw_part_alpha);
-    adapter_before_minor_23.major = qol::contracts::kUiAdapterMajor;
-    adapter_before_minor_23.minor = qol::contracts::kUiAdapterMinor - 1;
-    const bool old_adapter_has_draw_part_alpha =
-        adapter_before_minor_23.minor >= qol::contracts::kUiAdapterMinor &&
-        adapter_before_minor_23.size >= offsetof(qol::contracts::QolUiAdapter, draw_part_alpha) +
-            sizeof(adapter_before_minor_23.draw_part_alpha);
-    CHECK(!old_adapter_has_draw_part_alpha);
+    qol::contracts::QolUiAdapter adapter_before_container_frame{};
+    adapter_before_container_frame.size = offsetof(qol::contracts::QolUiAdapter,
+                                                   draw_container_frame);
+    adapter_before_container_frame.major = qol::contracts::kUiAdapterMajor;
+    adapter_before_container_frame.minor = qol::contracts::kUiAdapterMinor - 1;
+    const bool old_adapter_has_container_frame =
+        adapter_before_container_frame.minor >= qol::contracts::kUiAdapterMinor &&
+        adapter_before_container_frame.size >=
+            offsetof(qol::contracts::QolUiAdapter, draw_container_frame) +
+                sizeof(adapter_before_container_frame.draw_container_frame);
+    CHECK(!old_adapter_has_container_frame);
 
     uint32_t popup_count = 42;
     uintptr_t popup_top = 0x42;
@@ -923,8 +934,9 @@ int main() {
     components.major = qol::contracts::kUiContractMajor;
     components.minor = qol::contracts::kUiContractMinor;
     CHECK(components.size == sizeof(qol::contracts::QolUiComponents));
-    // contracts UI minor 15：additive 尾槽；此行随版本常量机械同步。
-    CHECK(components.major == 1 && components.minor == qol::contracts::kUiContractMinor);
+    // contracts UI Major 2 / minor 23：Major break 后移除旧容器槽，styled 为唯一容器入口；
+    // 此行随版本常量机械同步。
+    CHECK(components.major == 2 && components.minor == qol::contracts::kUiContractMinor);
 
     const qol::contracts::UiRect rect{10, 20, 30, 40};
     FakeControl control{};
@@ -942,12 +954,266 @@ int main() {
 
     CHECK(adapter->fill_rect_alpha(rect, 0x123456, 0x50).ok == kQolOk);
     CHECK(g_fill_rect_calls == 1);
-    CHECK(adapter->draw_border_rect(12, 34, 320, 140).ok == kQolOk);
-    CHECK(g_border_rect[0] == 12 && g_border_rect[1] == 34 && g_border_rect[2] == 320 &&
-          g_border_rect[3] == 140);
-    CHECK(adapter->draw_border_rect(0, 0, 47, 140).code == kQolErrInvalidArgument);
+    // Adapter Major 2 移除了旧 draw_border_rect；容器绘制统一走 draw_container_frame。
+    CHECK(adapter->draw_container_frame != nullptr);
+    CHECK(offsetof(qol::contracts::QolUiAdapter, draw_container_frame) ==
+          offsetof(qol::contracts::QolUiAdapter, use_control_event_on) + sizeof(void*));
+    CHECK(adapter->draw_container_frame({10, 20, 1318, 604}, 0x1904u, 60u).ok == kQolOk);
+    CHECK(g_container_frame_calls == 1 && g_container_frame_rect.x == 10 &&
+          g_container_frame_rect.y == 20 && g_container_frame_rect.w == 1318 &&
+          g_container_frame_rect.h == 604 && g_container_frame_rgb565 == 0x1904u &&
+          g_container_frame_alpha == 60u);
+    CHECK(adapter->draw_container_frame({0, 0, 48, 48}, 0xffffu, 0u).ok == kQolOk);
+    CHECK(g_container_frame_calls == 2 && g_container_frame_alpha == 0u);
+    CHECK(adapter->draw_container_frame({10, 20, 48, 48}, 0xf800u, 100u).ok == kQolOk);
+    CHECK(g_container_frame_calls == 3 && g_container_frame_rgb565 == 0xf800u &&
+          g_container_frame_alpha == 100u);
+    CHECK(adapter->draw_container_frame({0, 0, 48, 48}, 0x10000u, 0u).code ==
+          kQolErrInvalidArgument);
+    CHECK(adapter->draw_container_frame({0, 0, 48, 48}, 0, 101u).code ==
+          kQolErrInvalidArgument);
+    CHECK(adapter->draw_container_frame({INT32_MAX, 0, 48, 48}, 0, 100u).code ==
+          kQolErrInvalidArgument);
+    CHECK(g_container_frame_calls == 3);
+    g_game_main_thread = false;
+    CHECK(adapter->draw_container_frame({0, 0, 48, 48}, 0x1234u, 100u).code ==
+          kQolErrNotReady);
+    CHECK(g_container_frame_calls == 3);
+    g_game_main_thread = true;
+    g_container_frame_result = false;
+    CHECK(adapter->draw_container_frame({0, 0, 48, 48}, 0x1234u, 100u).code ==
+          kQolErrNotReady);
+    CHECK(g_container_frame_calls == 4);
+    g_container_frame_result = true;
 
-    // Minor 21/22 slots remain in place; minor 23/24 append image-part drawing slots.
+    // Profile matching depends only on the exact runtime unit-0x0f loc metadata.
+    using namespace qol::game::ui_container_frame_geometry;
+    using ExpectedGrpxDrawPartExFn = void (*)(void*, int32_t, int32_t, int32_t, int32_t,
+        int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t);
+    using ExpectedGrpxDrawPartFlipExFn = void (*)(void*, int32_t, int32_t, int32_t, int32_t,
+        int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t);
+    static_assert(std::is_same<GrpxDrawPartExFn, ExpectedGrpxDrawPartExFn>::value,
+                  "GRPX_DrawPartEx must retain the decoded 12-argument ABI");
+    static_assert(std::is_same<GrpxDrawPartFlipExFn, ExpectedGrpxDrawPartFlipExFn>::value,
+                  "GRPX_DrawPartFlipEx must retain the decoded 13-argument ABI");
+    const ContainerFrameProfile& profile = kCommonFrameProfile;
+    constexpr int32_t kExpectedTopInset[kCornerExtent] = {
+        24, 24, 24, 24, 24, 24, 24, 24, 24, 23, 19, 17,
+        15, 14, 13, 12, 12, 11, 11, 10, 10, 10, 10, 10,
+    };
+    constexpr int32_t kExpectedBottomInset[kCornerExtent] = {
+        10, 10, 10, 10, 10, 11, 11, 12, 12, 13, 14, 15,
+        17, 19, 23, 24, 24, 24, 24, 24, 24, 24, 24, 24,
+    };
+    for (int32_t row = 0; row < kCornerExtent; ++row) {
+        CHECK(profile.corner_insets[0][row] == kExpectedTopInset[row]);
+        CHECK(profile.corner_insets[1][row] == kExpectedTopInset[row]);
+        CHECK(profile.corner_insets[2][row] == kExpectedBottomInset[row]);
+        CHECK(profile.corner_insets[3][row] == kExpectedBottomInset[row]);
+        CHECK(profile.corner_insets[0][row] == profile.corner_insets[1][row]);
+        CHECK(profile.corner_insets[2][row] == profile.corner_insets[3][row]);
+        CHECK(profile.corner_insets[0][row] ==
+              profile.corner_insets[2][kCornerExtent - 1 - row]);
+    }
+    const ImageLocation observed_horizontal = profile.expected_horizontal;
+    const ImageLocation observed_vertical = profile.expected_vertical;
+    const ImageLocation observed_corners[] = {
+        profile.expected_corners[0], profile.expected_corners[1],
+        profile.expected_corners[2], profile.expected_corners[3],
+    };
+    CHECK(select_frame_profile(observed_horizontal, observed_vertical, observed_corners) ==
+          &kCommonFrameProfile);
+    ImageLocation mismatched_horizontal = observed_horizontal;
+    ++mismatched_horizontal.source_y;
+    CHECK(select_frame_profile(mismatched_horizontal, observed_vertical, observed_corners) ==
+          nullptr);
+    ImageLocation mismatched_corner = observed_corners[0];
+    ++mismatched_corner.offset_x;
+    const ImageLocation mismatched_corners[] = {
+        mismatched_corner, observed_corners[1], observed_corners[2], observed_corners[3]};
+    CHECK(select_frame_profile(observed_horizontal, observed_vertical, mismatched_corners) ==
+          nullptr);
+    ImageLocation mismatched_vertical = observed_vertical;
+    ++mismatched_vertical.offset_y;
+    CHECK(select_frame_profile(observed_horizontal, mismatched_vertical, observed_corners) ==
+          nullptr);
+    const ImageLocation excluded_v14_horizontal{0, 0, 68, 2, 373, 63};
+    const ImageLocation excluded_v14_vertical{0, 0, 2, 68, 442, 14};
+    const ImageLocation excluded_v14_corners[] = {
+        {0, 0, 254, 344, 81, 81}, {0, 0, 338, 353, 35, 35},
+        {0, 0, 376, 353, 35, 35}, {0, 0, 338, 391, 35, 35},
+    };
+    CHECK(select_frame_profile(excluded_v14_horizontal, excluded_v14_vertical,
+                               excluded_v14_corners) == nullptr);
+    CHECK(vertical_source_extent(profile, observed_vertical) == 383);
+    SourceRect horizontal_crop{};
+    SourceRect vertical_crop{};
+    CHECK(horizontal_source_rect(profile, observed_horizontal, 508, &horizontal_crop));
+    CHECK(horizontal_crop.x == 2 && horizontal_crop.y == 2 && horizontal_crop.width == 508 &&
+          horizontal_crop.height == 9);
+    CHECK(vertical_source_rect(profile, observed_vertical, 383, &vertical_crop));
+    CHECK(vertical_crop.x == 2 && vertical_crop.y == 29 && vertical_crop.width == 9 &&
+          vertical_crop.height == 383);
+    CHECK(!vertical_source_rect(profile, observed_vertical, 384, &vertical_crop));
+    CHECK(kFrameCornerLocIds[0] == 0x0f && kFrameCornerLocIds[1] == 0x10 &&
+          kFrameCornerLocIds[2] == 0x11 && kFrameCornerLocIds[3] == 0x12);
+    CHECK(native_flip_selector(Edge::kTop) == -1 && native_flip_selector(Edge::kLeft) == -1 &&
+          native_flip_selector(Edge::kBottom) == 1 && native_flip_selector(Edge::kRight) == 0);
+    const UiRect native_border_rect{10, 20, 1318, 604};
+    CHECK(horizontal_start_x(profile, native_border_rect) == 34 &&
+          bottom_edge_anchor_y(native_border_rect) == 623 &&
+          vertical_start_y(profile, native_border_rect) == 44 &&
+          right_edge_anchor_x(native_border_rect) == 1327);
+
+    // Row masks follow the measured corner contours; straight body spans use a 9px inset.
+    const UiRect fill_profile_rect{10, 20, 1422, 101};
+    int32_t filled_rows = 0;
+    for (int64_t row = 0; row < fill_profile_rect.h; ++row) {
+        UiRect span{};
+        const bool has_span = profile_fill_row_span(profile, fill_profile_rect, row, &span);
+        const bool expected_row = row >= 9 && row < fill_profile_rect.h - 9;
+        CHECK(has_span == expected_row);
+        if (!has_span) continue;
+        int32_t left_inset = profile.straight_inner_inset;
+        int32_t right_inset = profile.straight_inner_inset;
+        if (row < 24) {
+            left_inset = corner_profile_inset(profile, Corner::kTopLeft,
+                                              static_cast<int32_t>(row));
+            right_inset = corner_profile_inset(profile, Corner::kTopRight,
+                                               static_cast<int32_t>(row));
+        } else if (row >= fill_profile_rect.h - 24) {
+            const int32_t corner_row = static_cast<int32_t>(row -
+                (fill_profile_rect.h - profile.border_inset));
+            left_inset = corner_profile_inset(profile, Corner::kBottomLeft, corner_row);
+            right_inset = corner_profile_inset(profile, Corner::kBottomRight, corner_row);
+        }
+        CHECK(span.x == fill_profile_rect.x + left_inset &&
+              span.y == fill_profile_rect.y + row &&
+              span.w == fill_profile_rect.w - left_inset - right_inset &&
+              span.h == 1 && span.x >= fill_profile_rect.x &&
+              span.x + span.w <= fill_profile_rect.x + fill_profile_rect.w);
+        CHECK(span.x + span.w == fill_profile_rect.x + fill_profile_rect.w - right_inset);
+        ++filled_rows;
+    }
+    CHECK(filled_rows == 83 && profile_fill_layout_valid(profile, fill_profile_rect));
+    CHECK(!profile_fill_enabled(0) && profile_fill_enabled(100));
+    const UiRect smallest_container{0, 0, 48, 48};
+    UiRect smallest_span{};
+    CHECK(profile_fill_layout_valid(profile, smallest_container) &&
+          profile_has_fill(profile, smallest_container));
+    CHECK(!profile_fill_row_span(profile, smallest_container, 8, &smallest_span));
+    CHECK(profile_fill_row_span(profile, smallest_container, 9, &smallest_span) &&
+          smallest_span.w == 2 && smallest_span.h == 1);
+    CHECK(profile_fill_row_span(profile, smallest_container, 24, &smallest_span) &&
+          smallest_span.w == 28 && smallest_span.h == 1);
+    CHECK(!profile_fill_row_span(profile, smallest_container, 39, &smallest_span));
+    const UiRect next_smallest{0, 0, 49, 49};
+    CHECK(profile_fill_layout_valid(profile, next_smallest));
+    CHECK(profile_fill_row_span(profile, next_smallest, 24, &smallest_span) &&
+          smallest_span.w == 31);
+    UiRect body_fill{};
+    CHECK(profile_body_fill_rect(profile, UiRect{10, 20, 1318, 604}, &body_fill));
+    CHECK(body_fill.x == 19 && body_fill.y == 44 && body_fill.w == 1300 &&
+          body_fill.h == 556);
+    CHECK(!profile_body_fill_rect(profile, UiRect{10, 20, 48, 48}, &body_fill));
+    CHECK(profile_has_fill(profile, UiRect{10, 20, 48, 48}));
+
+    constexpr Corner kCorners[] = {
+        Corner::kTopLeft, Corner::kTopRight, Corner::kBottomLeft, Corner::kBottomRight};
+    for (size_t corner = 0; corner < 4; ++corner) {
+        const bool right = corner == 1 || corner == 3;
+        for (int32_t first_row = 0; first_row < profile.border_inset;) {
+            const int32_t inset = corner_profile_inset(profile, kCorners[corner], first_row);
+            int32_t end_row = first_row + 1;
+            while (end_row < profile.border_inset &&
+                   corner_profile_inset(profile, kCorners[corner], end_row) == inset) {
+                ++end_row;
+            }
+            CornerSourceRun run{};
+            CHECK(corner_source_run(profile, observed_corners[corner], kCorners[corner], first_row,
+                                    end_row - first_row, &run));
+            CHECK(run.source_width == inset && run.source_height == end_row - first_row &&
+                  run.destination_offset_y == first_row);
+            if (right) {
+                CHECK(run.source_x == observed_corners[corner].source_x +
+                          observed_corners[corner].width - inset &&
+                      run.destination_offset_x == profile.border_inset - inset &&
+                      run.source_x + run.source_width ==
+                          observed_corners[corner].source_x + observed_corners[corner].width);
+            } else {
+                CHECK(run.source_x == observed_corners[corner].source_x &&
+                      run.destination_offset_x == 0 &&
+                      run.source_x + run.source_width <=
+                          observed_corners[corner].source_x + inset);
+            }
+            CHECK(run.source_y == observed_corners[corner].source_y + first_row &&
+                  run.source_y + run.source_height <=
+                      observed_corners[corner].source_y + observed_corners[corner].height);
+            first_row = end_row;
+        }
+    }
+
+    const int64_t frame_widths[] = {48, 49, 556, 557, 920, 1318, 1422};
+    const int64_t expected_horizontal_parts[][3] = {
+        {0, 0, 0}, {1, 0, 0}, {508, 0, 0}, {508, 1, 0},
+        {508, 364, 0}, {508, 508, 254}, {508, 508, 358}};
+    const int expected_horizontal_counts[] = {0, 1, 1, 2, 2, 3, 3};
+    for (size_t i = 0; i < 7; ++i) {
+        int64_t remaining = frame_widths[i] - 48;
+        int64_t destination_offset = 0;
+        int part = 0;
+        while (remaining > 0) {
+            if (part >= expected_horizontal_counts[i]) {
+                CHECK(false);
+                break;
+            }
+            const int32_t span = bounded_tile_length(
+                remaining, horizontal_source_extent(profile, observed_horizontal),
+                profile.horizontal.tile_limit);
+            CHECK(span == expected_horizontal_parts[i][part]);
+            SourceRect piece{};
+            CHECK(horizontal_source_rect(profile, observed_horizontal, span, &piece));
+            CHECK(piece.x == 2 && piece.y == 2 && piece.width <= 508 && piece.height == 9);
+            destination_offset += span;
+            remaining -= span;
+            ++part;
+        }
+        CHECK(part == expected_horizontal_counts[i] &&
+              destination_offset == frame_widths[i] - 48);
+    }
+    const int64_t frame_heights[] = {48, 49, 431, 432, 604, 640};
+    const int64_t expected_vertical_parts[][2] = {
+        {0, 0}, {1, 0}, {383, 0}, {383, 1}, {383, 173}, {383, 209}};
+    const int expected_vertical_counts[] = {0, 1, 1, 2, 2, 2};
+    for (size_t i = 0; i < 6; ++i) {
+        int64_t remaining = frame_heights[i] - 48;
+        int64_t destination_offset = 0;
+        int part = 0;
+        while (remaining > 0) {
+            if (part >= expected_vertical_counts[i]) {
+                CHECK(false);
+                break;
+            }
+            const int32_t span = bounded_tile_length(
+                remaining, vertical_source_extent(profile, observed_vertical),
+                profile.vertical.tile_limit);
+            CHECK(span == expected_vertical_parts[i][part]);
+            SourceRect piece{};
+            CHECK(vertical_source_rect(profile, observed_vertical, span, &piece));
+            CHECK(piece.x == 2 && piece.y == 29 && piece.width == 9 && piece.height <= 383);
+            destination_offset += span;
+            remaining -= span;
+            ++part;
+        }
+        CHECK(part == expected_vertical_counts[i] &&
+              destination_offset == frame_heights[i] - 48);
+    }
+    CHECK(1318 - 48 == 1270 && 604 - 48 == 556);
+    CHECK(bounded_tile_length(508, 507, profile.horizontal.tile_limit) == 507);
+    SourceRect invalid_horizontal{};
+    CHECK(!horizontal_source_rect(profile, observed_horizontal, 509, &invalid_horizontal));
+
+    // Earlier image-part slots remain in place; the current container-frame slot is the tail.
     CHECK(adapter->minor == qol::contracts::kUiAdapterMinor);
     CHECK(adapter->set_clip != nullptr && adapter->reset_clip != nullptr);
     CHECK(adapter->set_clip(-12, 34, 320, 140).ok == kQolOk);

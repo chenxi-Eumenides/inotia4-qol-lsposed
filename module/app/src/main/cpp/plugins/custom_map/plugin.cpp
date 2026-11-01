@@ -105,7 +105,8 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     const auto* components = static_cast<const contracts::QolUiComponents*>(components_iface);
-    if (components->size < sizeof(*components) || components->major != 1 ||
+    if (components->size < sizeof(*components) ||
+        components->major != contracts::kUiContractMajor ||
         components->minor < contracts::kUiContractMinor ||
         !contracts::succeeded(sdk->panels.register_provider(&kPanelProvider))) {
         g_install_error = "install failed: map panel registration failed";

@@ -20,7 +20,7 @@
 
 - plugin id `world_tuning`，注册于 `host/assembly.cpp`。
 - `requires` 1 项：`character.facts` v1.0。
-- `optional_requires` 2 项：`ui_panels` v1.3、`ui_components` v1.22；界面工具被停用时倍率仍生效，仅面板不可用。
+- `optional_requires` 2 项：`ui_panels` v1.3、`ui_components` v2.23；界面工具被停用时倍率仍生效，仅面板不可用。
 - `ports` 1 项：`QOL_PORT_CHARACTER_EXTRAS` v1.2。
 - `provides` 1：`world_tuning.move_speed` v1.1；JNI 0、HTTP route/endpoint 0。
 - `resources` 4 个入口 hook（伤害、怪物最大生命、加经验、加金币），均为 `kOptional` + `kFailSoft`：单个落点不可用只影响对应倍率，不会把插件置 `failed`。
@@ -51,7 +51,7 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 
 面板 id `world_tuning`，provider 在 `plugin_install` 内注册（需要 `ui_panels` + `ui_components` 同时可用）。
 
-- 960×640 root，单栏容器 `{28,100,920,444}`；与设置页相同的 `kPanelBg` 底、`draw_container_ornamented` 边框和左右装饰图（`draw_image_part` unit `0x4f`/`0x50`）；不绘制标题与说明行。
+- 960×640 root，单栏容器 `{28,100,920,444}`；与设置页相同的 `kPanelBg` 底、`draw_container_styled`（`ornamented=1`）边框/内底和左右装饰图（`draw_image_part` unit `0x4f`/`0x50`）；不绘制标题与说明行。迁移前使用的 `draw_container_ornamented` 已随 ui_components Major 2 移除。
 - 7 行，行高 71，使用 `scroll_list`（关闭选中态）；每行：名称、数值（`×1.0`）、左右 `arrow_button`；行底 2 逻辑单位金色分割线，与设置页行样式一致。
 - 列表视口高 428，内容高 497，可上下拖动滚动；滚动条沿用原生 `scroll_list` 自带的一条，不额外自绘。
 - 全部 6 行的箭头都可用、样式一致；未接线行只保存数值，不产生游戏效果。

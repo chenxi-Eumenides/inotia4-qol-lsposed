@@ -15,8 +15,9 @@ static void component_text(const char* text, int x, int y, uint32_t color, int a
 }
 
 static void component_container(UiRect rect) {
-    if (g_ui_components == nullptr || g_ui_components->draw_container == nullptr) return;
-    (void)g_ui_components->draw_container(component_absolute_rect(rect));
+    if (g_ui_components == nullptr || g_ui_components->draw_container_styled == nullptr) return;
+    const contracts::UiContainerStyleDesc style{component_absolute_rect(rect), 0x0000, 60, 0};
+    (void)g_ui_components->draw_container_styled(&style);
 }
 
 static void component_selected_background(UiRect rect, int inset) {

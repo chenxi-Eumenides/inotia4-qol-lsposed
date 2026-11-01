@@ -1,3 +1,4 @@
+#include <array>
 #include <cassert>
 #include <cstring>
 #include <cstdio>
@@ -8,6 +9,7 @@
 #include <vector>
 
 #include "contracts/ui.h"
+#include "contracts/ui_theme.h"
 #include "plugins/core.custom_ui/ui_components.h"
 
 // 返回按钮助手内部调用宿主 back 入口；本测试不链接面板栈实现。
@@ -32,6 +34,28 @@ struct FakeControl {
     void* control_proc = nullptr;
     int32_t control_user_type = 0;
     bool enabled = true;
+    bool pressed = false;
+};
+
+struct FillRectCall {
+    qol::contracts::UiRect rect;
+    uint32_t color;
+};
+
+struct OverlayCall {
+    qol::contracts::UiRect rect;
+    uint32_t color;
+    uint32_t alpha;
+};
+
+struct ScaledPartCall {
+    qol::contracts::QolUiHandle group;
+    qol::contracts::QolUiHandle part;
+    int32_t x;
+    int32_t y;
+    int32_t type;
+    int32_t flip;
+    int32_t scale;
 };
 
 int g_clicks = 0;
@@ -39,8 +63,10 @@ int g_changes = 0;
 int g_scrolls = 0;
 int32_t g_last_value = -1;
 int32_t g_last_offset = -1;
-qol::contracts::UiRect g_last_container{};
-int g_container_draws = 0;
+qol::contracts::UiRect g_last_styled_container{};
+uint32_t g_last_styled_fill = 0;
+uint32_t g_last_styled_alpha = 0;
+int g_styled_container_draws = 0;
 int g_part_draws = 0;
 int32_t g_part_x[4]{};
 int32_t g_part_y[4]{};
@@ -51,10 +77,18 @@ int g_fake_main_thread = 1;
 int g_native_button_draws = 0;
 int g_native_button_deletes = 0;
 qol::contracts::UiRect g_native_button_rect{};
+uint8_t g_native_button_pressed = 0;
 int g_native_label_draws = 0;
 qol::contracts::UiRect g_native_label_rect{};
 std::string g_native_label_text;
+uint32_t g_native_label_color = 0;
 int32_t g_native_label_font = -1;
+uint32_t g_paint_text_color = 0;
+std::vector<FillRectCall> g_fill_rect_calls;
+std::vector<OverlayCall> g_overlay_calls;
+std::vector<ScaledPartCall> g_scaled_part_calls;
+int32_t g_scaled_image_width = 40;
+int32_t g_scaled_image_height = 40;
 qol::contracts::QolUiHandle g_main_menu_button = nullptr;
 qol::contracts::QolUiHandle g_main_menu_replacement = nullptr;
 void* g_main_menu_click_owner = nullptr;
@@ -152,7 +186,9 @@ QolResult set_click_proc(qol::contracts::QolUiHandle handle, qol::contracts::Qol
 
 QolResult set_button_enabled(qol::contracts::QolUiHandle handle, uint8_t enabled) {
     if (handle == nullptr || enabled > 1) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
-    static_cast<FakeControl*>(handle)->enabled = enabled != 0;
+    auto* control = static_cast<FakeControl*>(handle);
+    control->enabled = enabled != 0;
+    if (!control->enabled) control->pressed = false;
     return ok();
 }
 
@@ -160,18 +196,28 @@ QolResult draw_native_text_button_background(qol::contracts::UiRect rect, uint8_
     if (pressed > 1) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
     ++g_native_button_draws;
     g_native_button_rect = rect;
+    g_native_button_pressed = pressed;
     return ok();
 }
 
 QolResult draw_native_text_button_label(qol::contracts::UiRect rect, const char* text,
-                                        uint32_t, int32_t font) {
+                                        uint32_t color, int32_t font) {
     if (text == nullptr || (font != 0 && font != 1)) {
         return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
     }
     ++g_native_label_draws;
     g_native_label_rect = rect;
     g_native_label_text = text;
+    g_native_label_color = color;
     g_native_label_font = font;
+    return ok();
+}
+
+QolResult draw_control_alpha_overlay(qol::contracts::QolUiHandle handle,
+                                     qol::contracts::UiRect rect, uint32_t color,
+                                     uint32_t alpha) {
+    if (handle == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    g_overlay_calls.push_back({rect, color, alpha});
     return ok();
 }
 
@@ -211,13 +257,16 @@ QolResult control_tree_event(qol::contracts::QolUiHandle handle, uint64_t event,
     const bool inside = point[0] >= x && point[0] < x + control->rect.w &&
         point[1] >= y && point[1] < y + control->rect.h;
     if (event == 0x17) {
-        control->enabled = inside;
+        control->pressed = inside && control->enabled;
+        *consumed = inside ? 1u : 0u;
+    } else if (event == 0x19) {
+        if (!inside) control->pressed = false;
         *consumed = inside ? 1u : 0u;
     } else if (event == 0x18) {
-        if (control->enabled && inside && control->click != nullptr) {
+        if (control->enabled && control->pressed && inside && control->click != nullptr) {
             control->click(control->click_user);
         }
-        control->enabled = false;
+        control->pressed = false;
         *consumed = inside ? 1u : 0u;
     }
     return ok();
@@ -338,7 +387,7 @@ QolResult control_pressed(qol::contracts::QolUiHandle handle, int32_t* out_press
     if (handle == nullptr || out_pressed == nullptr) {
         return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
     }
-    *out_pressed = 0;
+    *out_pressed = static_cast<FakeControl*>(handle)->pressed ? 1 : 0;
     return ok();
 }
 
@@ -359,8 +408,13 @@ QolResult paint_layout(const qol::contracts::UiTextButtonPaintDesc* desc,
     if (r.w == 300 && r.h == 65) r = {r.x + 14, r.y, 272, 64};
     *out = {r, {r.x - 2, r.y - 2, r.w + 4, r.h + 4}, r}; return ok();
 }
-QolResult paint_draw(const qol::contracts::UiTextButtonPaintDesc* desc, const char*, uint32_t,
-                     uint8_t pressed) { g_paint = *desc; g_paint_pressed = pressed; return ok(); }
+QolResult paint_draw(const qol::contracts::UiTextButtonPaintDesc* desc, const char*, uint32_t color,
+                     uint8_t pressed) {
+    g_paint = *desc;
+    g_paint_pressed = pressed;
+    g_paint_text_color = color;
+    return ok();
+}
 QolResult menu_rect_available(qol::contracts::QolUiHandle, qol::contracts::UiRect rect,
                                uint8_t* out) {
     g_menu_guard_rect = rect;
@@ -368,8 +422,9 @@ QolResult menu_rect_available(qol::contracts::QolUiHandle, qol::contracts::UiRec
     return ok();
 }
 int g_fill_count = 0;
-QolResult fill_rect(qol::contracts::UiRect, uint32_t) {
+QolResult fill_rect(qol::contracts::UiRect rect, uint32_t color) {
     ++g_fill_count;
+    g_fill_rect_calls.push_back({rect, color});
     return ok();
 }
 
@@ -456,7 +511,7 @@ QolResult image_unit_load(int32_t) { return ok(); }
 QolResult draw_part_scaled(qol::contracts::QolUiHandle group, int32_t x, int32_t y,
                            qol::contracts::QolUiHandle part, int32_t type, int32_t flip,
                            int32_t scale) {
-    (void)group; (void)x; (void)y; (void)part; (void)type; (void)flip; (void)scale;
+    g_scaled_part_calls.push_back({group, part, x, y, type, flip, scale});
     return ok();
 }
 
@@ -517,19 +572,28 @@ QolResult set_control_data(qol::contracts::QolUiHandle handle, qol::contracts::Q
     return ok();
 }
 
-QolResult draw_border_rect(int32_t x, int32_t y, int32_t w, int32_t h) {
-    g_last_container = {x, y, w, h};
-    ++g_container_draws;
+QolResult draw_container_frame(qol::contracts::UiRect rect, uint32_t fill_rgb565,
+                               uint32_t alpha) {
+    g_last_styled_container = rect;
+    g_last_styled_fill = fill_rgb565;
+    g_last_styled_alpha = alpha;
+    ++g_styled_container_draws;
     return ok();
 }
 
 int g_fake_icon_group = 0;
 int g_fake_icon_loc = 0;
+int g_fake_arrow_group = 0;
+std::array<int, 4> g_fake_arrow_locs{};
 
 QolResult image_group(int32_t unit, qol::contracts::QolUiHandle* out) {
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
     if (unit == 0x16) {
         *out = &g_fake_icon_group;
+        return ok();
+    }
+    if (unit == 0x59) {
+        *out = &g_fake_arrow_group;
         return ok();
     }
     if (unit != 0x0f) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
@@ -542,6 +606,16 @@ QolResult image_loc(int32_t unit, int32_t loc, qol::contracts::QolUiHandle* out)
     if (unit == 0x16 && loc == 0) {
         *out = &g_fake_icon_loc;
         return ok();
+    }
+    if (unit == 0x59) {
+        constexpr int32_t locations[] = {0x09, 0x0a, 0x0b, 0x0c};
+        for (size_t i = 0; i < 4; ++i) {
+            if (loc == locations[i]) {
+                *out = &g_fake_arrow_locs[i];
+                return ok();
+            }
+        }
+        return qol::contracts::error(kQolErrNotFound, "missing", 7);
     }
     if (unit != 0x0f) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
     constexpr int32_t locations[] = {0x30, 0x31, 0x35, 0x36};
@@ -570,9 +644,10 @@ QolResult image_loc_size(int32_t unit, int32_t loc, int32_t* out_width, int32_t*
     if (out_width == nullptr || out_height == nullptr) {
         return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
     }
-    if (unit == 0x16 && loc == 0) {
-        *out_width = 40;
-        *out_height = 40;
+    if ((unit == 0x16 && loc == 0) ||
+        (unit == 0x59 && (loc == 0x09 || loc == 0x0a || loc == 0x0b || loc == 0x0c))) {
+        *out_width = g_scaled_image_width;
+        *out_height = g_scaled_image_height;
         return ok();
     }
     if (unit != 0x0f) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
@@ -590,8 +665,8 @@ QolResult image_loc_size(int32_t unit, int32_t loc, int32_t* out_width, int32_t*
 qol::contracts::QolUiAdapter make_fake_adapter() {
     qol::contracts::QolUiAdapter adapter{};
     adapter.size = sizeof(adapter);
-    adapter.major = 1;
-    adapter.minor = qol::contracts::kUiContractMinor;
+    adapter.major = qol::contracts::kUiAdapterMajor;
+    adapter.minor = qol::contracts::kUiAdapterMinor;
     adapter.create_control = &create_control;
     adapter.set_rect = &set_rect;
     adapter.set_text = &set_text;
@@ -602,7 +677,7 @@ qol::contracts::QolUiAdapter make_fake_adapter() {
     adapter.get_rect = &get_rect;
     adapter.draw_back_button = &draw_back_button;
     adapter.load_option_images = &load_option_images;
-    adapter.draw_border_rect = &draw_border_rect;
+    adapter.draw_container_frame = &draw_container_frame;
     adapter.fill_rect = &fill_rect;
     adapter.image_group = &image_group;
     adapter.image_loc = &image_loc;
@@ -620,6 +695,7 @@ qol::contracts::QolUiAdapter make_fake_adapter() {
     adapter.main_menu_text_button_invalidate_binding = &invalidate_main_menu_binding;
     adapter.draw_native_text_button_background = &draw_native_text_button_background;
     adapter.draw_native_text_button_label = &draw_native_text_button_label;
+    adapter.draw_control_alpha_overlay = &draw_control_alpha_overlay;
     adapter.delete_control = &delete_control;
     adapter.control_tree_event = &control_tree_event;
     adapter.find_root = &find_root;
@@ -973,22 +1049,66 @@ int main() {
     CHECK(components->destroy(button).ok == kQolOk);
     CHECK(components->destroy(button).code == kQolErrNotFound);
     CHECK(components->destroy(nullptr).code == kQolErrInvalidArgument);
-    CHECK(components->draw_container({10, 20, 320, 140}).ok == kQolOk);
-    CHECK(g_container_draws == 1 && g_last_container.x == 10 && g_last_container.y == 20 &&
-          g_last_container.w == 320 && g_last_container.h == 140);
-    CHECK(components->draw_container({0, 0, 47, 100}).code == kQolErrInvalidArgument);
-    CHECK(components->draw_container({INT64_MAX, 0, 100, 100}).code == kQolErrInvalidArgument);
-    CHECK(components->draw_container({INT32_MAX, 0, 48, 100}).code == kQolErrInvalidArgument);
-    CHECK(components->draw_container_ornamented({10, 20, 320, 140}).ok == kQolOk);
-    CHECK(g_container_draws == 2 && g_last_container.x == 10 && g_last_container.y == 20 &&
-          g_last_container.w == 320 && g_last_container.h == 140);
-    CHECK(g_part_draws == 4);
-    CHECK(g_part_loc[0] == 0 && g_part_x[0] == 8 && g_part_y[0] == 18);
-    CHECK(g_part_loc[1] == 1 && g_part_x[1] == 287 && g_part_y[1] == 18);
-    CHECK(g_part_loc[2] == 2 && g_part_x[2] == 8 && g_part_y[2] == 116);
-    CHECK(g_part_loc[3] == 3 && g_part_x[3] == 285 && g_part_y[3] == 114);
-    CHECK(components->draw_container_ornamented({INT32_MIN, 0, 320, 140}).code ==
-          kQolErrInvalidArgument);
+    // 旧 draw_container / draw_container_ornamented 已随 Major 2 移除；容器统一走 styled，
+    // 参数边界在此验证（48 最小尺寸、整数溢出、ornament 扩框下界）。
+    const int styled_draws_before_boundary = g_styled_container_draws;
+    const int parts_before_boundary = g_part_draws;
+    qol::contracts::UiContainerStyleDesc boundary{{10, 20, 320, 140}, 0, 60u, 0};
+    boundary.rect = {0, 0, 47, 100};
+    CHECK(components->draw_container_styled(&boundary).code == kQolErrInvalidArgument);
+    boundary.rect = {INT64_MAX, 0, 100, 100};
+    CHECK(components->draw_container_styled(&boundary).code == kQolErrInvalidArgument);
+    boundary.rect = {INT32_MAX, 0, 48, 100};
+    CHECK(components->draw_container_styled(&boundary).code == kQolErrInvalidArgument);
+    boundary.rect = {INT32_MIN, 0, 320, 140};
+    boundary.ornamented = 1;  // ornament 扩框要求 x/y >= INT32_MIN+2。
+    CHECK(components->draw_container_styled(&boundary).code == kQolErrInvalidArgument);
+    boundary.rect = {10, 20, 320, 140};
+    boundary.ornamented = 0;
+    CHECK(components->draw_container_styled(&boundary).ok == kQolOk);
+    CHECK(g_styled_container_draws == styled_draws_before_boundary + 1 &&
+          g_last_styled_container.x == 10 &&
+          g_last_styled_container.y == 20 && g_last_styled_container.w == 320 &&
+          g_last_styled_container.h == 140 && g_last_styled_fill == 0u &&
+          g_last_styled_alpha == 60u);
+    CHECK(g_part_draws == parts_before_boundary);  // ornamented=0 不查询也不绘制角装饰。
+
+    qol::contracts::UiContainerStyleDesc styled{{20, 30, 1318, 604}, 0x1904u, 60u, 0};
+    CHECK(components->draw_container_styled(&styled).ok == kQolOk);
+    CHECK(g_styled_container_draws == styled_draws_before_boundary + 2 &&
+          g_last_styled_container.x == 20 &&
+          g_last_styled_container.y == 30 && g_last_styled_container.w == 1318 &&
+          g_last_styled_container.h == 604 && g_last_styled_fill == 0x1904u &&
+          g_last_styled_alpha == 60u && g_part_draws == parts_before_boundary);
+
+    styled.ornamented = 1;
+    g_part_draws = 0;
+    CHECK(components->draw_container_styled(&styled).ok == kQolOk);
+    CHECK(g_styled_container_draws == styled_draws_before_boundary + 3 && g_part_draws == 4);
+    CHECK(g_part_loc[0] == 0 && g_part_loc[1] == 1 && g_part_loc[2] == 2 &&
+          g_part_loc[3] == 3);
+    styled.rect = {0, 0, 48, 48};
+    styled.fill_rgb565 = 0xffffu;
+    styled.alpha = 0;
+    styled.ornamented = 0;
+    CHECK(components->draw_container_styled(&styled).ok == kQolOk);
+    CHECK(g_styled_container_draws == styled_draws_before_boundary + 4 &&
+          g_last_styled_fill == 0xffffu &&
+          g_last_styled_alpha == 0u && g_last_styled_container.w == 48 &&
+          g_last_styled_container.h == 48);
+    CHECK(components->draw_container_styled(nullptr).code == kQolErrInvalidArgument);
+    styled.fill_rgb565 = 0x10000u;
+    CHECK(components->draw_container_styled(&styled).code == kQolErrInvalidArgument);
+    styled.fill_rgb565 = 0;
+    styled.alpha = 101;
+    CHECK(components->draw_container_styled(&styled).code == kQolErrInvalidArgument);
+    styled.alpha = 100;
+    styled.ornamented = 2;
+    CHECK(components->draw_container_styled(&styled).code == kQolErrInvalidArgument);
+    styled.ornamented = 0;
+    styled.rect = {INT32_MAX, 0, 48, 48};
+    CHECK(components->draw_container_styled(&styled).code == kQolErrInvalidArgument);
+    CHECK(g_styled_container_draws == styled_draws_before_boundary + 4);
 
     // 返回按钮助手：组件树按钮（手工命中，按下→抬起在按钮内请求宿主 back）与原生事件树按钮。
     qol::contracts::QolUiHandle back = nullptr;
@@ -1088,13 +1208,57 @@ int main() {
           kQolErrInvalidArgument);
     CHECK(bad_button == nullptr);
     CHECK(components->button_set_text(text_button, "更新后的按钮文字").ok == kQolOk);
-    CHECK(components->text_button_set_enabled(text_button, 0).ok == kQolOk);
+    const int clicks_before_text_interactions = g_clicks;
+    const auto dispatch_text_event = [&](uint64_t event, int64_t x, int64_t y) {
+        int64_t point[] = {x, y};
+        uint32_t consumed = 0;
+        CHECK(components->dispatch_native_event(text_button, event,
+            reinterpret_cast<uintptr_t>(point), 0, &consumed).ok == kQolOk);
+        return consumed;
+    };
     auto* fake_text_button = static_cast<FakeControl*>(text_button);
-    fake_text_button->click(fake_text_button->click_user);
-    CHECK(g_clicks == 1);
+    CHECK(components->text_button_set_enabled(text_button, 0).ok == kQolOk);
+    CHECK(dispatch_text_event(0x17, 120, 80) == 1);
+    CHECK(dispatch_text_event(0x18, 120, 80) == 1);
+    CHECK(g_clicks == clicks_before_text_interactions && !fake_text_button->enabled);
     CHECK(components->text_button_set_enabled(text_button, 1).ok == kQolOk);
-    fake_text_button->click(fake_text_button->click_user);
-    CHECK(g_clicks == 2);
+    CHECK(dispatch_text_event(0x17, 120, 80) == 1);
+    CHECK(dispatch_text_event(0x18, 120, 80) == 1);
+    CHECK(g_clicks == clicks_before_text_interactions + 1 && fake_text_button->enabled);
+
+    // Active is selection styling; only the native event tree changes control_pressed.
+    const size_t overlays_before_active_draws = g_overlay_calls.size();
+    CHECK(components->text_button_set_active(text_button, 1).ok == kQolOk);
+    CHECK(components->text_button_draw(text_button).ok == kQolOk);
+    CHECK(!fake_text_button->pressed && g_native_button_pressed == 0 &&
+          g_native_label_color == qol::contracts::ui_theme::kTextGold);
+    CHECK(g_overlay_calls.size() == overlays_before_active_draws);
+    CHECK(dispatch_text_event(0x17, 120, 80) == 1 && fake_text_button->pressed);
+    CHECK(components->text_button_draw(text_button).ok == kQolOk);
+    CHECK(g_native_button_pressed == 1 &&
+          g_native_label_color == qol::contracts::ui_theme::kTextNormal);
+    CHECK(dispatch_text_event(0x19, 500, 500) == 0 && !fake_text_button->pressed);
+    CHECK(components->text_button_draw(text_button).ok == kQolOk);
+    CHECK(g_native_button_pressed == 0 &&
+          g_native_label_color == qol::contracts::ui_theme::kTextGold);
+    CHECK(components->text_button_set_active(text_button, 0).ok == kQolOk);
+    CHECK(components->text_button_draw(text_button).ok == kQolOk);
+    CHECK(g_native_label_color == qol::contracts::ui_theme::kTextDisabled &&
+          g_overlay_calls.size() == overlays_before_active_draws + 1);
+    CHECK(g_overlay_calls.back().alpha == 28 &&
+          g_overlay_calls.back().color == 0xFF000000u &&
+          g_overlay_calls.back().rect.w == text_desc.rect.w &&
+          g_overlay_calls.back().rect.h == text_desc.rect.h);
+    CHECK(dispatch_text_event(0x17, 120, 80) == 1 && fake_text_button->pressed);
+    CHECK(components->text_button_draw(text_button).ok == kQolOk);
+    CHECK(g_native_button_pressed == 1 &&
+          g_native_label_color == qol::contracts::ui_theme::kTextNormal);
+    CHECK(dispatch_text_event(0x19, 500, 500) == 0 && !fake_text_button->pressed);
+    CHECK(components->text_button_set_active(text_button, 1).ok == kQolOk);
+    CHECK(components->text_button_draw(text_button).ok == kQolOk);
+    CHECK(g_native_label_color == qol::contracts::ui_theme::kTextGold &&
+          g_clicks == clicks_before_text_interactions + 1);
+
     int64_t touch_inside[] = {120, 80};
     int64_t touch_outside[] = {500, 500};
     uint32_t consumed = 0;
@@ -1102,20 +1266,249 @@ int main() {
         reinterpret_cast<uintptr_t>(touch_inside), 0, &consumed).ok == kQolOk && consumed == 1);
     CHECK(components->dispatch_native_event(text_button, 0x18,
         reinterpret_cast<uintptr_t>(touch_inside), 0, &consumed).ok == kQolOk && consumed == 1);
-    CHECK(g_clicks == 3);
+    CHECK(g_clicks == clicks_before_text_interactions + 2);
     CHECK(components->dispatch_native_event(text_button, 0x17,
         reinterpret_cast<uintptr_t>(touch_inside), 0, &consumed).ok == kQolOk);
     CHECK(components->dispatch_native_event(text_button, 0x18,
         reinterpret_cast<uintptr_t>(touch_outside), 0, &consumed).ok == kQolOk);
-    CHECK(g_clicks == 3);
+    CHECK(g_clicks == clicks_before_text_interactions + 2);
     CHECK(components->dispatch_native_event(text_button, 0x17,
         reinterpret_cast<uintptr_t>(touch_outside), 0, &consumed).ok == kQolOk);
     CHECK(components->dispatch_native_event(text_button, 0x18,
         reinterpret_cast<uintptr_t>(touch_inside), 0, &consumed).ok == kQolOk);
-    CHECK(g_clicks == 3);
+    CHECK(g_clicks == clicks_before_text_interactions + 2);
     CHECK(components->destroy(text_button).ok == kQolOk);
     CHECK(g_native_button_deletes == 4);
     CHECK(components->destroy(text_button).code == kQolErrNotFound);
+
+    const auto assert_button_factory_bounds = [&](auto factory, int64_t minimum_width,
+                                                  int64_t minimum_height) {
+        qol::contracts::UiButtonDesc too_narrow{{10, 12, minimum_width - 1, minimum_height},
+            "边界", 0, &on_click, &g_clicks};
+        qol::contracts::QolUiHandle candidate = nullptr;
+        CHECK(factory(&too_narrow, text_root, &candidate).code == kQolErrInvalidArgument);
+        CHECK(candidate == nullptr);
+        qol::contracts::UiButtonDesc too_short{{10, 12, minimum_width, minimum_height - 1},
+            "边界", 0, &on_click, &g_clicks};
+        CHECK(factory(&too_short, text_root, &candidate).code == kQolErrInvalidArgument);
+        CHECK(candidate == nullptr);
+        qol::contracts::UiButtonDesc at_minimum{{10, 12, minimum_width, minimum_height},
+            "边界", 0, &on_click, &g_clicks};
+        CHECK(factory(&at_minimum, text_root, &candidate).code == kQolOk);
+        CHECK(candidate != nullptr);
+        CHECK(components->destroy(candidate).code == kQolOk);
+    };
+    assert_button_factory_bounds(components->text_button_create, 204, 48);
+    assert_button_factory_bounds(components->capsule_text_button_create, 204, 48);
+    assert_button_factory_bounds(components->decorated_text_button_create, 204, 48);
+    assert_button_factory_bounds(components->compact_capsule_text_button_create, 140, 48);
+    assert_button_factory_bounds(components->flat_text_button_create, 80, 42);
+
+    qol::contracts::UiButtonDesc flat_desc{{20, 20, 80, 42}, "平面", 0,
+                                             &on_click, &g_clicks};
+    qol::contracts::QolUiHandle flat_button = nullptr;
+    CHECK(components->flat_text_button_create(&flat_desc, text_root, &flat_button).code == kQolOk);
+    auto* fake_flat_button = static_cast<FakeControl*>(flat_button);
+    const size_t flat_fill_start = g_fill_rect_calls.size();
+    CHECK(components->text_button_set_active(flat_button, 1).code == kQolOk);
+    CHECK(components->text_button_draw(flat_button).code == kQolOk);
+    CHECK(g_fill_rect_calls.size() == flat_fill_start + 5);
+    CHECK(g_fill_rect_calls[flat_fill_start].color == 0xFF383430u &&
+          g_last_text_rgb == (qol::contracts::ui_theme::kTextGold & 0x00ffffffu));
+    int64_t flat_x = 0;
+    int64_t flat_y = 0;
+    CHECK(control_absolute_origin(flat_button, &flat_x, &flat_y).code == kQolOk);
+    const int flat_click_base = g_clicks;
+    int64_t flat_inside[] = {flat_x + 40, flat_y + 21};
+    int64_t flat_outside[] = {flat_x + 100, flat_y + 80};
+    uint32_t flat_consumed = 0;
+    CHECK(components->dispatch_native_event(flat_button, 0x17,
+        reinterpret_cast<uintptr_t>(flat_inside), 0, &flat_consumed).code == kQolOk &&
+        flat_consumed == 1 && fake_flat_button->pressed);
+    const size_t pressed_fill_start = g_fill_rect_calls.size();
+    CHECK(components->text_button_draw(flat_button).code == kQolOk);
+    CHECK(g_fill_rect_calls[pressed_fill_start].color == 0xFF474139u &&
+          g_last_text_rgb == (qol::contracts::ui_theme::kTextNormal & 0x00ffffffu));
+    CHECK(components->dispatch_native_event(flat_button, 0x19,
+        reinterpret_cast<uintptr_t>(flat_outside), 0, &flat_consumed).code == kQolOk &&
+        !fake_flat_button->pressed);
+    CHECK(components->text_button_set_active(flat_button, 0).code == kQolOk);
+    const size_t unselected_fill_start = g_fill_rect_calls.size();
+    CHECK(components->text_button_draw(flat_button).code == kQolOk);
+    CHECK(g_fill_rect_calls[unselected_fill_start].color == 0xFF24201Cu &&
+          g_last_text_rgb == (qol::contracts::ui_theme::kTextNormal & 0x00ffffffu));
+    CHECK(components->text_button_set_enabled(flat_button, 0).code == kQolOk);
+    CHECK(components->dispatch_native_event(flat_button, 0x17,
+        reinterpret_cast<uintptr_t>(flat_inside), 0, &flat_consumed).code == kQolOk);
+    CHECK(components->dispatch_native_event(flat_button, 0x18,
+        reinterpret_cast<uintptr_t>(flat_inside), 0, &flat_consumed).code == kQolOk);
+    CHECK(g_clicks == flat_click_base && !fake_flat_button->enabled);
+    CHECK(components->text_button_draw(flat_button).code == kQolOk);
+    CHECK(g_last_text_rgb == (qol::contracts::ui_theme::kTextDisabled & 0x00ffffffu));
+    CHECK(components->text_button_set_enabled(flat_button, 1).code == kQolOk);
+    CHECK(components->dispatch_native_event(flat_button, 0x17,
+        reinterpret_cast<uintptr_t>(flat_inside), 0, &flat_consumed).code == kQolOk);
+    CHECK(components->dispatch_native_event(flat_button, 0x18,
+        reinterpret_cast<uintptr_t>(flat_inside), 0, &flat_consumed).code == kQolOk);
+    CHECK(g_clicks == flat_click_base + 1);
+    CHECK(components->destroy(flat_button).code == kQolOk);
+
+    const auto create_arrow = [&](qol::contracts::UiRect rect, uint32_t direction,
+                                  uint8_t enabled, qol::contracts::QolUiHandle* out) {
+        const qol::contracts::UiArrowButtonDesc desc{
+            rect, direction, enabled, &on_click, &g_clicks};
+        return components->arrow_button_create(&desc, text_root, out);
+    };
+    g_scaled_image_width = 100;
+    g_scaled_image_height = 100;
+    qol::contracts::QolUiHandle arrow = nullptr;
+    CHECK(create_arrow({0, 0, 1, 1}, qol::contracts::kUiArrowLeft, 1, &arrow).code == kQolOk);
+    g_scaled_part_calls.clear();
+    CHECK(components->arrow_button_draw(arrow).code == kQolOk);
+    CHECK(g_scaled_part_calls.size() == 1 && g_scaled_part_calls[0].scale == 1 &&
+          g_scaled_part_calls[0].group == &g_fake_arrow_group &&
+          g_scaled_part_calls[0].part == &g_fake_arrow_locs[0]);
+    CHECK(components->destroy(arrow).code == kQolOk);
+
+    g_scaled_image_width = 40;
+    g_scaled_image_height = 40;
+    arrow = nullptr;
+    CHECK(create_arrow({0, 0, 160, 160}, qol::contracts::kUiArrowRight, 1, &arrow).code == kQolOk);
+    g_scaled_part_calls.clear();
+    CHECK(components->arrow_button_draw(arrow).code == kQolOk);
+    CHECK(g_scaled_part_calls.size() == 1 && g_scaled_part_calls[0].scale == 400 &&
+          g_scaled_part_calls[0].part == &g_fake_arrow_locs[2]);
+    CHECK(components->destroy(arrow).code == kQolOk);
+
+    g_scaled_image_width = 101;
+    g_scaled_image_height = 101;
+    arrow = nullptr;
+    CHECK(create_arrow({0, 0, 1, 1}, qol::contracts::kUiArrowLeft, 1, &arrow).code == kQolOk);
+    g_scaled_part_calls.clear();
+    CHECK(components->arrow_button_draw(arrow).code == kQolErrInvalidArgument);
+    CHECK(g_scaled_part_calls.empty());
+    CHECK(components->destroy(arrow).code == kQolOk);
+
+    g_scaled_image_width = 40;
+    g_scaled_image_height = 40;
+    arrow = nullptr;
+    CHECK(create_arrow({0, 0, 161, 161}, qol::contracts::kUiArrowLeft, 1, &arrow).code == kQolOk);
+    g_scaled_part_calls.clear();
+    CHECK(components->arrow_button_draw(arrow).code == kQolErrInvalidArgument);
+    CHECK(g_scaled_part_calls.empty());
+    CHECK(components->destroy(arrow).code == kQolOk);
+
+    qol::contracts::UiArrowButtonDesc disabled_arrow_desc{{10, 10, 40, 40},
+        qol::contracts::kUiArrowRight, 0, &on_click, &g_clicks};
+    arrow = nullptr;
+    CHECK(components->arrow_button_create(&disabled_arrow_desc, text_root, &arrow).code == kQolOk);
+    auto* fake_arrow = static_cast<FakeControl*>(arrow);
+    CHECK(components->arrow_button_set_enabled(arrow, 0).code == kQolOk);
+    int64_t arrow_origin_x = 0, arrow_origin_y = 0;
+    CHECK(control_absolute_origin(arrow, &arrow_origin_x, &arrow_origin_y).code == kQolOk);
+    const int arrow_click_base = g_clicks;
+    int64_t arrow_inside[] = {arrow_origin_x + 20, arrow_origin_y + 20};
+    CHECK(components->dispatch_native_event(arrow, 0x17,
+        reinterpret_cast<uintptr_t>(arrow_inside), 0, &flat_consumed).code == kQolOk);
+    CHECK(components->dispatch_native_event(arrow, 0x18,
+        reinterpret_cast<uintptr_t>(arrow_inside), 0, &flat_consumed).code == kQolOk);
+    CHECK(g_clicks == arrow_click_base && !fake_arrow->enabled);
+    const size_t arrow_overlays = g_overlay_calls.size();
+    g_scaled_part_calls.clear();
+    CHECK(components->arrow_button_draw(arrow).code == kQolOk);
+    CHECK(g_scaled_part_calls.size() == 1 && g_scaled_part_calls[0].scale == 100 &&
+          g_scaled_part_calls[0].part == &g_fake_arrow_locs[2]);
+    CHECK(g_overlay_calls.size() == arrow_overlays + 1 &&
+          g_overlay_calls.back().alpha == 35 &&
+          g_overlay_calls.back().rect.w == 40 && g_overlay_calls.back().rect.h == 40);
+    CHECK(components->arrow_button_set_enabled(arrow, 1).code == kQolOk);
+    CHECK(components->dispatch_native_event(arrow, 0x17,
+        reinterpret_cast<uintptr_t>(arrow_inside), 0, &flat_consumed).code == kQolOk);
+    g_scaled_part_calls.clear();
+    CHECK(components->arrow_button_draw(arrow).code == kQolOk);
+    CHECK(g_scaled_part_calls.size() == 1 && g_scaled_part_calls[0].part == &g_fake_arrow_locs[3]);
+    CHECK(components->dispatch_native_event(arrow, 0x18,
+        reinterpret_cast<uintptr_t>(arrow_inside), 0, &flat_consumed).code == kQolOk);
+    CHECK(g_clicks == arrow_click_base + 1);
+    CHECK(components->destroy(arrow).code == kQolOk);
+
+    qol::contracts::UiIconButtonDesc icon_desc{{20, 20, 1, 1}, 0x16, 0, 1, 1,
+        nullptr, &on_click, &g_clicks, 0};
+    qol::contracts::QolUiHandle icon = nullptr;
+    g_scaled_image_width = 100;
+    g_scaled_image_height = 100;
+    CHECK(components->icon_button_create(&icon_desc, text_root, &icon).code == kQolOk);
+    g_scaled_part_calls.clear();
+    CHECK(components->icon_button_draw(icon).code == kQolOk);
+    CHECK(g_scaled_part_calls.size() == 1 && g_scaled_part_calls[0].scale == 1 &&
+          g_scaled_part_calls[0].group == &g_fake_icon_group &&
+          g_scaled_part_calls[0].part == &g_fake_icon_loc);
+    CHECK(components->destroy(icon).code == kQolOk);
+
+    icon_desc.rect = {20, 20, 160, 160};
+    g_scaled_image_width = 40;
+    g_scaled_image_height = 40;
+    icon = nullptr;
+    CHECK(components->icon_button_create(&icon_desc, text_root, &icon).code == kQolOk);
+    g_scaled_part_calls.clear();
+    CHECK(components->icon_button_draw(icon).code == kQolOk);
+    CHECK(g_scaled_part_calls.size() == 1 && g_scaled_part_calls[0].scale == 400);
+    CHECK(components->destroy(icon).code == kQolOk);
+
+    icon_desc.rect = {20, 20, 1, 1};
+    g_scaled_image_width = 101;
+    g_scaled_image_height = 101;
+    icon = nullptr;
+    CHECK(components->icon_button_create(&icon_desc, text_root, &icon).code == kQolOk);
+    g_scaled_part_calls.clear();
+    CHECK(components->icon_button_draw(icon).code == kQolOk);
+    CHECK(g_scaled_part_calls.empty());
+    CHECK(components->destroy(icon).code == kQolOk);
+
+    icon_desc.rect = {20, 20, 161, 161};
+    g_scaled_image_width = 40;
+    g_scaled_image_height = 40;
+    icon = nullptr;
+    CHECK(components->icon_button_create(&icon_desc, text_root, &icon).code == kQolOk);
+    g_scaled_part_calls.clear();
+    CHECK(components->icon_button_draw(icon).code == kQolOk);
+    CHECK(g_scaled_part_calls.empty());  // Icons beyond 400% are omitted, not distorted.
+    CHECK(components->destroy(icon).code == kQolOk);
+
+    icon_desc.rect = {20, 20, 40, 40};
+    icon_desc.enabled = 0;
+    icon = nullptr;
+    CHECK(components->icon_button_create(&icon_desc, text_root, &icon).code == kQolOk);
+    auto* fake_icon = static_cast<FakeControl*>(icon);
+    CHECK(components->icon_button_set_enabled(icon, 0).code == kQolOk);
+    int64_t icon_origin_x = 0, icon_origin_y = 0;
+    CHECK(control_absolute_origin(icon, &icon_origin_x, &icon_origin_y).code == kQolOk);
+    const int icon_click_base = g_clicks;
+    int64_t icon_inside[] = {icon_origin_x + 20, icon_origin_y + 20};
+    CHECK(components->dispatch_native_event(icon, 0x17,
+        reinterpret_cast<uintptr_t>(icon_inside), 0, &flat_consumed).code == kQolOk);
+    CHECK(components->dispatch_native_event(icon, 0x18,
+        reinterpret_cast<uintptr_t>(icon_inside), 0, &flat_consumed).code == kQolOk);
+    CHECK(g_clicks == icon_click_base && !fake_icon->enabled);
+    const size_t icon_overlays = g_overlay_calls.size();
+    g_scaled_part_calls.clear();
+    CHECK(components->icon_button_draw(icon).code == kQolOk);
+    CHECK(g_scaled_part_calls.size() == 1 && g_scaled_part_calls[0].scale == 100 &&
+          g_scaled_part_calls[0].part == &g_fake_icon_loc);
+    CHECK(g_overlay_calls.size() == icon_overlays + 1 &&
+          g_overlay_calls.back().alpha == 32 &&
+          g_overlay_calls.back().rect.w == 40 && g_overlay_calls.back().rect.h == 40);
+    CHECK(components->icon_button_set_enabled(icon, 1).code == kQolOk);
+    CHECK(components->dispatch_native_event(icon, 0x17,
+        reinterpret_cast<uintptr_t>(icon_inside), 0, &flat_consumed).code == kQolOk);
+    CHECK(components->dispatch_native_event(icon, 0x18,
+        reinterpret_cast<uintptr_t>(icon_inside), 0, &flat_consumed).code == kQolOk);
+    CHECK(g_clicks == icon_click_base + 1);
+    CHECK(components->destroy(icon).code == kQolOk);
+    g_scaled_image_width = 40;
+    g_scaled_image_height = 40;
+    g_scaled_part_calls.clear();
+
     CHECK(components->destroy(text_root).ok == kQolOk);
     qol::features::core_ui::ui_components_unbind();
 
@@ -1131,6 +1524,8 @@ int main() {
     g_main_menu_invalidation_allowed = true;
     const qol::contracts::UiMainMenuTextButtonDesc menu_desc{
         "模块设置", qol::contracts::kUiTextButtonFontDefault, &on_click, &g_clicks};
+    const int clicks_before_main_menu = g_clicks;
+    const int native_button_draws_before_main_menu = g_native_button_draws;
     qol::contracts::QolUiHandle original_menu_button = nullptr;
     qol::contracts::QolUiHandle replacement_menu_button = nullptr;
     const int deletes_before_draw_failure = g_native_button_deletes;
@@ -1160,7 +1555,7 @@ int main() {
     CHECK(components->main_menu_text_button_is_live(replacement_menu_button,
         &replacement_live).ok == kQolOk && replacement_live == 1);
     replacement_control->draw(replacement_control);
-    CHECK(g_native_button_draws == 5);
+    CHECK(g_native_button_draws == native_button_draws_before_main_menu + 1);
     CHECK(g_native_label_text == "模块设置");
     CHECK(g_native_button_rect.w == replacement_control->rect.w);
     CHECK(g_native_button_rect.h == replacement_control->rect.w * 48 / 220);
@@ -1169,7 +1564,7 @@ int main() {
           g_native_label_rect.h == g_native_button_rect.h);
     CHECK(replacement_control->rect.h == menu_button.rect.h);
     replacement_control->click(replacement_control->click_user);
-    CHECK(g_clicks == 4);
+    CHECK(g_clicks == clicks_before_main_menu + 1);
 
     const int deletions_before_unknown_state = g_native_button_deletes;
     g_main_menu_identity_known = false;
@@ -1179,7 +1574,7 @@ int main() {
     CHECK(g_native_button_deletes == deletions_before_unknown_state);
     CHECK(g_main_menu_click_owner == replacement_control->click_user);
     replacement_control->click(replacement_control->click_user);
-    CHECK(g_clicks == 5);
+    CHECK(g_clicks == clicks_before_main_menu + 2);
 
     int unrelated_owner = 0;
     g_main_menu_identity_known = true;
@@ -1218,7 +1613,7 @@ int main() {
     CHECK(g_native_button_deletes == deletions_before_unbind_retry);
     CHECK(g_main_menu_click_owner == third_control->click_user);
     third_control->click(third_control->click_user);
-    CHECK(g_clicks == 6);
+    CHECK(g_clicks == clicks_before_main_menu + 3);
     g_main_menu_identity_known = true;
     g_main_menu_invalidation_allowed = true;
     CHECK(qol::features::core_ui::ui_components_bind(&kFakeAdapter));

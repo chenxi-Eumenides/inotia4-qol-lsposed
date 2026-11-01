@@ -398,7 +398,8 @@ int plugin_install(contracts::PluginContext& ctx) {
         ui_components->nav_button_create == nullptr || ui_components->nav_button_draw == nullptr ||
         ui_components->nav_button_set_enabled == nullptr ||
         ui_components->arrow_button_create == nullptr || ui_components->arrow_button_set_enabled == nullptr ||
-        ui_components->arrow_button_draw == nullptr || ui_components->draw_container == nullptr ||
+        ui_components->arrow_button_draw == nullptr ||
+        ui_components->draw_container_styled == nullptr ||
         ui_components->draw_rounded_rect == nullptr ||
         ui_components->draw_control_text == nullptr || ui_components->dispatch_native_event == nullptr ||
         ui_components->destroy == nullptr ||

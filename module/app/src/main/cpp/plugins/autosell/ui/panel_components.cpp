@@ -79,19 +79,13 @@ void autosell_draw_component_text(const char* text, int32_t x, int32_t y, uint32
 
 void autosell_draw_total_toggle(const UiRect& panel) {
     const auto* ui = ui_api();
-    if (g_component_root == nullptr || ui == nullptr || ui->fill_rect == nullptr) return;
+    if (g_component_root == nullptr || ui == nullptr) return;
     const UiRect rect = autosell_total_rect();
-    if (g_ui_components != nullptr && g_ui_components->draw_container != nullptr) {
-        (void)g_ui_components->draw_container(rect);
-    } else {
-        constexpr int64_t edge = 2;
-        const uint32_t border_color = g_toggle_pressed ? kGold : 0xFF766A58u;
-        const UiRect borders[] = {
-            {rect.x, rect.y, rect.w, edge}, {rect.x, rect.y + rect.h - edge, rect.w, edge},
-            {rect.x, rect.y, edge, rect.h}, {rect.x + rect.w - edge, rect.y, edge, rect.h}};
-        for (UiRect border : borders) (void)ui->fill_rect(border, border_color);
+    if (g_ui_components != nullptr && g_ui_components->draw_container_styled != nullptr) {
+        const contracts::UiContainerStyleDesc style{rect, 0x0000, 60, 0};
+        (void)g_ui_components->draw_container_styled(&style);
     }
-    if (g_toggle_pressed) {
+    if (g_toggle_pressed && ui->fill_rect != nullptr) {
         constexpr int64_t edge = 2;
         const UiRect borders[] = {
             {rect.x, rect.y, rect.w, edge}, {rect.x, rect.y + rect.h - edge, rect.w, edge},

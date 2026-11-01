@@ -67,7 +67,7 @@ bool main_thread() {
 bool components_ready() {
     return g_components != nullptr && g_ui != nullptr &&
         g_components->draw_control_text != nullptr &&
-        g_components->draw_container_ornamented != nullptr &&
+        g_components->draw_container_styled != nullptr &&
         g_components->dispatch_native_event != nullptr &&
         g_components->arrow_button_create != nullptr &&
         g_components->arrow_button_draw != nullptr &&
@@ -299,8 +299,8 @@ void panel_process() {
                                         root_y + kPanelH / 2, 2, 1);
         }
         const UiRect body{root_x + kBody.x, root_y + kBody.y, kBody.w, kBody.h};
-        (void)g_ui->fill_rect(body, contracts::ui_theme::kPanelBg);
-        (void)g_components->draw_container_ornamented(body);
+        const contracts::UiContainerStyleDesc body_style{body, 0x1904, 100, 1};
+        (void)g_components->draw_container_styled(&body_style);
     }
     if (g_list != nullptr) (void)g_components->scroll_list_draw(g_list);
     if (!g_message.empty()) {

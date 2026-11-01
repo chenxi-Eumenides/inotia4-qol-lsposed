@@ -852,7 +852,8 @@ void poll_entry_continuation() {
 bool components_complete() {
     constexpr size_t end = offsetof(contracts::QolUiComponents, capsule_text_button_create) +
         sizeof(((contracts::QolUiComponents*)nullptr)->capsule_text_button_create);
-    return g_components != nullptr && g_components->major == 1 && g_components->minor >= 15 &&
+    return g_components != nullptr && g_components->major == contracts::kUiContractMajor &&
+        g_components->minor >= 23 &&
         g_components->size >= end && g_components->size >= kArrowComponentsSize &&
         g_components->capsule_text_button_create &&
         g_components->scroll_list_create &&
@@ -864,7 +865,7 @@ bool components_complete() {
         g_components->arrow_button_draw &&
         g_components->text_button_set_enabled &&
         g_components->text_button_draw && g_components->destroy &&
-        g_components->draw_control_text && g_components->draw_container_ornamented &&
+        g_components->draw_control_text && g_components->draw_container_styled &&
         g_components->dispatch_native_event;
 }
 void destroy_page();
@@ -945,8 +946,8 @@ void settings_panel_process() {
         }
         for (const auto& rect : {UiRect{x + kLeftX - 8, y + kLeftY - 8, kLeftW + 32, kLeftH + 16},
              UiRect{x + kRightX - 8, y + kRightY - 8, kRightW + 32, kRightH + 16}}) {
-            (void)g_ui->fill_rect(rect, contracts::ui_theme::kPanelBg);
-            (void)g_components->draw_container_ornamented(rect);
+            const contracts::UiContainerStyleDesc style{rect, 0x1904, 100, 1};
+            (void)g_components->draw_container_styled(&style);
         }
     }
     if (g_left) (void)g_components->scroll_list_draw(g_left);

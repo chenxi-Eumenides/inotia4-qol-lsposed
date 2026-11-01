@@ -27,6 +27,8 @@
 #include "game/access/ui_native_text_button.h"
 #include "game/access/ui_confirmation.h"
 #include "game/access/ui_components.h"
+#include "game/access/ui_container_frame.h"
+#include "game/access/ui_container_frame_geometry.h"
 #include "game/access/popup_state.h"
 #include "game/access/ui_state.h"
 #include "game/adapter_ports/game_host_port.h"
@@ -915,13 +917,15 @@ QolResult fill_rect(UiRect rect, uint32_t color) {
     return contracts::ok();
 }
 
-QolResult draw_border_rect(int32_t x, int32_t y, int32_t w, int32_t h) {
-    if (w < 48 || h < 48) return invalid_argument();
-    if (!qol::game::game_host_is_main_thread() || fn_ui_draw_border_rect == nullptr) {
-        return not_ready();
+QolResult draw_container_frame(UiRect rect, uint32_t fill_rgb565, uint32_t alpha) {
+    if (!qol::game::ui_container_frame_geometry::valid_rect(game_rect(rect)) ||
+        fill_rgb565 > 0xffffu || alpha > 100u) {
+        return invalid_argument();
     }
-    fn_ui_draw_border_rect(x, y, w, h);
-    return contracts::ok();
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+    return qol::game::ui_draw_container_frame(game_rect(rect), fill_rgb565, alpha)
+        ? contracts::ok()
+        : not_ready();
 }
 
 QolResult set_clip(int32_t x1, int32_t y1, int32_t x2, int32_t y2) {
@@ -1736,11 +1740,10 @@ QolUiAdapter g_ui_adapter{
      &clear_control_drag_flags,
      &clear_touch_state,
      &set_touch_release_input,
-      &clear_touch_drop_event,
-       &popup_stack_snapshot,
-       &adapter_is_main_thread,
-       &draw_border_rect,
-        &image_loc_size,
+     &clear_touch_drop_event,
+     &popup_stack_snapshot,
+     &adapter_is_main_thread,
+     &image_loc_size,
         &set_clip,
          &reset_clip,
          &scroll_create,
@@ -1796,6 +1799,8 @@ QolUiAdapter g_ui_adapter{
              &create_yes_no_text,
              // Minor 33 tail: restore native ControlItem On/MoveOn event eligibility.
              &use_control_event_on,
+             // Minor 34 tail: custom container frame paint.
+             &draw_container_frame,
            };
 
 }  // namespace

@@ -138,12 +138,13 @@ static void autosell_panel_process_impl() {
     const UiRect panel = autosell_panel_rect();
     const UiRect mask = autosell_mask_rect(panel);
     ui_fill_rect_alpha(mask, 0xFF000000, kMaskAlpha);
-    ui_fill_rect_alpha(panel, kPanelFill565, kPanelAlpha);
-    if (g_ui_components != nullptr && g_ui_components->draw_container_ornamented != nullptr) {
-        (void)g_ui_components->draw_container_ornamented(panel);
-        if (g_ui_components->draw_container != nullptr) {
-            (void)g_ui_components->draw_container(autosell_equipment_group(panel));
-        }
+    if (g_ui_components != nullptr && g_ui_components->draw_container_styled != nullptr) {
+        // Preserve the panel's intentional fill; the styled container draws it once.
+        const contracts::UiContainerStyleDesc panel_style{panel, kPanelFill565, kPanelAlpha, 1};
+        (void)g_ui_components->draw_container_styled(&panel_style);
+        const contracts::UiContainerStyleDesc group_style{
+            autosell_equipment_group(panel), 0x0000, 60, 0};
+        (void)g_ui_components->draw_container_styled(&group_style);
     }
 
     autosell_draw_component_text("自动出售", static_cast<int32_t>(panel.w / 2), 20,
