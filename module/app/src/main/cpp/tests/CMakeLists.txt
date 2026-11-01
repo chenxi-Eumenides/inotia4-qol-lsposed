@@ -1720,6 +1720,7 @@ add_executable(debug_two_column_tests
     test_debug_two_column.cpp
     ${CORE_CUSTOM_UI_COMPONENTS_SOURCES}
     ${CPP_DIR}/plugins/core.custom_ui/panels/debug_components.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_option_group.cpp
 )
 target_include_directories(debug_two_column_tests PRIVATE
     ${CPP_DIR}

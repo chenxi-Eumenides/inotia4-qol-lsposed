@@ -13,6 +13,7 @@
 #include "contracts/ui_confirmation.h"
 #include "contracts/ui_theme.h"
 #include "plugins/core.custom_ui/panels/debug_components.h"
+#include "plugins/core.custom_ui/ui_option_group.h"
 #include "plugins/core.custom_ui/ui_components.h"
 
 using namespace qol::contracts;
@@ -530,6 +531,14 @@ QolResult draw_container_frame(UiRect rect, uint32_t color, uint32_t alpha) {
     return g_fail_container_frame && g_container_frame_calls.size() == 3
         ? error(kQolErrInternal, "styled preview failure", 23) : ok();
 }
+int g_option_group_draws = 0;
+QolResult draw_help_option_row(UiRect, uint8_t, uint8_t) {
+    ++g_option_group_draws;
+    return ok();
+}
+void option_group_changed(void* user, int32_t selected) {
+    *static_cast<int32_t*>(user) = selected;
+}
 QolResult touch_coordinates(uint64_t param, int64_t* x, int64_t* y) {
     if (param == 0) {
         *x = 0;
@@ -600,6 +609,7 @@ QolUiAdapter make_adapter() {
     ui.draw_image_part = &draw_image_part;
     ui.draw_part_scaled = &draw_part_scaled;
     ui.draw_container_frame = &draw_container_frame;
+    ui.draw_help_option_row = &draw_help_option_row;
     ui.touch_coordinates = &touch_coordinates;
     return ui;
 }
@@ -1404,6 +1414,26 @@ int main() {
     CHECK(!g_back_requested);
 
     const size_t frames_before_close = g_container_frame_calls.size();
+    // 保留的两行选项组组件：创建、绘制、点击切换、销毁。
+    {
+        int32_t changed = -1;
+        UiOptionGroupDesc desc{{0, 0, 300, 120}, {"选项 A", "选项 B"}, 0,
+                               &option_group_changed, &changed};
+        UiOptionGroup group{};
+        CHECK(option_group_create(api, root, &desc, &group).code == kQolOk);
+        CHECK(group.handles[0] != nullptr && group.handles[1] != nullptr &&
+              group.selected == 0);
+        g_option_group_draws = 0;
+        option_group_draw(&ui, &group);
+        CHECK(g_option_group_draws == 2);
+        auto* second = static_cast<Control*>(group.handles[1]);
+        CHECK(second != nullptr && second->click != nullptr);
+        second->click(second->user);
+        CHECK(group.selected == 1 && changed == 1);
+        option_group_destroy(api, &group);
+        CHECK(group.handles[0] == nullptr && group.handles[1] == nullptr);
+    }
+
     g_provider->close();
     CHECK(!g_provider->active());
     g_provider->callbacks->process();
