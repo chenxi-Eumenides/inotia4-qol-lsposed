@@ -69,11 +69,6 @@ struct DrawPartCall {
     int32_t flip = 0;
 };
 
-struct HelpOptionRowCall {
-    UiRect rect;
-    uint8_t selected;
-    uint8_t pressed;
-};
 struct ContainerFrameCall {
     UiRect rect{};
     uint32_t color = 0;
@@ -139,7 +134,6 @@ std::vector<int32_t> g_image_group_units;
 std::vector<ImageLocationCall> g_image_location_calls;
 std::vector<DrawPartCall> g_draw_part_calls;
 std::vector<ContainerFrameCall> g_container_frame_calls;
-std::vector<HelpOptionRowCall> g_help_option_rows;
 std::vector<FrameEvent> g_frame_events;
 std::vector<PressedQuery> g_pressed_queries;
 std::vector<BackDrawCall> g_back_draw_calls;
@@ -536,10 +530,6 @@ QolResult draw_container_frame(UiRect rect, uint32_t color, uint32_t alpha) {
     return g_fail_container_frame && g_container_frame_calls.size() == 3
         ? error(kQolErrInternal, "styled preview failure", 23) : ok();
 }
-QolResult draw_help_option_row(UiRect rect, uint8_t selected, uint8_t pressed) {
-    g_help_option_rows.push_back({rect, selected, pressed});
-    return ok();
-}
 QolResult touch_coordinates(uint64_t param, int64_t* x, int64_t* y) {
     if (param == 0) {
         *x = 0;
@@ -610,7 +600,6 @@ QolUiAdapter make_adapter() {
     ui.draw_image_part = &draw_image_part;
     ui.draw_part_scaled = &draw_part_scaled;
     ui.draw_container_frame = &draw_container_frame;
-    ui.draw_help_option_row = &draw_help_option_row;
     ui.touch_coordinates = &touch_coordinates;
     return ui;
 }
@@ -644,12 +633,12 @@ int main() {
                            qol::contracts::ui_theme::kNavBoxAbsY,
                            qol::contracts::ui_theme::kNavBoxW,
                            qol::contracts::ui_theme::kNavBoxH};
-    const UiRect left_panel_1008{102, 26, 200, 620};
-    const UiRect right_panel_1008{314, 26, 676, 620};
-    const UiRect preview_1008{346, 102, 612, 240};
-    const UiRect left_panel_1422{102, 26, 200, 588};
-    const UiRect right_panel_1422{314, 26, 1090, 588};
-    const UiRect preview_1422{346, 102, 1026, 240};
+    const UiRect left_panel_1008{102, 26, 300, 620};
+    const UiRect right_panel_1008{414, 26, 576, 620};
+    const UiRect preview_1008{446, 102, 512, 240};
+    const UiRect left_panel_1422{102, 26, 300, 588};
+    const UiRect right_panel_1422{414, 26, 990, 588};
+    const UiRect preview_1422{446, 102, 926, 240};
     UiRect panel_rect = panel_rect_1008;
     UiRect left_panel = left_panel_1008;
     UiRect right_panel = right_panel_1008;
@@ -685,25 +674,25 @@ int main() {
           g_loaded_image_units[2] == 0x0f && g_loaded_image_units[3] == 0x59);
 
     Control* root = root_control();
-    CHECK(root != nullptr && root->kind == 0 && root->children.size() == 15);
+    CHECK(root != nullptr && root->kind == 0 && root->children.size() == 14);
     CHECK(rect_matches(root->rect, panel_rect));
-    CHECK(g_live == 16);
+    CHECK(g_live == 15);
     Control* panel_nav_control = root->children[0].get();
     g_nav_control = panel_nav_control;
     CHECK(panel_nav_control->kind == 1 && panel_nav_control->click != nullptr);
     CHECK(rect_matches(panel_nav_control->rect, panel_nav));
-    Control* category_controls[8]{};
-    for (size_t i = 0; i < 8; ++i) {
+    Control* category_controls[7]{};
+    for (size_t i = 0; i < 7; ++i) {
         category_controls[i] = root->children[i + 1].get();
         CHECK(category_controls[i]->kind == 1 && category_controls[i]->click != nullptr);
-        CHECK(category_controls[i]->rect.x == 118 &&
+        CHECK(category_controls[i]->rect.x == 134 &&
               category_controls[i]->rect.y == 94 + static_cast<int64_t>(i) * 56 &&
-              category_controls[i]->rect.w == 168 && category_controls[i]->rect.h == 48);
+              category_controls[i]->rect.w == 236 && category_controls[i]->rect.h == 48);
     }
     Control* style_controls[6]{};
-    for (size_t i = 0; i < 6; ++i) style_controls[i] = root->children[i + 9].get();
+    for (size_t i = 0; i < 6; ++i) style_controls[i] = root->children[i + 8].get();
     const auto assert_style_control_rects = [&]() {
-        const int64_t color_x[] = {346, 470, 346, 470};
+        const int64_t color_x[] = {446, 570, 446, 570};
         const int64_t color_y[] = {442, 442, 494, 494};
         for (size_t i = 0; i < 4; ++i) {
             CHECK(style_controls[i]->kind == 1 && style_controls[i]->click != nullptr);
@@ -712,7 +701,7 @@ int main() {
         }
         for (size_t i = 0; i < 2; ++i) {
             CHECK(style_controls[i + 4]->kind == 1 && style_controls[i + 4]->click != nullptr);
-            CHECK(style_controls[i + 4]->rect.x == 598 + static_cast<int64_t>(i) * 92);
+            CHECK(style_controls[i + 4]->rect.x == 698 + static_cast<int64_t>(i) * 92);
             CHECK(style_controls[i + 4]->rect.y == 442 && style_controls[i + 4]->rect.w == 80 &&
                   style_controls[i + 4]->rect.h == 44);
         }
@@ -725,9 +714,9 @@ int main() {
     };
     const auto bind_style_controls = [&]() {
         const UiRect rects[] = {
-            {346, 442, 112, 44}, {470, 442, 112, 44},
-            {346, 494, 112, 44}, {470, 494, 112, 44},
-            {598, 442, 80, 44}, {690, 442, 80, 44},
+            {446, 442, 112, 44}, {570, 442, 112, 44},
+            {446, 494, 112, 44}, {570, 494, 112, 44},
+            {698, 442, 80, 44}, {790, 442, 80, 44},
         };
         for (size_t i = 0; i < 6; ++i) {
             style_controls[i] = find_child_at(rects[i]);
@@ -756,7 +745,6 @@ int main() {
         g_close_draws = 0;
         g_back_draws = 0;
         g_container_frame_calls.clear();
-        g_help_option_rows.clear();
         g_fill_rects.clear();
         g_fill_colors.clear();
         g_text_button_layout_appearances.clear();
@@ -771,7 +759,7 @@ int main() {
     };
     const auto assert_flat_button_fills = [&](size_t extra_native_outlines = 0,
                                               bool include_style_controls = true) {
-        const size_t base_fill_count = include_style_controls ? 71 : 41;
+        const size_t base_fill_count = include_style_controls ? 66 : 36;
         CHECK(g_fill_draws == static_cast<int>(base_fill_count + extra_native_outlines) &&
               g_fill_rects.size() == base_fill_count + extra_native_outlines &&
               g_fill_colors.size() == base_fill_count + extra_native_outlines);
@@ -797,8 +785,8 @@ int main() {
                 }
             }
         };
-        assert_button_fills(category_controls, 8, 1);
-        if (include_style_controls) assert_button_fills(style_controls, 6, 41);
+        assert_button_fills(category_controls, 7, 1);
+        if (include_style_controls) assert_button_fills(style_controls, 6, 36);
     };
     const auto assert_native_button_outlines = [&](Control* const* controls,
                                                     int32_t pressed_index) {
@@ -817,7 +805,7 @@ int main() {
             const uint32_t color = static_cast<int32_t>(i) == pressed_index
                 ? qol::contracts::ui_theme::kOk : qol::contracts::ui_theme::kFrameGold;
             for (size_t edge = 0; edge < 4; ++edge) {
-                const size_t index = 41 + i * 4 + edge;
+                const size_t index = 36 + i * 4 + edge;
                 CHECK(rect_matches(g_fill_rects[index], expected[edge]));
                 CHECK(g_fill_colors[index] == color);
             }
@@ -930,7 +918,7 @@ int main() {
         CHECK(has_drawn_string(g_drawn_strings, "示意 " + std::to_string(preview.w) + " × " +
               std::to_string(preview.h)));
         for (const char* label : {"方框", "文本按钮", "箭头按钮", "图标按钮",
-                                  "普通控件按钮", "返回/导航", "列表/主菜单", "配色",
+                                  "普通控件按钮", "返回/导航", "列表/主菜单专用",
                                   "黑色 0000", "灰色 8410", "白色 FFFF", "红色 F800",
                                   "-10", "+10"}) {
             CHECK(has_drawn_string(g_drawn_strings, label));
@@ -983,8 +971,7 @@ int main() {
         CHECK(g_provider->callbacks->event(0x18, param, 0x10) == 1);
     };
     const char* category_names[] = {
-        "方框", "文本按钮", "箭头按钮", "图标按钮", "普通控件按钮", "返回/导航", "列表/主菜单",
-        "配色"};
+        "方框", "文本按钮", "箭头按钮", "图标按钮", "普通控件按钮", "返回/导航", "列表/主菜单专用"};
     const auto has_category_heading = [&](size_t category) {
         return std::any_of(g_drawn_string_calls.begin(), g_drawn_string_calls.end(),
             [&](const DrawnStringCall& call) {
@@ -1104,8 +1091,8 @@ int main() {
     expect_style(0xf800, 100);
 
     const UiRect box_style_rects[] = {
-        {346, 442, 112, 44}, {470, 442, 112, 44}, {346, 494, 112, 44},
-        {470, 494, 112, 44}, {598, 442, 80, 44}, {690, 442, 80, 44}};
+        {446, 442, 112, 44}, {570, 442, 112, 44}, {446, 494, 112, 44},
+        {570, 494, 112, 44}, {698, 442, 80, 44}, {790, 442, 80, 44}};
 
     // 从 category 0 经面板事件回调进入 category 5；两个有效坐标事件必须进入 native adapter。
     const int events_before_back_nav = g_control_tree_event_calls;
@@ -1367,29 +1354,6 @@ int main() {
           g_back_draws == 0 && g_native_text_background_draws == 0 &&
           g_painted_buttons.empty());  // Restricted examples are described, not fabricated.
 
-    // 配色页：无交互控件，纯静态绘制；只有左右外壳两个容器框。
-    request_category(7);
-    render_panel_frame();
-    CHECK(has_drawn_string(g_drawn_strings, category_names[7]));
-    CHECK(has_category_heading(7));
-    CHECK(has_drawn_string(g_drawn_strings, "方框 3x / 2x（60/84/93%）"));
-    CHECK(has_drawn_string(g_drawn_strings, "标题区域（帮助页选中项 · 静态）"));
-    CHECK(has_drawn_string(g_drawn_strings, "次级标题区域（非选中项 · 静态）"));
-    CHECK(has_drawn_string(g_drawn_strings, "选项区域（非选中项 · 静态）"));
-    CHECK(has_drawn_string(g_drawn_strings, "按钮组件（帮助页选项 · 原生按下）"));
-    CHECK(has_drawn_string(g_drawn_strings, "未选中 · 按下"));
-    CHECK(has_drawn_string(g_drawn_strings, "选中 · 按下"));
-    CHECK(has_drawn_string(g_drawn_strings, "正文 #FFFFFF"));
-    CHECK(has_drawn_string(g_drawn_strings, "次级 #C1C7C8；禁用 #A7AAA8。"));
-    CHECK(has_drawn_string(g_drawn_strings, "色板"));
-    CHECK(g_container_frame_calls.size() == 5);  // 2 外壳 + 3 方框
-    CHECK(g_help_option_rows.size() == 5);  // 标题/次级/选项区域 + 两个按下按钮
-    CHECK(g_help_option_rows[0].selected == 1 && g_help_option_rows[0].pressed == 0);
-    CHECK(g_help_option_rows[1].selected == 0 && g_help_option_rows[1].pressed == 0);
-    CHECK(g_help_option_rows[2].selected == 0 && g_help_option_rows[2].pressed == 0);
-    CHECK(g_help_option_rows[3].selected == 0 && g_help_option_rows[3].pressed == 1);
-    CHECK(g_help_option_rows[4].selected == 1 && g_help_option_rows[4].pressed == 1);
-
     // Returning to category 0 rebuilds its page on process while preserving the preview style.
     const int creates_before_box_page = g_creates;
     request_category(0);
@@ -1462,12 +1426,12 @@ int main() {
     right_panel = right_panel_1422;
     preview = preview_1422;
     root = root_control();
-    CHECK(root != nullptr && root->kind == 0 && root->children.size() == 15);
-    CHECK(rect_matches(root->rect, panel_rect_1422) && g_live == 16);
+    CHECK(root != nullptr && root->kind == 0 && root->children.size() == 14);
+    CHECK(rect_matches(root->rect, panel_rect_1422) && g_live == 15);
     panel_nav_control = root->children[0].get();
     g_nav_control = panel_nav_control;
     CHECK(rect_matches(panel_nav_control->rect, panel_nav));
-    for (size_t i = 0; i < 8; ++i) category_controls[i] = root->children[i + 1].get();
+    for (size_t i = 0; i < 7; ++i) category_controls[i] = root->children[i + 1].get();
     for (size_t i = 0; i < 6; ++i) style_controls[i] = find_child_at(box_style_rects[i]);
     assert_style_control_rects();
     CHECK(origin(root, &root_x, &root_y).code == kQolOk);
