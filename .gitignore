@@ -98,7 +98,8 @@ scripts/keys/*
 # ---- 其他 ----
 
 ## 日志
-/log/
+log/
+logs/
 ## 临时文件
 .tmp/
 
