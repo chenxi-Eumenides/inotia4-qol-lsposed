@@ -5,6 +5,7 @@ add_library(qol_plugin_core.custom_ui STATIC
     ui_confirmation.cpp
     ui_components.cpp
     ui_shapes.cpp
+    ui_option_group.cpp
     settings_contribution.cpp
     panels/stack.cpp
     panels/host.cpp
