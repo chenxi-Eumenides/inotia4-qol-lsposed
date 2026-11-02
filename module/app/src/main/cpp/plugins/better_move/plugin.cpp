@@ -2,7 +2,6 @@
 
 #include <cstdint>
 
-#include "../../contracts/world_tuning.h"
 #include "feature.h"
 
 namespace qol::features::better_move {
@@ -15,13 +14,6 @@ const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_MOVEMENT_INPUT,
      {contracts::kQolPortMovementInputVersion.major,
       contracts::kQolPortMovementInputVersion.minor}},
-};
-
-// 移速能力由 world_tuning 提供；缺失时移动逻辑回退原生 8px，插件仍可独立使用。
-const contracts::CapabilityRequirement kOptionalRequires[] = {
-    {contracts::kWorldTuningMoveSpeedCapabilityId,
-     {contracts::kWorldTuningMoveSpeedVersion.major,
-      contracts::kWorldTuningMoveSpeedVersion.minor}},
 };
 
 // 全部资源跟随 lifecycle：feature 开启才安装，关闭即物理还原。
@@ -145,18 +137,23 @@ constexpr contracts::FeatureChoiceOption kMovementModes[] = {
     {"omnidirectional", "全向移动"},
 };
 
+// direction 必须保持第一位、step 第二位：Host 按注册顺序通知回调，保证先设置模式再更新步长。
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"better_move.direction", 0, contracts::FeatureCategory::kGameplay,
      contracts::FeatureType::kChoice, "移动优化", "选择关闭、八向或全向移动。",
      nullptr, nullptr, nullptr, 0, kMovementModes,
      static_cast<uint32_t>(sizeof(kMovementModes) / sizeof(kMovementModes[0])), &on_choice},
+    {"better_move.step", 0, contracts::FeatureCategory::kGameplay,
+     contracts::FeatureType::kChoice, "移动步长", "每步像素数，8 为原生；仅八向/全向移动时生效。",
+     nullptr, nullptr, nullptr, 0, kStepChoices, kStepChoiceCount, &on_step_choice},
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
     remove_poll_task();
     set_gate(false);
     set_input_port(nullptr);
-    reset_move_speed();
+    // 端口尚未可用：只复位本地步长/模式，不推送。
+    reset_step();
     set_host_sdk(nullptr);
     if (ctx.struct_size < sizeof(contracts::PluginContext) ||
         ctx.sdk_major != contracts::kHostSdkMajor || ctx.sdk == nullptr || ctx.game == nullptr ||
@@ -179,8 +176,10 @@ int plugin_install(contracts::PluginContext& ctx) {
     set_host_sdk(ctx.sdk);
     set_input_port(port);
     set_gate(true);
+    // 复位并推送原生步长 8，再尝试回写缺失的 step selection。
+    reset_step();
     ensure_poll_task();
-    ensure_move_speed_subscription(true);
+    seed_default_step(ctx);
     return 0;
 }
 
@@ -191,15 +190,15 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     const auto* port = input_port();
     if (port != nullptr && port->api.set_mode != nullptr)
         port->api.set_mode(contracts::QolMovementInputMode::kDisabled);
-    reset_move_speed();
+    reset_step();
     set_host_sdk(nullptr);
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
-    (void)ctx;
     set_gate(true);
     ensure_poll_task();
-    ensure_move_speed_subscription(true);
+    reset_step();
+    seed_default_step(ctx);
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
@@ -209,7 +208,7 @@ void plugin_on_disabled(contracts::PluginContext& ctx) {
     const auto* port = input_port();
     if (port != nullptr && port->api.set_mode != nullptr)
         port->api.set_mode(contracts::QolMovementInputMode::kDisabled);
-    reset_move_speed();
+    reset_step();
 }
 
 void plugin_fill_status(contracts::PluginStatusOut& out) {
@@ -221,8 +220,7 @@ const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
     0, nullptr,   // requires
-    static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
-    kOptionalRequires,  // optional: world_tuning.move_speed
+    0, nullptr,   // optional_requires：步长已改为本地 better_move.step choice，无可选能力
     0, nullptr,   // provides
     static_cast<uint32_t>(sizeof(kResources) / sizeof(kResources[0])), kResources,
     0, nullptr,   // jni
@@ -235,7 +233,7 @@ const contracts::PluginDescriptor kDescriptor = {
     kPorts,
     1,
     nullptr, 0,   // deprecated http_queries
-    kFeatures, 1,
+    kFeatures, 2,
 };
 
 }  // namespace

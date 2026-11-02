@@ -50,7 +50,7 @@ bool enabled();
 contracts::QolMovementInputMode current_mode();
 const State& current_state();
 void set_mode(contracts::QolMovementInputMode mode);
-// 基础步长（像素），由 better_move 从 world_tuning.move_speed 推入；<=0 回退原生 8。
+// 基础步长（像素），由 better_move 从 better_move.step 档位推入；<=0 回退原生 8。
 void set_step(int32_t step);
 int32_t current_step();
 // Compatibility entry point: enabled=true still means the legacy omnidirectional mode.

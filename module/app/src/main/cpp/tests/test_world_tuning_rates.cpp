@@ -30,7 +30,6 @@ void test_ladder_and_metadata() {
     assert(std::strcmp(rate_key(RateId::kEnemyHp), "enemy_hp") == 0);
     assert(std::strcmp(rate_key(RateId::kDamageOut), "damage_out") == 0);
     assert(std::strcmp(rate_key(RateId::kDamageIn), "damage_in") == 0);
-    assert(std::strcmp(rate_key(RateId::kMoveSpeed), "move_speed") == 0);
 
     assert(rate_supported(RateId::kGold));
     assert(rate_supported(RateId::kExp));
@@ -38,7 +37,6 @@ void test_ladder_and_metadata() {
     assert(rate_supported(RateId::kEnemyHp));
     assert(rate_supported(RateId::kDamageOut));
     assert(rate_supported(RateId::kDamageIn));
-    assert(!rate_supported(RateId::kMoveSpeed));
 
     assert(rate_display(10) == "×0.1");
     assert(rate_display(100) == "×1.0");
@@ -89,6 +87,49 @@ void test_decode_rejects_invalid() {
     assert(reject("{\"enemy_hp\":999999999}"));
 }
 
+// 旧配置兼容：移速倍率已移除，已持久化的 rates JSON 仍可能带 move_speed 键，解析须容忍。
+void test_legacy_move_speed_key() {
+    const auto reject = [](const char* json) {
+        Rates parsed{};
+        return !decode_rates(json, static_cast<uint32_t>(std::strlen(json)), &parsed);
+    };
+
+    // 旧版完整 7 字段 JSON：move_speed 读取后忽略，其余字段正常生效。
+    const char* legacy =
+        "{\"gold\":150,\"exp\":100,\"player_hp\":100,\"enemy_hp\":50,\"damage_out\":150,"
+        "\"damage_in\":30,\"move_speed\":120}";
+    Rates parsed{};
+    assert(decode_rates(legacy, static_cast<uint32_t>(std::strlen(legacy)), &parsed));
+    assert(parsed.value[static_cast<uint32_t>(RateId::kGold)] == 150);
+    assert(parsed.value[static_cast<uint32_t>(RateId::kEnemyHp)] == 50);
+    assert(parsed.value[static_cast<uint32_t>(RateId::kDamageOut)] == 150);
+    assert(parsed.value[static_cast<uint32_t>(RateId::kDamageIn)] == 30);
+    assert(parsed.value[static_cast<uint32_t>(RateId::kExp)] == 100);
+
+    // 只剩 move_speed 键的旧配置：全部字段回默认值。
+    const char* legacy_only = "{\"move_speed\":100}";
+    assert(decode_rates(legacy_only, static_cast<uint32_t>(std::strlen(legacy_only)), &parsed));
+    for (uint32_t i = 0; i < static_cast<uint32_t>(RateId::kCount); ++i) {
+        assert(parsed.value[i] == 100);
+    }
+
+    // encode 不再输出 move_speed。
+    const std::string json = encode_rates(default_rates());
+    assert(json.find("move_speed") == std::string::npos);
+    assert(json == "{\"gold\":100,\"exp\":100,\"player_hp\":100,\"enemy_hp\":100,"
+                   "\"damage_out\":100,\"damage_in\":100}");
+
+    // validate_config 同样容忍旧 move_speed 键。
+    assert(validate_rates_config("rates", legacy, static_cast<uint32_t>(std::strlen(legacy))).ok ==
+           kQolOk);
+
+    // 值规则与现行字段一致：非档位取值仍拒绝。
+    assert(reject("{\"move_speed\":101}"));
+    // move_speed 重复仍拒绝；move_speed 与未知键并存时未知键仍拒绝。
+    assert(reject("{\"move_speed\":100,\"move_speed\":50}"));
+    assert(reject("{\"move_speed\":100,\"unknown\":100}"));
+}
+
 void test_validate_config() {
     const char* good = "{\"enemy_hp\":50}";
     assert(validate_rates_config("rates", good, static_cast<uint32_t>(std::strlen(good))).ok ==
@@ -132,6 +173,7 @@ int main() {
     test_ladder_and_metadata();
     test_roundtrip_and_defaults();
     test_decode_rejects_invalid();
+    test_legacy_move_speed_key();
     test_validate_config();
     test_scaling();
     return 0;

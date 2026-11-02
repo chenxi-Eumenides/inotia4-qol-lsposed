@@ -6,7 +6,6 @@
 #include "../../contracts/plugin.h"
 #include "../../contracts/character_facts.h"
 #include "../../contracts/game_ports/character_extras_port.h"
-#include "../../contracts/world_tuning.h"
 
 // 游戏世界调整插件业务层（ARCHITECTURE.md §3.3）。
 //
@@ -16,7 +15,7 @@
 //   ③ 玩家侧受到的伤害（面板「承伤倍率」）；
 //   ④ 玩家侧获得的经验；
 //   ⑤ 金币增量。
-// 玩家血量倍率与移速倍率尚未接游戏逻辑；移速只对外发布数值能力。
+// 玩家血量倍率尚未接游戏逻辑（面板行可见、箭头禁用）。
 //
 // 机制（沿用 simple_mode 已论证的入口 hook）：
 //   - 伤害：包裹 CHAR_AddDamage 入口。该函数是全部 15 条伤害路径的唯一汇合点，
@@ -53,18 +52,6 @@ inline constexpr const char* kResourceIdAddMoney = "hook:INVEN_AddMoney";
 // 门禁开关：true = 业务生效；false = wrapper 空转透传（fail-closed）。任意线程可读。
 void set_gate(bool enabled);
 bool gate_enabled();
-
-// 移速（1 倍 = 8，整数取整）：供 world_tuning.move_speed 能力消费。
-int32_t move_speed_value();
-
-// 移速能力 v1.1 订阅：提供方在倍率变化、启用/停用和订阅建立时主动推送。
-// 只在 Host 主线程调用；回调同步执行，不得在回调内 unsubscribe 自身。
-QolResult subscribe_move_speed(void* ctx, contracts::WorldTuningMoveSpeedObserver observer,
-                               uint64_t* out_id);
-QolResult unsubscribe_move_speed(uint64_t id);
-// 停用/关闭时向现有订阅者推送原生 8，避免消费端保留旧倍率。
-void notify_move_speed_fallback();
-void notify_move_speed();
 
 // 倍率快照与应用。apply 可从主线程（面板/配置）调用；wrapper 侧只读原子值。
 Rates current_rates();

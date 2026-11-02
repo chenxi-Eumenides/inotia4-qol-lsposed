@@ -46,7 +46,7 @@ int32_t char_move(void* ch, int32_t dir, int32_t delta, uint8_t flag) {
     if (fn_char_move == nullptr) return 0;
 
     const State& state = current_state();
-    // 轴向没有 secondary_dir，但步长仍可能被 world_tuning.move_speed 放大/缩小，
+    // 轴向没有 secondary_dir，但步长仍可能被 better_move.step 档位放大/缩小，
     // 不能在这里透传，否则十字方向永远保持原版 8px。
     if (!enabled() || !state.active || !state.trusted || flag != 0 || dir < 0 || dir > 3 ||
         dir != state.primary_dir ||

@@ -7,7 +7,6 @@
 #include <cstring>
 
 #include "../../contracts/runtime_hooks.h"
-#include "../../contracts/world_tuning.h"
 
 namespace qol::features::better_move {
 namespace {
@@ -25,12 +24,8 @@ std::atomic<bool> g_direction_seen{false};
 std::atomic<bool> g_move_seen{false};
 std::atomic<bool> g_wait_coord_seen{false};
 std::atomic<bool> g_map_blocking_seen{false};
-
-const contracts::WorldTuningMoveSpeedApi* g_move_speed_api = nullptr;
-uint64_t g_move_speed_subscription = 0;
-int32_t g_pushed_step = contracts::kWorldTuningBaseMoveSpeed;
-// 只在尚未订阅时用于重试能力查找；订阅成功后不再递增或读取能力。
-uint32_t g_subscribe_retry_ticks = 0;
+// 步长不再来自 world_tuning 订阅：Host 的 better_move.step choice 直接写本地原子值。
+std::atomic<int32_t> g_step{kDefaultStep};
 
 using DirectionFn = uint64_t (*)(void*, uint64_t, int64_t*, uint64_t);
 using PressKeyFn = void (*)(int32_t);
@@ -66,61 +61,52 @@ void set_input_port(const contracts::QolMovementInputPort* port) {
     g_input_port.store(port, std::memory_order_release);
 }
 
-void apply_move_speed(int32_t step) {
-    if (step < 1) step = contracts::kWorldTuningBaseMoveSpeed;
-    if (step == g_pushed_step) return;
+namespace {
+
+// 推送步长到游戏层；游戏层按值变化使 (模式, S) 候选缓存失效，插件侧只负责转发。
+void push_step(int32_t step) {
     const auto* port = input_port();
     if (port == nullptr || port->api.set_step == nullptr) return;
-    g_pushed_step = step;
-    log_info("move speed step=%d", step);
+    log_info("movement step=%d", step);
     port->api.set_step(step);
 }
 
-void on_move_speed_changed(void* /*ctx*/, int32_t step) {
-    apply_move_speed(step);
+// 更新本地步长；值未变化时不重复推送。force 用于生命周期复位（安装/停用），
+// 此时端口可能残留上一次激活的值，必须无条件写回原生 8。
+void set_local_step(int32_t step, bool force) {
+    const int32_t next = step < 1 ? kDefaultStep : step;
+    const int32_t previous = g_step.exchange(next, std::memory_order_acq_rel);
+    if (!force && previous == next) return;
+    push_step(next);
 }
 
-void ensure_move_speed_subscription(bool force) {
-    if (g_move_speed_subscription != 0) return;
-    const auto* port = input_port();
-    if (port == nullptr || port->api.set_step == nullptr) return;
-    if (!force && ++g_subscribe_retry_ticks < 60) return;
-    g_subscribe_retry_ticks = 0;
+}  // namespace
 
-    const auto* sdk = g_sdk;
-    if (sdk == nullptr || sdk->capabilities.require == nullptr) return;
-    const void* iface = nullptr;
-    if (!contracts::succeeded(sdk->capabilities.require(
-            contracts::kWorldTuningMoveSpeedCapabilityId,
-            {contracts::kWorldTuningMoveSpeedVersion.major,
-             contracts::kWorldTuningMoveSpeedVersion.minor},
-            &iface)) ||
-        iface == nullptr) {
-        // 能力尚未注册：保留最后一次步长，不回退 8，避免开关/装配窗口造成速度跳变。
+void reset_step() { set_local_step(kDefaultStep, true); }
+
+void seed_default_step(const contracts::PluginContext& ctx) {
+    // 只在插件已激活时回写 selection，避免 direction 关闭时仅因 step 选中而改变插件可用性。
+    if (!gate_enabled()) return;
+    const auto* api = contracts::feature_choice_if_available(ctx.sdk);
+    if (api == nullptr || api->read_choice == nullptr || api->request_set_choice == nullptr) {
+        // Host choice API 不可用：保持本地 8，不影响插件运行。
         return;
     }
-    const auto* api = static_cast<const contracts::WorldTuningMoveSpeedApi*>(iface);
-    if (api->subscribe == nullptr || api->unsubscribe == nullptr) return;
-    uint64_t id = 0;
-    if (!contracts::succeeded(api->subscribe(nullptr, &on_move_speed_changed, &id)) ||
-        id == 0) {
+    char selected[8]{};
+    uint32_t size = 0;
+    if (!contracts::succeeded(api->read_choice(api->context, ctx.owner_token, "better_move",
+                                               "better_move.step", selected, sizeof(selected),
+                                               &size)) ||
+        size != 0) {
+        // 已有 selection 或读取失败：不覆盖用户的显式选择。
         return;
     }
-    g_move_speed_api = api;
-    g_move_speed_subscription = id;
-    g_subscribe_retry_ticks = 0;
-    log_info("move speed subscription=%llu", static_cast<unsigned long long>(id));
-}
-
-void reset_move_speed() {
-    if (g_move_speed_subscription != 0 && g_move_speed_api != nullptr &&
-        g_move_speed_api->unsubscribe != nullptr) {
-        (void)g_move_speed_api->unsubscribe(g_move_speed_subscription);
-    }
-    g_move_speed_api = nullptr;
-    g_move_speed_subscription = 0;
-    g_subscribe_retry_ticks = 0;
-    apply_move_speed(contracts::kWorldTuningBaseMoveSpeed);
+    // request_set_choice 是异步提交；持久化结果由 Host receipt 闭环，这里不等待也不重试。
+    // Host 的 enqueue 要求 receipt 非空（否则直接返回 invalid argument），因此不能传 nullptr。
+    contracts::FeatureReceipt receipt{};
+    (void)api->request_set_choice(api->context, ctx.owner_token, "better_move",
+                                  "better_move.step", "8", &receipt);
+    log_info("movement step seeded default 8");
 }
 
 void set_gate(bool enabled) {
@@ -134,7 +120,6 @@ bool gate_enabled() {
 int32_t state_poll_tick(int64_t /*frame*/, void* /*ctx*/) {
     const auto* port = input_port();
     if (port != nullptr && port->api.poll != nullptr) port->api.poll();
-    ensure_move_speed_subscription(false);
     return 1;
 }
 
@@ -257,6 +242,22 @@ QolResult on_choice(contracts::PluginContext& ctx, const char* value) {
     }
     port->api.set_mode(mode);
     return contracts::ok();
+}
+
+QolResult on_step_choice(contracts::PluginContext& ctx, const char* value) {
+    // 空值表示未选择：本地按原生 8 生效；插件已激活时回写默认 "8" 保持持久化一致。
+    // direction 关闭时 step 仍更新但不生效：模式由 direction 回调单独控制。
+    if (value == nullptr || value[0] == '\0') {
+        set_local_step(kDefaultStep, false);
+        seed_default_step(ctx);
+        return contracts::ok();
+    }
+    for (uint32_t i = 0; i < kStepChoiceCount; ++i) {
+        if (std::strcmp(value, kStepChoices[i].value) != 0) continue;
+        set_local_step(kStepAmounts[i], false);
+        return contracts::ok();
+    }
+    return contracts::error(kQolErrInvalidArgument, nullptr, 0);
 }
 
 int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup) {

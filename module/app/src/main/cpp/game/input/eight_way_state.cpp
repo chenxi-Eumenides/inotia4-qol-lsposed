@@ -17,7 +17,7 @@ namespace {
 std::atomic<bool> g_enabled{false};
 std::atomic<contracts::QolMovementInputMode> g_mode{
     contracts::QolMovementInputMode::kDisabled};
-// 基础步长只由 better_move 的帧任务写入；候选表按 (模式, 步长) 懒计算并缓存在主线程。
+// 基础步长只由 better_move 的 step choice 回调写入；候选表按 (模式, 步长) 懒计算并缓存在主线程。
 std::atomic<int32_t> g_step{8};
 State g_state;
 CandidateSet g_candidates;

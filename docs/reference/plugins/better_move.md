@@ -7,7 +7,7 @@
 | 拥有 | 不拥有 |
 |---|---|
 | 主控角色的八向与全向触屏移动 | 物理键盘、手柄或其他输入设备 |
-| 基础步长从 `world_tuning.move_speed` 读取并缓存候选点 | 修改游戏原生移速属性 |
+| 基础步长从本地 `better_move.step` 档位读取并缓存候选点 | 修改游戏原生移速属性、依赖 `world_tuning` |
 | 主控角色的 1px 坐标粒度、碰撞查询与补步取消 | AI 角色、队友的原版四向 8px 移动 |
 | 主控切换时旧主控的 8px 吸附 | 寻路/点击移动、路径节点、推动规则本身 |
 | 按候选点缓存角度显示旋转指针 | 地图、角色、物品、存档等领域数据 |
@@ -20,22 +20,24 @@
 |---|---|
 | 插件 id | `better_move` |
 | 插件版本 | `0.1.0` |
-| 用户可见 feature | `better_move.direction` |
-| 显示名/描述 | 移动优化 / 选择关闭、八向或全向移动。 |
-| 类型/默认值 | choice / 关闭 |
+| 用户可见 feature | `better_move.direction`、`better_move.step` |
+| `better_move.direction` 显示名/描述 | 移动优化 / 选择关闭、八向或全向移动。 |
+| `better_move.direction` 类型/默认值 | choice / 关闭 |
+| `better_move.step` 显示名/描述 | 移动步长 / 每步像素数，8 为原生；仅八向/全向移动时生效。 |
+| `better_move.step` 类型/默认值 | choice（8 档）/ 未选择按原生 8；插件激活时自动回写 `"8"` |
 | 分类 | Gameplay「更多优化功能」 |
 | Release 可见 | 是 |
 
-choice 稳定值为 `eight_way`（「八向移动」）和 `omnidirectional`（「全向移动」）；Host 设置页的关闭项表示无 selection。插件与 feature 均从旧 `eight_way_move` 改名，旧 `eight_way_move.direction` 选择不迁移；没有 choice selection 的配置按关闭处理。
+`direction` choice 稳定值为 `eight_way`（「八向移动」）和 `omnidirectional`（「全向移动」）；Host 设置页的关闭项表示无 selection。`step` choice 稳定值为 `1/3/6/8/10/12/16/24`（value 与显示 label 相同），无 selection 按原生 `8` 处理，且只在 `direction` 为八向/全向时生效；`direction` 关闭时 step 选择保留但不生效。插件与 feature 均从旧 `eight_way_move` 改名，旧 `eight_way_move.direction` 选择不迁移；`direction` 没有 selection 的配置按关闭处理，`step` 没有 selection 的配置按原生 8 处理。
 
-Host 单 key 配置请求使用 `field="choice"`，`key` 为 `better_move.direction`，`value` 为以上稳定值；`null` 或空字符串关闭。例如 `{ "plugin_id":"better_move", "field":"choice", "key":"better_move.direction", "value":"eight_way" }`。
+Host 单 key 配置请求使用 `field="choice"`，`key` 为 `better_move.direction` 或 `better_move.step`，`value` 为以上稳定值；`direction` 的 `null`/空字符串关闭，`step` 的 `null`/空字符串按原生 8 处理（插件激活时回写 `"8"`）。例如 `{ "plugin_id":"better_move", "field":"choice", "key":"better_move.step", "value":"12" }`。
 
-### 2.1 移速能力
+### 2.1 步长档位
 
-- 可选依赖 `world_tuning.move_speed` v1.1；插件只建立一次订阅，之后由 `world_tuning` 主动推送，不轮询、不在触摸时重新读取能力。
-- 订阅建立时立即回调当前步长；`world_tuning` 倍率变化、启用/停用都会推送。停用推送原生 `8`。
-- 尚未订阅时每 60 帧重试一次能力查找；订阅成功后该路径为空操作。重试失败保留最后一次步长，不回退 8，避免装配窗口造成速度跳变。
-- `QOL_PORT_MOVEMENT_INPUT` 升至 v1.3，尾追加 `set_step(int32_t)`；插件把推送值转给游戏层，游戏层不直接依赖 `world_tuning`。
+- 步长由本插件本地 feature `better_move.step` 提供，不依赖 `world_tuning`，没有可选能力或订阅。
+- Host choice callback（`on_choice`）解析档位后写入插件本地原子值，再经 `QOL_PORT_MOVEMENT_INPUT` v1.3 的 `set_step(int32_t)` 推送游戏层；值未变化不重复推送。
+- 空 selection（关闭）按原生 `8` 生效；插件已安装/启用且 Host choice API 可用时，插件会经 `read_choice`/`request_set_choice` 自动把缺失的 selection 回写为 `"8"`，使设置页显示与实际行为一致；API 不可用时保持本地 8，不失败。
+- `QOL_PORT_MOVEMENT_INPUT` 为 v1.3，尾字段含 `set_step(int32_t)`；游戏层按值变化使 `(模式, S)` 候选缓存失效，不直接依赖任何插件能力。
 - 旧 `set_enabled(true/false)` 保留 v1.1 语义：开启全向、关闭移动模式。插件业务模式只由 Host choice callback 通知。
 
 没有 HTTP 路由、JNI 绑定或公开命令。
@@ -47,7 +49,7 @@ Host 单 key 配置请求使用 `field="choice"`，`key` 为 `better_move.direct
 | 关闭 | 恢复原版四向输入，清理本功能键码/按住状态并吸附主控到 8px 瓦片中心 |
 | 八向 | 轴向 `(±S,0)`、`(0,±S)`；对角取 `k=round(S/√2)` 的 `(±k,±k)`，选择最近方向 |
 | 全向 | 取所有 `round(hypot(x,y))==S` 的整数候选点，选择最近角度；S 越大候选越多 |
-| 步长 | `S` 来自 `world_tuning.move_speed`（1 倍 = 8）；候选表按 `(模式, S)` 缓存 |
+| 步长 | `S` 来自 `better_move.step` 档位（默认原生 8）；候选表按 `(模式, S)` 缓存 |
 | 轴向 | 与斜向一样使用候选步长 S；`char_move` 不再因无副轴而透传原版 8px |
 | 轴向/斜向 | 共用主副轴分解、`CHAR_Move` 顺序、碰撞查询、贴墙回退和 `delta/8` 缩放 |
 | 模式切换 | 清空旧候选 index、selected 向量与输入状态，不跨候选表复用 index |
@@ -73,7 +75,7 @@ Host 单 key 配置请求使用 `field="choice"`，`key` 为 `better_move.direct
 ### 3.2 计算与更新时机
 
 - **计算**：首次触摸且 `(模式, S)` 缓存未命中时，在主线程构建候选表；不在每帧或每次触摸重复计算。
-- **更新**：`world_tuning` 推送新步长时只更新原子值并使缓存失效；下一次触摸重建。
+- **更新**：`better_move.step` choice 变化时 `on_choice` 只更新本地原子值并经端口 `set_step` 使缓存失效；下一次触摸重建。`direction` 注册在 `step` 之前，Host 按注册顺序通知回调，先设置模式再更新步长。
 - 正在按住时步长变化不打断当前手势：当前主/副轴步长继续用到松手；下一次触摸使用新步长。
 - 模式切换清触摸状态，不重复建表；插件关闭/停用时步长回退 8，候选缓存保留到下次重建。
 
@@ -90,6 +92,6 @@ Host 单 key 配置请求使用 `field="choice"`，`key` 为 `better_move.direct
 
 ## 5. 状态与错误
 
-feature 关闭、资源不可用或插件安装失败时，本插件不改变移动行为。`world_tuning.move_speed` 缺失只降级为原生 8px，不使插件失败。插件状态由 Host 生命周期与资源诊断面统一呈现，不额外定义用户可见错误码。
+feature 关闭、资源不可用或插件安装失败时，本插件不改变移动行为。`better_move.step` 无 selection 只按原生 8px 处理，不使插件失败；Host choice API 不可用时保持本地 8，同样不失败。插件状态由 Host 生命周期与资源诊断面统一呈现，不额外定义用户可见错误码。
 
-实现细节、资源列表、游戏函数地址和验证边界见 [`better_move-internals.md`](better_move-internals.md)。C18L v589 烟测已确认：150% 移速下八向步长为 12、轴向 `applied=12`、45° 对角为 8/8；50% 下全向步长为 4/1；关闭 `world_tuning` 推送 8；持续观察无 30 帧回退；8 资源全 `live`，无 FATAL。撞墙/滑行、切图/拾取、其他分辨率与变体仍待真机验收，完整行为状态为 `NOT_ACCEPTED`。
+实现细节、资源列表、游戏函数地址和验证边界见 [`better_move-internals.md`](better_move-internals.md)。步长档位化（本地 `better_move.step`，取代旧 `world_tuning.move_speed` 订阅）后的真机验收尚未执行；下方 v589 烟测针对已被取代的订阅设计，仅作历史追溯：C18L v589 曾确认 150% 移速下八向步长为 12、轴向 `applied=12`、45° 对角为 8/8，50% 下全向步长为 4/1，关闭 `world_tuning` 推送 8。撞墙/滑行、切图/拾取、其他分辨率与变体仍待真机验收，完整行为状态为 `NOT_ACCEPTED`。

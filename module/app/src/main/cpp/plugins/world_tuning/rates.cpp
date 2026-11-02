@@ -8,17 +8,21 @@ namespace qol::features::world_tuning {
 namespace {
 
 constexpr const char* kRateKeys[] = {
-    "gold", "exp", "player_hp", "enemy_hp", "damage_out", "damage_in", "move_speed",
+    "gold", "exp", "player_hp", "enemy_hp", "damage_out", "damage_in",
 };
 constexpr const char* kRateNames[] = {
-    "金币倍率", "经验倍率", "血量倍率", "敌怪血量倍率", "伤害倍率", "承伤倍率", "移速倍率",
+    "金币倍率", "经验倍率", "血量倍率", "敌怪血量倍率", "伤害倍率", "承伤倍率",
 };
 constexpr const char* kRateDescriptions[] = {
     "获得的金钱缩放", "获得的经验缩放", "玩家最大生命的缩放", "怪物最大生命的缩放", "对怪物造成的伤害缩放",
-    "受到的伤害缩放，数值越低越耐打", "移动速度的缩放",
+    "受到的伤害缩放，数值越低越耐打",
 };
-constexpr bool kRateSupported[] = {true, true, false, true, true, true, false};
+constexpr bool kRateSupported[] = {true, true, false, true, true, true};
 constexpr uint32_t kRateCount = static_cast<uint32_t>(RateId::kCount);
+
+// 旧配置兼容：移速倍率已从面板与 encode_rates 中移除，但已持久化的 rates JSON 仍可能带
+// move_speed 键。解析时读取并忽略该键，不能因它把整份 rates 判为非法。
+constexpr const char* kLegacyMoveSpeedKey = "move_speed";
 
 static_assert(sizeof(kRateKeys) / sizeof(kRateKeys[0]) == kRateCount, "rate key table size");
 static_assert(sizeof(kRateNames) / sizeof(kRateNames[0]) == kRateCount, "rate name table size");
@@ -148,6 +152,7 @@ bool decode_rates(const char* json, uint32_t size, Rates* out) {
     if (json == nullptr || out == nullptr) return false;
     Rates parsed = default_rates();
     bool seen[kRateCount]{};
+    bool seen_legacy_move_speed = false;
     const char* cursor = json;
     const char* end = json + size;
     if (!consume(&cursor, end, '{')) return false;
@@ -168,9 +173,18 @@ bool decode_rates(const char* json, uint32_t size, Rates* out) {
                     break;
                 }
             }
-            if (index == kRateCount || seen[index]) return false;
-            seen[index] = true;
-            parsed.value[index] = value;
+            // 旧配置的 move_speed 键：值仍要求合法档位，读取后忽略，不写入 rates。
+            const bool legacy_move_speed = index == kRateCount &&
+                std::strcmp(key, kLegacyMoveSpeedKey) == 0;
+            if (index == kRateCount && !legacy_move_speed) return false;
+            if (legacy_move_speed) {
+                if (seen_legacy_move_speed) return false;
+                seen_legacy_move_speed = true;
+            } else {
+                if (seen[index]) return false;
+                seen[index] = true;
+                parsed.value[index] = value;
+            }
             skip_space(&cursor, end);
             if (cursor < end && *cursor == ',') {
                 ++cursor;

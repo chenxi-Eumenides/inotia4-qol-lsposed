@@ -4,7 +4,7 @@
 
 功能插件「游戏世界调整」，插件版本 `0.1.0`。设置页只有一个入口行；点击后启用插件并打开自有面板，面板内每行一个倍率，左右箭头在固定档位间调整。改动经 Host 配置 Store 持久化，写入 `config.json` 的 `world_tuning` namespace。
 
-当前真正接线的倍率有四项：
+当前真正接线的倍率有五项：
 
 - 金币倍率：缩放 `INVEN_AddMoney` 的增量；
 - 经验倍率：缩放玩家侧 `CHAR_AddExperience` 的增量；
@@ -12,7 +12,7 @@
 - 伤害倍率：缩放玩家侧对怪物造成的伤害；
 - 承伤倍率（配置键 `damage_in`）：缩放玩家侧受到的伤害。
 
-玩家血量倍率尚未接线（玩家/佣兵不走 `CHAR_UpdateAttrFromMonster`）。移速倍率未改游戏移动，只通过 `world_tuning.move_speed` 能力把数值发布给消费者（例如全向移动插件）。面板行只显示名称、数值与箭头，不显示副标题。
+玩家血量倍率尚未接线（玩家/佣兵不走 `CHAR_UpdateAttrFromMonster`），面板行只保存数值，不产生游戏效果。面板行只显示名称、数值与箭头，不显示副标题。
 
 插件 id 由旧 `simple_mode` 改为 `world_tuning`，旧 `simple_mode.combat` feature 与旧配置不再迁移。除特别说明，文中路径均相对 `module/app/src/main/cpp/`。
 
@@ -22,7 +22,7 @@
 - `requires` 1 项：`character.facts` v1.0。
 - `optional_requires` 2 项：`ui_panels` v1.3、`ui_components` v2.23；界面工具被停用时倍率仍生效，仅面板不可用。
 - `ports` 1 项：`QOL_PORT_CHARACTER_EXTRAS` v1.2。
-- `provides` 1：`world_tuning.move_speed` v1.1；JNI 0、HTTP route/endpoint 0。
+- `provides` 0；JNI 0、HTTP route/endpoint 0。
 - `resources` 4 个入口 hook（伤害、怪物最大生命、加经验、加金币），均为 `kOptional` + `kFailSoft`：单个落点不可用只影响对应倍率，不会把插件置 `failed`。
 - `validate_config` = `validate_rates_config`，只接受 `rates` 键。
 - 唯一 feature 为 entry（`plugins/world_tuning/plugin.cpp`）：
@@ -38,11 +38,12 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 单键 `rates`，值为整数百分比对象：
 
 ```json
-{"gold":100,"exp":100,"player_hp":100,"enemy_hp":50,"damage_out":150,"damage_in":50,"move_speed":100}
+{"gold":100,"exp":100,"player_hp":100,"enemy_hp":50,"damage_out":150,"damage_in":50}
 ```
 
-- 字段：`gold`、`exp`、`player_hp`、`enemy_hp`、`damage_out`、`damage_in`、`move_speed`；缺字段按 100 处理。
+- 字段：`gold`、`exp`、`player_hp`、`enemy_hp`、`damage_out`、`damage_in`；缺字段按 100 处理。
 - 取值只允许档位：`10/30/50/80/100/120/150/200/300/500`（即 ×0.1 … ×5.0）；未知字段、重复字段、非整数、档位外取值一律拒绝。
+- 旧配置兼容：历史版本写入的 `move_speed` 键（已移除的移速倍率）解析时读取并忽略，不使整份 rates 非法；其取值仍须为合法档位，重复出现仍拒绝。
 - `validate_config` 在写入与 Store 加载两条路径生效（`host/features/controller.cpp`、`host/core_settings_config_store.cpp`）。
 - 读取通道：插件经 `QolFeatureApi::read_config` 读自己的 namespace；写入经 `request_set_config`，面板每帧轮询一次 receipt。`/api/config/set` 改同一键，下次打开面板或插件重新启用时生效。
 - 插件未订阅 `runtime_effects`；外部改动不会即时推送。
@@ -52,9 +53,9 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 面板 id `world_tuning`，provider 在 `plugin_install` 内注册（需要 `ui_panels` + `ui_components` 同时可用）。
 
 - 960×640 root，单栏容器 `{28,100,920,444}`；与设置页相同的 `kPanelBg` 底、`draw_container_styled`（`ornamented=1`）边框/内底和左右装饰图（`draw_image_part` unit `0x4f`/`0x50`）；不绘制标题与说明行。迁移前使用的 `draw_container_ornamented` 已随 ui_components Major 2 移除。
-- 7 行，行高 71，使用 `scroll_list`（关闭选中态）；每行：名称、数值（`×1.0`）、左右 `arrow_button`；行底 2 逻辑单位金色分割线，与设置页行样式一致。
-- 列表视口高 428，内容高 497，可上下拖动滚动；滚动条沿用原生 `scroll_list` 自带的一条，不额外自绘。
-- 全部 6 行的箭头都可用、样式一致；未接线行只保存数值，不产生游戏效果。
+- 6 行，行高 71，使用 `scroll_list`（关闭选中态）；每行：名称、数值（`×1.0`）、左右 `arrow_button`；行底 2 逻辑单位金色分割线，与设置页行样式一致。
+- 列表视口高 428，内容高 426（6 行 × 71），一屏完整显示，无需滚动；滚动条沿用原生 `scroll_list` 自带的一条，不额外自绘。
+- 全部 6 行的箭头都可用、样式一致；未接线行（玩家血量）只保存数值，不产生游戏效果。
 - 点击箭头 → 生成完整 `rates` JSON → `request_set_config` → 进入 pending（全部箭头禁用）→ 持久化确认后 `apply_rates`；成功不显示提示，失败/状态未知才在底部显示错误并回滚。
 - 面板打开时重新读取配置，覆盖外部编辑；关闭/插件停用销毁全部控件与回调。
 
@@ -90,24 +91,6 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 - 缩放后若当前 HP 高于新上限，同步写回 HP 上限值。
 - 倍率 100 时不缩放；若上次有缩放，先把 raw 写回槽再透传，之后清空 applied。
 
-## 对外能力：`world_tuning.move_speed`
-
-`provides` 声明 `world_tuning.move_speed` v1.1（`contracts/world_tuning.h`）：
-
-```cpp
-struct WorldTuningMoveSpeedApi {
-    QolResult (*read)(int32_t* out_speed);
-    QolResult (*subscribe)(void* ctx, void (*observer)(void*, int32_t), uint64_t* out_id);
-    QolResult (*unsubscribe)(uint64_t id);
-};
-```
-
-- 返回 `round(8 × 移速倍率)`，下限 1；1 倍 = 8。
-- `subscribe` 成功时立即回调一次当前值；之后 `apply_rates` 完成一次快照后推送一次，启用/停用也会推送当前值或原生 8。
-- `read` 保留给一次性查询；常规消费者应使用订阅，避免轮询或在触摸时读取。
-- 插件未启用时能力不存在；停用时先向现有订阅者推送 8，再撤销能力。
-- `better_move` 已接入该能力，订阅后不再轮询。
-
 ## 生命周期与线程模型
 
 - `plugin_install`：校验 context/port/SDK → require `character.facts` → 缓存 `sdk/game/port/facts/owner/plugin_id` → 可选注册面板 provider → 读取 `rates`。
@@ -130,12 +113,12 @@ struct WorldTuningMoveSpeedApi {
 
 ## 测试
 
-- `world_tuning_rates_tests`（`tests/test_world_tuning_rates.cpp`）：档位、显示文本、JSON 往返、非法输入、`validate_config`、缩放边界。
-- `world_tuning_feature_tests`（`tests/test_world_tuning_feature.cpp`）：descriptor（4 资源、move-speed 能力）、安装失败出口、门禁时序、伤害矩阵、HP 缩放与幂等/倍率变更、经验/金币缩放、移速能力取整、阵营失败、残留 wrapper、entry 不可用分支。
+- `world_tuning_rates_tests`（`tests/test_world_tuning_rates.cpp`）：档位、显示文本、JSON 往返、非法输入、旧配置 `move_speed` 键兼容、`validate_config`、缩放边界。
+- `world_tuning_feature_tests`（`tests/test_world_tuning_feature.cpp`）：descriptor（4 资源、无 provides）、安装失败出口、门禁时序、伤害矩阵、HP 缩放与幂等/倍率变更、经验/金币缩放、阵营失败、残留 wrapper、entry 不可用分支。
 - `settings_contributions_tests` 编译本插件的空 contribution。
 
 面板绘制/命中与 entry 联动已有真机观察（见下）；未覆盖：真实设备 hook ABI（伤害/敌怪血量实际生效）、资源安装时序。
 
 ## 验证状态
 
-Host 测试与构建通过；2026-10-29 真机（C18L v589）已验证：设置页入口 → 面板打开、6 行箭头显示与点击、数值写入 `config.json`（`rates.move_speed` 1.0→1.2）、无 FATAL。三项倍率的游戏内实际效果尚未复测，按 `docs/refactor/verification.md` 的口径登记为 `PARTIAL / NOT_ACCEPTED`。
+Host 测试与构建通过；2026-10-29 真机（C18L v589）已验证：设置页入口 → 面板打开、行箭头显示与点击、数值写入 `config.json`、无 FATAL（该证据时点面板为 7 行且含已移除的 `rates.move_speed` 键）。各倍率的游戏内实际效果尚未复测，按 `docs/refactor/verification.md` 的口径登记为 `PARTIAL / NOT_ACCEPTED`。

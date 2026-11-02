@@ -45,7 +45,7 @@ struct QolMovementInputApi {
     int32_t (*map_blocking_query)(int32_t x, int32_t y, QolMapBlockingQueryFn original);
     // v1.2 tail: selects the touch candidate set; set_enabled retains its legacy full-mode meaning.
     void (*set_mode)(QolMovementInputMode mode);
-    // v1.3 tail: base step in pixels read from world_tuning.move_speed; <=0 restores the native 8.
+    // v1.3 tail: base step in pixels from the better_move.step choice; <=0 restores the native 8.
     void (*set_step)(int32_t step);
 };
 

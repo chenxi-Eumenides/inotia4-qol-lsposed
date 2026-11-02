@@ -6,8 +6,8 @@
 
 | 目录/文件 | 职责 |
 |---|---|
-| `plugins/better_move/plugin.cpp` | descriptor、8 个 ResourceClaim、feature、生命周期、可选能力声明 |
-| `plugins/better_move/feature.{h,cpp}` | 端口/门禁、6 个入口/调用点 wrapper、backup、每帧状态任务、移速能力同步 |
+| `plugins/better_move/plugin.cpp` | descriptor、8 个 ResourceClaim、direction/step 两个 feature、生命周期 |
+| `plugins/better_move/feature.{h,cpp}` | 端口/门禁、6 个入口/调用点 wrapper、backup、每帧状态任务、本地步长/模式状态与 step choice 回调 |
 | `contracts/game_ports/movement_input_port.h` | `QOL_PORT_MOVEMENT_INPUT` v1.3；尾追加 mode setter 与 step setter，旧 `set_enabled` 保持全向语义 |
 | `game/adapter_ports/movement_input_port.{h,cpp}` | 端口实例，转发到 `game/input` |
 | `game/input/eight_way_move_math.h` | 运行时候选点构建、缓存角度、最近角度/滞回、主副轴拆分与速度缩放 |
@@ -16,18 +16,18 @@
 | `game/input/eight_way_move.{h,cpp}` | `CHAR_Move` 双轴 wrapper、滑行/回滚/恢复坐标 |
 | `game/input/eight_way_draw.{h,cpp}` | `UIPlayPorting_Draw` 后按缓存角度绘制旋转指针 |
 | `tests/test_better_move.cpp` | 动态候选点、角度/滞回、selected 向量/角度、主副轴、缩放单测 |
-| `tests/test_better_move_plugin.cpp` | descriptor、8 资源、端口 v1.3、feature、可选能力单测 |
+| `tests/test_better_move_plugin.cpp` | descriptor、8 资源、端口 v1.3、feature、step 档位/推送/seed 单测 |
 
 游戏层文件名仍保留 `eight_way_*`，表示八向/全向几何实现；对外插件名统一为 `better_move`。
 
 ## 2. 装配
 
 - `plugin_descriptor()` 由 `host/assembly.cpp` 的 `kBuiltInPlugins` 注册。
-- feature：`better_move.direction`，显示名「移动优化」，默认关闭，`FeatureCategory::kGameplay`，`kChoice`；稳定 options 为 `eight_way`、`omnidirectional`。无 selection 即关闭；旧 `eight_way_move.direction` 配置不迁移。
-- 可选能力：`world_tuning.move_speed` v1.1；订阅后由提供方推送，不轮询、不在触摸时读取。未订阅时每 60 帧重试一次能力查找；订阅成功后空操作。初始/停用推送 8。
+- feature：`better_move.direction`（显示名「移动优化」，默认关闭，稳定 options `eight_way`、`omnidirectional`）与 `better_move.step`（显示名「移动步长」，默认关闭，8 个档位 `1/3/6/8/10/12/16/24`）。两者均为 `FeatureCategory::kGameplay`、`kChoice`；direction 必须注册在第一位、step 第二位，保证 Host 按注册顺序先通知模式再通知步长。direction 无 selection 即关闭；step 无 selection 按原生 8，插件激活时会回写 `"8"`。旧 `eight_way_move.direction` 配置不迁移。
+- 步长为插件本地状态：无可选能力、无订阅、不依赖 `world_tuning`。`on_step_choice` 解析档位写入本地原子值并经端口 `set_step` 推送；空 selection 按原生 8 生效，插件已激活且 Host choice API 可用时经 `read_choice`/`request_set_choice` 自动回写默认 `"8"`，API 不可用时保持本地 8。
 - 端口：`QOL_PORT_MOVEMENT_INPUT`（`34`）v1.3，私有，仅 `better_move` 可声明；由 `host/plugin_registry.cpp` 注入。v1.3 尾追加 `set_step(int32_t)`，原有字段顺序/`set_enabled`/`set_mode` 语义不变。
 - `QolMovementInputMode` 为 `kDisabled`、`kEightWay`、`kOmnidirectional`；consumer 用 version/helper 和非空检查 `set_mode`、`set_step`，v1.1 前缀里的 `set_enabled` 仍作为兼容全向入口。
-- 无 HTTP、JNI、ownership；只消费 `world_tuning.move_speed`。
+- 无 HTTP、JNI、ownership、provides。
 
 ### 2.1 资源
 
@@ -85,9 +85,9 @@
 6. 按候选点 `step_components` 拆主轴/副轴；两个分量接近时优先保持当前四方向朝向。
 7. 写自定义键码 `0x51000000` 到 `KEY_nCode`，保存当前模式、`lattice_index`、`selected_dx/dy`、缓存角度 `selected_angle`、`candidate_step`、主副轴/步长/键码及 `owns_input`。
 
-步长由 `world_tuning.move_speed` v1.1 订阅回调推入端口 `set_step`；值变化只使缓存失效，下一次触摸重建。正在按住时旧步长继续生效到松手。模式切换清 State，不跨候选缓存复用 index。订阅建立前每 60 帧重试一次能力查找；重试失败保留最后一次值，不主动回退 8。
+步长由 `better_move.step` choice 回调解析后写本地原子值，再经端口 `set_step` 推入游戏层；值变化只使缓存失效，下一次触摸重建。正在按住时旧步长继续生效到松手。模式切换清 State，不跨候选缓存复用 index。空 selection 回退原生 8；插件已激活且 Host choice API 可用时，插件读 `read_choice` 发现 size==0（无 selection）会异步 `request_set_choice("8")` 回写默认，读失败或已有选择不覆盖，API 不可用保持本地 8。插件安装/启用时同样在无 selection 时回写一次，并强制推送步长 8。
 
-mode 切换通过 Host `on_choice` 进入端口 `set_mode`。模式改变先复位 State 与输入键码，候选 index 不跨表复用；关闭会沿旧关闭路径吸附主控并恢复 overlay。`set_enabled(true)` 仍只表示全向模式，以兼容 v1.1 旧调用者。
+mode 切换通过 Host `on_choice` 进入端口 `set_mode`。模式改变先复位 State 与输入键码，候选 index 不跨表复用；关闭会沿旧关闭路径吸附主控并恢复 overlay。`set_enabled(true)` 仍只表示全向模式，以兼容 v1.1 旧调用者。direction 关闭时 step 选择保留但不生效。
 
 ### 3.3 键码翻译
 
@@ -162,8 +162,8 @@ mode 切换通过 Host `on_choice` 进入端口 `set_mode`。模式改变先复�
 ## 4. 数据流
 
 ```text
-world_tuning.move_speed 订阅 → 回调推送 → movement_input_port.set_step → 步长原子值
-Host choice callback → movement_input_port.set_mode → eight_way_state mode/reset
+Host choice (better_move.step) → on_step_choice → 本地步长原子值 → movement_input_port.set_step → 游戏层步长
+Host choice callback (direction) → movement_input_port.set_mode → eight_way_state mode/reset
 触屏 → UIPlay_ButtonDirection hook → eight_way_state
   → 按 (模式, 步长) 懒构建/缓存候选点 → selected_dx/dy + selected_angle + 自定义 KEY_nCode
   → GAMESTATE_PressKeyPlay hook → 主方向键码 → 原版行走/切图/拾取/动画
@@ -178,8 +178,8 @@ Host choice callback → movement_input_port.set_mode → eight_way_state mode/r
 - 8 资源任一安装失败：整组 fail-closed，插件 failed，不保留半装状态。
 - entry hook 无 backup：宿主拒绝/回滚，wrapper 不执行。
 - 端口缺失/ABI 不匹配（v1.3 的 `set_step` 不存在）：install 失败，不安装资源。
-- `world_tuning.move_speed` 缺失：保留最后一次步长，不使插件失败；未订阅时每 60 帧重试接入。提供方停用会主动推送 8。
-- choice 关闭/disable/deactivate：先设为 disabled、吸附当前主控到瓦片中心并清自定义码/selected 向量，再移除每帧任务、步长回退 8、关闭端口门禁和物理还原资源。
+- `better_move.step` 无 selection：按原生 8 处理；插件已激活且 Host choice API 可用时自动回写 `"8"`。API 缺失或读失败只保持本地 8，不使插件失败。
+- choice 关闭/disable/deactivate：先设为 disabled、吸附当前主控到瓦片中心并清自定义码/selected 向量，再移除每帧任务、步长强制回 8、关闭端口门禁和物理还原资源。
 - 八向/全向切换不改移动执行或碰撞实现；只重置触摸、候选 index 与输入归属，避免跨表复用 index。
 
 ## 6. 已知限制与风险
@@ -199,13 +199,13 @@ Host choice callback → movement_input_port.set_mode → eight_way_state mode/r
 | 范围 | 证据 |
 |---|---|
 | 动态候选点（S=1/2/8/12/40）、最近方向/边界、滞回、主副轴、缩放、selected 向量/角度复位 | `tests/test_better_move.cpp` |
-| descriptor choice、稳定 value、callback mode 映射、旧 `set_enabled`、端口 v1.3 尾 ABI、可选移速能力 | `tests/test_better_move_plugin.cpp` |
+| descriptor 双 choice、稳定 value、callback mode 映射、旧 `set_enabled`、端口 v1.3 尾 ABI、step 档位/非法值拒绝/空值回退 8/推送与 seed | `tests/test_better_move_plugin.cpp` |
 | 旧 bool 无 selection 时按关闭修复 | Host `host_feature_controller_tests` 的通用 choice seed 用例 |
 | 构建 | `scripts/build-debug.sh` |
 | 架构/层依赖/符号/资源 | `check_arch.py`、`check_layers.py`、`check_symbols.py`、`check_resources.py` |
 | 原全向 smoke | C18L v586，属于旧全向模式，不代表新 choice 模式验收 |
 | 新 choice 三态/重启恢复/selected 高亮 | **PASS（烟测，C18L v589）**：旧 `direction=true` 升级后关闭；`eight_way` 重启后 `mode=1 candidate=7 steps=6/6`、高亮 45°；`omnidirectional` 高亮连续约 20°；关闭恢复原版四箭头 |
-| 移速订阅/步长/指针烟测 | **PASS（C18L v589）**：150% 订阅后 `move speed step=12`；八向 `steps=12/0`、`(12,0)`、`rot=90`；轴向 `applied=12`；45° `steps=8/8`；50% 全向 `steps=4/1`；关闭 `world_tuning` 推送 8，重启用后 4；持续观察无 30 帧回退；8 资源 live，无 FATAL。 |
+| 移速订阅/步长/指针烟测 | **历史（已被 step 档位化取代，C18L v589）**：旧订阅设计下 150% 得 `step=12`、八向 `steps=12/0`、轴向 `applied=12`、45° `steps=8/8`、50% 全向 `steps=4/1`。当前 `better_move.step` 本地档位的等价烟测未执行。 |
 | 撞墙/滑行/切图/其他分辨率 | **NOT_ACCEPTED（未执行）** |
 
 ## 8. 已删除旧结构

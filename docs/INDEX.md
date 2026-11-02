@@ -77,7 +77,7 @@
 - `core-item/bag-system-design.md`：背包系统设计（原生袋/C18/多袋源统一指针槽表、分层职责与层间调用、函数级 hook 接入矩阵、预检后单次写、不流转 ItemData/payload、无回滚/无 pending）。
 - `handoff-extension-bag-20261028.md`：扩展背包当前交接：礼盒 924、拾取 SaveItem/FindSaveSlot、扩展袋背包装备优先级的未完成问题与排查入口。
 - `core-character/architecture.md`：`core.character` 收敛方案（写面判定单点化、路由表 drift 防护、解析器合并、快照只读视图；不做 L0–L6 全量重构）。
-- `eight-way-move/design.md`：触屏方向摇杆八向/全向移动设计与原型记录（历史材料；当前对外契约为 `better_move`，动态候选点与移速能力见 `docs/reference/plugins/better_move-internals.md`）。
+- `eight-way-move/design.md`：触屏方向摇杆八向/全向移动设计与原型记录（历史材料；当前对外契约为 `better_move`，动态候选点与步长档位见 `docs/reference/plugins/better_move-internals.md`）。
 - `adr/`：架构决策记录。
 
 ### `archive/`：只读历史归档

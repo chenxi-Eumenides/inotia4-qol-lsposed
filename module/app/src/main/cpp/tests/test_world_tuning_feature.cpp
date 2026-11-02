@@ -5,7 +5,6 @@
 #include "contracts/host_sdk.h"
 #include "plugins/world_tuning/feature.h"
 #include "plugins/world_tuning/panel.h"
-#include "contracts/world_tuning.h"
 #include "plugins/world_tuning/plugin.h"
 
 #include <cassert>
@@ -46,11 +45,6 @@ bool g_fail_pool_slot = false;
 bool g_fail_max_hp = false;
 bool g_fail_hp = false;
 int g_require_calls = 0;
-int32_t g_observed_move_speed = 0;
-
-void observe_move_speed(void* ctx, int32_t speed) {
-    *static_cast<int32_t*>(ctx) = speed;
-}
 int g_party_calls = 0;
 int g_active_calls = 0;
 int g_summoner_calls = 0;
@@ -342,8 +336,8 @@ void test_descriptor() {
     assert(descriptor.optional_count == 2);
     assert(descriptor.validate_config == &validate_rates_config);
     assert(descriptor.resources_count == 4);
-    assert(descriptor.provides_count == 1);
-    assert(std::strcmp(descriptor.provides[0].id, kWorldTuningMoveSpeedCapabilityId) == 0);
+    assert(descriptor.provides_count == 0);
+    assert(descriptor.provides == nullptr);
     assert(std::strcmp(descriptor.resources[0].id, kResourceIdAddDamage) == 0);
     assert(std::strcmp(descriptor.resources[0].symbol, "F_CHAR_ADD_DAMAGE_VMA") == 0);
     assert(descriptor.resources[0].handler == reinterpret_cast<void*>(&char_add_damage_wrapper));
@@ -721,7 +715,7 @@ void test_deactivate_residual_wrappers() {
     assert(g_max_hp_writes == 0 && g_hp_writes == 0);
 }
 
-void test_exp_money_and_move_speed() {
+void test_exp_and_money() {
     install_success();
     const auto& descriptor = plugin_descriptor();
     descriptor.on_enabled(g_context);
@@ -752,41 +746,7 @@ void test_exp_money_and_move_speed() {
     (void)inven_add_money_wrapper(-5);
     assert(g_last_money == -5);
 
-    const auto* api = static_cast<const WorldTuningMoveSpeedApi*>(
-        descriptor.provides[0].iface);
-    assert(api != nullptr && api->read != nullptr);
-    int32_t speed = 0;
-    rates = default_rates();
-    rates.value[static_cast<uint32_t>(RateId::kMoveSpeed)] = 100;
-    apply_rates(rates);
-    assert(api->read(&speed).ok == kQolOk && speed == 8);
-    rates.value[static_cast<uint32_t>(RateId::kMoveSpeed)] = 150;
-    apply_rates(rates);
-    assert(api->read(&speed).ok == kQolOk && speed == 12);
-    rates.value[static_cast<uint32_t>(RateId::kMoveSpeed)] = 50;
-    apply_rates(rates);
-    assert(api->read(&speed).ok == kQolOk && speed == 4);
-    rates.value[static_cast<uint32_t>(RateId::kMoveSpeed)] = 10;
-    apply_rates(rates);
-    assert(api->read(&speed).ok == kQolOk && speed == 1);
-    rates.value[static_cast<uint32_t>(RateId::kMoveSpeed)] = 120;
-    apply_rates(rates);
-    assert(api->read(&speed).ok == kQolOk && speed == 10);
-    assert(api->read(nullptr).ok == kQolErrInvalidArgument);
-
-    uint64_t observer_id = 0;
-    assert(api->subscribe != nullptr && api->unsubscribe != nullptr);
-    assert(api->subscribe(&g_observed_move_speed, &observe_move_speed, &observer_id).ok ==
-               kQolOk &&
-           observer_id != 0 && g_observed_move_speed == 10);
-    rates.value[static_cast<uint32_t>(RateId::kMoveSpeed)] = 150;
-    apply_rates(rates);
-    assert(g_observed_move_speed == 12);
     descriptor.on_disabled(g_context);
-    assert(g_observed_move_speed == 8);
-    assert(api->unsubscribe(observer_id).ok == kQolOk);
-    assert(api->unsubscribe(observer_id).ok == kQolErrNotFound);
-
     (void)char_add_experience_wrapper(&player, 100, 1);
     assert(g_last_exp == 100);
     (void)inven_add_money_wrapper(100);
@@ -815,7 +775,7 @@ int main() {
     test_damage_wrapper();
     test_max_hp_wrapper();
     test_deactivate_residual_wrappers();
-    test_exp_money_and_move_speed();
+    test_exp_and_money();
     test_panel_contract();
     assert(g_in_flight_enters == g_in_flight_leaves);
     return 0;

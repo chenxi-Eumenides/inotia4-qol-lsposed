@@ -7,7 +7,6 @@
 #include "../../contracts/game_ports/character_extras_port.h"
 #include "../../contracts/panels.h"
 #include "../../contracts/ui.h"
-#include "../../contracts/world_tuning.h"
 #include "feature.h"
 #include "panel.h"
 #include "rates.h"
@@ -37,29 +36,6 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
       static_cast<uint16_t>(contracts::kUiPanelsVersionMinor)}},
     {contracts::kUiComponentsCapabilityId,
      {contracts::kUiContractMajor, contracts::kUiContractMinor}},
-};
-
-QolResult move_speed_read(int32_t* out_speed) {
-    if (out_speed == nullptr) {
-        return contracts::error(kQolErrInvalidArgument, "out_speed is null", 17);
-    }
-    *out_speed = move_speed_value();
-    return contracts::ok();
-}
-
-QolResult move_speed_subscribe(void* ctx, contracts::WorldTuningMoveSpeedObserver observer,
-                               uint64_t* out_id) {
-    return subscribe_move_speed(ctx, observer, out_id);
-}
-
-QolResult move_speed_unsubscribe(uint64_t id) { return unsubscribe_move_speed(id); }
-
-const contracts::WorldTuningMoveSpeedApi kMoveSpeedApi{
-    &move_speed_read, &move_speed_subscribe, &move_speed_unsubscribe};
-
-const contracts::CapabilityProvisionRef kProvides[] = {
-    {contracts::kWorldTuningMoveSpeedCapabilityId, contracts::kWorldTuningMoveSpeedVersion,
-     &kMoveSpeedApi},
 };
 
 const contracts::QolPortRequirement kPorts[] = {
@@ -203,13 +179,11 @@ int plugin_install(contracts::PluginContext& ctx) {
 
     ensure_panel(ctx);
     reload_rates_from_config();
-    notify_move_speed();
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     set_gate(false);
-    notify_move_speed_fallback();
     if (ctx.sdk != nullptr && ctx.sdk->panels.unregister_owner != nullptr)
         (void)ctx.sdk->panels.unregister_owner(kPluginId);
     panel_unbind();
@@ -224,13 +198,11 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
     set_gate(true);
     ensure_panel(ctx);
     reload_rates_from_config();
-    notify_move_speed();
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     (void)ctx;
     set_gate(false);
-    notify_move_speed_fallback();
 }
 
 void plugin_fill_status(contracts::PluginStatusOut& out) {
@@ -276,7 +248,7 @@ const contracts::PluginDescriptor kDescriptor = {
     kPluginVersion,
     1, kRequires,          // requires=character.facts
     2, kOptionalRequires,  // optional=ui_panels + ui_components
-    1, kProvides,          // provides: world_tuning.move_speed
+    0, nullptr,            // provides
     4, kResources,
     0, nullptr,            // jni
     &plugin_install,

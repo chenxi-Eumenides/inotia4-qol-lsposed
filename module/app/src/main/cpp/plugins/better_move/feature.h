@@ -16,10 +16,10 @@ void ensure_poll_task();
 void remove_poll_task();
 int32_t state_poll_tick(int64_t frame, void* ctx);
 
-// 建立 world_tuning.move_speed v1.1 订阅；成功后由提供方主动推送步长，不再轮询。
-// 未订阅时每 60 帧重试一次能力查找；已订阅时该函数为空操作。
-void ensure_move_speed_subscription(bool force);
-void reset_move_speed();
+// 本地步长状态：由 Host choice 回调写入；生命周期回调复位为原生 8。
+void reset_step();
+// step 无 selection 且插件已激活时，经 Host choice API 自动回写默认 "8"；API 不可用时保持本地 8。
+void seed_default_step(const contracts::PluginContext& ctx);
 
 void set_gate(bool enabled);
 bool gate_enabled();
@@ -44,5 +44,19 @@ void porting_draw_wrapper();
 void move_on_wait_coord_wrapper(void* ch);
 int32_t map_blocking_wrapper(int32_t x, int32_t y);
 QolResult on_choice(contracts::PluginContext& ctx, const char* value);
+QolResult on_step_choice(contracts::PluginContext& ctx, const char* value);
+
+// better_move.step 档位：descriptor 与 on_step_choice 解析共用同一张表，value/label 相同。
+inline constexpr contracts::FeatureChoiceOption kStepChoices[] = {
+    {"1", "1"},   {"3", "3"},   {"6", "6"},   {"8", "8"},
+    {"10", "10"}, {"12", "12"}, {"16", "16"}, {"24", "24"},
+};
+inline constexpr int32_t kStepAmounts[] = {1, 3, 6, 8, 10, 12, 16, 24};
+inline constexpr uint32_t kStepChoiceCount =
+    static_cast<uint32_t>(sizeof(kStepChoices) / sizeof(kStepChoices[0]));
+static_assert(sizeof(kStepAmounts) / sizeof(kStepAmounts[0]) == kStepChoiceCount,
+              "step choice table and amounts must stay aligned");
+// 8 为原生步长；无 selection、停用与 API 不可用都按该值处理。
+inline constexpr int32_t kDefaultStep = 8;
 
 }  // namespace qol::features::better_move

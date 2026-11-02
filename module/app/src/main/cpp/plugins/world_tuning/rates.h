@@ -17,7 +17,6 @@ enum class RateId : uint8_t {
     kEnemyHp,
     kDamageOut,
     kDamageIn,
-    kMoveSpeed,
     kCount,
 };
 
@@ -48,6 +47,7 @@ Rates default_rates();
 // 把 rates 编码为单行 JSON 对象（字段顺序固定，整数）。
 std::string encode_rates(const Rates& rates);
 // 严格解析：只接受白名单字段、整数值、档位内取值；缺字段用默认值；未知字段/重复字段/语法错误返回 false。
+// 历史配置里的 "move_speed" 键（已移除的移速倍率）按合法字段解析后忽略，不使整份 rates 非法。
 bool decode_rates(const char* json, uint32_t size, Rates* out);
 // PluginDescriptor::validate_config 入口：只接受 key == "rates"，其余键拒绝。
 QolResult validate_rates_config(const char* key, const char* json, uint32_t size);
