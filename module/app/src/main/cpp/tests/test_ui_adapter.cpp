@@ -200,6 +200,50 @@ void fake_draw_part(void* group, int32_t x, int32_t y, void* loc, int32_t type,
     ++g_draw_part_calls;
 }
 
+struct RoundRectCall {
+    int32_t x = 0;
+    int32_t y = 0;
+    int32_t w = 0;
+    int32_t h = 0;
+    int32_t alpha = 0;
+};
+std::vector<RoundRectCall> g_round_rect_calls;
+std::vector<RoundRectCall> g_round_rect2_calls;
+void fake_ui_fill_round_rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t alpha) {
+    g_round_rect_calls.push_back({x, y, w, h, alpha});
+}
+void fake_ui_fill_round_rect2(int32_t x, int32_t y, int32_t w, int32_t h, int32_t alpha) {
+    g_round_rect2_calls.push_back({x, y, w, h, alpha});
+}
+
+struct DrawPartExCall {
+    void* group = nullptr;
+    int32_t x = 0;
+    int32_t y = 0;
+    int32_t source_x = 0;
+    int32_t source_y = 0;
+    int32_t width = 0;
+    int32_t height = 0;
+    int32_t offset_x = 0;
+    int32_t offset_y = 0;
+    int32_t position_type = 0;
+    int32_t draw_mode = 0;
+    int32_t alpha = 0;
+};
+std::vector<DrawPartExCall> g_draw_part_ex_calls;
+void fake_draw_part_ex(void* group, int32_t x, int32_t y, int32_t source_x, int32_t source_y,
+                       int32_t width, int32_t height, int32_t offset_x, int32_t offset_y,
+                       int32_t position_type, int32_t draw_mode, int32_t alpha) {
+    g_draw_part_ex_calls.push_back({group, x, y, source_x, source_y, width, height,
+                                    offset_x, offset_y, position_type, draw_mode, alpha});
+}
+void* fake_imgsys_get_group(int32_t unit) {
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(0x1000 + unit));
+}
+void* fake_imgsys_get_loc(int32_t unit, int32_t loc) {
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(0x2000 + unit * 0x100 + loc));
+}
+
 // 游戏 IMGSYS fake：UnitLoad 幂等（已加载不重载、不增引用），UnitUnload 无引用计数、
 // 直接置失效并记录物理卸载次数。0x0f 边框、0x59 option/返回、0x4f/0x50 标题背景由
 // 游戏共享；模块消费者归零不代表游戏已停用，受保护 unit 的物理卸载必须为 0，否则
@@ -763,6 +807,41 @@ int main() {
         fn_grpx_draw_part = nullptr;
         CHECK(adapter->draw_part_alpha(&group, 0, 0, &loc, 0, 0, 0x28).code ==
               kQolErrNotReady);
+    }
+
+    // 帮助页选项按下态：原版 UIHelp_ButtonMenuListDraw 的 unit 0x10 左右贴片 +
+    // 上下两条 GRPX_DrawPartEx 金线（源 y=200、高 9）；上下都必须存在。
+    {
+        fn_ui_fill_round_rect = &fake_ui_fill_round_rect;
+        fn_ui_fill_round_rect2 = &fake_ui_fill_round_rect2;
+        fn_imgsys_get_group = &fake_imgsys_get_group;
+        fn_imgsys_get_loc = &fake_imgsys_get_loc;
+        fn_grpx_draw_part = &fake_draw_part;
+        fn_grpx_draw_part_ex = &fake_draw_part_ex;
+        g_draw_part_calls = 0;
+        g_draw_part_ex_calls.clear();
+        g_round_rect_calls.clear();
+        g_round_rect2_calls.clear();
+        CHECK(adapter->draw_help_option_row({100, 200, 284, 50}, 0, 1).ok == kQolOk);
+        CHECK(g_round_rect_calls.size() == 1);
+        CHECK(g_round_rect_calls[0].x == 104 && g_round_rect_calls[0].y == 204 &&
+              g_round_rect_calls[0].w == 276 && g_round_rect_calls[0].h == 42 &&
+              g_round_rect_calls[0].alpha == 0x32);
+        CHECK(g_draw_part_calls == 2);
+        CHECK(g_draw_part_ex_calls.size() == 2);
+        const auto& top = g_draw_part_ex_calls[0];
+        const auto& bottom = g_draw_part_ex_calls[1];
+        CHECK(top.x == 120 && top.y == 200 && top.source_x == 2 && top.source_y == 200 &&
+              top.width == 244 && top.height == 9 && top.draw_mode == 2 && top.alpha == 0);
+        CHECK(bottom.x == 120 && bottom.y == 241 && bottom.source_x == 2 &&
+              bottom.source_y == 200 && bottom.width == 244 && bottom.height == 9 &&
+              bottom.draw_mode == 2 && bottom.alpha == 0);
+        fn_ui_fill_round_rect = nullptr;
+        fn_ui_fill_round_rect2 = nullptr;
+        fn_imgsys_get_group = nullptr;
+        fn_imgsys_get_loc = nullptr;
+        fn_grpx_draw_part = nullptr;
+        fn_grpx_draw_part_ex = nullptr;
     }
     uint64_t retired_menu_binding_token = 99;
     CHECK(adapter->bind_main_menu_more_games(+[](void*) {}, &retired_menu_binding_token).code ==

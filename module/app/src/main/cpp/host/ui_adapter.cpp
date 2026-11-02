@@ -961,6 +961,9 @@ QolResult draw_help_option_row(UiRect rect, uint8_t selected, uint8_t pressed) {
     if (right != nullptr) fn_grpx_draw_part(group, r.x + r.w - 20, r.y, right, 0, 2, 0);
     if (r.w > 40) {
         fn_grpx_draw_part_ex(group, r.x + 20, r.y, 2, 200, r.w - 40, 9, 0, 0, 0, 2, 0);
+        // 原版 UIHelp_ButtonMenuListDraw 在按下态上下各画一条同源金线（y 与 y+h-9）。
+        fn_grpx_draw_part_ex(group, r.x + 20, r.y + r.h - 9, 2, 200, r.w - 40, 9,
+                             0, 0, 0, 2, 0);
     }
     return contracts::ok();
 }
