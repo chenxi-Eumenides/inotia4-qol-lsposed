@@ -73,6 +73,8 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags += "-std=c++17"
+                // FP 链回溯依赖未省略的帧指针；-O2 默认 -fomit-frame-pointer 会砍断链。
+                cppFlags += "-fno-omit-frame-pointer"
                 if (qolKernelOnly.get()) arguments += "-DQOL_KERNEL_ONLY=ON"
                 if (qolDeviceProbe.get()) arguments += "-DQOL_ENABLE_DEVICE_PROBE=ON"
             }

@@ -353,6 +353,11 @@ void qol_log_init() {
             "/sdcard/Android/data/" + std::string(package) + "/files/qol";
         const bool directory_ready = ::mkdir(log_dir.c_str(), 0755) == 0 || errno == EEXIST;
         const std::string path = log_dir + "/qol.log";
+        // 保留上一会话日志：先挪走轮转文件再挪走主文件，顺序固定（若先挪主文件，
+        // 旧 .1 会在下次轮转被覆盖，失去 prev.1 语义）。失败（含 ENOENT）一律忽略，
+        // 不得阻断日志初始化。
+        (void)::rename((path + ".1").c_str(), (path + ".prev.1").c_str());
+        (void)::rename(path.c_str(), (path + ".prev").c_str());
         const int fd = directory_ready
                            ? open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644)
                            : -1;

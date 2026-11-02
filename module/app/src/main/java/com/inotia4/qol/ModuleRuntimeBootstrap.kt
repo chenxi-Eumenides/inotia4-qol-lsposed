@@ -63,6 +63,9 @@ object ModuleRuntimeBootstrap {
                 Build.VERSION.RELEASE ?: "",
                 Build.VERSION.SDK_INT,
             )
+            // 崩溃取证：先锁定落盘目录，再下发身份与配置摘要（内部含单行 runtime env INFO）。
+            JavaCrashReporter.attachRoot(context)
+            RuntimeEnvironment.initialize(context, gameVersionName)
         } catch (t: Throwable) {
             LogFile.error(LogDomain.HTTP, "system_facts set identity failed", t)
         }

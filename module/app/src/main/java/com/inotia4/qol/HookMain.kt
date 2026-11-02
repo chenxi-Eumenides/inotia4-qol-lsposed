@@ -22,10 +22,8 @@ class HookMain : XposedModule() {
         LogFile.initEarly()
         LogFile.info(LogDomain.PLATFORM, "module loaded in process: ${param.processName}")
 
-        // 捕获未处理异常写日志（防闪退信息丢失）
-        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            LogFile.error(LogDomain.PLATFORM, "uncaught exception on ${thread.name}", throwable)
-        }
+        // 捕获未处理异常：写独立崩溃取证文件并转发前序 handler（防闪退信息丢失）
+        JavaCrashReporter.install()
 
         ModuleHealthMonitor.start()
     }

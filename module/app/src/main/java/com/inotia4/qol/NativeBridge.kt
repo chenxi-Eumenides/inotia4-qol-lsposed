@@ -90,6 +90,10 @@ object NativeBridge {
     external fun nativeQolLogSetDebugEnabled(enabled: Boolean)
     external fun nativeSetPushAllEnabled(enabled: Boolean): Boolean
 
+    // ---- 崩溃取证（native crash handler 附加信息下发；文本由 RuntimeEnvironment 构造）----
+    external fun nativeQolCrashSetIdentity(text: String)
+    external fun nativeQolCrashSetConfig(text: String)
+
     external fun nativeRegisterConfigBridge(bridge: Class<*>)
     external fun nativeRegisterExtensionBagUiBridge(bridge: Class<*>)
     external fun nativeGetInitReport(): String

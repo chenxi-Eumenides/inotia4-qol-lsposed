@@ -7,6 +7,9 @@
 //
 // 文件分段顺序是离线符号化脚本的契约，禁止调整：
 //   header / regs / --- maps --- / --- log tail ---
+// header 段内 identity 行（ident.*，signal 行之后、寄存器之前）与 regs 段尾的
+// btN 行（FP 链回溯，寄存器之后、maps 之前）是段内扩展行：符号化脚本按
+// key=value 解析，四段顺序不变。
 
 #include "infra/log/qol_crash.h"
 
@@ -14,6 +17,7 @@
 
 #include <atomic>
 #include <cerrno>
+#include <cstdio>  // rename（截断前保留上一份 crash 文件）
 #include <cstring>
 
 #include <fcntl.h>
@@ -26,6 +30,7 @@
 
 #if defined(__linux__)
 #include <sys/prctl.h>
+#include <sys/uio.h>  // process_vm_readv：崩溃处理器内安全读 FP 链（aarch64）
 #endif
 
 namespace {
@@ -43,6 +48,20 @@ char g_log_path[kPathCap] = {};
 struct sigaction g_old_actions[kCrashSignalCount] = {};
 std::atomic<int> g_capturing{0};
 bool g_installed = false;
+
+// ---- identity / config 静态缓冲（seqlock 防撕裂） ----
+//
+// 启动期由 qol_crash_set_identity / qol_crash_set_config 写入一次；崩溃处理器读取
+// 时不加锁、不分配：写侧把 seq 翻为奇数再写数据、写完翻回偶数；读侧前后两次读
+// seq，不一致或为奇数就整段丢弃，绝不输出半截内容。
+
+constexpr size_t kIdentityCap = 1024;
+constexpr size_t kConfigCap = 512;
+
+char g_identity[kIdentityCap] = {};
+char g_config[kConfigCap] = {};
+std::atomic<uint32_t> g_identity_seq{0};
+std::atomic<uint32_t> g_config_seq{0};
 
 // ---- 异步信号安全的格式化（栈上缓冲，不使用 snprintf） ----
 
@@ -140,6 +159,68 @@ void write_kv_hex(int fd, const char* key, uint64_t value) {
     write_all(fd, line, n);
 }
 
+// ---- identity / config 缓冲读写 ----
+
+void set_static_text(char* buf, size_t cap, std::atomic<uint32_t>& seq, const char* text) {
+    if (text == nullptr) text = "";
+    size_t keep = std::strlen(text);
+    const bool truncated = keep > cap - 16;
+    if (truncated) keep = cap - 16;  // 预留 16 字节给 "...(truncated)" 与 NUL
+    seq.fetch_add(1, std::memory_order_acq_rel);  // 偶 -> 奇：标记写入开始
+    std::memcpy(buf, text, keep);
+    buf[keep] = '\0';
+    if (truncated) {
+        static const char kTruncated[] = "...(truncated)";
+        std::memcpy(buf + keep, kTruncated, sizeof(kTruncated));  // 含末尾 NUL
+    }
+    seq.fetch_add(1, std::memory_order_acq_rel);  // 奇 -> 偶：写入完成
+}
+
+// 崩溃处理器专用读：seqlock 两阶段校验。读到写入中途（seq 为奇数或前后不一致）
+// 返回 false，调用方写 ident.unstable=1，保证不输出半截内容。
+bool read_static_text(const char* buf, const std::atomic<uint32_t>& seq, char* out, size_t cap) {
+    const uint32_t before = seq.load(std::memory_order_acquire);
+    if ((before & 1u) != 0) return false;
+    size_t len = 0;
+    while (len + 1 < cap && buf[len] != '\0') ++len;
+    std::memcpy(out, buf, len);
+    out[len] = '\0';
+    std::atomic_thread_fence(std::memory_order_acquire);  // 数据读取不得晚于 seq 复查生效
+    const uint32_t after = seq.load(std::memory_order_acquire);
+    return after == before;
+}
+
+// identity/config 输出在 header 段内（signal 行之后、寄存器之前）：符号化脚本把
+// 该区域所有 key=value 行收进 header 字典，四段顺序契约不受影响。identity 行文本
+// 由 Kotlin 侧生成并自带 "ident." 前缀，这里原样整段写出，不加前缀。
+void write_identity(int fd) {
+    bool unstable_reported = false;
+    char line[kIdentityCap];
+    if (!read_static_text(g_identity, g_identity_seq, line, sizeof(line))) {
+        emit(fd, "ident.unstable=1\n");
+        unstable_reported = true;
+    } else if (line[0] == '\0') {
+        emit(fd, "ident.device=(not set)\n");
+    } else {
+        const size_t len = std::strlen(line);
+        write_all(fd, line, len);
+        if (line[len - 1] != '\n') emit(fd, "\n");
+    }
+
+    char cfg[kConfigCap];
+    if (!read_static_text(g_config, g_config_seq, cfg, sizeof(cfg))) {
+        if (!unstable_reported) emit(fd, "ident.unstable=1\n");
+    } else if (cfg[0] == '\0') {
+        emit(fd, "ident.config=(not set)\n");
+    } else {
+        char out[kConfigCap + 24];
+        size_t n = put_raw(out, sizeof(out), 0, "ident.config=");
+        n = put_raw(out, sizeof(out), n, cfg);
+        n = put_raw(out, sizeof(out), n, "\n");
+        write_all(fd, out, n);
+    }
+}
+
 // ---- 寄存器 ----
 //
 // 设备只跑 arm64/arm32；x86_64 分支仅供 host 单测验证写盘路径。
@@ -194,6 +275,54 @@ void write_regs(int fd, void* uc_ptr) {
     (void)fd;
     (void)uc;
 #endif
+}
+
+// ---- FP 链回溯 ----
+
+#if defined(__aarch64__)
+constexpr int kBacktraceMaxFrames = 64;
+
+// arm64 FP 链：fp[0] 是上一帧 FP，fp[1] 是本帧返回地址。经 process_vm_readv 读
+// [fp, fp+16) 而不是直接解引用：处理器正运行在 SIGSEGV 路径上，坏的 fp 会造成
+// 二次 fault，中断后续 --- maps --- / --- log tail --- 段。任何失败都只截断回溯，
+// 不影响其余段。键名 btN 会被 symbolize_crash.py 按寄存器做 maps 解析；符号名由
+// 离线符号化负责。
+void write_backtrace_aarch64(int fd, const ucontext_t& uc) {
+    uintptr_t fp = static_cast<uintptr_t>(uc.uc_mcontext.regs[29]);
+    for (int frame = 0; frame < kBacktraceMaxFrames; ++frame) {
+        if (fp == 0) break;
+        if ((fp & (sizeof(void*) - 1)) != 0) break;  // FP 必须 8 字节对齐
+        if (fp > UINTPTR_MAX - 2 * sizeof(void*)) break;  // 读 16 字节不得地址回绕
+        unsigned long pair[2] = {0, 0};
+        struct iovec local {};
+        local.iov_base = pair;
+        local.iov_len = sizeof(pair);
+        struct iovec remote {};
+        remote.iov_base = reinterpret_cast<void*>(fp);
+        remote.iov_len = sizeof(pair);
+        if (::process_vm_readv(::getpid(), &local, 1, &remote, 1, 0) <= 0) break;
+        char key[8];
+        size_t n = put_raw(key, sizeof(key), 0, "bt");
+        n = put_dec(key, sizeof(key), n, static_cast<uint64_t>(frame));
+        key[n] = '\0';
+        write_kv_hex(fd, key, static_cast<uint64_t>(pair[1]));
+        const uintptr_t next_fp = static_cast<uintptr_t>(pair[0]);
+        if (next_fp == 0) break;  // 链尾
+        if (next_fp >= fp) break;  // 栈向下生长：合法链必须递减
+        fp = next_fp;
+    }
+}
+#endif
+
+void write_backtrace(int fd, const ucontext_t* uc) {
+#if defined(__aarch64__)
+    if (uc != nullptr) {
+        write_backtrace_aarch64(fd, *uc);
+        return;
+    }
+#endif
+    (void)uc;
+    emit(fd, "backtrace=unavailable\n");
 }
 
 // ---- 附属信息 ----
@@ -294,7 +423,11 @@ bool capture(int signo, const siginfo_t* si, void* uc) {
     n = put_raw(line, sizeof(line), n, "\n");
     write_all(fd, line, n);
 
+    write_identity(fd);
+
     write_regs(fd, uc);
+
+    write_backtrace(fd, static_cast<const ucontext_t*>(uc));
 
     emit(fd, "--- maps ---\n");
     write_maps(fd);
@@ -331,10 +464,18 @@ void qol_crash_init(const char* log_dir, const char* log_path) {
     if (log_dir == nullptr || log_dir[0] == '\0') return;
 
     // qol-crash.log 每次进程启动截断：一个进程只可能崩一次，保留最新现场。
+    // 截断前先把上一份现场改名 .prev；失败（含 ENOENT）一律忽略，不得阻断初始化。
     char crash_path[kPathCap];
     size_t n = put_raw(crash_path, sizeof(crash_path), 0, log_dir);
     n = put_raw(crash_path, sizeof(crash_path), n, "/qol-crash.log");
     if (n >= sizeof(crash_path) - 1) return;
+    char prev_path[kPathCap];
+    const size_t crash_len = std::strlen(crash_path);
+    if (crash_len + sizeof(".prev") <= sizeof(prev_path)) {
+        std::memcpy(prev_path, crash_path, crash_len);
+        std::memcpy(prev_path + crash_len, ".prev", sizeof(".prev"));
+        (void)::rename(crash_path, prev_path);
+    }
     g_crash_fd = ::open(crash_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
     if (g_crash_fd < 0) {
         QOL_LOG_WARN(QolDomain::kPlatform, "crash capture disabled: cannot open %s errno=%d",
@@ -370,6 +511,14 @@ void qol_crash_init(const char* log_dir, const char* log_path) {
         if (::sigaction(kCrashSignals[i], &action, &g_old_actions[i]) != 0) return;
     }
     g_installed = true;
+}
+
+void qol_crash_set_identity(const char* text) {
+    set_static_text(g_identity, sizeof(g_identity), g_identity_seq, text);
+}
+
+void qol_crash_set_config(const char* text) {
+    set_static_text(g_config, sizeof(g_config), g_config_seq, text);
 }
 
 #if !defined(__ANDROID__)

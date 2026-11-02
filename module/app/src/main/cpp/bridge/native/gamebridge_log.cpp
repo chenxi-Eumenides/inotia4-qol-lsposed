@@ -6,6 +6,7 @@
 
 #include <jni.h>
 
+#include "infra/log/qol_crash.h"
 #include "infra/log/qol_log.h"
 
 namespace {
@@ -55,4 +56,18 @@ Java_com_inotia4_qol_NativeBridge_nativeQolLogWrite(
 extern "C" JNIEXPORT void JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeQolLogSetDebugEnabled(JNIEnv*, jclass, jboolean) {
     // Frozen compatibility stub; only the native core.settings runtime commit may change the gate.
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeQolCrashSetIdentity(JNIEnv* env, jclass, jstring text) {
+    // UtfChars：text==nullptr 时 get() 返回 nullptr 并原样传给 setter；作用域结束
+    // 立即释放，不长期持有 jstring 指针。
+    UtfChars chars(env, text);
+    qol_crash_set_identity(chars.get());
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeQolCrashSetConfig(JNIEnv* env, jclass, jstring text) {
+    UtfChars chars(env, text);
+    qol_crash_set_config(chars.get());
 }
