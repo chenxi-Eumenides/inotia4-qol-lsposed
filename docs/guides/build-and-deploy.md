@@ -236,28 +236,50 @@ curl -s http://<设备IP>:8088/api/ui/state
    adb -s <设备序列号> logcat -d -v time > <任务目录>/logcat.txt
    ```
 
-   结合 `extension_bag` domain 日志锚（`txn committed ...`、`release_cleanup ...` 等，格式见 `docs/archive/development/logging.md`）判断停滞点；
+   结合 `extension_bag` domain 日志锚（`txn committed ...`、`release_cleanup ...` 等，格式见 `docs/reference/logging.md`）判断停滞点；
    取证后恢复：`adb shell am force-stop <包名>` 并按 §3.1 ③ 重启。
 5. 结论回填对应验收卡的日志锚，不得只写「已卡死」而无线程栈证据。
 
 #### 3.3.1 崩溃取证（进程已死）
 
-模块在 native 崩溃（`SIGSEGV`/`SIGBUS`/`SIGILL`/`SIGFPE`）时自动写
-`/sdcard/Android/data/<包名>/files/qol/qol-crash.log`，内容依次是：信号、全部寄存器、
-`/proc/self/maps`、`qol.log` 尾部 4 KB。写完后恢复原处理器并重新抛出信号，系统
-tombstone 与游戏自身处理器照常记录，不吞崩溃。
+native 崩溃（`SIGSEGV`/`SIGBUS`/`SIGILL`/`SIGFPE`）时模块自动写
+`/sdcard/Android/data/<包名>/files/qol/qol-crash.log`；Java 层未捕获异常写同目录
+`java-crash.log`。**格式权威见 `docs/reference/logging.md`**，本节只列取证命令与现场结构。
+
+`qol-crash.log` 分段顺序是符号化脚本契约：header（crash_at / pid/tid/frame / `signal=` /
+`ident.*` 设备身份与 config 指纹 / 全部寄存器 / `btN` FP 链回溯行）→ `--- maps ---` →
+`--- log tail ---`（qol.log 尾部 4 KB）。`ident.*` 在 `signal=` 之后、寄存器之前，`btN` 在
+寄存器之后、maps 之前，均为段内 `key=value` 扩展行；四段顺序不变，
+`symbolize_crash.py` 对该扩展零改动，`btN` 与寄存器同路径解析。
 
 ```bash
 adb -s <设备序列号> pull /sdcard/Android/data/com.com2us.inotia4.normal.freefull.google.global.android.common/files/qol/qol-crash.log <任务目录>/
 uv run python scripts/analysis/symbolize_crash.py <任务目录>/qol-crash.log --obj-dir module/app/build
 ```
 
-`pc`/`lr` 落在 `libgamebridge.so` 时输出 `模块+偏移` 与函数名；基址由 maps 反推，
-换包重装后仍能解析。日志尾段与 `qol.log` 同一时间线，可直接对齐 domain 日志锚。
+`pc`/`lr`/`btN` 落在 `libgamebridge.so` 时输出 `模块+偏移` 与函数名；基址由 maps 反推
+（同文件所有映射 `start-offset` 最小值），换包重装后仍能解析。日志尾段与 `qol.log` 同一时间线，
+可直接对齐 domain 日志锚。
 
-边界：只覆盖**崩溃线程**，不展开全线程栈（那需要独立的 ptrace 型 dumper）；ANR 不在
-本文件范围，按 §3.3 取 `debuggerd -b`；`SIGABRT` 不接管，ART 的 `FATAL EXCEPTION`
-仍看 logcat。
+会话取证件（上一份现场）保存在同目录，`.prev` 后缀：
+
+```bash
+adb -s <设备序列号> shell ls -la /sdcard/Android/data/com.com2us.inotia4.normal.freefull.google.global.android.common/files/qol/
+```
+
+保留策略：`qol.log.prev`（上一会话主日志）、`qol.log.prev.1`（其轮转件）、
+`qol-crash.log.prev`（上一进程的崩溃现场）、`java-crash.log.prev`（上一次 Java 崩溃现场）。
+崩溃类文件每次进程启动先 rename 为 `.prev` 再重建，**各只保留一份**，再崩即被覆盖；
+需要长期留证的现场必须在下一次重启游戏前 pull 下来。
+
+`java-crash.log` 是 Java 层未捕获异常的独立取证文件（完整栈不进 qol.log，error 行会压缩栈），
+四块顺序：header 行（ts/pid/proc/thread/module/config 指纹）→ identity（`ident.*` 多行）→
+`--- throwable ---`（含 cause 链完整栈）→ `--- threads ---`（全线程转储，`=== <线程名> ... ===` 分节）。
+上限：总 256 KiB（超限追加 `...(truncated threads=N)`）、128 线程、每线程 64 帧。
+
+边界：qol-crash.log 只覆盖**崩溃线程**（FP 链回溯最多 64 帧），不展开全线程原生栈（那需要独立的
+ptrace 型 dumper）；ANR 不在崩溃文件范围，按 §3.3 取 `debuggerd -b`；`SIGABRT` 不接管，
+ART 的 `FATAL EXCEPTION` 看 `java-crash.log` 与 logcat。
 
 ### 3.4 脚本速查（Python 脚本均须 `uv run`）
 
@@ -329,7 +351,7 @@ uv run python scripts/analysis/symbolize_crash.py <任务目录>/qol-crash.log -
 # 符号查询（workdir: 项目根，libgame.so 符号表）
 grep " INVEN_GetMoney" apk/decompiled/libgame-symbols.txt
 
-# 抓模块日志（单一 tag；文件日志在手机 sdcard/Android/data/<游戏包>/files/，格式见 docs/archive/development/logging.md）
+# 抓模块日志（单一 tag；文件日志在手机 sdcard/Android/data/<游戏包>/files/，格式见 docs/reference/logging.md）
 adb logcat -s Inotia4Qol:V
 
 # 反汇编定位（改 game_symbols.h 时用）

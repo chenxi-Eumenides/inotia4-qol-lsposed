@@ -21,15 +21,15 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 95 |
-| `game` | 182 |
+| `contracts` | 100 |
+| `game` | 184 |
 | `hooks` | 10 |
 | `host` | 86 |
-| `infra` | 42 |
+| `infra` | 41 |
 | `legacy/inventory` | 2 |
 | `legacy/save` | 1 |
 | `legacy/system` | 2 |
-| `patch` | 13 |
+| `patch` | 15 |
 | `plugins/attribute_quality` | 6 |
 | `plugins/attribute_range_display` | 4 |
 | `plugins/autosell` | 31 |
@@ -38,10 +38,11 @@
 | `plugins/core.api` | 6 |
 | `plugins/core.character` | 6 |
 | `plugins/core.craft` | 3 |
-| `plugins/core.custom_ui` | 29 |
+| `plugins/core.custom_ui` | 31 |
 | `plugins/core.data` | 5 |
 | `plugins/core.feature` | 3 |
-| `plugins/core.item` | 76 |
+| `plugins/core.inventory` | 45 |
+| `plugins/core.item` | 50 |
 | `plugins/core.quest` | 6 |
 | `plugins/core.save` | 13 |
 | `plugins/core.system` | 4 |
@@ -50,7 +51,7 @@
 | `plugins/craft_lottery` | 8 |
 | `plugins/custom_map` | 8 |
 | `plugins/custom_recipe` | 19 |
-| `plugins/extension_bag` | 131 |
+| `plugins/extension_bag` | 134 |
 | `plugins/module_health` | 2 |
 | `plugins/popup_blocker` | 2 |
 | `plugins/push_all` | 8 |
@@ -60,7 +61,7 @@
 | `plugins/stack_limit` | 4 |
 | `plugins/world_teleport` | 6 |
 | `plugins/world_tuning` | 10 |
-| **合计** | **894** |
+| **合计** | **926** |
 
 ### 1.2 迁移期映射摘要
 
@@ -98,25 +99,25 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 82 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 84 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `plugins/extension_bag` | `contracts` | 183 |
-| `host` | `game` | 118 |
-| `game` | `contracts` | 105 |
-| `plugins/core.item` | `contracts` | 95 |
-| `host` | `contracts` | 73 |
-| `host` | `infra` | 62 |
-| `plugins/custom_recipe` | `contracts` | 44 |
+| `plugins/extension_bag` | `contracts` | 194 |
+| `host` | `game` | 121 |
+| `game` | `contracts` | 106 |
+| `host` | `contracts` | 74 |
+| `plugins/core.item` | `contracts` | 70 |
+| `host` | `infra` | 63 |
+| `plugins/custom_recipe` | `contracts` | 45 |
+| `plugins/core.inventory` | `contracts` | 42 |
 | `plugins/save_backup` | `contracts` | 40 |
-| `plugins/core.custom_ui` | `contracts` | 37 |
+| `plugins/core.custom_ui` | `contracts` | 39 |
 | `plugins/autosell` | `contracts` | 31 |
 | `plugins/core.save` | `contracts` | 19 |
 | `legacy/system` | `game` | 18 |
 | `plugins/settings` | `contracts` | 18 |
 | `plugins/world_tuning` | `contracts` | 16 |
-| `host` | `patch` | 14 |
 
 ### 2.2 include 环
 
@@ -132,24 +133,21 @@
 
 ## 4. 资源安装点清单
 
-扫描合计：安装点 6 个 / 文件 2 个 / 去重符号 3 个 / 无法归属 0 个。
+扫描合计：安装点 0 个 / 文件 0 个 / 去重符号 0 个 / 无法归属 0 个。
 
 | 机制 | 文件数 | 安装点数 | 去重符号数 |
 | --- | --- | --- | --- |
 | entry hook | 0 | 0 | 0 |
-| call patch | 2 | 6 | 3 |
+| call patch | 0 | 0 | 0 |
 | ptr slot | 0 | 0 | 0 |
 
-去重符号 → 文件（前 3 条，共 3 条；`--verbose` 列全部）：
+去重符号 → 文件（前 0 条，共 0 条；`--verbose` 列全部）：
 
-- `F_GAMESTATE_SET_STATE_VMA` → `patch/save_exit.cpp`
-- `F_SAVESLOT_SLOT_BUTTON_EXE_VMA` → `patch/save_enter.cpp`
-- `F_SELECTCHAR_BUTTON_START_EXE_VMA` → `patch/save_enter.cpp`
 
 ## 5. JNI 面
 
-- Kotlin `external fun`：158 个
-- native 导出：158 个
+- Kotlin `external fun`：160 个
+- native 导出：160 个
 - 差异条数：0 条
 
 差异样例（前 0 条，共 0 条）：
@@ -158,14 +156,14 @@
 
 ## 6. 功能域清单
 
-旧 `feature/*`（待迁移 0 个）与已迁移 `plugins/*`（30 个）共 30 个域。
+旧 `feature/*`（待迁移 0 个）与已迁移 `plugins/*`（31 个）共 31 个域。
 
 ### 6.1 旧 `feature/*`（待迁移，0）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
 
-### 6.2 已迁移 `plugins/*`（30）
+### 6.2 已迁移 `plugins/*`（31）
 
 | 域 | 目标层 | 文件数 |
 | --- | --- | --- |
@@ -177,10 +175,11 @@
 | `core.api` | `plugins/core.api` | 6 |
 | `core.character` | `plugins/core.character` | 6 |
 | `core.craft` | `plugins/core.craft` | 3 |
-| `core.custom_ui` | `plugins/core.custom_ui` | 29 |
+| `core.custom_ui` | `plugins/core.custom_ui` | 31 |
 | `core.data` | `plugins/core.data` | 5 |
 | `core.feature` | `plugins/core.feature` | 3 |
-| `core.item` | `plugins/core.item` | 76 |
+| `core.inventory` | `plugins/core.inventory` | 45 |
+| `core.item` | `plugins/core.item` | 50 |
 | `core.quest` | `plugins/core.quest` | 6 |
 | `core.save` | `plugins/core.save` | 13 |
 | `core.system` | `plugins/core.system` | 4 |
@@ -189,7 +188,7 @@
 | `craft_lottery` | `plugins/craft_lottery` | 8 |
 | `custom_map` | `plugins/custom_map` | 8 |
 | `custom_recipe` | `plugins/custom_recipe` | 19 |
-| `extension_bag` | `plugins/extension_bag` | 131 |
+| `extension_bag` | `plugins/extension_bag` | 134 |
 | `module_health` | `plugins/module_health` | 2 |
 | `popup_blocker` | `plugins/popup_blocker` | 2 |
 | `push_all` | `plugins/push_all` | 8 |

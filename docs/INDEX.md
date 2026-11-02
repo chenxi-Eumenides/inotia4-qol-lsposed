@@ -9,7 +9,8 @@
 | 了解模块、安装和基本使用 | 根目录 `README.md` | `guides/game-guide.md` |
 | 使用 HTTP API | `reference/api-reference.md` | `guides/game-guide.md` |
 | 理解 API 服务开关与 OP 权限边界 | `refactor/api-optional-op-design.md` | `reference/api-reference.md` §7.6/§8、`reference/plugins/core.api.md` |
-| 构建、部署与设备验收 | `guides/build-and-deploy.md` | `reference/api-reference.md`（涉及 API 验收时） |
+| 构建、部署与设备验收 | `guides/build-and-deploy.md` | `reference/api-reference.md`（涉及 API 验收时）、`reference/logging.md`（崩溃取证） |
+| 排查崩溃、读日志与符号化 | `reference/logging.md` | `guides/build-and-deploy.md` §3.3/§3.3.1 |
 | 修改源码或设计边界 | 根目录 `ARCHITECTURE.md` | `refactor/`、相关 `reference/plugins/` |
 | 插件审计 | `refactor/plugin-audit-playbook.md` | `refactor/audits/`、`refactor/issues.md` |
 | 插件重构架构指导 | `refactor/plugin-architecture-guide.md` | `refactor/extension-bag/final-architecture.md` |
@@ -24,6 +25,7 @@
 保存当前可复用的事实和契约。
 
 - `api-reference.md`：HTTP API 路径、方法、参数、响应和状态码的唯一权威。
+- `logging.md`：日志行格式、级别与域、文件清单与保留/轮转策略、`qol-crash.log`/`java-crash.log` 格式契约与符号化用法的唯一权威。
 - `game/`：原版游戏系统与逆向结论。
 - `game/equipment.md`：群友推荐的可获得与不可获得装备清单。
 - `plugins/`：官方插件当前职责与实现参考。
