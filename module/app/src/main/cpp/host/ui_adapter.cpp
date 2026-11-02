@@ -930,6 +930,32 @@ QolResult draw_container_frame(UiRect rect, uint32_t fill_rgb565, uint32_t alpha
 
 // 帮助页选项行：背景由游戏自身的 UI_FillRoundRect/2 绘制，按下高亮由 unit 0x10
 // 的左右贴片和 GRPX_DrawPartEx 九宫格绘制；不自绘圆角或金线。
+bool draw_option_side_cap(void* group, void* loc, int32_t x, int32_t y, int32_t height) {
+    constexpr int32_t kCorner = 9;
+    if (group == nullptr || loc == nullptr || height < 2 * kCorner ||
+        !game_memory_accessible(loc, 0x18, 'r')) return false;
+    const auto* bytes = static_cast<const uint8_t*>(loc);
+    int32_t source_x = 0, source_y = 0, width = 0, cap_height = 0;
+    std::memcpy(&source_x, bytes + IMAGE_LOC_SOURCE_X, sizeof(source_x));
+    std::memcpy(&source_y, bytes + IMAGE_LOC_SOURCE_Y, sizeof(source_y));
+    std::memcpy(&width, bytes + IMAGE_LOC_SOURCE_WIDTH, sizeof(width));
+    std::memcpy(&cap_height, bytes + IMAGE_LOC_SOURCE_HEIGHT, sizeof(cap_height));
+    const int32_t middle_dst = height - 2 * kCorner;
+    const int32_t middle_src = cap_height - 2 * kCorner;
+    if (width <= 0 || middle_src < middle_dst || middle_src <= 0) return false;
+    // 原版贴片固定 20x56（含上下圆角）；按当前高度取上下各 9px 圆角，中段从原贴片
+    // 中部裁取，避免缩放贴图或自绘竖边。
+    const int32_t middle_y = source_y + kCorner + (middle_src - middle_dst) / 2;
+    fn_grpx_draw_part_ex(group, x, y, source_x, source_y, width, kCorner, 0, 0, 0, 2, 0);
+    if (middle_dst > 0) {
+        fn_grpx_draw_part_ex(group, x, y + kCorner, source_x, middle_y, width, middle_dst,
+                             0, 0, 0, 2, 0);
+    }
+    fn_grpx_draw_part_ex(group, x, y + height - kCorner, source_x,
+                         source_y + cap_height - kCorner, width, kCorner, 0, 0, 0, 2, 0);
+    return true;
+}
+
 QolResult draw_help_option_row(UiRect rect, uint8_t selected, uint8_t pressed) {
     if (rect.w < 8 || rect.h < 8 || selected > 1 || pressed > 1 ||
         fn_ui_fill_round_rect == nullptr || fn_ui_fill_round_rect2 == nullptr) {
@@ -957,8 +983,12 @@ QolResult draw_help_option_row(UiRect rect, uint8_t selected, uint8_t pressed) {
     if (group == nullptr) return not_ready();
     void* left = fn_imgsys_get_loc(0x10, 0x1C);
     void* right = fn_imgsys_get_loc(0x10, 0x1D);
-    if (left != nullptr) fn_grpx_draw_part(group, r.x, r.y, left, 0, 2, 0);
-    if (right != nullptr) fn_grpx_draw_part(group, r.x + r.w - 20, r.y, right, 0, 2, 0);
+    if (!draw_option_side_cap(group, left, r.x, r.y, r.h) && left != nullptr) {
+        fn_grpx_draw_part(group, r.x, r.y, left, 0, 2, 0);
+    }
+    if (!draw_option_side_cap(group, right, r.x + r.w - 20, r.y, r.h) && right != nullptr) {
+        fn_grpx_draw_part(group, r.x + r.w - 20, r.y, right, 0, 2, 0);
+    }
     if (r.w > 40) {
         fn_grpx_draw_part_ex(group, r.x + 20, r.y, 2, 200, r.w - 40, 9, 0, 0, 0, 2, 0);
         // 原版 UIHelp_ButtonMenuListDraw 在按下态上下各画一条同源金线（y 与 y+h-9）。

@@ -237,10 +237,22 @@ void fake_draw_part_ex(void* group, int32_t x, int32_t y, int32_t source_x, int3
     g_draw_part_ex_calls.push_back({group, x, y, source_x, source_y, width, height,
                                     offset_x, offset_y, position_type, draw_mode, alpha});
 }
+struct FakeImageLoc {
+    int32_t source_x;
+    int32_t source_y;
+    int32_t width;
+    int32_t height;
+    int32_t offset_x;
+    int32_t offset_y;
+};
+FakeImageLoc g_fake_loc_left{83, 446, 20, 56, 0, 0};
+FakeImageLoc g_fake_loc_right{106, 446, 20, 56, 0, 0};
 void* fake_imgsys_get_group(int32_t unit) {
     return reinterpret_cast<void*>(static_cast<uintptr_t>(0x1000 + unit));
 }
 void* fake_imgsys_get_loc(int32_t unit, int32_t loc) {
+    if (unit == 0x10 && loc == 0x1c) return &g_fake_loc_left;
+    if (unit == 0x10 && loc == 0x1d) return &g_fake_loc_right;
     return reinterpret_cast<void*>(static_cast<uintptr_t>(0x2000 + unit * 0x100 + loc));
 }
 
@@ -437,6 +449,7 @@ bool ui_delete_control(void* control) {
 }
 bool game_memory_accessible(const void* address, size_t, char) {
     ++g_memory_accessible_reads;
+    if (address == &g_fake_loc_left || address == &g_fake_loc_right) return true;
     return address != nullptr && g_memory_accessible;
 }
 bool ui_set_control_item(void*, void*) { return false; }
@@ -827,10 +840,33 @@ int main() {
         CHECK(g_round_rect_calls[0].x == 104 && g_round_rect_calls[0].y == 204 &&
               g_round_rect_calls[0].w == 276 && g_round_rect_calls[0].h == 42 &&
               g_round_rect_calls[0].alpha == 0x32);
-        CHECK(g_draw_part_calls == 2);
-        CHECK(g_draw_part_ex_calls.size() == 2);
-        const auto& top = g_draw_part_ex_calls[0];
-        const auto& bottom = g_draw_part_ex_calls[1];
+        CHECK(g_draw_part_calls == 0);
+        CHECK(g_draw_part_ex_calls.size() == 8);
+        // 左右贴片按当前 50 高拆成上下 9px 圆角 + 32px 中段，不再整块 20x56 固定高度。
+        const auto& left_top = g_draw_part_ex_calls[0];
+        const auto& left_middle = g_draw_part_ex_calls[1];
+        const auto& left_bottom = g_draw_part_ex_calls[2];
+        const auto& right_top = g_draw_part_ex_calls[3];
+        const auto& right_middle = g_draw_part_ex_calls[4];
+        const auto& right_bottom = g_draw_part_ex_calls[5];
+        const auto& top = g_draw_part_ex_calls[6];
+        const auto& bottom = g_draw_part_ex_calls[7];
+        CHECK(left_top.x == 100 && left_top.y == 200 && left_top.source_x == 83 &&
+              left_top.source_y == 446 && left_top.width == 20 && left_top.height == 9);
+        CHECK(left_middle.x == 100 && left_middle.y == 209 && left_middle.source_x == 83 &&
+              left_middle.source_y == 458 && left_middle.width == 20 &&
+              left_middle.height == 32);
+        CHECK(left_bottom.x == 100 && left_bottom.y == 241 && left_bottom.source_x == 83 &&
+              left_bottom.source_y == 493 && left_bottom.width == 20 &&
+              left_bottom.height == 9);
+        CHECK(right_top.x == 364 && right_top.y == 200 && right_top.source_x == 106 &&
+              right_top.source_y == 446 && right_top.width == 20 && right_top.height == 9);
+        CHECK(right_middle.x == 364 && right_middle.y == 209 && right_middle.source_x == 106 &&
+              right_middle.source_y == 458 && right_middle.width == 20 &&
+              right_middle.height == 32);
+        CHECK(right_bottom.x == 364 && right_bottom.y == 241 && right_bottom.source_x == 106 &&
+              right_bottom.source_y == 493 && right_bottom.width == 20 &&
+              right_bottom.height == 9);
         CHECK(top.x == 120 && top.y == 200 && top.source_x == 2 && top.source_y == 200 &&
               top.width == 244 && top.height == 9 && top.draw_mode == 2 && top.alpha == 0);
         CHECK(bottom.x == 120 && bottom.y == 241 && bottom.source_x == 2 &&
