@@ -61,8 +61,8 @@ typedef struct QolRuntimeHooksApi {
     bool (*save_transition_begin_thunk)(int32_t kind, int32_t target_slot,
                                         uint64_t* out_transition);
 
-    // 进入存档确认序是否已发布 ready（core.save 确认完成后才允许旧 save_enter 回调与
-    // kEventSaveEnter 派发）。false = 确认未完成或失败：调用方不消费 pending、不派发。
+    // 进入存档确认序是否已发布 ready（core.save 确认完成后才允许 kEventSaveEnter
+    // 事件派发）。false = 确认未完成或失败：调用方不消费 pending、不派发。
     bool (*save_enter_ready)();
 
     // 取消未决转换：begin 成功后、原版未启动或明确失败的出口显式释放 token/lease

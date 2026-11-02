@@ -8,7 +8,7 @@
 
 namespace qol::features::core_save {
 
-// ---- 唯一联合保存协调器（fake 驱动；生产接线 P3c）----
+// ---- 唯一联合保存协调器（SAVE_Save native_call 与 HTTP settle 生产驱动）----
 // 线性事务：固定参与者集合 → 恰一次 capture → 三候选真实编码预检 →
 // acquire operation → reserve_in_operation → prepared journal → referenced 双凭据 →
 // call_original_save → read_evidence → confirmed journal → 一次 replace_reserved →

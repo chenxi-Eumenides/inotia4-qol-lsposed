@@ -1,18 +1,12 @@
 #include "gamebridge_internal.h"
 
 #include "game/access/world.h"
-#include "host/adapters.h"
 #include "host/assembly.h"
 #include "host/legacy_json_builders.h"
 #include "host/module_health.h"
-#include "game/adapter_ports/quest_port.h"
-#include "game/access/save.h"
 #include "game/read/item_class.h"
 #include "contracts/module_health.h"
-#include "infra/capabilities.h"
-#include "bridge/native/module_health_read.h"
 
-#include <cstring>
 #include <limits>
 #include <memory>
 #include <new>
@@ -119,63 +113,11 @@ void deliver_module_health(void* raw_context,
     if (attached) context->vm->DetachCurrentThread();
 }
 
-constexpr char kModuleHealthUnavailable[] = "{\"ok\":false,\"error\":\"plugin unavailable\"}";
-
 }  // namespace
-
-extern "C" JNIEXPORT jlong JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeGetFrameCount(JNIEnv*, jclass) {
-    return static_cast<jlong>(data_frame_count());
-}
-
-extern "C" JNIEXPORT jint JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeGetActiveQuest(JNIEnv*, jclass) {
-    int32_t active_quest_id = -1;
-    const auto& quest = qol::game::quest_port();
-    if (quest.read.active_quest_id != nullptr) {
-        (void)quest.read.active_quest_id(&active_quest_id);
-    }
-    return active_quest_id;
-}
-
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeQuestList(JNIEnv* env, jclass) {
-    return env->NewStringUTF(qol::host::legacy_data_quest_list_json().c_str());
-}
-
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeQuestCompleted(JNIEnv* env, jclass) {
-    return env->NewStringUTF(qol::host::legacy_data_quest_completed_json().c_str());
-}
-
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeQuestActive(JNIEnv* env, jclass) {
-    return env->NewStringUTF(qol::host::legacy_data_quest_active_json().c_str());
-}
-
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeCurrentSaveSlot(JNIEnv* env, jclass) {
-    return env->NewStringUTF(qol::game::current_save_slot_json().c_str());
-}
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeGetInitReport(JNIEnv* env, jclass) {
     return env->NewStringUTF(init_report_with_assembly().c_str());
-}
-
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeReadModuleHealth(JNIEnv* env, jclass) {
-    qol::contracts::QolModuleHealthSnapshot snapshot{};
-    snapshot.struct_size = sizeof(snapshot);
-    const void* const iface = qol::infra::require_capability(
-        qol::contracts::kModuleHealthCapabilityId,
-        QolVersionRange{qol::contracts::kModuleHealthCapabilityVersion.major,
-                        qol::contracts::kModuleHealthCapabilityVersion.minor});
-    const QolResult result = qol::bridge::read_module_health_snapshot(
-        iface, &qol::host::g_host_sdk, &snapshot);
-    if (!qol::contracts::succeeded(result))
-        return env->NewStringUTF(kModuleHealthUnavailable);
-    return env->NewStringUTF(module_health_json(snapshot).c_str());
 }
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -245,28 +187,8 @@ Java_com_inotia4_qol_NativeBridge_nativeModuleHealthUnsubscribe(JNIEnv*, jclass,
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeGetPlayerJson(JNIEnv* env, jclass) {
-    return env->NewStringUTF(data_player_json().c_str());
-}
-
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeGetPartyJson(JNIEnv* env, jclass) {
-    return env->NewStringUTF(data_party_json().c_str());
-}
-
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeGetInventoryJson(JNIEnv* env, jclass) {
-    return env->NewStringUTF(data_inventory_json().c_str());
-}
-
-extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeGetMapJson(JNIEnv* env, jclass) {
     return env->NewStringUTF(data_map_json().c_str());
-}
-
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeGetTilesJson(JNIEnv* env, jclass) {
-    return env->NewStringUTF(qol::game::build_tiles_json().c_str());
 }
 
 // P0#瓦片矩阵：Kotlin 读取 assets maps/tiles.json 后传入，native 解析缓存
@@ -310,28 +232,8 @@ Java_com_inotia4_qol_NativeBridge_nativeGetSnapshotJson(JNIEnv* env, jclass) {
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeGetSkillsJson(JNIEnv* env, jclass) {
-    return env->NewStringUTF(data_skills_json().c_str());
-}
-
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeGetMercenariesJson(JNIEnv* env, jclass) {
-    return env->NewStringUTF(data_mercenaries_json().c_str());
-}
-
-extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeGetDropsJson(JNIEnv* env, jclass) {
     return env->NewStringUTF(data_drops_json().c_str());
-}
-
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeGetPathJson(JNIEnv* env, jclass, jint tx, jint ty) {
-    return env->NewStringUTF(qol::game::data_path_json(static_cast<int>(tx), static_cast<int>(ty)).c_str());
-}
-
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeDistanceJson(JNIEnv* env, jclass, jint tx, jint ty) {
-    return env->NewStringUTF(qol::game::data_distance_json(static_cast<int32_t>(tx), static_cast<int32_t>(ty)).c_str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL

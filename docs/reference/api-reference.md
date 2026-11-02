@@ -2041,7 +2041,7 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 
 **返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步结果 `{"ok":true}` 经 §7.9 回取。
 
-**注意**：nativeOpSetMoney 直写金币绝对值（v0.5.47 接线，D4）。
+**注意**：经 owner 命令直写金币绝对值；Kotlin 侧 JNI 直连入口已删除，统一走 HTTP dispatch。
 
 #### 设置属性点
 
@@ -2051,7 +2051,7 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 
 **返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步结果 `{"ok":true}` 经 §7.9 回取。
 
-**注意**：nativeOpSetStatusPoint 直写可分配属性点（v0.5.47 接线，D4）。
+**注意**：经 owner 命令直写可分配属性点；Kotlin 侧 JNI 直连入口已删除，统一走 HTTP dispatch。
 
 #### 队伍换位
 
@@ -2061,7 +2061,7 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 
 **返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步结果 `{"ok":true}` 经 §7.9 回取。
 
-**注意**：nativeOpPartySwap 交换两槽位角色（v0.5.47 接线，D4）。
+**注意**：经 owner 命令交换两槽位角色；Kotlin 侧 JNI 直连入口已删除，统一走 HTTP dispatch。
 
 #### 传送/切图
 
@@ -2071,7 +2071,7 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 
 **返回格式**：`{"ok":true,"state":<Map 模型>}`；落点被拒时 `{"ok":false,"error":"tile (x,y) out of map bounds WxH (force to override)"}` 或 `"tile (x,y) not walkable (force to override)"`。
 
-**注意**：nativeOpTeleportEx 传送至指定地图坐标（经 MAPCHANGE_Set + GAMESTATE_SetState(MAP_CHANGE) 官方切图状态机，在游戏主线程发起；旧的 fn_change_map 直调与 fn_set_position 同图瞬移因镜头体系断裂已废弃）。nativeOpTeleport（三参）保留，等价于 `force:false`。`map_id`/`x`/`y` 均必填。**坐标语义（全 API 坐标统一瓦片）**：`x`/`y` 为**瓦片索引**；`map_id>0` 传送至目标图，`map_id=0` 表示当前图（同图重入）。
+**注意**：经 owner 命令传送至指定地图坐标（经 MAPCHANGE_Set + GAMESTATE_SetState(MAP_CHANGE) 官方切图状态机，在游戏主线程发起；旧的 fn_change_map 直调与 fn_set_position 同图瞬移因镜头体系断裂已废弃）。`force` 缺省为 `false`。`map_id`/`x`/`y` 均必填。**坐标语义（全 API 坐标统一瓦片）**：`x`/`y` 为**瓦片索引**；`map_id>0` 传送至目标图，`map_id=0` 表示当前图（同图重入）。
 
 **落点校验**：默认校验落点，`force: true` 跳过。
 - 地界：目标图越出静态数据 `width`/`height` 直接拒绝（引擎不校验地界，越界会把角色放到地图数据之外，表现为角色不出现且不可操作，需重进档恢复）。

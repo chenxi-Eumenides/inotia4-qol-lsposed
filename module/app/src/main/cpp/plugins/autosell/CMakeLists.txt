@@ -8,7 +8,6 @@ add_library(qol_plugin_autosell STATIC
     scan_gates.cpp
     scan_session.cpp
     plugin.cpp
-    settings_contribution.cpp
     store.cpp
     ui/panel_ui.cpp
     ui/panel_layout.cpp

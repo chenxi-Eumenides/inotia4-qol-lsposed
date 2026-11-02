@@ -1,8 +1,7 @@
 // gamebridge_log.cpp —— 统一日志系统 JNI 薄层。
 //
 // 仅做 JNI 参数转换；格式化与发射逻辑在 infra/log/qol_log.*。
-// Kotlin 侧方法名已冻结：nativeQolLogInit / nativeQolLogWrite / nativeQolLogSetDebugEnabled。
-// Debug gating is controlled by the native core.settings Store commit; its old JNI setter is inert.
+// Debug 门控由 native core.settings Store commit 决定，JNI 侧不提供 setter。
 
 #include <jni.h>
 
@@ -51,11 +50,6 @@ Java_com_inotia4_qol_NativeBridge_nativeQolLogWrite(
     }
     qol_log_write_kotlin(static_cast<QolLogLevel>(level), qol_domain_from_token(domain_chars.get()),
                          src_chars.get(), msg_chars.get());
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeQolLogSetDebugEnabled(JNIEnv*, jclass, jboolean) {
-    // Frozen compatibility stub; only the native core.settings runtime commit may change the gate.
 }
 
 extern "C" JNIEXPORT void JNICALL

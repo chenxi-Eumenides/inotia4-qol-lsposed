@@ -36,7 +36,7 @@ void cancel_resync_task();
 
 void start_resync_task();
 
-// save_enter 回调（游戏主线程、world 就绪后触发）：注册一次性逻辑帧任务。
+// kEventSaveEnter 事件订阅适配（游戏主线程、world 就绪后触发）：注册一次性逻辑帧任务。
 void on_save_enter(void* ctx);
 
 // 一次性逻辑帧任务：补齐 state=1 且已达成者；返回 false 自动注销。

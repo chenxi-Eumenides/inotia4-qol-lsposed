@@ -75,9 +75,6 @@ constexpr size_t kSerializedItemProbeBuffer = 1024;  // SaveItem 尾部写入校
 
 enum class BagType : uint8_t {
     kNone = 0,
-    kHandbag = 1,
-    kSmallBackpack = 2,
-    kMediumBackpack = 3,
     kLargeBackpack = 4,
 };
 

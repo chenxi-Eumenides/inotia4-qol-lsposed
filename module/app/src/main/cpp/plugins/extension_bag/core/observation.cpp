@@ -80,7 +80,6 @@ private:
 
 enum class P5DataDomain : int {
     kUnavailable = -1,
-    kNoData = 0,
     kEmpty = 1,
     kProjectedModuleItem = 2,
     kModuleTabItem = 3,

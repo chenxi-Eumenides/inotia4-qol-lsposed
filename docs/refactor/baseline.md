@@ -24,21 +24,21 @@
 | `contracts` | 100 |
 | `game` | 184 |
 | `hooks` | 10 |
-| `host` | 86 |
-| `infra` | 41 |
+| `host` | 78 |
+| `infra` | 39 |
 | `legacy/inventory` | 2 |
 | `legacy/save` | 1 |
 | `legacy/system` | 2 |
 | `patch` | 15 |
 | `plugins/attribute_quality` | 6 |
 | `plugins/attribute_range_display` | 4 |
-| `plugins/autosell` | 31 |
+| `plugins/autosell` | 29 |
 | `plugins/better_move` | 4 |
 | `plugins/character_panel_i18n` | 6 |
 | `plugins/core.api` | 6 |
 | `plugins/core.character` | 6 |
 | `plugins/core.craft` | 3 |
-| `plugins/core.custom_ui` | 31 |
+| `plugins/core.custom_ui` | 29 |
 | `plugins/core.data` | 5 |
 | `plugins/core.feature` | 3 |
 | `plugins/core.inventory` | 45 |
@@ -48,20 +48,20 @@
 | `plugins/core.system` | 4 |
 | `plugins/core.ui_state` | 3 |
 | `plugins/core.world` | 4 |
-| `plugins/craft_lottery` | 8 |
+| `plugins/craft_lottery` | 6 |
 | `plugins/custom_map` | 8 |
-| `plugins/custom_recipe` | 19 |
-| `plugins/extension_bag` | 134 |
+| `plugins/custom_recipe` | 17 |
+| `plugins/extension_bag` | 132 |
 | `plugins/module_health` | 2 |
 | `plugins/popup_blocker` | 2 |
-| `plugins/push_all` | 8 |
-| `plugins/save_backup` | 34 |
-| `plugins/settings` | 14 |
+| `plugins/push_all` | 6 |
+| `plugins/save_backup` | 32 |
+| `plugins/settings` | 12 |
 | `plugins/special_equip` | 6 |
-| `plugins/stack_limit` | 4 |
+| `plugins/stack_limit` | 2 |
 | `plugins/world_teleport` | 6 |
-| `plugins/world_tuning` | 10 |
-| **合计** | **926** |
+| `plugins/world_tuning` | 8 |
+| **合计** | **896** |
 
 ### 1.2 迁移期映射摘要
 
@@ -103,21 +103,21 @@
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `plugins/extension_bag` | `contracts` | 194 |
-| `host` | `game` | 121 |
+| `plugins/extension_bag` | `contracts` | 193 |
+| `host` | `game` | 108 |
 | `game` | `contracts` | 106 |
-| `host` | `contracts` | 74 |
 | `plugins/core.item` | `contracts` | 70 |
-| `host` | `infra` | 63 |
-| `plugins/custom_recipe` | `contracts` | 45 |
+| `host` | `contracts` | 69 |
+| `host` | `infra` | 55 |
+| `plugins/custom_recipe` | `contracts` | 44 |
 | `plugins/core.inventory` | `contracts` | 42 |
-| `plugins/save_backup` | `contracts` | 40 |
-| `plugins/core.custom_ui` | `contracts` | 39 |
-| `plugins/autosell` | `contracts` | 31 |
+| `plugins/save_backup` | `contracts` | 39 |
+| `plugins/core.custom_ui` | `contracts` | 38 |
+| `plugins/autosell` | `contracts` | 30 |
 | `plugins/core.save` | `contracts` | 19 |
 | `legacy/system` | `game` | 18 |
-| `plugins/settings` | `contracts` | 18 |
-| `plugins/world_tuning` | `contracts` | 16 |
+| `plugins/settings` | `contracts` | 17 |
+| `plugins/world_tuning` | `contracts` | 15 |
 
 ### 2.2 include 环
 
@@ -146,8 +146,8 @@
 
 ## 5. JNI 面
 
-- Kotlin `external fun`：160 个
-- native 导出：160 个
+- Kotlin `external fun`：66 个
+- native 导出：66 个
 - 差异条数：0 条
 
 差异样例（前 0 条，共 0 条）：
@@ -169,13 +169,13 @@
 | --- | --- | --- |
 | `attribute_quality` | `plugins/attribute_quality` | 6 |
 | `attribute_range_display` | `plugins/attribute_range_display` | 4 |
-| `autosell` | `plugins/autosell` | 31 |
+| `autosell` | `plugins/autosell` | 29 |
 | `better_move` | `plugins/better_move` | 4 |
 | `character_panel_i18n` | `plugins/character_panel_i18n` | 6 |
 | `core.api` | `plugins/core.api` | 6 |
 | `core.character` | `plugins/core.character` | 6 |
 | `core.craft` | `plugins/core.craft` | 3 |
-| `core.custom_ui` | `plugins/core.custom_ui` | 31 |
+| `core.custom_ui` | `plugins/core.custom_ui` | 29 |
 | `core.data` | `plugins/core.data` | 5 |
 | `core.feature` | `plugins/core.feature` | 3 |
 | `core.inventory` | `plugins/core.inventory` | 45 |
@@ -185,19 +185,19 @@
 | `core.system` | `plugins/core.system` | 4 |
 | `core.ui_state` | `plugins/core.ui_state` | 3 |
 | `core.world` | `plugins/core.world` | 4 |
-| `craft_lottery` | `plugins/craft_lottery` | 8 |
+| `craft_lottery` | `plugins/craft_lottery` | 6 |
 | `custom_map` | `plugins/custom_map` | 8 |
-| `custom_recipe` | `plugins/custom_recipe` | 19 |
-| `extension_bag` | `plugins/extension_bag` | 134 |
+| `custom_recipe` | `plugins/custom_recipe` | 17 |
+| `extension_bag` | `plugins/extension_bag` | 132 |
 | `module_health` | `plugins/module_health` | 2 |
 | `popup_blocker` | `plugins/popup_blocker` | 2 |
-| `push_all` | `plugins/push_all` | 8 |
-| `save_backup` | `plugins/save_backup` | 34 |
-| `settings` | `plugins/settings` | 14 |
+| `push_all` | `plugins/push_all` | 6 |
+| `save_backup` | `plugins/save_backup` | 32 |
+| `settings` | `plugins/settings` | 12 |
 | `special_equip` | `plugins/special_equip` | 6 |
-| `stack_limit` | `plugins/stack_limit` | 4 |
+| `stack_limit` | `plugins/stack_limit` | 2 |
 | `world_teleport` | `plugins/world_teleport` | 6 |
-| `world_tuning` | `plugins/world_tuning` | 10 |
+| `world_tuning` | `plugins/world_tuning` | 8 |
 
 ## 校验入口
 

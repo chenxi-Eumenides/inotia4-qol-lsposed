@@ -204,7 +204,7 @@ Kotlin postAndAwait
 4. 取目标槽 lease；预加密 dat；仅当目标 `warehouse_companion_file_state == available`（monster 仓库能力）时预加密 wh4（补目标槽、重算 wh4 `+0x38`、往返自检），否则跳过 wh4 并记日志。C18 目标按已知布局构造唯一活动 per-slot 文件。
 5. 目标槽现存 dat/sidecar/C18 活动文件复制或快照到 `.rollback/`。
 6. 原子写 dat → sidecar → wh4 → C18 活动文件；失败按逆序回滚，C18 回滚记录包含原文件存在状态与原字节。
-7. 成功后清理回滚副本；`save_mark_stale()`；返回 `BackupMeta`。
+7. 成功后清理回滚副本；`save_backup::port::mark_stale()`；返回 `BackupMeta`。
 
 ### 6.2.1 C18 native bag 版本转换
 

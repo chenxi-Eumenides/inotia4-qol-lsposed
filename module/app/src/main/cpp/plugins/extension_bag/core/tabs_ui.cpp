@@ -52,17 +52,6 @@
 #include <unistd.h>
 
 namespace {
-constexpr size_t kPopupStateSize = 0x40;
-constexpr int kPopupStateCount = 27;
-constexpr int64_t kCellStepY = 0x46;
-constexpr size_t kInventorySlotStride = 16;
-// Extension tab ControlObject rects are relative to the item-list root, whose
-// absolute origin is (kGridX, kGridY). Their visuals keep the existing overlay
-// positions so this phase changes input ownership without moving the UI.
-constexpr int64_t kExtensionTabX = kCellX - kGridX;
-constexpr int64_t kExtensionTabY = kCellY - kGridY;
-constexpr int64_t kExtensionTabWidth = 0x70;
-constexpr int64_t kExtensionTabHeight = 0x30;
 void queue_extension_tab_click_locked(int extension_bag);
 
 bool extension_tab_control_is_current_locked(int index, void* control);

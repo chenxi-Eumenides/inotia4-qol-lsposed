@@ -6,7 +6,8 @@
 
 namespace qol::features::core_save {
 
-// ---- 选角/进档转换状态机（fake 驱动；生产接线 P3c）----
+// ---- 选角/进档转换状态机（读档/新档发起经宿主 save_route 转接 native_call；
+// RenderPre 帧驱动确认序）----
 enum class TransitionKind : uint32_t { kResume = 0, kBeginNew = 1 };
 enum class TransitionPhase : uint32_t {
     kDetached = 0,       // 旧 session 准入已撤销，等待选角。
@@ -50,7 +51,7 @@ QolResult save_transition_confirm(uint64_t token_id, int32_t observed_slot);
 QolResult save_transition_cancel(uint64_t token_id);
 // 私有结果查询：只按 token 身份查询，不依赖全局 ready 或当前槽。
 QolResult save_transition_query(uint64_t token_id, TransitionResult* out);
-// 确认序成功发布 ready 之后才允许旧 save_enter 回调与 kEventSaveEnter；新转换开始即撤销。
+// 确认序成功发布 ready 之后才允许 kEventSaveEnter 事件派发；新转换开始即撤销。
 bool save_transition_ready_for_save_enter();
 // 确认序观测面（RenderPre 帧驱动）：存在等待确认的转换时返回其 token 与 target 槽。
 // phase 已进入确认中/终态时返回 false（不重复确认）。

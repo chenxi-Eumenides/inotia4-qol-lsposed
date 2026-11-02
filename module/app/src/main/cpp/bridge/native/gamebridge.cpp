@@ -210,16 +210,6 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeRegisterConfigBridge(JNIEnv* env, jclass, jclass bridge_class) {
-#if !QOL_KERNEL_ONLY
-    qol::features::core_ui::settings_register_config_bridge(env, bridge_class);
-#else
-    (void)env;
-    (void)bridge_class;
-#endif
-}
-
-extern "C" JNIEXPORT void JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeRegisterExtensionBagUiBridge(JNIEnv* env, jclass, jclass bridge_class) {
 #if !QOL_KERNEL_ONLY
     virtual_bag_ui_register_bridge(env, bridge_class);
@@ -296,19 +286,6 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         // 特殊装备解锁已迁移为 special_equip 插件（assembly 注册，宿主声明式安装两个入口 hook）。
     }
     return ok ? JNI_TRUE : JNI_FALSE;
-}
-
-// Frozen compatibility setter. Global config writes must use core.settings' native single-key
-// owner-token path; runtime changes are applied only after that Store commit.
-extern "C" JNIEXPORT jboolean JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeSetApiEnabled(JNIEnv*, jclass, jboolean enabled) {
-    (void)enabled;
-    return JNI_FALSE;
-}
-
-extern "C" JNIEXPORT jlong JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeGetBaseAddr(JNIEnv*, jclass) {
-    return static_cast<jlong>(g_base);
 }
 
 extern "C" JNIEXPORT jlong JNICALL

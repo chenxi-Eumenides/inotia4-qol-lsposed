@@ -59,7 +59,7 @@ bool status_set_degraded(const char* id, bool degraded);
 uint32_t status_count();
 
 // 按 id 读取单条状态；未注册返回 false（不改写 out）。
-// 供宿主门禁监督（host/plugin_registry 的 sync_gates）比较当前状态与目标状态。
+// 供宿主门禁监督比较当前状态与目标状态（reconciler 的 desired/actual 对齐）。
 bool status_get(const char* id, FeatureStatus* out);
 
 // 按注册顺序写出至多 capacity 条；written 为实际写出条数。

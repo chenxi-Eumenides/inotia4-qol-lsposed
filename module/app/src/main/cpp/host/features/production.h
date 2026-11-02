@@ -21,7 +21,6 @@ ConfigStoreResult production_feature_register_host_owner(const contracts::Plugin
 ConfigStoreResult production_feature_bootstrap(const std::string& external_files_directory);
 
 // Bind/step on the game main thread only, after all registry descriptors are registered.
-// The existing reconciler rejects legacy gates; these seams do not call old sync_gates.
 bool production_feature_bind_frame(const HostDeps&);
 uint32_t production_feature_frame_step();
 

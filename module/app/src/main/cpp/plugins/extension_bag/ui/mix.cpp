@@ -158,31 +158,6 @@ bool mix_all_tab_buttons_installed_locked() {
     return true;
 }
 
-bool mix_has_tab_buttons_locked() {
-    for (void* button : qol::extension_bag::ui_state().mix.tab_buttons) {
-        if (button != nullptr) return true;
-    }
-    return false;
-}
-
-void mix_discard_new_tab_controls_locked(
-    std::array<void*, virtual_bag::kMaxExtensionBags>& controls, int failed_index,
-    void* failed_control, const char* stage) {
-    VIRTBAG_LOG("mix tab install failed index=%d stage=%s", failed_index, stage);
-    if (failed_control != nullptr && !extension_bag_ui_delete_control(failed_control)) {
-        VIRTBAG_LOG("mix tab cleanup failed index=%d control=%p", failed_index,
-                    failed_control);
-    }
-    for (int index = 0; index < virtual_bag::kMaxExtensionBags; ++index) {
-        void*& control = controls[index];
-        if (control == nullptr) continue;
-        if (!extension_bag_ui_delete_control(control)) {
-            VIRTBAG_LOG("mix tab cleanup failed index=%d control=%p", index, control);
-        }
-        control = nullptr;
-    }
-}
-
 // ---- 合成器页签锚定（ui_components minor 21）----
 // 页签挂在 UIMix 袋容器上，游戏销毁容器子树后句柄失效；锚定层负责存活证明与重建。
 struct MixTabAnchorContext {

@@ -99,30 +99,6 @@ bool store_all_tab_buttons_installed_locked() {
     return true;
 }
 
-bool store_has_tab_buttons_locked() {
-    for (void* button : qol::extension_bag::ui_state().store.tab_buttons) {
-        if (button != nullptr) return true;
-    }
-    return false;
-}
-
-void store_discard_new_tab_controls_locked(
-    std::array<void*, virtual_bag::kMaxExtensionBags>& controls, int failed_index,
-    void* failed_control, const char* stage) {
-    VIRTBAG_LOG("store tab install failed index=%d stage=%s", failed_index, stage);
-    if (failed_control != nullptr && !extension_bag_ui_delete_control(failed_control)) {
-        VIRTBAG_LOG("store tab cleanup failed index=%d control=%p", failed_index,
-                    failed_control);
-    }
-    for (int index = 0; index < virtual_bag::kMaxExtensionBags; ++index) {
-        void*& control = controls[index];
-        if (control == nullptr) continue;
-        if (!extension_bag_ui_delete_control(control)) {
-            VIRTBAG_LOG("store tab cleanup failed index=%d control=%p", index, control);
-        }
-        control = nullptr;
-    }
-}
 uint64_t store_tab_item_proc(void* ctrl, uint64_t event, void*, void*) {
     if (event == 0x02) {
         ::qol::extension_bag::ReentryLock lock;

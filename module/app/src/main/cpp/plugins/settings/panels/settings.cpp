@@ -1098,7 +1098,6 @@ const contracts::PanelCallbacks* settings_panel_callbacks() {
     return &callbacks;
 }
 void settings_ui_close_panel() { settings_panel_f3(); }
-void settings_register_config_bridge(void*, void*) {}
 std::string data_settings_ui_inject() {
     if (!g_sdk) return result_error("settings unavailable");
     settings_more_games_tick();

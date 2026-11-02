@@ -10,7 +10,7 @@
 // infra::scheduler 的 kRenderPre 派发）；内部不取 g_virtual_bag_mtx、不调用 op_ok()、
 // 不主动 save。扩展袋逐槽读取自身取放锁；出售经 inventory.action capability 调用 owner。
 //
-// 过渡依赖：save_enter/save_exit 设施由共享基础设施提供，inventory.action 由
+// 依赖：save_enter/save_exit 经 kEventSaveEnter/kEventSaveExit 事件订阅；inventory.action 由
 // inventory_hooks 提供。
 
 // 扫描间隔（帧）：作为 scheduler_add 的 interval，由统一帧调度器按帧节流。
@@ -40,13 +40,13 @@ bool autosell_scan_session_active(int slot);
 int autosell_scan_session_slot();
 void autosell_scan_sync_after_session_change();
 
-// 注册「进入存档」回调（插件 install 调用，幂等）：只标记 world session 活跃并同步任务；
+// 订阅「进入存档」事件（插件 install 调用，幂等）：只标记 world session 活跃并同步任务；
 // 存档配置读取由 save.slot_data 的 SessionBound participant 负责。
 void autosell_register_save_enter();
 
-// 注册「退出存档」回调（插件 install 调用，幂等）：world → 主菜单时触发一次，置「未进档」
+// 订阅「退出存档」事件（插件 install 调用，幂等）：world → 主菜单时触发一次，置「未进档」
 // 并同步任务（已有任务即删除），避免离开存档后仍持有扫描任务。
 void autosell_register_save_exit();
 
-// 注销进档/退档回调（插件 deactivate 调用，与注册成对，幂等）：设施迁移前避免停用后仍收到回调。
+// 注销进档/退档事件订阅（插件 deactivate 调用，与注册成对，幂等）：避免停用后仍收到事件。
 void autosell_unregister_save_callbacks();

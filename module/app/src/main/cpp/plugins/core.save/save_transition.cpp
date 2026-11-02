@@ -187,7 +187,7 @@ QolResult save_transition_begin(uint32_t kind, int32_t requested_slot, uint64_t*
     std::lock_guard<std::mutex> lock(g.mutex);
     g.pending = pending;
     g.has_pending = true;
-    g.ready_published = false;  // 新转换期间不允许旧 save_enter 回调与事件。
+    g.ready_published = false;  // 新转换期间不允许 kEventSaveEnter 事件派发。
     *out_token = pending.id;
     return ok();
 }
@@ -245,7 +245,7 @@ QolResult save_transition_confirm(uint64_t token_id, int32_t observed_slot) {
     g.pending.phase = TransitionPhase::kTerminal;
     g.pending = PendingTransition{};
     g.has_pending = false;
-    // 此后才允许旧 save_enter 回调与 kEventSaveEnter。
+    // 此后才允许 kEventSaveEnter 事件派发。
     g.ready_published = true;
     return ok();
 }

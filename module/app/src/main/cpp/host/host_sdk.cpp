@@ -5,8 +5,6 @@
 #include "host/module_health.h"
 #include "host/owner_identity.h"
 #include "host/save_route.h"
-#include "host/settings_catalog_adapter.h"
-#include "host/settings_config_bridge.h"
 #include "host/config_namespace.h"
 #include "host/features/production.h"
 
@@ -1400,8 +1398,6 @@ contracts::QolHostSdk make_host_sdk() {
     sdk.snapshot_publish = &infra::snapshot_handle::publish;
     sdk.snapshot_acquire = &infra::snapshot_handle::acquire;
     sdk.snapshot_release = &infra::snapshot_handle::release;
-    sdk.settings_catalog = &settings_catalog_api();
-    sdk.settings_config = &settings_config_api();
     sdk.module_version = &sdk_module_version;
     sdk.owner_verify_token = &owner_verify_token;
     sdk.owner_store = &kOwnerStoreApi;

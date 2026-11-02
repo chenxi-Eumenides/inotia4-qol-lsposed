@@ -23,6 +23,5 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
 void extension_bag_ui_play_switch_sound();
 ExtensionBagUnequipResult unequip_extension_bag_locked(
     ::qol::extension_bag::ReentryLock& lock, int internal_bag);
-bool store_module_view_installed_locked();
 void store_teardown_locked();
 void mix_teardown_locked();

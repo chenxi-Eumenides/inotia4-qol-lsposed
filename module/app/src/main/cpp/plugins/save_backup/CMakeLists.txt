@@ -6,7 +6,6 @@ add_library(qol_plugin_save_backup STATIC
     plugin.cpp
     persistence/persistence.cpp
     port/save_port.cpp
-    settings_contribution.cpp
     state/state.cpp
     transaction/transactions.cpp
     usecases/backup_usecases.cpp

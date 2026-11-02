@@ -14,8 +14,6 @@ constexpr uint8_t kTransferExtensionToExtension = 2;
 constexpr uint8_t kJournalStagePrepared = 0;
 constexpr uint8_t kJournalStageOriginalSaved = 1;
 constexpr uint8_t kJournalStageSidecarCommitted = 2;
-constexpr const char* kJournalSectionName = "extensionbags.journal";
-constexpr int kJournalSectionVersion = 1;
 constexpr size_t kMaxTransactionIdChars = 64;
 
 struct JournalRecord {

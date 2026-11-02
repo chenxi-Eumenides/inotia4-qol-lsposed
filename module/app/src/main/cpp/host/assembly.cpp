@@ -37,10 +37,7 @@
 #include "plugins/attribute_quality/plugin.h"
 #include "plugins/attribute_range_display/plugin.h"
 #include "plugins/autosell/plugin.h"
-#include "plugins/autosell/settings_contribution.h"
 #include "plugins/settings/plugin.h"
-#include "plugins/settings/settings_contribution.h"
-#include "plugins/core.custom_ui/settings_contribution.h"
 #include "plugins/core.custom_ui/plugin.h"
 #include "plugins/core.api/plugin.h"
 #include "plugins/core.craft/plugin.h"
@@ -48,27 +45,20 @@
 #include "plugins/core.data/plugin.h"
 #include "plugins/core.feature/plugin.h"
 #include "plugins/custom_recipe/plugin.h"
-#include "plugins/custom_recipe/settings_contribution.h"
 #include "plugins/craft_lottery/plugin.h"
-#include "plugins/craft_lottery/settings_contribution.h"
 #include "plugins/extension_bag/plugin.h"
-#include "plugins/extension_bag/assembly/settings_contribution.h"
 #include "plugins/extension_bag/ui/equip_hooks.h"
 #include "plugins/core.inventory/plugin.h"
 #include "plugins/core.item/plugin.h"
 #include "plugins/core.ui_state/plugin.h"
 #include "plugins/better_move/plugin.h"
 #include "plugins/push_all/plugin.h"
-#include "plugins/push_all/settings_contribution.h"
 #include "plugins/popup_blocker/plugin.h"
 #include "plugins/core.quest/plugin.h"
 #include "plugins/save_backup/plugin.h"
-#include "plugins/save_backup/settings_contribution.h"
 #include "plugins/world_tuning/plugin.h"
-#include "plugins/world_tuning/settings_contribution.h"
 #include "plugins/special_equip/plugin.h"
 #include "plugins/stack_limit/plugin.h"
-#include "plugins/stack_limit/settings_contribution.h"
 #include "plugins/core.system/plugin.h"
 #include "plugins/character_panel_i18n/plugin.h"
 #include "plugins/world_teleport/plugin.h"
@@ -110,8 +100,8 @@ namespace qol::host {
 // T2h-B'：向 infra game_cache 注入 legacy builder（K1，行为/线程逐字不变）。
 // slot 编号与 core/native/game_cache.cpp 的 CacheSlot 表一致。
 // T2i-1：player/party/skills/mercenaries 四槽改指 host 内联副本（host/legacy_json_builders.h，
-// 与 api/native 原实现逐字一致），两 TU 退役后仍可作插件停用 fallback；inventory(6) 的
-// legacy builder 归整目录批，暂仍指 api/native。
+// 与 api/native 原实现逐字一致），两 TU 退役后仍可作插件停用 fallback；inventory(6) 同法由
+// host_build_inventory_json 提供（item.state owner 适配器，失败逐字 fallback legacy）。
 // T2l-w-read：world 五槽（2 map / 3 units / 9 drops / 10 enemies / 11 interactives）同法改指
 // host 内联（同头逐字副本），game_cache.cpp 不再 include game_world.h。
 void install_legacy_cache_builders() {
@@ -408,14 +398,14 @@ void probe_entry_export_resolution() {
 
 // 逻辑帧任务：命令排空 → 生命周期推进 → 门禁对齐（主线程）。
 // 经 infra::scheduler 逻辑帧点派发，drain 是注册序最早的任务。
-// 顺序原因：先执行命令（可能触发 lifecycle_apply 启动事务），再推进生命周期事务，
-// 最后门禁对齐；sync_gates 处理门禁落态与 kBlocked 重评估，不会与事务中间态冲突。
+// 顺序原因：先执行命令（可能触发 lifecycle_apply 启动事务），再由 reconciler 推进
+// 生命周期事务与门禁落态；两者不并发，不会与事务中间态冲突。
 // 返回 true = 保留期任务，不自动注销。
 bool drain_commands_task(int64_t frame, void* ctx) {
     (void)frame;
     (void)ctx;
     infra::commands_drain();
-    // New-model reconciler is the sole lifecycle/frame driver (no legacy lifecycle_step/sync_gates).
+    // reconciler 是唯一生命周期/帧驱动入口。
     production_feature_frame_step();
     // 启动期 ownership 恢复：SaveEnter 信号驱动的单次定向重试（非逐帧/非定时）。
     // 位置固定在 reconciler 之后：desired 关闭、依赖撤销与 stop 已先经 reconciler 处理。

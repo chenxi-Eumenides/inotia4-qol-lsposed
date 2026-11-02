@@ -16,5 +16,3 @@ enum class ExtensionBagUnequipResult {
     kPersistFailed,
     kFailed,
 };
-
-constexpr int kEquipSlotCount = 10;

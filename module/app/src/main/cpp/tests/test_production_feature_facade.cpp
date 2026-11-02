@@ -206,9 +206,9 @@ void test_abi() {
                   std::is_trivial_v<QolFeatureControlApi>);
     static_assert(std::is_standard_layout_v<QolFeatureCatalogItem> &&
                   std::is_trivially_copyable_v<QolFeatureCatalogItem>);
-    static_assert(offsetof(QolHostSdk, config_namespace) == 800);
-    static_assert(offsetof(QolHostSdk, feature) == 808);
-    static_assert(offsetof(QolHostSdk, feature_control) == 816);
+    static_assert(offsetof(QolHostSdk, config_namespace) == 784);
+    static_assert(offsetof(QolHostSdk, feature) == 792);
+    static_assert(offsetof(QolHostSdk, feature_control) == 800);
     static_assert(offsetof(QolFeatureControlApi, read_categories) == 96);
     static_assert(offsetof(QolFeatureControlApi, read_owner_availability) == 104);
     static_assert(offsetof(QolFeatureControlApi, read_choice) == 112);

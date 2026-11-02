@@ -50,10 +50,6 @@
 #include <thread>
 #include <unistd.h>
 
-bool virtual_bag_native_call_active() {
-    return g_in_native_call;
-}
-
 void virtual_bag_refresh_item_area_with_gate() {
     ::qol::extension_bag::ReentryLock lock;
     virtual_bag_call_original_refresh_item_area_with_guard();
@@ -661,17 +657,4 @@ bool virtual_bag_sync_projected_item_control(void* control) {
         }
     }
     return false;
-}
-
-// 商店扩展视图会把窗口原版袋容量字临时放大到扩展容量；若玩家在此视图下
-// 触发原版库存写入（买入→INVEN_SaveItem），FindSaveSlot 会按放大容量找
-// 空槽，可能把物品写进超过真实容量的槽位（恢复后物品丢失/错乱）。该函数
-// 由 SaveItem hook wrapper 在 backup 前调用：商店投影激活时先恢复投影
-// （容量字还原），让原版按真实容量入库。
-void virtual_bag_store_restore_for_original_write() {
-    ::qol::extension_bag::ReentryLock lock;
-    if (store_module_view_installed_locked()) {
-        VIRTBAG_LOG("store save gate: restore store module view before original write");
-        store_restore_module_view_locked();
-    }
 }

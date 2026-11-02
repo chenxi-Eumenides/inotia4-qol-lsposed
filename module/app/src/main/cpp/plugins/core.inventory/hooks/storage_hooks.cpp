@@ -355,7 +355,6 @@ void s2_write_count_field(void* item, uint32_t field) {
 // C18 原生袋上界由 lifecycle 按 bag_count(0)+bag_count(1) 下发。
 constexpr int kInvenPhysicalBagCount = 6;
 constexpr int kInvenSlotsPerBag = 16;
-constexpr size_t kInvenBagStride = 0x80;
 
 int physical_bag_limit() {
     return std::max(bags::native_bag_limit(), kInvenPhysicalBagCount);

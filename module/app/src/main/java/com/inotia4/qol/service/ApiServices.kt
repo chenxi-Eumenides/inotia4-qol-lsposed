@@ -1,6 +1,8 @@
 package com.inotia4.qol.service
 
 import com.inotia4.qol.service.action.ActionApiServiceImpl
+import com.inotia4.qol.service.contract.ActionApiService
+import com.inotia4.qol.service.contract.InfoApiService
 import com.inotia4.qol.service.info.InfoApiServiceImpl
 
 /**

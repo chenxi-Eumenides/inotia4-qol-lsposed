@@ -686,22 +686,6 @@ foreach(infra_case snapshot command_queue events capabilities_status)
     add_test(NAME infra_${infra_case}_tests COMMAND infra_${infra_case}_tests)
 endforeach()
 
-add_executable(settings_catalog_tests test_settings_catalog.cpp
-    ${CPP_DIR}/infra/settings_catalog.cpp)
-target_include_directories(settings_catalog_tests PRIVATE ${CPP_DIR})
-set_target_properties(settings_catalog_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-target_link_libraries(settings_catalog_tests PRIVATE Threads::Threads)
-add_test(NAME settings_catalog_tests COMMAND settings_catalog_tests)
-
-add_executable(settings_catalog_adapter_tests test_settings_catalog_adapter.cpp
-    ${CPP_DIR}/infra/settings_catalog.cpp ${CPP_DIR}/infra/status.cpp
-    ${CPP_DIR}/host/settings_catalog_adapter.cpp)
-target_include_directories(settings_catalog_adapter_tests PRIVATE ${CPP_DIR})
-set_target_properties(settings_catalog_adapter_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-target_link_libraries(settings_catalog_adapter_tests PRIVATE Threads::Threads)
-add_test(NAME settings_catalog_adapter_tests COMMAND settings_catalog_adapter_tests)
-set_tests_properties(settings_catalog_adapter_tests PROPERTIES TIMEOUT 5)
-
 add_executable(settings_catalog_abi_tests test_settings_catalog_abi.cpp)
 target_include_directories(settings_catalog_abi_tests PRIVATE ${CPP_DIR})
 set_target_properties(settings_catalog_abi_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
@@ -837,10 +821,8 @@ target_link_libraries(symbol_resolver_tests PRIVATE ${CMAKE_DL_LIBS})
 add_dependencies(symbol_resolver_tests plugin_export_fixture)
 add_test(NAME symbol_resolver_tests COMMAND symbol_resolver_tests)
 
-# P3 Lane B：生命周期全路径 host 测试（真实 registry/tx/status/config + 假 tx 依赖，末尾追加）
-# 显式锚定 C++17：contracts/plugin.h 字段名 requires 在 C++20 是关键字。
-add_executable(plugin_lifecycle_tests
-    test_plugin_lifecycle.cpp
+# New-model fake fixtures reuse the existing registry/resource transaction test backends.
+set(FEATURE_REGISTRY_TEST_SOURCES
     test_stubs.cpp
     test_game_port_stubs.cpp
     ${CPP_DIR}/host/plugin_registry.cpp
@@ -867,21 +849,6 @@ add_executable(plugin_lifecycle_tests
     ${CPP_DIR}/infra/events.cpp
     ${CPP_DIR}/infra/log/qol_log.cpp
 )
-target_include_directories(plugin_lifecycle_tests PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
-    ${CPP_DIR}
-    ${CPP_DIR}/game/read
-    ${CPP_DIR}/game/symbols
-    ${JNI_INCLUDE_DIRS}
-)
-target_compile_features(plugin_lifecycle_tests PRIVATE cxx_std_17)
-set_target_properties(plugin_lifecycle_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-target_link_libraries(plugin_lifecycle_tests PRIVATE Threads::Threads)
-add_test(NAME plugin_lifecycle_tests COMMAND plugin_lifecycle_tests)
-
-# New-model fake fixtures reuse the existing registry/resource transaction test backends.
-get_target_property(FEATURE_REGISTRY_TEST_SOURCES plugin_lifecycle_tests SOURCES)
-list(REMOVE_ITEM FEATURE_REGISTRY_TEST_SOURCES test_plugin_lifecycle.cpp)
 add_executable(feature_reconciler_tests
     test_feature_reconciler.cpp
     ${FEATURE_REGISTRY_TEST_SOURCES}
@@ -898,47 +865,6 @@ target_sources(feature_reconciler_tests PRIVATE ${CPP_DIR}/infra/store.cpp ${CPP
 target_compile_definitions(feature_reconciler_tests PRIVATE QOL_STORE_TEST_SEAMS=1)
 add_test(NAME feature_reconciler_tests COMMAND feature_reconciler_tests ${CMAKE_CURRENT_BINARY_DIR})
 
-# P4 阶段 A3：能力时序与撤销级联 host 测试（真实 registry/capabilities/status/config，末尾追加）
-# 显式锚定 C++17：contracts/plugin.h 字段名 requires 在 C++20 是关键字。
-add_executable(capability_lifecycle_tests
-    test_capability_lifecycle.cpp
-    test_stubs.cpp
-    test_game_port_stubs.cpp
-    ${CPP_DIR}/host/plugin_registry.cpp
-    ${CPP_DIR}/host/save_route.cpp
-    ${CPP_DIR}/host/owner_identity.cpp
-    ${CPP_DIR}/host/http_registry.cpp
-    ${CPP_DIR}/host/http_dispatch.cpp
-    ${CPP_DIR}/host/http_endpoint_binder.cpp
-    ${CPP_DIR}/hooks/registry.cpp
-    ${CPP_DIR}/hooks/install.cpp
-    ${CPP_DIR}/hooks/transaction.cpp
-    ${CPP_DIR}/game/access/patches.cpp
-    ${CPP_DIR}/game/read/item_class.cpp
-    ${CPP_DIR}/host/item_count_facade.cpp
-    ${CPP_DIR}/game/adapter_ports/item_count_facade.cpp
-    ${CPP_DIR}/game/access/ptr_slots.cpp
-    ${CPP_DIR}/game/access/ui_equip.cpp
-    ${CPP_DIR}/patch/claims.cpp
-    ${CPP_DIR}/patch/instr_patch.cpp
-    ${CPP_DIR}/patch/ptr_slot.cpp
-    ${CPP_DIR}/infra/status.cpp
-    ${CPP_DIR}/infra/capabilities.cpp
-    ${CPP_DIR}/infra/config.cpp
-    ${CPP_DIR}/infra/events.cpp
-    ${CPP_DIR}/infra/log/qol_log.cpp
-)
-target_include_directories(capability_lifecycle_tests PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
-    ${CPP_DIR}
-    ${CPP_DIR}/game/read
-    ${CPP_DIR}/game/symbols
-    ${JNI_INCLUDE_DIRS}
-)
-target_compile_features(capability_lifecycle_tests PRIVATE cxx_std_17)
-set_target_properties(capability_lifecycle_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-target_link_libraries(capability_lifecycle_tests PRIVATE Threads::Threads)
-add_test(NAME capability_lifecycle_tests COMMAND capability_lifecycle_tests)
 
 # P4 阶段 A1：patch/ 机制层 host 测试（claims + instr_patch + game patch 点，假原语，末尾追加）
 # 显式锚定 C++17：contracts/plugin.h 字段名 requires 在 C++20 是关键字。
@@ -1458,9 +1384,6 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/host/config_namespace.cpp
     ${CPP_DIR}/host/owner_identity.cpp
     ${CPP_DIR}/host/save_route.cpp
-    ${CPP_DIR}/host/settings_catalog_adapter.cpp
-    ${CPP_DIR}/host/settings_config_bridge.cpp
-    ${CPP_DIR}/infra/settings_catalog.cpp
     ${CPP_DIR}/infra/status.cpp
     ${CPP_DIR}/infra/snapshot_handle.cpp
     ${CPP_DIR}/host/lifecycle_participants.cpp
@@ -2216,47 +2139,6 @@ target_compile_features(ui_state_dialog_tests PRIVATE cxx_std_17)
 target_compile_options(ui_state_dialog_tests PRIVATE -ffunction-sections -fdata-sections)
 target_link_options(ui_state_dialog_tests PRIVATE -Wl,--gc-sections)
 add_test(NAME ui_state_dialog_tests COMMAND ui_state_dialog_tests)
-
-# 插件设置贡献 standalone harness：3 类别 12 项、可选 SDK 尾（旧前缀不读尾指针）、
-# 公共键白名单、owner gate 与 ui_panels 能力导航（末尾追加）
-add_executable(settings_contributions_tests
-    test_settings_contributions.cpp
-    ${CPP_DIR}/infra/settings_catalog.cpp
-    ${CPP_DIR}/infra/status.cpp
-    ${CPP_DIR}/host/settings_catalog_adapter.cpp
-    ${CPP_DIR}/plugins/settings/settings_contribution.cpp
-    ${CPP_DIR}/plugins/core.custom_ui/settings_contribution.cpp
-    ${CPP_DIR}/plugins/extension_bag/assembly/settings_contribution.cpp
-    ${CPP_DIR}/plugins/stack_limit/settings_contribution.cpp
-    ${CPP_DIR}/plugins/world_tuning/settings_contribution.cpp
-    ${CPP_DIR}/plugins/push_all/settings_contribution.cpp
-    ${CPP_DIR}/plugins/custom_recipe/settings_contribution.cpp
-    ${CPP_DIR}/plugins/autosell/settings_contribution.cpp
-    ${CPP_DIR}/plugins/save_backup/settings_contribution.cpp
-    ${CPP_DIR}/plugins/core.custom_ui/panels/stack.cpp
-    ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
-    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation.cpp
-)
-target_include_directories(settings_contributions_tests PRIVATE ${CPP_DIR})
-target_compile_features(settings_contributions_tests PRIVATE cxx_std_17)
-target_compile_definitions(settings_contributions_tests PRIVATE QOL_DEBUG_COMPONENTS=1)
-set_target_properties(settings_contributions_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-target_link_libraries(settings_contributions_tests PRIVATE Threads::Threads)
-add_test(NAME settings_contributions_tests COMMAND settings_contributions_tests)
-set_tests_properties(settings_contributions_tests PROPERTIES TIMEOUT 30)
-
-# 持久配置桥（settings_config v1.0）host 测试：白名单/未就绪/排队/回执/容量/revision 单调
-# （末尾追加；JNI 面在 Android 构建内，host 不覆盖）
-add_executable(settings_config_bridge_tests
-    test_settings_config_bridge.cpp
-    ${CPP_DIR}/host/settings_config_bridge.cpp
-)
-target_include_directories(settings_config_bridge_tests PRIVATE ${CPP_DIR})
-target_compile_features(settings_config_bridge_tests PRIVATE cxx_std_17)
-set_target_properties(settings_config_bridge_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-target_link_libraries(settings_config_bridge_tests PRIVATE Threads::Threads)
-add_test(NAME settings_config_bridge_tests COMMAND settings_config_bridge_tests)
-set_tests_properties(settings_config_bridge_tests PROPERTIES TIMEOUT 30)
 
 # Production move_merge wrapper fixture. The test includes the production body rather than a model.
 # Owner：extension_bag（自 core.item 迁入）；测试 include EB 新 TU 并注入共享状态。

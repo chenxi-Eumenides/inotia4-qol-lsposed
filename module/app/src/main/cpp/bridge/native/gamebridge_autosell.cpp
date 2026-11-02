@@ -59,25 +59,6 @@ Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellConfig(
 #endif
 }
 
-extern "C" JNIEXPORT jboolean JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellEnabled(JNIEnv*, jclass, jboolean enabled) {
-    // Frozen global-config compatibility stub; writes belong to core.settings' native
-    // single-key owner-token path. nativeSetAutoSellConfig remains per-save-slot rule data.
-    (void)enabled;
-    return JNI_FALSE;
-}
-
-extern "C" JNIEXPORT jboolean JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeAutoSellRunNow(JNIEnv*, jclass) {
-#if QOL_KERNEL_ONLY
-    return JNI_FALSE;
-#else
-    // 保留 JNI 入口以兼容既有 external 签名；扫描已由 scheduler 周期任务（每 60 帧）负责，
-    // 不再提供单次立即扫描：60 帧等待可接受。
-    return JNI_TRUE;
-#endif
-}
-
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeAutoSellStatusJson(JNIEnv* env, jclass) {
 #if QOL_KERNEL_ONLY

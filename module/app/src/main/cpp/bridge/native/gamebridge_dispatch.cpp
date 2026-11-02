@@ -8,7 +8,6 @@
 #include "host/http_dispatch.h"
 #include "host/http_endpoint_binder.h"
 #include "host/features/production.h"
-#include "infra/config.h"
 
 namespace {
 
@@ -61,29 +60,6 @@ std::string dispatch_result_json(const qol::contracts::HttpRes& response) {
 }
 
 }  // namespace
-
-// Frozen compatibility config setters. Global config writes must use core.settings' native
-// single-key owner-token path; these exports cannot mutate configuration.
-extern "C" JNIEXPORT jboolean JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeSetOpEnabled(JNIEnv*, jclass, jboolean) {
-    return JNI_FALSE;
-}
-
-extern "C" JNIEXPORT jboolean JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeConfigSetString(JNIEnv* env, jclass, jstring key,
-                                                       jstring value) {
-    (void)env;
-    (void)key;
-    (void)value;
-    return JNI_FALSE;
-}
-
-extern "C" JNIEXPORT jboolean JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeConfigSetInt(JNIEnv* env, jclass, jstring key, jint) {
-    (void)env;
-    (void)key;
-    return JNI_FALSE;
-}
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeHttpDispatch(JNIEnv* env, jclass, jint method,

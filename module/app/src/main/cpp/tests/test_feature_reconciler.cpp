@@ -555,11 +555,8 @@ int main(int argc, char** argv) {
     assert(control.initialize(directory, path, &FeatureReconciler::pending_desired, &reconcile).ok());
     assert(reconcile.bind({&resolve, &hook, &unhook}));
     reconcile.step(); // Starts the provider's shared install transaction, but does not advance it.
-    const auto hooks_before_old_step = hook_calls;
-    for (int i = 0; i < 10; ++i) assert(lifecycle_step() == 0);
-    assert(hook_calls == hooks_before_old_step && probes["test.provider"].enabled == 0);
+    assert(probes["test.provider"].enabled == 0);
     assert(infra::require_capability("test.capability", {1, 0}) == nullptr);
-    assert(sync_gates() == 0 && install_all({&resolve, &hook, &unhook}) == -1);
     frames();
     assert(feature_registry_active("test.provider") && feature_registry_active("test.consumer"));
     assert(feature_registry_active("test.solo"));

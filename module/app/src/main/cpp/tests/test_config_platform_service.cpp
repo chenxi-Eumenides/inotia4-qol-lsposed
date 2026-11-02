@@ -3,7 +3,6 @@
 #include "host/config_platform_bridge.h"
 #include "host/core_settings_config_service.h"
 #include "host/owner_identity.h"
-#include "host/settings_config_bridge.h"
 #include "core/native/game_cache.h"
 #include "infra/config.h"
 #include "infra/commands.h"
@@ -232,28 +231,6 @@ int main(int argc, char** argv) {
     assert(qol::host::config_platform_bind_namespace_store());
     int identity = 0;
     const auto owner = register_owner(&identity, "sample.plugin");
-    int settings_identity = 0;
-    const auto settings_owner = register_owner(&settings_identity, "core.settings");
-    const auto& settings_api = qol::host::settings_config_api();
-    int32_t current_stack_limit = -1;
-    assert(qol::contracts::succeeded(settings_api.read_bool_for_owner(
-        settings_owner, "stackLimitIncrease", &current_stack_limit)));
-    assert(current_stack_limit == 0);
-    uint64_t settings_request = 0;
-    assert(qol::contracts::succeeded(settings_api.request_set_bool_for_owner(
-        settings_owner, "stackLimitIncrease", 1, &settings_request)));
-    qol::contracts::SettingsConfigRequestStatus settings_status{};
-    settings_status.size = sizeof(settings_status);
-    for (int attempt = 0; attempt < 500; ++attempt) {
-        settings_status.size = sizeof(settings_status);
-        assert(qol::contracts::succeeded(settings_api.query_request_for_owner(
-            settings_owner, settings_request, &settings_status)));
-        if (settings_status.state != qol::contracts::SettingsConfigRequestState::kQueued) break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
-    assert(settings_status.state == qol::contracts::SettingsConfigRequestState::kSucceeded);
-    assert(settings_status.persisted == 1 && settings_status.configured_value == 1 &&
-           settings_status.apply_state == qol::contracts::SettingsConfigApplyState::kPendingFrame);
     assert(qol::contracts::succeeded(namespaces.update_value(owner, "sample.plugin", "value",
                                                                "7", 1)));
     qol::features::core_settings::JsonValue stored_namespace;

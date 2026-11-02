@@ -930,23 +930,6 @@ int main() {
     assert(sdk.module_health->struct_size == sizeof(qol::contracts::QolHostModuleHealthFactsApi));
     assert(sdk.module_health->read != nullptr);
     assert(sdk.module_version != nullptr);
-    assert(qol::contracts::settings_catalog_if_available(&sdk) == sdk.settings_catalog);
-    assert(sdk.settings_catalog != nullptr);
-    // Old provider removal must not remove resident settings contributions.
-    const qol::contracts::SettingsCategorySpec settings_category{
-        sizeof(qol::contracts::SettingsCategorySpec), "adapter.settings", "adapter.owner", "Adapter", ""};
-    const qol::contracts::SettingsItemSpec settings_item{
-        sizeof(qol::contracts::SettingsItemSpec), "adapter.enable", "adapter.settings", "adapter.owner",
-        "Enable", "", qol::contracts::SettingsItemType::kToggle, "adapterEnabled", 1,
-        nullptr, nullptr, nullptr};
-    assert(sdk.settings_catalog->register_category(&settings_category, &settings_item, 1).ok == kQolOk);
-    assert(sdk.panels.unregister_owner("adapter.owner").ok == kQolOk);
-    const qol::contracts::CatalogView* settings_view = nullptr;
-    qol::contracts::SettingsCatalogToken settings_token = 0;
-    assert(sdk.settings_catalog->snapshot_acquire(&settings_view, &settings_token).ok == kQolOk);
-    assert(settings_view->category_count == 1 && settings_view->item_count == 1);
-    assert(sdk.settings_catalog->snapshot_release(settings_token).ok == kQolOk);
-    assert(sdk.settings_catalog->unregister_owner("adapter.owner").ok == kQolOk);
     static_assert(offsetof(qol::contracts::QolHostSdk, snapshot_create) ==
                       offsetof(qol::contracts::QolHostSdk, item_handle) +
                           sizeof(qol::contracts::QolItemHandleApi),

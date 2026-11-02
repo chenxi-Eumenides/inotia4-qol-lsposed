@@ -37,21 +37,10 @@ bool bind_plugin_save_route(const contracts::PluginDescriptor& plugin);
 // 其余插件 context 保持普通 SDK（feature_control=nullptr），不得访问管理通道。
 void bind_management_sdk(const contracts::QolHostSdk& sdk);
 
-// 安装全部已注册插件；返回失败插件数（0 = 全部按要求就绪）。
-int install_all(const HostDeps& deps);
-
-// 门禁监督（主线程帧驱动）：比较带 gate 资源的配置值与登记状态，变化时同步
-// hooks::registry 状态、infra::status 状态，并调用 on_enabled/on_disabled。
-// 返回本轮发生状态变化的插件数。处理门禁落态与可补齐的 kBlocked 插件；幂等。
-uint32_t sync_gates();
-
 // 生命周期动作（主线程唯一执行器；命令经命令端口投递后由本函数执行）。
 // action 取 contracts::kFeatureLifecycle*；状态机见 ARCHITECTURE.md §3.2。
 // 前置拒绝（返回 false）：插件不存在 / 该插件有未终态事务 / 任一资源已隔离。
 bool lifecycle_apply(const char* plugin_id, int32_t action);
-
-// 帧驱动：推进在途生命周期事务并同步状态/回调；返回本轮推进数（0 = 无事可做）。
-uint32_t lifecycle_step();
 
 // Explicit new-model seam. All registered descriptors must have validated features and
 // no legacy resource gates. Preparation registers status/DAG only, not product resources.

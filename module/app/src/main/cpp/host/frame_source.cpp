@@ -55,7 +55,7 @@ void frame_render_pre_wrapper() {
     if (fn_map_drawbase != nullptr) fn_map_drawbase();
 }
 
-// 替换原 BL STATE_NextStartProcess：先派发调度器与 legacy 帧任务，再复刻原调用。
+// 替换原 BL STATE_NextStartProcess：先派发调度器，再刷新缓存，再复刻原调用。
 // 消费点位于帧计数自增与 Draw 之前。
 void frame_logic_pre_wrapper() {
     // The logic hook runs on the game's logic thread; bootstrap may run on Android's app thread.
@@ -326,7 +326,7 @@ bool host_save_transition_begin_thunk(int32_t kind, int32_t target_slot,
     return contracts::succeeded(result);
 }
 
-// P3c：core.save 确认序未完成（未 ready）时旧 save_enter 回调与事件不得派发。
+// P3c：core.save 确认序未完成（未 ready）时 kEventSaveEnter 事件不得派发。
 // 缺省（core.save 未装/未 bind）放行，保持无模块参与时的既有 save_enter 行为。
 bool host_save_enter_ready() {
     const contracts::QolOwnerToken token = qol::host::owner_token_of("core.save");

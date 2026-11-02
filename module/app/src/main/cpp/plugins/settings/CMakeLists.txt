@@ -1,7 +1,6 @@
 add_library(qol_plugin_settings STATIC
     feature.cpp
     plugin.cpp
-    settings_contribution.cpp
     panels/settings.cpp
     panels/settings_binding.cpp
 )

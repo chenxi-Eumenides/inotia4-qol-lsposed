@@ -27,7 +27,7 @@
 // 面板通过 ui_panels 注册 provider，由 core.custom_ui 的 PopupHost 托管回调与 popup 生命周期。
 // UI（入口按钮 + 面板）为插件自有 ui/panel.*。
 //
-// 过渡依赖：save_enter/save_exit 事件仅维护扫描活动态；配置持久化经 save.slot_data；
+// 依赖：save_enter/save_exit 事件仅维护扫描活动态；配置持久化经 save.slot_data；
 // 出售副作用由 inventory_hooks 提供的 inventory.action 承载；扩展袋由 core.item 的
 // inventory.bag_source 枚举；原版和 C18 原生袋由 item port 扫描。
 
@@ -238,8 +238,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     register_ui_state();
-    // save_enter/save_exit 回调设施是共享过渡依赖（B4 迁移）；注册对同一 fn+ctx 幂等，
-    // activate 重入安全。
+    // save_enter/save_exit 事件订阅：注册对同一 fn+ctx 幂等，activate 重入安全。
     autosell_register_save_enter();
     autosell_register_save_exit();
     // feature 为插件唯一开关：want_run 成立才会 install，故进入此路径即视为启用。

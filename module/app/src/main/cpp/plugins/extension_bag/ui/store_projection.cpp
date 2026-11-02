@@ -232,7 +232,6 @@ void store_install_module_view_locked(int bag) {
     VIRTBAG_LOG("store view installed bag=%d window=%d capacity=%d", bag, original_bag,
                 ::qol::extension_bag::access::bag().capacities[bag]);
 }
-bool store_module_view_installed_locked() { return qol::extension_bag::ui_state().store.view_installed; }
 
 void store_restore_module_view_locked() {
     if (!qol::extension_bag::ui_state().store.view_installed) return;

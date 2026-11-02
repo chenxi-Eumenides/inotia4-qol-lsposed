@@ -57,19 +57,3 @@ Java_com_inotia4_qol_NativeBridge_nativePluginConfigRequestIfRevision(
         receipt.error_code = result.code;
     return receipt_or_error(env, receipt);
 }
-
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_inotia4_qol_NativeBridge_nativePluginConfigReceipt(JNIEnv* env, jclass,
-                                                            jlong request_id) {
-    if (env == nullptr || request_id <= 0) return env != nullptr
-        ? env->NewStringUTF("{\"ok\":false,\"error_code\":1}") : nullptr;
-    qol::contracts::FeatureReceipt receipt{};
-    const auto result = qol::host::production_feature_controller().receipt(
-        static_cast<uint64_t>(request_id), &receipt);
-    if (!qol::contracts::succeeded(result)) {
-        const std::string error = "{\"ok\":false,\"error_code\":" +
-            std::to_string(result.code) + "}";
-        return env->NewStringUTF(error.c_str());
-    }
-    return receipt_or_error(env, receipt);
-}

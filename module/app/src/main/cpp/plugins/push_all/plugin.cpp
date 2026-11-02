@@ -61,15 +61,6 @@ const contracts::ResourceClaim kResources[] = {
     },
 };
 
-// JNI 绑定元数据：符号名与签名在重构期冻结；签名哈希 P5 落地前为 nullptr。
-const contracts::JniBinding kJni[] = {
-    {
-        "nativeSetPushAllEnabled",
-        "Java_com_inotia4_qol_NativeBridge_nativeSetPushAllEnabled",
-        nullptr,
-    },
-};
-
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_game = ctx.game;
@@ -143,7 +134,7 @@ const contracts::PluginDescriptor kDescriptor = {
     0, nullptr,   // optional_requires
     0, nullptr,   // provides
     2, kResources,
-    1, kJni,
+    0, nullptr,   // jni：全局开关写入走 /api/config/set，无 JNI 入口
     &plugin_install,
     &plugin_deactivate,
     &plugin_on_enabled,

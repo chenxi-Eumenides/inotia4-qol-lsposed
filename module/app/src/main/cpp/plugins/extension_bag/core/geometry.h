@@ -15,8 +15,6 @@ constexpr int64_t kGridX = 0x45c - 0x185 + 0x22; // 761
 constexpr int64_t kGridY = 0x91 - 0x0c + 0x1b;   // 160
 constexpr int64_t kGridCell = 0x4a;
 constexpr int64_t kGridStep = 0x53;
-constexpr int64_t kOriginalGridX = kGridX;
-constexpr int64_t kOriginalGridY = kGridY;
 
 bool extension_bag_grid_hit(int64_t x, int64_t y);
 int extension_bag_grid_slot_index(int64_t x, int64_t y,

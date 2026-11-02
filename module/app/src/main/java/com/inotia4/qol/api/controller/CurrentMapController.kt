@@ -3,7 +3,6 @@ package com.inotia4.qol.api.controller
 import com.inotia4.qol.service.ApiServices
 import com.inotia4.qol.util.ControllerGuard
 import com.yanzhenjie.andserver.annotation.GetMapping
-import com.yanzhenjie.andserver.annotation.PathVariable
 import com.yanzhenjie.andserver.annotation.RequestParam
 import com.yanzhenjie.andserver.annotation.RestController
 

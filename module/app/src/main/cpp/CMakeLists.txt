@@ -26,9 +26,6 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/extension_bag/core/bind.cpp
     plugins/extension_bag/api/api_impl.cpp
     plugins/extension_bag/api/bag_source.cpp
-    plugins/extension_bag/interface/bag_query.cpp
-    plugins/extension_bag/usecases/view.cpp
-    plugins/extension_bag/usecases/unequip.cpp
     plugins/extension_bag/usecases/move.cpp
     plugins/extension_bag/usecases/set_bag_count.cpp
     plugins/extension_bag/assembly/claims.cpp
@@ -67,7 +64,6 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/autosell/scan.cpp
     plugins/autosell/plugin.cpp
     plugins/autosell/store.cpp
-    plugins/autosell/ui/panel.cpp
     plugins/core.quest/feature.cpp
     plugins/core.quest/plugin.cpp
     plugins/special_equip/rules.cpp
@@ -88,7 +84,6 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/core.custom_ui/feature.cpp
     plugins/core.ui_state/plugin.cpp
     plugins/core.custom_ui/plugin.cpp
-    plugins/core.custom_ui/feature.cpp
     plugins/core.custom_ui/ui_components.cpp
     plugins/core.custom_ui/panels/stack.cpp
     plugins/save_backup/ui/panel.cpp
@@ -96,7 +91,6 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
 )
 
 add_library(gamebridge SHARED
-    host/settings_config_bridge.cpp
     bridge/native/gamebridge.cpp
     bridge/native/gamebridge_data.cpp
     bridge/native/gamebridge_operations.cpp
@@ -176,17 +170,13 @@ target_sources(gamebridge PRIVATE
     bridge/native/gamebridge_autosell.cpp
 )
 
-# 自动出售按存档配置 sidecar（P4-B3 迁移至 plugins/autosell）
-target_sources(gamebridge PRIVATE
-)
-
-# 自动出售 UI：背包页入口按钮 + 配置面板（D1-b3 迁入 plugins/autosell/ui）
-target_sources(gamebridge PRIVATE
-)
-
-# 合成器宝石合成操作优化（gem-craft-optimization 阶段1，末尾追加，不改上方既有行）
-target_sources(gamebridge PRIVATE
-)
+# 历史迁移记录（原空 target_sources 块已清理，各批条目均已迁入下沉插件、由插件 target 编译）：
+# 自动出售按存档配置 sidecar（P4-B3 → plugins/autosell）；自动出售 UI 背包页入口按钮 +
+# 配置面板（D1-b3 → plugins/autosell/ui）；合成器宝石合成优化（gem-craft-optimization 阶段1）；
+# 自定义合成配方（custom-craft-recipe：目录/规则/表注入/结果层 provider）；
+# 库存行为域声明式化（B2a-1，wrapper 业务体归 core.item/hooks + usecases）；
+# core.ui 出口面与 save_backup 游戏内面板（D1-b2）；extension_bag 声明式资源
+# （D2a-3b-1 / D2c-2b-2，29 条 claim，features/patch 已删除）。
 
 # 状态转换派发（go_main_menu/enter_slot/create_slot 跨线程收敛到逻辑帧点，末尾追加）
 target_sources(gamebridge PRIVATE
@@ -221,10 +211,6 @@ target_sources(gamebridge PRIVATE
     game/feature/game_feature.cpp
 )
 
-# 自定义合成配方（custom-craft-recipe：目录/规则/表注入/结果层 provider，末尾追加，不改上方既有行）
-target_sources(gamebridge PRIVATE
-)
-
 # 角色属性面板战斗属性行标签中文化（character-info-zh-labels；作用域标记归入 character_panel_i18n 插件）
 target_sources(gamebridge PRIVATE
     hooks/dispatch.cpp
@@ -243,7 +229,6 @@ target_sources(gamebridge PRIVATE
 
 # 推怪（推动增强）全局开关：JNI 薄层（插件实现已迁 plugins/push_all，末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    bridge/native/gamebridge_push_all.cpp
 )
 
 # P1 最小骨架：infra 运行时（命令队列/事件/能力/状态）+ game 时钟适配（末尾追加，不改上方既有行）
@@ -309,8 +294,6 @@ target_sources(gamebridge PRIVATE
     game/access/save_file_evidence.cpp
     game/access/save_transaction.cpp
     game/adapter_ports/save_transaction_port.cpp
-    host/settings_catalog_adapter.cpp
-    infra/settings_catalog.cpp
     host/lifecycle_participants.cpp
     host/http_endpoint_binder.cpp
     host/http_registry.cpp
@@ -324,7 +307,6 @@ target_sources(gamebridge PRIVATE
 target_sources(gamebridge PRIVATE
     host/status_json.cpp
     bridge/native/gamebridge_config_store.cpp
-    bridge/native/gamebridge_config_platform.cpp
     bridge/native/gamebridge_status.cpp
     bridge/native/gamebridge_dispatch.cpp
     bridge/native/gamebridge_static_data.cpp
@@ -377,11 +359,6 @@ target_sources(gamebridge PRIVATE
 )
 
 # P3 Lane B：生命周期 JNI 薄层（控制端点经命令端口投递，末尾追加，不改上方既有行）
-target_sources(gamebridge PRIVATE
-    bridge/native/gamebridge_lifecycle.cpp
-)
-
-# B2a-1：库存行为域声明式化（24 条入口 hook 的插件 owner；wrapper 业务体归 core.item/hooks + usecases）
 target_sources(gamebridge PRIVATE
 )
 
@@ -437,23 +414,4 @@ target_sources(gamebridge PRIVATE
 # D1-b0：面板注册表（纯数据面，零 game 依赖）+ PopupState 按名定位入口
 target_sources(gamebridge PRIVATE
     infra/panels.cpp
-)
-
-# D1-b2：core.ui 出口面插件（设置页容器 + 面板栈 + ui_panels 能力）
-target_sources(gamebridge PRIVATE
-)
-
-# D1-b2：save_backup 游戏内面板迁入插件（provider save_backup）
-target_sources(gamebridge PRIVATE
-)
-
-# D2a-3b-1 / D2c-2b-2：extension_bag 声明式资源插件（29 条 claim；wrapper 业务体随
-# D2c-2b-2 全部收口在 plugins/extension_bag，features/patch 已删除）
-target_sources(gamebridge PRIVATE
-)
-
-# 持久配置桥（settings_config v1.0）JNI 薄层：镜像发布/回执回传仅转换，语义在
-# host/settings_config_bridge.cpp（末尾追加，不改上方既有行）
-target_sources(gamebridge PRIVATE
-    bridge/native/gamebridge_settings_config.cpp
 )

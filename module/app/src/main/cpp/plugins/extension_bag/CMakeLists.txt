@@ -58,7 +58,6 @@ add_library(qol_plugin_extension_bag STATIC
     persistence/persistence.cpp
     core/geometry.cpp
     plugin.cpp
-    assembly/settings_contribution.cpp
 )
 
 target_include_directories(qol_plugin_extension_bag PRIVATE

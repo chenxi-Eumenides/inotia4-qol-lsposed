@@ -196,7 +196,7 @@ int32_t autosell_retry_frame(int64_t frame, void*) {
     return 1;
 }
 
-// retry task 句柄仅在插件生命周期（主/逻辑线程经 lifecycle_step）注册/注销；
+// retry task 句柄仅在插件生命周期（主/逻辑线程经 feature_registry_step）注册/注销；
 // 帧回调 autosell_retry_frame→store_flush 只读写 g_last_retry_frame/g_retry_due_frame
 // （已由 g_store_mtx 保护），不触碰 g_retry_task，故句柄无需额外加锁。
 bool ensure_retry_task() {

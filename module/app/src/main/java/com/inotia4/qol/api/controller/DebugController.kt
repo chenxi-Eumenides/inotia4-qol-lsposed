@@ -2,7 +2,6 @@ package com.inotia4.qol.api.controller
 
 import com.inotia4.qol.service.ApiServices
 import com.inotia4.qol.service.info.NativeHttpCommand
-import com.inotia4.qol.service.info.NativeHttpQuery
 import com.inotia4.qol.util.ApiException
 import com.inotia4.qol.util.ControllerGuard
 import com.inotia4.qol.util.withNativeRouteLease

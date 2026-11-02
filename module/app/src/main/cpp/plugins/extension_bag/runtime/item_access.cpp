@@ -165,20 +165,6 @@ void extension_free_item_payload(void* item) { (void)extension_free_item(item); 
 
 namespace {
 
-void extension_refresh_mix_item() {
-    const auto* api = extension_bag_write_api();
-    if (api != nullptr && api->ui.refresh_mix_item != nullptr) {
-        (void)api->ui.refresh_mix_item();
-    }
-}
-
-void extension_refresh_store_item() {
-    const auto* api = extension_bag_write_api();
-    if (api != nullptr && api->ui.refresh_store_item != nullptr) {
-        (void)api->ui.refresh_store_item();
-    }
-}
-
 void extension_update_character_equip() {
     const auto* api = extension_bag_write_api();
     if (api != nullptr && api->ui.update_character_equip != nullptr) {

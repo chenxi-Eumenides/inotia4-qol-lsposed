@@ -96,13 +96,6 @@ bool read_inventory_find_save_slot(const void* item, int* out_slot) {
     return true;
 }
 
-int read_current_save_slot() {
-    const auto* facts = extension_bag_save_facts();
-    if (facts == nullptr || facts->current_slot == nullptr) return -1;
-    int32_t slot = -1;
-    return qol::contracts::succeeded(facts->current_slot(&slot)) ? slot : -1;
-}
-
 }  // namespace
 
 bool read_world_state_id(int* out_state) {

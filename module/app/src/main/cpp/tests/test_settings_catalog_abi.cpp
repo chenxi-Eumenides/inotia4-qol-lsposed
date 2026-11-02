@@ -7,7 +7,6 @@
 #include <type_traits>
 
 using namespace qol::contracts;
-static_assert(kSettingsCatalogMajor == 1 && kSettingsCatalogMinor == 3);
 static_assert(kHostSdkMajor == 1 && kHostSdkMinor == 30);
 static_assert(kHttpRegistryVersion.major == 1 && kHttpRegistryVersion.minor == 1);
 static_assert(kHttpDispatchVersion.major == 1 && kHttpDispatchVersion.minor == 1);
@@ -52,28 +51,27 @@ PREFIX(snapshot_release);
 static_assert(sizeof(QolPanelsApi) == 7 * sizeof(void (*)()));
 static_assert(sizeof(PanelItemSpec) == 7 * sizeof(void*));
 static_assert(sizeof(PanelProviderSpec) == 7 * sizeof(void*));
-static_assert(offsetof(QolHostSdk, settings_catalog) == sizeof(HostSdkV15));
 static_assert(sizeof(void*) == 8, "supported Android/host targets use the 64-bit ABI");
 static_assert(sizeof(HostSdkV15) == 744);
 static_assert(offsetof(QolHostSdk, panels) == 248);
 static_assert(offsetof(QolHostSdk, snapshot_release) == 736);
-// minor 16 尾（settings_catalog）保持 744/752；minor 17 尾（settings_config）、
-// minor 18 尾（module_version）及后续 owner/operation/route/runtime/security/module-health 尾只追加指针。
-static_assert(offsetof(QolHostSdk, settings_config) == 752);
-static_assert(offsetof(QolHostSdk, module_version) == 760);
-static_assert(offsetof(QolHostSdk, owner_verify_token) == 768);
-static_assert(offsetof(QolHostSdk, owner_store) == 776);
-static_assert(offsetof(QolHostSdk, slot_operation) == 784);
-static_assert(offsetof(QolHostSdk, save_route) == 792);
-static_assert(offsetof(QolHostSdk, config_namespace) == 800);
-static_assert(offsetof(QolHostSdk, feature) == 808);
-static_assert(offsetof(QolHostSdk, feature_control) == 816);
-static_assert(offsetof(QolHostSdk, runtime_effects) == 824);
-static_assert(offsetof(QolHostSdk, security) == 832);
-static_assert(offsetof(QolHostSdk, module_health) == 840);
-static_assert(offsetof(QolHostSdk, desc_hook_v2) == 848);
-static_assert(offsetof(QolHostSdk, panel_enumeration) == 856);
-static_assert(sizeof(QolHostSdk) == 864);
+// v1.15 前缀（744 字节）之后为纯指针尾追加：minor 17 尾原为 settings_config（已随退役的
+// settings catalog/config 链删除，后续尾偏移整体前移 16 字节），minor 18 尾（module_version）
+// 及后续 owner/operation/route/runtime/security/module-health 尾只追加指针。
+static_assert(offsetof(QolHostSdk, module_version) == 744);
+static_assert(offsetof(QolHostSdk, owner_verify_token) == 752);
+static_assert(offsetof(QolHostSdk, owner_store) == 760);
+static_assert(offsetof(QolHostSdk, slot_operation) == 768);
+static_assert(offsetof(QolHostSdk, save_route) == 776);
+static_assert(offsetof(QolHostSdk, config_namespace) == 784);
+static_assert(offsetof(QolHostSdk, feature) == 792);
+static_assert(offsetof(QolHostSdk, feature_control) == 800);
+static_assert(offsetof(QolHostSdk, runtime_effects) == 808);
+static_assert(offsetof(QolHostSdk, security) == 816);
+static_assert(offsetof(QolHostSdk, module_health) == 824);
+static_assert(offsetof(QolHostSdk, desc_hook_v2) == 832);
+static_assert(offsetof(QolHostSdk, panel_enumeration) == 840);
+static_assert(sizeof(QolHostSdk) == 848);
 static_assert(std::is_standard_layout_v<FeatureDefinition> &&
               std::is_trivially_copyable_v<FeatureDefinition>);
 constexpr FeatureDefinition kDefaultPriorityFeature{};
@@ -241,27 +239,8 @@ static_assert(offsetof(QolConfigNamespaceApi, update_value) == 32);
 static_assert(offsetof(QolConfigNamespaceApi, read_registered) == 40);
 static_assert(offsetof(QolConfigNamespaceApi, update_http_request) == 48);
 static_assert(sizeof(QolConfigNamespaceApi) == 56);
-static_assert(std::is_standard_layout_v<QolSettingsCatalogApi>);
-static_assert(offsetof(QolSettingsCatalogApi, query_item_availability) == 48);
-static_assert(offsetof(QolSettingsCatalogApi, register_items) == 56);
-static_assert(offsetof(QolSettingsCatalogApi, register_category_metadata) == 64);
-static_assert(sizeof(QolSettingsCatalogApi) == 72);
-static_assert(std::is_trivial_v<CatalogView>);
-static_assert(std::is_standard_layout_v<QolSettingsConfigApi>);
-static_assert(std::is_trivial_v<SettingsConfigRequestStatus>);
 
-QolResult register_category(const SettingsCategorySpec*, const SettingsItemSpec*, uint32_t) { return ok(); }
-QolResult unregister_owner(const char*) { return ok(); }
-QolResult acquire(const CatalogView**, SettingsCatalogToken*) { return ok(); }
-QolResult release(SettingsCatalogToken) { return ok(); }
-QolResult invoke(const char*, uint64_t) { return ok(); }
-QolResult query_availability(const char*, uint64_t, SettingsItemAvailability*) { return ok(); }
-QolResult register_items(const char*, const char*, const SettingsItemSpec*, uint32_t) { return ok(); }
-QolResult register_category_metadata(const SettingsCategorySpec*) { return ok(); }
 const char* test_module_version() { return "0.7.13"; }
-QolResult config_read_bool(const char*, int32_t*) { return ok(); }
-QolResult config_request_set_bool(const char*, int32_t, uint64_t*) { return ok(); }
-QolResult config_query_request(uint64_t, SettingsConfigRequestStatus*) { return ok(); }
 QolResult module_health_read_stub(void*, QolModuleHealthSnapshot*) { return ok(); }
 QolResult desc_hook_resolve_stub(uint32_t, QolDescButtonTarget*) { return ok(); }
 QolResult desc_hook_bind_stub(uint32_t, const QolDescButtonTarget*, QolDescButtonProc, uint64_t*) {
@@ -273,84 +252,8 @@ QolResult desc_hook_call_original_stub(uint64_t, void*) { return ok(); }
 QolResult desc_hook_unbind_stub(uint64_t) { return ok(); }
 
 int main() {
-    constexpr uint32_t old_catalog_size = offsetof(QolSettingsCatalogApi, query_item_availability);
-    QolSettingsCatalogApi catalog{old_catalog_size, 1, 0, &register_category,
-                                  &unregister_owner, &acquire, &release, &invoke, nullptr};
-    QolSettingsConfigApi config_api{sizeof(QolSettingsConfigApi), kSettingsConfigMajor,
-                                    kSettingsConfigMinor, &config_read_bool, &config_request_set_bool,
-                                    &config_query_request};
     QolHostSdk sdk{};
     sdk.abi = {sizeof(QolHostSdk), 1, 16};
-    sdk.settings_catalog = &catalog;
-    assert(settings_catalog_if_available(&sdk) == &catalog);
-    assert(settings_catalog_availability_if_available(&sdk) == nullptr);
-    catalog.size = sizeof(QolSettingsCatalogApi);
-    catalog.minor = 1;
-    catalog.query_item_availability = &query_availability;
-    assert(settings_catalog_availability_if_available(&sdk) == &catalog);
-    assert(settings_catalog_join_if_available(&sdk) == nullptr);  // minor 1 cannot consume tail
-    catalog.minor = 2;
-    catalog.register_items = &register_items;
-    catalog.size = offsetof(QolSettingsCatalogApi, register_category_metadata);
-    assert(settings_catalog_join_if_available(&sdk) == &catalog);
-    assert(settings_catalog_metadata_if_available(&sdk) == nullptr);
-    catalog.size = offsetof(QolSettingsCatalogApi, register_items);
-    assert(settings_catalog_join_if_available(&sdk) == nullptr);
-    catalog.size = sizeof(QolSettingsCatalogApi);
-    catalog.minor = 3;
-    catalog.register_category_metadata = &register_category_metadata;
-    assert(settings_catalog_metadata_if_available(&sdk) == &catalog);
-    catalog.size = offsetof(QolSettingsCatalogApi, register_category_metadata);
-    assert(settings_catalog_metadata_if_available(&sdk) == nullptr);
-    catalog.size = sizeof(QolSettingsCatalogApi);
-    catalog.minor = 0;
-    catalog.size = old_catalog_size;
-    assert(settings_catalog_if_available(nullptr) == nullptr);
-    sdk.abi.minor = 15;
-    assert(settings_catalog_if_available(&sdk) == nullptr);
-    sdk.abi.minor = 16;
-    sdk.abi.size = sizeof(HostSdkV15);
-    assert(settings_catalog_if_available(&sdk) == nullptr);
-    // size 截断必须恰好覆盖 settings_catalog 指针本身（minor 17 尾加入后 sizeof-1 已不再截断它）。
-    sdk.abi.size = offsetof(QolHostSdk, settings_catalog);
-    assert(settings_catalog_if_available(&sdk) == nullptr);
-    sdk.abi.size = sizeof(QolHostSdk);
-    sdk.abi.major = 2;
-    assert(settings_catalog_if_available(&sdk) == nullptr);
-    sdk.abi.major = 1;
-    catalog.major = 2;
-    assert(settings_catalog_if_available(&sdk) == nullptr);
-    catalog.major = 1;
-    catalog.size = old_catalog_size - 1;
-    assert(settings_catalog_if_available(&sdk) == nullptr);
-    catalog.size = old_catalog_size;
-    catalog.invoke_action = nullptr;
-    assert(settings_catalog_if_available(&sdk) == nullptr);
-    catalog.invoke_action = &invoke;
-    sdk.settings_catalog = nullptr;
-    assert(settings_catalog_if_available(&sdk) == nullptr);
-    // minor 17 尾：旧 minor / 缺尾 / 空指针 / 半截接口都必须协商失败。
-    sdk.settings_catalog = &catalog;
-    sdk.settings_config = &config_api;
-    assert(settings_config_if_available(&sdk) == nullptr);  // minor 16 < 17
-    sdk.abi.minor = 17;
-    assert(settings_config_if_available(&sdk) == &config_api);
-    sdk.abi.size = offsetof(QolHostSdk, settings_config);
-    assert(settings_config_if_available(&sdk) == nullptr);
-    sdk.abi.size = sizeof(QolHostSdk);
-    sdk.settings_config = nullptr;
-    assert(settings_config_if_available(&sdk) == nullptr);
-    sdk.settings_config = &config_api;
-    config_api.size = sizeof(QolSettingsConfigApi) - 1;
-    assert(settings_config_if_available(&sdk) == &config_api);
-    assert(settings_config_owner_if_available(&sdk) == nullptr);
-    config_api.size = sizeof(QolSettingsConfigApi);
-    config_api.major = kSettingsConfigMajor + 1;  // minor 0 是合法首版；只拒非法 major
-    assert(settings_config_if_available(&sdk) == nullptr);
-    config_api.major = kSettingsConfigMajor;
-    config_api.request_set_bool = nullptr;
-    assert(settings_config_if_available(&sdk) == nullptr);
-    config_api.request_set_bool = &config_request_set_bool;
     // minor 18 尾：模块身份版本访问；旧 minor / 缺尾 / 空指针都必须协商失败。
     sdk.module_version = &test_module_version;
     sdk.abi.minor = 17;
@@ -463,15 +366,11 @@ int main() {
     assert(config_namespace_if_available(&sdk) == nullptr);
     std::printf("SDK v1.15 prefix bytes=%zu, panels offset=%zu, snapshot_release offset=%zu\n",
                 sizeof(HostSdkV15), offsetof(HostSdkV15, panels), offsetof(HostSdkV15, snapshot_release));
-    std::printf("Settings catalog v1.3: legacy v1.2 size=%zu, new size=%zu, metadata tail offset=%zu\n",
-                offsetof(QolSettingsCatalogApi, register_category_metadata),
-                sizeof(QolSettingsCatalogApi), offsetof(QolSettingsCatalogApi, register_category_metadata));
     std::printf("Plugin descriptor: metadata=%zu, count=%zu, size=%zu\n",
                 offsetof(PluginDescriptor, http_route_metadata),
                 offsetof(PluginDescriptor, http_route_metadata_count), sizeof(PluginDescriptor));
-    std::printf("Host SDK v1.28: settings_catalog=%zu, settings_config=%zu, runtime_effects=%zu, "
+    std::printf("Host SDK: runtime_effects=%zu, "
                 "security=%zu, module_health=%zu, desc_hook_v2=%zu, total=%zu\n",
-                offsetof(QolHostSdk, settings_catalog), offsetof(QolHostSdk, settings_config),
                 offsetof(QolHostSdk, runtime_effects), offsetof(QolHostSdk, security),
                 offsetof(QolHostSdk, module_health), offsetof(QolHostSdk, desc_hook_v2),
                 sizeof(QolHostSdk));

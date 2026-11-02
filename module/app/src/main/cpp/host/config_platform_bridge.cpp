@@ -1,7 +1,6 @@
 #include "host/config_platform_bridge.h"
 
 #include "host/config_namespace.h"
-#include "host/settings_config_bridge.h"
 #include "contracts/commands.h"
 #include "infra/config.h"
 #include "infra/commands.h"
