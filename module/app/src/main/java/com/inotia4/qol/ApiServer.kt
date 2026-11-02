@@ -1,225 +1,248 @@
 package com.inotia4.qol
 
 import android.content.Context
-import com.inotia4.qol.StaticData
-import com.inotia4.qol.service.ApiServices
-import com.inotia4.qol.store.ModuleSaveStore
 import com.yanzhenjie.andserver.AndServer
 import com.yanzhenjie.andserver.Server
+import java.net.BindException
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.ServerSocketFactory
 
 object ApiServer {
+    private const val DEFAULT_LISTEN_ADDRESS = "0.0.0.0"
+    private const val DEFAULT_LISTEN_PORT = 8088
+
+    private val controlExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "api-server-control").apply { isDaemon = true }
+    }
 
     private var server: Server? = null
-
-    @Volatile
+    private var serverStarting = false
+    private var activeStartAttempt = 0L
+    private var runningConfig: ApiListenerConfig? = null
     private var startContext: Context? = null
-
-    @Volatile
     private var startModuleApkPath: String? = null
+    private var hasRuntimeEffect = false
+    private var actualEnabled = false
+    private var desiredEnabled = false
+    private var listenerConfig: ApiListenerConfig? = null
+    private var lastEventRevision = Long.MIN_VALUE
+    private var controlGeneration = 0L
+    private var pendingControl: ScheduledFuture<*>? = null
 
-    /** feature 初始化幂等门禁（bootstrap 只执行一次 feature 初始化） */
-    @Volatile
-    private var bootstrapped = false
-
-    /** 模块 assets 注入幂等门禁（addAssetPath 不重复执行） */
-    @Volatile
-    private var assetsInjected = false
-
-    /**
-     * 启动入口（HookMain 无条件调用）：**先执行 feature 初始化（仅一次）**，再按
-     * `ModuleConfig.apiEnabled` 决定是否启动 HTTP 服务器。
-     * `apiEnabled=false` 时 feature 照常初始化（native 预取线程由 applyToNative 内的
-     * nativeSetApiEnabled 置为停止），仅不启动 HTTP。
-     */
+    /** Captures context after the runtime replay and reconciles the latest core.api effect. */
     @Synchronized
     fun bootstrap(context: Context, moduleApkPath: String?) {
         startContext = context
         startModuleApkPath = moduleApkPath
-        initFeatures(context, moduleApkPath)
-        if (!ModuleConfig.apiEnabled) {
-            LogFile.info(LogDomain.HTTP, "ApiServer HTTP disabled by config (apiEnabled=false); features initialized")
+        if (BuildConfig.KERNEL_ONLY) {
+            LogFile.info(LogDomain.HTTP, "kernel-only mode: starting loader health server")
+            ModuleRuntimeBootstrap.injectModuleAssets(context, moduleApkPath)
+            startKernelHealthServerLocked()
             return
         }
-        start(context, moduleApkPath)
+        reconcileLocked()
     }
 
-    /**
-     * feature 初始化（仅执行一次，幂等）：静态数据、模块 assets 注入、配置加载、sidecar 存储、
-     * 存档备份 native/UI、扩展背包 UI，以及功能开关下发 native（含 nativeSetApiEnabled）。
-     * 与 HTTP 服务器无关，`apiEnabled=false` 时同样执行。仅在 [bootstrap] 的同步块内调用。
-     */
-    private fun initFeatures(context: Context, moduleApkPath: String?) {
-        if (bootstrapped) return
-        bootstrapped = true
-        StaticData.attach(context)
-        ensureAssetsInjected(context, moduleApkPath)
-        // 模块配置组件：外部 config.json 为唯一来源（v0.5.21 起不再读 assets；缺失用默认值并写入外部存储）
-        ModuleConfig.load(context)
-        ModuleSaveStore.initialize(context)
-        // 存档管理器备份底层（bundle 导出/导入/列表/删除）收口 native feature/save_backup
-        NativeBridge.nativeSaveBackupInit(
-            context.applicationInfo.dataDir,
-            context.getExternalFilesDir(null)?.absolutePath ?: "",
-        )
-        // 启动期下发 map_id → 中文名表（MAPINFOBASE），native 自存内存表供 entry_json 输出
-        // （v0.7.x 给游戏内备份面板的列表项展示地图名）。
-        try {
-            NativeBridge.nativeSaveBackupSetMapNames(StaticData.buildMapNamesJson())
-        } catch (t: Throwable) {
-            LogFile.error(LogDomain.HTTP, "savebackup set map names failed", t)
-        }
-        // 启动游戏内备份面板的懒注入线程（注入 INAP_GOODS 死条目 + 设置页存档备份按钮）
-        try {
-            val r = NativeBridge.nativeSaveBackupUiInject()
-            LogFile.info(LogDomain.HTTP, "savebackup ui inject: $r")
-            val sr = NativeBridge.nativeSaveBackupUiSelfCheck()
-            LogFile.info(LogDomain.HTTP, "savebackup self check: $sr")
-        } catch (t: Throwable) {
-            LogFile.error(LogDomain.HTTP, "savebackup ui init failed", t)
-        }
-        ExtensionBagUiBridge.initialize(context)
-        // 功能开关通知 native 生效（含 nativeSetApiEnabled：控制缓存预取线程启停）+ 静态瓦片矩阵加载
-        ApiServices.config.applyToNative()
-    }
-
-    /**
-     * AndServer 通过 context.getAssets() 扫描 .andserver 文件定位注册类。
-     * LSPosed 注入场景下 context 是游戏进程的，assets 为游戏 APK；需把模块 APK 加入 AssetManager。
-     * 幂等：成功注入一次后不再重复（失败保留重试机会）。
-     */
-    private fun ensureAssetsInjected(context: Context, moduleApkPath: String?) {
-        if (assetsInjected) return
-        if (moduleApkPath == null) {
-            assetsInjected = true
-            return
-        }
-        try {
-            val m = android.content.res.AssetManager::class.java
-                .getMethod("addAssetPath", String::class.java)
-            m.invoke(context.assets, moduleApkPath)
-            assetsInjected = true
-            LogFile.info(LogDomain.HTTP, "module assets added: $moduleApkPath")
-        } catch (t: Throwable) {
-            LogFile.error(LogDomain.HTTP, "addAssetPath failed", t)
-        }
-    }
-
-    /**
-     * 只负责 HTTP 服务器启动（含 assets 注入与端口/地址 fallback）。feature 初始化由
-     * [bootstrap] 完成；`apiEnabled=false` 时不会被 bootstrap 调用。
-     */
     @Synchronized
-    fun start(context: Context, moduleApkPath: String?) {
-        startContext = context
-        startModuleApkPath = moduleApkPath
-        if (server?.isRunning == true) return
-        ensureAssetsInjected(context, moduleApkPath)
-        startServerWithFallback(context)
-    }
+    internal fun applyRuntimeEffect(
+        eventRevision: Long,
+        actualEnabled: Boolean,
+        desiredEnabled: Boolean,
+        config: ApiListenerConfig?,
+        configError: String?,
+    ) {
+        if (BuildConfig.KERNEL_ONLY || (hasRuntimeEffect && eventRevision <= lastEventRevision)) return
 
-    /** 启动 server；端口被占用等失败时回退默认端口重建（v0.5.22） */
-    private fun startServerWithFallback(context: Context) {
-        if (startServer(context)) return
-        if (ModuleConfig.listenPort != ModuleConfig.DEFAULT_LISTEN_PORT) {
-            LogFile.info(LogDomain.HTTP, "listenPort=${ModuleConfig.listenPort} start failed, fallback to default ${ModuleConfig.DEFAULT_LISTEN_PORT}")
-            ModuleConfig.fallbackListenPortToDefault()
-            startServer(context)
+        val wasEnabled = this.actualEnabled && this.desiredEnabled
+        val previousConfig = listenerConfig
+        hasRuntimeEffect = true
+        lastEventRevision = eventRevision
+        this.actualEnabled = actualEnabled
+        this.desiredEnabled = desiredEnabled
+        listenerConfig = config
+
+        when {
+            !desiredEnabled || !actualEnabled -> {
+                cancelPendingControlLocked()
+                stopServerLocked()
+            }
+            config == null -> {
+                cancelPendingControlLocked()
+                LogFile.error(
+                    LogDomain.HTTP,
+                    "core.api listener config rejected; listener remains stopped: ${configError ?: "invalid config"}",
+                )
+                stopServerLocked()
+            }
+            !wasEnabled || previousConfig == null -> {
+                cancelPendingControlLocked()
+                reconcileLocked()
+            }
+            previousConfig != config && server != null -> scheduleReconcileLocked(500L)
+            else -> {
+                cancelPendingControlLocked()
+                reconcileLocked()
+            }
         }
     }
 
-    /** 按当前 ModuleConfig 配置构建并启动 AndServer；返回是否启动成功 */
-    private fun startServer(context: Context): Boolean = try {
-        val builder = AndServer.webServer(context)
-            .port(ModuleConfig.listenPort)
-            .timeout(10, TimeUnit.SECONDS)
-            .serverSocketFactory(GracefulCloseServerSocketFactory)
-            .listener(object : Server.ServerListener {
-                override fun onStarted() {
-                    LogFile.info(LogDomain.HTTP, "AndServer started on ${ModuleConfig.listenAddress}:${ModuleConfig.listenPort}")
-                }
+    @Synchronized
+    fun clearRuntimeEffect() {
+        if (BuildConfig.KERNEL_ONLY) return
+        hasRuntimeEffect = false
+        actualEnabled = false
+        desiredEnabled = false
+        listenerConfig = null
+        lastEventRevision = Long.MIN_VALUE
+        cancelPendingControlLocked()
+        stopServerLocked()
+    }
 
-                override fun onStopped() {
-                    LogFile.info(LogDomain.HTTP, "AndServer stopped")
-                }
+    private fun startKernelHealthServerLocked() {
+        if (server != null || serverStarting) return
+        val context = startContext ?: return
+        startServerLocked(context, ApiListenerConfig(DEFAULT_LISTEN_ADDRESS, DEFAULT_LISTEN_PORT))
+    }
 
-                override fun onException(e: Exception) {
-                    LogFile.error(LogDomain.HTTP, "AndServer error", e)
-                }
-            })
-        // 按配置绑定监听地址；非法地址回退默认绑定（0.0.0.0 通配）
+    private fun reconcileLocked() {
+        if (BuildConfig.KERNEL_ONLY || !hasRuntimeEffect) return
+        if (!actualEnabled || !desiredEnabled) {
+            stopServerLocked()
+            return
+        }
+        val config = listenerConfig
+        if (config == null) {
+            stopServerLocked()
+            return
+        }
+        if (server != null) {
+            if (runningConfig != config) {
+                stopServerLocked()
+                startContext?.let { startServerLocked(it, config) }
+            }
+            return
+        }
+        if (!serverStarting) startContext?.let { startServerLocked(it, config) }
+    }
+
+    private fun startServerLocked(context: Context, config: ApiListenerConfig) {
+        if (server != null || serverStarting) return
+        val attempt = ++activeStartAttempt
+        val started = AtomicBoolean(false)
+        val failureReported = AtomicBoolean(false)
+        serverStarting = true
+        ModuleRuntimeBootstrap.injectModuleAssets(context, startModuleApkPath)
         try {
-            builder.inetAddress(InetAddress.getByName(ModuleConfig.listenAddress))
-        } catch (e: Exception) {
-            LogFile.error(LogDomain.HTTP, "invalid listenAddress=${ModuleConfig.listenAddress}, fallback to wildcard bind", e)
+            val address = InetAddress.getByName(config.listenAddress)
+            val builder = AndServer.webServer(context)
+                .port(config.listenPort)
+                .timeout(10, TimeUnit.SECONDS)
+                .serverSocketFactory(GracefulCloseServerSocketFactory)
+                .listener(object : Server.ServerListener {
+                    override fun onStarted() {
+                        started.set(true)
+                        synchronized(this@ApiServer) {
+                            if (activeStartAttempt == attempt) serverStarting = false
+                        }
+                        LogFile.info(
+                            LogDomain.HTTP,
+                            "AndServer started on ${config.listenAddress}:${config.listenPort}",
+                        )
+                    }
+
+                    override fun onStopped() {
+                        LogFile.info(LogDomain.HTTP, "AndServer stopped")
+                    }
+
+                    override fun onException(e: Exception) {
+                        LogFile.error(LogDomain.HTTP, "AndServer error", e)
+                        if (!started.get() && failureReported.compareAndSet(false, true)) {
+                            handleStartFailure(attempt, config, e)
+                        }
+                    }
+                })
+            builder.inetAddress(address)
+            val newServer = builder.build()
+            server = newServer
+            runningConfig = config
+            newServer.startup()
+        } catch (t: Throwable) {
+            if (failureReported.compareAndSet(false, true)) {
+                handleStartFailure(attempt, config, t)
+            } else {
+                LogFile.error(LogDomain.HTTP, "ApiServer start failed", t)
+            }
         }
-        server = builder.build()
-        server?.startup()
-        true
-    } catch (t: Throwable) {
-        LogFile.error(LogDomain.HTTP, "ApiServer start failed", t)
-        server = null
-        false
+    }
+
+    private fun handleStartFailure(attempt: Long, config: ApiListenerConfig, failure: Throwable) {
+        synchronized(this) {
+            if (activeStartAttempt == attempt) {
+                serverStarting = false
+                server = null
+                runningConfig = null
+            }
+        }
+        LogFile.error(
+            LogDomain.HTTP,
+            "ApiServer start failed on ${config.listenAddress}:${config.listenPort}",
+            failure,
+        )
+        if (isBindFailure(failure)) PluginRuntimeEffects.onBindFailure(config.listenPort)
+    }
+
+    private fun isBindFailure(failure: Throwable): Boolean {
+        var current: Throwable? = failure
+        var depth = 0
+        while (current != null && depth++ < 16) {
+            if (current is BindException) return true
+            current = current.cause
+        }
+        return false
     }
 
     @Synchronized
     fun stop() {
-        server?.shutdown()
+        cancelPendingControlLocked()
+        stopServerLocked()
+    }
+
+    private fun stopServerLocked() {
+        val previous = server
+        activeStartAttempt++
         server = null
-    }
-
-    /** 配置由 false→true 时的启动入口：仅启动 HTTP（feature 已 bootstrap，不重复初始化） */
-    @Synchronized
-    fun startFromConfig() {
-        if (!bootstrapped) {
-            LogFile.info(LogDomain.HTTP, "ApiServer startFromConfig skipped: features not bootstrapped")
-            return
+        serverStarting = false
+        runningConfig = null
+        try {
+            previous?.shutdown()
+        } catch (t: Throwable) {
+            LogFile.error(LogDomain.HTTP, "AndServer shutdown failed", t)
         }
-        if (!ModuleConfig.apiEnabled) return
-        if (server?.isRunning == true) return
-        val ctx = startContext
-        if (ctx == null) {
-            LogFile.info(LogDomain.HTTP, "ApiServer startFromConfig skipped: start context unavailable")
-            return
-        }
-        start(ctx, startModuleApkPath)
     }
 
-    /** 按当前 ModuleConfig 监听配置重启服务（配置端点修改监听地址/端口后调用） */
-    @Synchronized
-    fun restart() {
-        val ctx = startContext ?: return
-        stop()
-        start(ctx, startModuleApkPath)
-    }
-
-    /** 延迟重启：先让配置写响应送达客户端，再重启（避免改端口后响应丢失） */
-    fun restartDelayed() {
-        Thread {
-            try {
-                Thread.sleep(500)
-            } catch (e: InterruptedException) {
-                Thread.currentThread().interrupt()
+    private fun scheduleReconcileLocked(delayMillis: Long) {
+        val generation = ++controlGeneration
+        pendingControl?.cancel(false)
+        pendingControl = controlExecutor.schedule({
+            synchronized(this@ApiServer) {
+                if (generation != controlGeneration) return@synchronized
+                pendingControl = null
+                reconcileLocked()
             }
-            restart()
-        }.start()
+        }, delayMillis, TimeUnit.MILLISECONDS)
     }
 
-    /** 延迟停止：先让配置写响应送达客户端，再停止 HTTP 服务（apiEnabled true→false 时调用） */
-    fun stopDelayed() {
-        Thread {
-            try {
-                Thread.sleep(500)
-            } catch (e: InterruptedException) {
-                Thread.currentThread().interrupt()
-            }
-            stop()
-        }.start()
+    private fun cancelPendingControlLocked() {
+        controlGeneration++
+        pendingControl?.cancel(false)
+        pendingControl = null
     }
 }
 

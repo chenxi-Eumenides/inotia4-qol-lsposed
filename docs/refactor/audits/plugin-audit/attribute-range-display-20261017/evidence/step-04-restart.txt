@@ -1,0 +1,23 @@
+$ adb -s 192.168.3.56:5555 shell input keyevent 4
+exit_code=0
+
+$ adb -s 192.168.3.56:5555 shell am force-stop com.com2us.inotia4.normal.freefull.google.global.android.common
+exit_code=0
+
+$ adb -s 192.168.3.56:5555 shell monkey -p com.com2us.inotia4.normal.freefull.google.global.android.common -c android.intent.category.LAUNCHER 1
+  bash arg: -p
+  bash arg: com.com2us.inotia4.normal.freefull.google.global.android.common
+  bash arg: -c
+  bash arg: android.intent.category.LAUNCHER
+  bash arg: 1
+args: [-p, com.com2us.inotia4.normal.freefull.google.global.android.common, -c, android.intent.category.LAUNCHER, 1]
+ arg: "-p"
+ arg: "com.com2us.inotia4.normal.freefull.google.global.android.common"
+ arg: "-c"
+ arg: "android.intent.category.LAUNCHER"
+ arg: "1"
+data="com.com2us.inotia4.normal.freefull.google.global.android.common"
+data="android.intent.category.LAUNCHER"
+Events injected: 1
+## Network stats: elapsed time=186ms (0ms mobile, 0ms wifi, 186ms not connected)
+exit_code=0

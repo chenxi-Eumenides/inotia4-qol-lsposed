@@ -1,0 +1,2 @@
+10-18 03:11:16.797 25766 25874 I Inotia4Qol: 2026-10-18 03:11:16.797 f=0 I core assembly.cpp:562 assembly: initialized=true registered=28 install_failed=0 kernel_only=false
+10-18 03:11:16.843 25766 25874 I Inotia4Qol: 2026-10-18 03:11:16.842 f=0 I platform MainActivityStartupHook.kt:188 module identity: package=com.inotia4.qol versionCode=192 versionName=0.7.13 apk=/data/user/0/com.com2us.inotia4.normal.freefull.google.global.android.common/cache/lspatch/com.inotia4.qol/2315704421.apk sha256=2efcaf74c9f57a313fa43854b317ef28c215aeda14377ccbf98eee26e82e1bb5

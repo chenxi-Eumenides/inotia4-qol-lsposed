@@ -16,17 +16,17 @@ import java.util.concurrent.ArrayBlockingQueue
  *
  * - **native 单写者**：native 就绪后 `info/warn/error/op/debug` 一律经
  *   [NativeBridge.nativeQolLogWrite] 转发 native；native 补时间戳与帧号，并同时写
- *   logcat(tag=`Inotia4Qol`) 与文件 `/sdcard/Android/data/<pkg>/files/inotia4-export.log`。
+ *   logcat(tag=`Inotia4Qol`) 与文件 `/sdcard/Android/data/<pkg>/files/qol/qol.log`。
  * - **早期 backlog**：[onNativeReady] 之前日志进入有界队列（上限 512，溢出丢最旧），
  *   同时用 logcat 兜底；[onNativeReady] 调 `nativeQolLogInit()` 后按序重放 backlog，再置就绪直写。
  *   native 永不就绪则只走 logcat。
- * - **debug 门控**：`debug()` 在构造消息前检查 [ModuleConfig.debugLogEnabled]，关闭时直接返回。
+ * - debug 日志始终交给 native logger，由 native 配置执行门控。
  * - **error 单行化**：message 与压缩栈合并为单行，非 debug 不产生多行。
  */
 object LogFile {
 
     private const val LOGCAT_TAG = "Inotia4Qol"
-    private const val FILE_NAME = "inotia4-export.log"
+    private const val FILE_NAME = "qol.log"
     private const val BACKLOG_LIMIT = 512
     private const val STACK_FRAME_LIMIT = 8
 
@@ -70,7 +70,6 @@ object LogFile {
         synchronized(lock) {
             if (nativeReady) return
             NativeBridge.nativeQolLogInit()
-            NativeBridge.nativeQolLogSetDebugEnabled(ModuleConfig.debugLogEnabled)
             while (true) {
                 val pending = backlog.poll() ?: break
                 NativeBridge.nativeQolLogWrite(
@@ -81,15 +80,13 @@ object LogFile {
         }
     }
 
-    /** debug 日志是否开启（由 [ModuleConfig.debugLogEnabled] 决定）。 */
-    fun isDebugEnabled(): Boolean = ModuleConfig.debugLogEnabled
+    fun isDebugEnabled(): Boolean = true
 
     /** 统一日志文件路径（native 实际写入路径）。 */
-    fun path(): String = TargetPackages.externalFilesPath(FILE_NAME)
+    fun path(): String = TargetPackages.qolFilesPath(FILE_NAME)
 
-    /** debug 日志：门控开启时才在调用线程构造消息（惰性 lambda）。 */
+    /** Debug 日志门控由 native logger 执行。 */
     fun debug(domain: LogDomain, message: () -> String) {
-        if (!ModuleConfig.debugLogEnabled) return
         emit(LEVEL_DEBUG, domain, message())
     }
 
@@ -103,7 +100,19 @@ object LogFile {
 
     /** 错误日志：message 与压缩栈合并为单行（无栈时省略 ` stack=`）。 */
     fun error(domain: LogDomain, message: String, t: Throwable? = null) {
-        emit(LEVEL_ERROR, domain, if (t == null) message else "$message stack=${stackSummary(t)}")
+        val throwableSummary = t?.let(::stackSummary)
+        val logMessage = throwableSummary?.let { "$message stack=$it" } ?: message
+        try {
+            emit(LEVEL_ERROR, domain, logMessage)
+        } finally {
+            try {
+                ModuleErrorDialog.enqueue(
+                    formatModuleErrorDialogDetails(domain, message, throwableSummary),
+                )
+            } catch (_: Throwable) {
+                // Dialog failures must not replace or recursively report the original log error.
+            }
+        }
     }
 
     /**
@@ -256,4 +265,14 @@ object LogFile {
 
     private fun ByteArray.toHex(): String =
         joinToString(separator = "") { byte -> "%02x".format(Locale.US, byte.toInt() and 0xff) }
+}
+
+internal fun formatModuleErrorDialogDetails(
+    domain: LogDomain,
+    message: String,
+    throwableSummary: String?,
+): String = buildString {
+    append("domain=").append(domain.token)
+    append("\nmessage=").append(message)
+    if (throwableSummary != null) append("\nthrowable=").append(throwableSummary)
 }

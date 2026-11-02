@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""把 `.qol_save` 备份 bundle 完整解析为可读 JSON。
+"""把 `.qol.bak` 备份 bundle 完整解析为可读 JSON（旧 `.qol_save` 同样接受）。
 
-解析层次（格式依据 docs/development/features/save-backup.md §3、docs/reference/game/save.md）：
+解析层次（格式依据 docs/archive/development/features/save-backup.md §3、docs/reference/game/save.md）：
   1. bundle 容器：magic/formatVersion/分段边界/CRC32/checksum（sha256(origPlain‖module‖wh) 前 12 位）。
   2. metaJson 元数据。
   3. 原版存档明文 origPlain：块表、块 0 Information、块 3 Inventory（含内嵌 WH96v002 段检测）。
@@ -10,7 +10,7 @@
      +0x38 FNV-1a 64 完整性值；flags=0（密文）仅输出摘要（需设备密钥，无法离线解析）。
 
 用法：
-  uv run scripts/analysis/parse_qol_save.py <file.qol_save> [-o out.json]
+  uv run scripts/analysis/parse_qol_save.py <file.qol.bak> [-o out.json]
 
 stdout 输出纯 JSON（人类提示走 stderr）；解析失败输出 {"ok": false, "error": ...} 并退出码 1。
 """
@@ -25,7 +25,8 @@ from datetime import datetime
 from pathlib import Path
 
 BUNDLE_MAGIC = 0x51534231  # "QSB1"（大端）
-BUNDLE_SUFFIX = ".qol_save"
+BUNDLE_SUFFIX = ".qol.bak"
+LEGACY_BUNDLE_SUFFIX = ".qol_save"
 WH4_PLAIN_MAGIC = b"WH4JRN01"
 WH96_MAGIC = b"WH96v002"
 MSAV_MAGIC = 0x4D534156  # "MSAV"（大端）
@@ -145,7 +146,7 @@ def parse_block_table(plain: bytes) -> dict:
     """明文块表：[0..8) 头，[8+i*4) 每项 u16 offset_rel + u16 len，块数据 = plain + offset_rel + 8。
 
     块数按 C++ 剥离实现同一规则精确得出：块 0 数据紧跟块表 ⇒ offset_rel0 == 表字节数，
-    block_count = offset_rel0 / 4（与 save_backup_bundle.cpp warehouse_strip_inline_segment 一致）。
+    block_count = offset_rel0 / 4（与 plugins/save_backup/bundle.cpp warehouse_strip_inline_segment 一致）。
     """
     if len(plain) < 12:
         raise ParseError("plain too small for block table")
@@ -419,12 +420,12 @@ def parse_warehouse(wh: bytes, format_version: int) -> dict:
 
 def parse_checksum(parts: list[bytes], meta: dict, file_name: str) -> dict:
     computed = hashlib.sha256(b"".join(parts)).hexdigest()[:12]
-    expected_suffix = f"_{computed}{BUNDLE_SUFFIX}"
+    expected_suffixes = (f"_{computed}{BUNDLE_SUFFIX}", f"_{computed}{LEGACY_BUNDLE_SUFFIX}")
     return {
         "computed": computed,
         "matches_meta": meta.get("checksum") == computed,
-        "filename_locatable": file_name.endswith(expected_suffix),
-        "filename_note": "导入按 `_<checksum>.qol_save` 文件名后缀定位；浏览器重名后缀如 `(1)` 会让定位失败（backup not found）",
+        "filename_locatable": any(file_name.endswith(s) for s in expected_suffixes),
+        "filename_note": "导入按 `_<checksum>.qol.bak`（旧 `.qol_save` 兼容）文件名后缀定位；浏览器重名后缀如 `(1)` 会让定位失败（backup not found）",
     }
 
 
@@ -453,8 +454,8 @@ def parse_qol_save(path: Path) -> dict:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="解析 .qol_save 备份为可读 JSON")
-    parser.add_argument("bundle", type=Path, help=".qol_save 文件路径")
+    parser = argparse.ArgumentParser(description="解析 .qol.bak（兼容 .qol_save）备份为可读 JSON")
+    parser.add_argument("bundle", type=Path, help=".qol.bak / .qol_save 文件路径")
     parser.add_argument("-o", "--output", type=Path, default=None, help="输出 JSON 路径（缺省打印 stdout）")
     args = parser.parse_args()
 

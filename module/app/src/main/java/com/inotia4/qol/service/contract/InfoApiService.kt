@@ -24,44 +24,31 @@ interface InfoApiService {
     fun mercenary(): String
     fun mercenaryList(): String
     fun mercenarySlot(slot: Int): String
-    fun inventory(): String
+    fun inventory(space: Int? = null, cursor: String? = null, limit: Int? = null): String
     fun inventoryMoney(): String
-    fun inventoryItems(): String
-    fun bagInfo(bag: Int): String
-    fun bagSlot(bag: Int, slot: Int): String
+    fun inventoryItems(space: Int? = null, cursor: String? = null, limit: Int? = null): String
+    fun bagInfo(bag: Int, space: Int? = null): String
+    fun bagSlot(bag: Int, slot: Int, space: Int? = null): String
     fun quest(): String
     fun questActive(): String
     fun questDetails(): String
     fun questListId(id: Int): String
     fun questCompleted(): String
-    fun ui(): String
-    fun uiScreen(): String
-    fun uiPanel(): String
-    fun uiDialog(): String
+    fun uiState(): String
+    fun uiStateTable(): String
     fun game(): String
     fun gameSnapshot(): String
     fun gameInfo(): String
     fun gameFrame(): String
     fun events(since: Long?): String
     fun health(): String
+    fun featureStatusJson(): String
+    fun systemResourcesJson(): String
+    fun ticketStateJson(ticket: Long): String
     fun npcDialogOptions(): String
     fun shopItems(): String
     fun debugUi(): String
     fun debugPath(tx: Int, ty: Int): String
     fun debugItemRaw(bag: Int, slot: Int): String
-    fun exp1BtnBehavior(): String
-    fun exp2AddControl(): String
-    fun exp3CustomDialog(text: String): String
-    fun exp4TextAppearance(): String
-    fun exp5NewPanel(): String
-    fun expRestoreAll(): String
-    fun expStatus(): String
-    fun settingsUiInject(): String
     fun settingsUiStatus(): String
-    fun settingsUiRestore(): String
-    fun settingsUiOpenOption(): String
-    fun settingsUiOpenPanel(): String
-    fun extensionBagStatusJson(): String
-    fun extensionBagTestEquip(index: Int, bagType: Int): String
-    fun extensionBagTestItem(index: Int, slot: Int, category: Int, count: Int): String
 }

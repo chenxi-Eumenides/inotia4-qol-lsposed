@@ -1,0 +1,18 @@
+#pragma once
+
+// inventory_hooks 插件内部入口（D2c-2a）：声明式资源声明表与入口 hook backup 交还。
+// 实现位于 inventory_hooks.cpp，claims 表与 wrapper 地址同 TU；
+// plugin.cpp 与 inventory_hooks.cpp 同层，直接 include 本头即可，
+// 不再需要为规避跨层依赖而设的全局桥（原 inventory_hooks_claims /
+// inventory_hooks_bind_backup 前置声明）。
+
+#include <cstdint>
+
+#include "../../../contracts/plugin.h"
+
+// Inventory entry-hook declarations (static storage, process lifetime); out_count is optional.
+const qol::contracts::ResourceClaim* inventory_hooks_claims(uint32_t* out_count);
+
+// 入口 hook backup 交还（宿主 on_resource_ready 调用）：按资源 id 写入对应 wrapper 的
+// 原函数槽；未知 id / 空 backup 返回非 0，宿主按 fail-closed 回滚。
+int32_t inventory_hooks_bind_backup(const char* resource_id, void* backup);

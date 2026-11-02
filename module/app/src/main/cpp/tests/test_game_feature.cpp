@@ -1,8 +1,8 @@
 // host 单测：功能抽象层 game_feature（能力位 → 功能状态、monster 系列特判、名称表）。
-// 链接 core/native/game_feature.cpp + game_variant.cpp + qol_log.cpp；Android 头由 stubs/ 覆盖。
-#include "core/native/game_feature.h"
+// 链接 game/feature/game_feature.cpp + game_variant.cpp + qol_log.cpp；Android 头由 stubs/ 覆盖。
+#include "game/feature/game_feature.h"
 
-#include "core/native/game_variant.h"
+#include "game/variants/game_variant.h"
 
 #include <cstdint>
 #include <cstdio>

@@ -1,0 +1,600 @@
+#include "plugin.h"
+
+#include <atomic>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+
+#include "../../contracts/http.h"
+#include "../../contracts/panels.h"
+#include "../../contracts/save_facts.h"
+#include "../../contracts/save_pre_save.h"
+#include "../../contracts/world_facts.h"
+#include "../../contracts/game_ports/save_call_port.h"
+#include "../../contracts/game_ports/save_write_port.h"
+#include "../../contracts/commands.h"
+#include "../../contracts/runtime_hooks.h"
+#include "../../contracts/ui.h"
+#include "../../contracts/ui_confirmation.h"
+#include "api/commands.h"
+#include "bundle.h"
+#include "feature.h"
+#include "log.h"
+#include "ui/panel.h"
+
+namespace qol::features::save_backup {
+namespace {
+
+#define SB_LOG(...) SAVE_BACKUP_LOG_INFO(__VA_ARGS__)
+
+namespace api = ::save_backup::api;
+
+constexpr const char* kPluginId = "save_backup";
+constexpr const char* kPluginVersion = "0.1.0";
+
+// 指针槽资源登记名：与 game/access/ptr_slots 的 kSlots 条目一一对应。
+constexpr const char* kSlotDeleteResourceId = "ptrslot:SAVESLOT_DELETE_GOT";
+
+const contracts::CapabilityRequirement kRequires[] = {
+    {
+        contracts::kUiComponentsCapabilityId,
+        {contracts::kUiContractMajor, contracts::kUiContractMinor},
+    },
+    {
+        contracts::kUiPanelsCapabilityId,
+        {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor},
+    },
+    {
+        contracts::kSaveFactsCapabilityId,
+        {contracts::kSaveFactsVersionMajor, contracts::kSaveFactsVersionMinor},
+    },
+    {
+        contracts::kSavePreSaveCapabilityId,
+        {contracts::kSavePreSaveVersion.major, contracts::kSavePreSaveVersion.minor},
+    },
+    {
+        contracts::kWorldFactsCapabilityId,
+        {contracts::kWorldFactsVersion.major, contracts::kWorldFactsVersion.minor},
+    },
+    {
+        contracts::kUiConfirmationCapabilityId,
+        {contracts::kUiConfirmationVersionMajor, contracts::kUiConfirmationVersionMinor},
+    },
+};
+
+const contracts::CapabilityRequirement kOptionalHttpRequires[] = {
+    {contracts::kHttpRegistryCapabilityId,
+     {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor}},
+    {contracts::kHttpDispatchCapabilityId,
+     {contracts::kHttpDispatchVersion.major, contracts::kHttpDispatchVersion.minor}},
+};
+
+const contracts::QolPortRequirement kPorts[] = {
+    {contracts::QolPortId::QOL_PORT_SAVE_CALL,
+     {contracts::kQolPortSaveCallVersion.major, contracts::kQolPortSaveCallVersion.minor}},
+};
+
+// 游戏内备份面板 provider：由 core.ui 容器（设置页「存档备份」动作项）经 ui_panels 打开。
+// 回调交给 core.custom_ui 的 PopupHost：PopupState 占用、push、set_process_info、overlay scope
+// 都由 host 统一负责，插件只在回调里绘制与处理输入。
+const contracts::PanelCallbacks kPanelCallbacks{&savebackup_panel_enter, &savebackup_panel_process,
+                                                &savebackup_panel_f3, &savebackup_panel_f4,
+                                                &savebackup_panel_event};
+
+const contracts::PanelProviderSpec kPanelProvider = {
+    "save_backup",
+    kPluginId,
+    &savebackup_provider_open,
+    &savebackup_provider_close,
+    &savebackup_provider_active,
+    &savebackup_provider_block_reason,
+    &kPanelCallbacks,
+};
+
+// 常开标记：无配置门禁；仅用于 fill_status 上报（HTTP/UI 业务不受其门控）。
+std::atomic<bool> g_active{true};
+
+// 主线程槽元数据刷新任务（RenderPre，每 30 帧）；0 表示未注册。
+uint64_t g_slot_meta_task = 0;
+
+// typed result 命令注册状态；install/deactivate 对称注销。
+bool g_commands_registered = false;
+
+// save.pre_save 观察者：保存前自动备份。
+const contracts::SavePreSaveApi* g_pre_save_api = nullptr;
+uint64_t g_pre_save_observer = 0;
+
+void pre_save_cb(void*, int32_t slot) { save_backup_autobackup_pre_save(slot); }
+
+int32_t slot_meta_tick(int64_t, void*) {
+    save_backup_refresh_slot_meta_cache();
+    return 0;
+}
+
+// 删档原函数入口：宿主安装 kPtrSlot 资源成功后经 on_resource_ready 交还（§3.3 backup 交还）。
+// wrapper 先回调原函数（删 save{n}.dat + 重载三槽），再调业务同步体删该槽 sidecar。
+std::atomic<void*> g_slot_delete_orig{nullptr};
+
+// 执行上下文：游戏主线程（UIPopupMsg_ButtonOKExe → blr），x0 = slot(int32_t)。
+// 槽值由宿主按声明写入本 wrapper；原函数入口经 g_slot_delete_orig 取回。
+void slot_delete_hook_wrapper(int32_t slot) {
+    void* orig = g_slot_delete_orig.load(std::memory_order_acquire);
+    if (orig != nullptr) {
+        reinterpret_cast<void (*)(int32_t)>(orig)(slot);
+    }
+    save_backup_slot_deleted_sync(slot);
+}
+
+// 声明式资源：删档回调 GOT 槽（PopupState 由 core.custom_ui 的 PopupHost 统一占用）。
+// 槽址/期望值由 game/access/ptr_slots 解析；handler 为本 wrapper；常驻（gate=nullptr）、
+// 必需、fail-closed、可物理还原（归还时写回期望值）。
+const contracts::ResourceClaim kResources[] = {
+    {
+        kSlotDeleteResourceId,   // id
+        kSlotDeleteResourceId,   // symbol（与登记名同串，经 game/access 指针槽登记解析）
+        contracts::ResourceMechanism::kPtrSlot,
+        contracts::ResourcePolicy::kPrivate,
+        contracts::ResourceRequirement::kRequired,
+        contracts::ResourceFailure::kFailClosed,
+        true,                    // resumable
+        kPluginId,               // owner
+        "内存档面板删档后游戏立即重载槽区，模块必须同步清掉该槽 sidecar",  // reason
+        nullptr,                 // gate（常驻）
+        120,                     // step_budget
+        reinterpret_cast<void*>(&slot_delete_hook_wrapper),  // handler
+    },
+};
+
+// ---- HTTP 面：备份四端点（owner=save_backup）----
+// 声明式注册：descriptor 的 http 列表由宿主在插件 enabled 时注册、停用时置路由墓碑摘除，
+// 复用 dispatch 的 query（GET）/command（POST）双槽语义；插件不自注册，故无需显式注销。
+enum class SbHttpRoute : uint8_t { kList, kExport, kImport, kDelete };
+
+// checksum 恒为 ^[0-9a-f]{12}$（无转义字符），取到下一个双引号即可。
+bool sb_extract_string(const char* body, const char* key, std::string* out) {
+    const std::string pattern = std::string("\"") + key + "\":\"";
+    const char* p = std::strstr(body, pattern.c_str());
+    if (p == nullptr) return false;
+    p += pattern.size();
+    const char* end = std::strchr(p, '"');
+    if (end == nullptr) return false;
+    out->assign(p, static_cast<size_t>(end - p));
+    return true;
+}
+
+QolResult sb_http_error(contracts::HttpRes* response, uint16_t status, const char* message) {
+    const std::string body = std::string("{\"ok\":false,\"error\":\"") + message + "\"}";
+    if (response == nullptr || response->body == nullptr ||
+        response->body_capacity < body.size()) {
+        return contracts::error(kQolErrInternal, "http response buffer too small", 31);
+    }
+    std::memcpy(response->body, body.data(), body.size());
+    response->body_size = static_cast<uint32_t>(body.size());
+    response->status = status;
+    return contracts::error(status == 400 ? kQolErrInvalidArgument : kQolErrInternal, message,
+                            static_cast<uint32_t>(std::strlen(message)));
+}
+
+QolResult sb_http_body(contracts::HttpRes* response, const std::string& body) {
+    if (response == nullptr || response->body == nullptr ||
+        response->body_capacity < body.size()) {
+        return sb_http_error(response, 500, "http response buffer too small");
+    }
+    std::memcpy(response->body, body.data(), body.size());
+    response->body_size = static_cast<uint32_t>(body.size());
+    response->status = 200;
+    return contracts::ok();
+}
+
+QolResult sb_http_ticket(contracts::HttpRes* response, uint64_t ticket) {
+    const std::string body = api::ticket_json(ticket);
+    if (body.empty()) return sb_http_error(response, 500, "http response buffer too small");
+    return sb_http_body(response, body);
+}
+
+bool sb_copy_result(const std::string& result, char* out, uint32_t capacity, uint32_t* out_size) {
+    return api::copy_result(result, out, capacity, out_size);
+}
+
+bool sb_export_command(void*, const uint8_t* payload, uint32_t size, char* out, uint32_t capacity,
+                       uint32_t* out_size) {
+    if (payload == nullptr || size != sizeof(api::ExportPayload)) return false;
+    api::ExportPayload request{};
+    std::memcpy(&request, payload, sizeof(request));
+    return sb_copy_result(save_backup_export_json(request.slot), out, capacity, out_size);
+}
+
+bool sb_import_command(void*, const uint8_t* payload, uint32_t size, char* out, uint32_t capacity,
+                       uint32_t* out_size) {
+    if (payload == nullptr || size != sizeof(api::ImportPayload)) return false;
+    api::ImportPayload request{};
+    std::memcpy(&request, payload, sizeof(request));
+    return sb_copy_result(save_backup_import_json(request.checksum, request.slot), out, capacity,
+                          out_size);
+}
+
+bool sb_delete_command(void*, const uint8_t* payload, uint32_t size, char* out, uint32_t capacity,
+                       uint32_t* out_size) {
+    if (payload == nullptr || size != sizeof(api::DeletePayload)) return false;
+    api::DeletePayload request{};
+    std::memcpy(&request, payload, sizeof(request));
+    return sb_copy_result(save_backup_delete_json(request.checksum), out, capacity, out_size);
+}
+
+bool sb_post_command(uint32_t command_id, const void* payload, uint32_t size, uint64_t* ticket) {
+    const auto* sdk = save_backup_host_sdk();
+    if (sdk == nullptr || sdk->commands.post_typed == nullptr || ticket == nullptr) return false;
+    return contracts::succeeded(sdk->commands.post_typed(command_id, payload, size, ticket)) &&
+           *ticket != 0;
+}
+
+QolResult sb_http_handler(const contracts::HttpReq* request, contracts::HttpRes* response,
+                          void* ctx) {
+    if (request == nullptr || response == nullptr || ctx == nullptr) {
+        return sb_http_error(response, 400, "bad request");
+    }
+    const SbHttpRoute kind = *static_cast<const SbHttpRoute*>(ctx);
+    // HttpReq.body 无 null 结尾契约：拷贝到 std::string（自带结尾）再做字段提取。
+    // body 为 null 且长度为 0 时按空 body 处理；null + 非零长度是非法请求。
+    if (request->body == nullptr && request->body_len > 0) {
+        return sb_http_error(response, 400, "bad request");
+    }
+    const std::string body_text(
+        request->body != nullptr ? reinterpret_cast<const char*>(request->body) : "",
+        request->body_len);
+    const char* body = body_text.c_str();
+    int slot = -1;
+    switch (kind) {
+        case SbHttpRoute::kList:
+            return sb_http_body(response, save_backup_list_json());
+        case SbHttpRoute::kExport: {
+            if (!::save_backup::json_find_slot(body, slot)) {
+                return sb_http_error(response, 400, "bad slot");
+            }
+            const api::ExportPayload payload{slot};
+            uint64_t ticket = 0;
+            if (!sb_post_command(api::kCmdExport, &payload, sizeof(payload), &ticket)) {
+                return sb_http_error(response, 500, "command unavailable");
+            }
+            return sb_http_ticket(response, ticket);
+        }
+        case SbHttpRoute::kImport: {
+            std::string checksum;
+            if (!sb_extract_string(body, "checksum", &checksum) ||
+                !::save_backup::valid_checksum(checksum)) {
+                return sb_http_error(response, 400, "bad checksum");
+            }
+            if (!::save_backup::json_find_slot(body, slot)) {
+                return sb_http_error(response, 400, "bad slot");
+            }
+            api::ImportPayload payload{};
+            payload.slot = slot;
+            std::memcpy(payload.checksum, checksum.data(), checksum.size());
+            uint64_t ticket = 0;
+            if (!sb_post_command(api::kCmdImport, &payload, sizeof(payload), &ticket)) {
+                return sb_http_error(response, 500, "command unavailable");
+            }
+            return sb_http_ticket(response, ticket);
+        }
+        case SbHttpRoute::kDelete: {
+            std::string checksum;
+            if (!sb_extract_string(body, "checksum", &checksum) ||
+                !::save_backup::valid_checksum(checksum)) {
+                return sb_http_error(response, 400, "bad checksum");
+            }
+            api::DeletePayload payload{};
+            std::memcpy(payload.checksum, checksum.data(), checksum.size());
+            uint64_t ticket = 0;
+            if (!sb_post_command(api::kCmdDelete, &payload, sizeof(payload), &ticket)) {
+                return sb_http_error(response, 500, "command unavailable");
+            }
+            return sb_http_ticket(response, ticket);
+        }
+    }
+    return sb_http_error(response, 400, "bad request");
+}
+
+SbHttpRoute kSbHttpRouteKinds[] = {
+    SbHttpRoute::kList,
+    SbHttpRoute::kExport,
+    SbHttpRoute::kImport,
+    SbHttpRoute::kDelete,
+};
+
+const contracts::HttpEndpointDescriptor kSbHttpEndpoints[] = {
+    {contracts::HttpMethod::kGet, "/api/system/backup/list", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1, &sb_http_handler, nullptr,
+     &kSbHttpRouteKinds[0]},
+    {contracts::HttpMethod::kPost, "/api/system/backup/export", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &sb_http_handler,
+     &kSbHttpRouteKinds[1]},
+    {contracts::HttpMethod::kPost, "/api/system/backup/import", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &sb_http_handler,
+     &kSbHttpRouteKinds[2]},
+    {contracts::HttpMethod::kPost, "/api/system/backup/delete", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &sb_http_handler,
+     &kSbHttpRouteKinds[3]},
+};
+
+bool sb_register_commands(const qol::contracts::QolHostSdk* sdk) {
+    if (sdk == nullptr || sdk->ticket_result.register_typed_result_handler == nullptr ||
+        sdk->ticket_result.unregister_typed_result_handler == nullptr) {
+        return false;
+    }
+    if (!qol::contracts::succeeded(sdk->ticket_result.register_typed_result_handler(
+            api::kCmdExport, &sb_export_command, nullptr))) {
+        return false;
+    }
+    if (!qol::contracts::succeeded(sdk->ticket_result.register_typed_result_handler(
+            api::kCmdImport, &sb_import_command, nullptr))) {
+        (void)sdk->ticket_result.unregister_typed_result_handler(api::kCmdExport);
+        return false;
+    }
+    if (!qol::contracts::succeeded(sdk->ticket_result.register_typed_result_handler(
+            api::kCmdDelete, &sb_delete_command, nullptr))) {
+        (void)sdk->ticket_result.unregister_typed_result_handler(api::kCmdExport);
+        (void)sdk->ticket_result.unregister_typed_result_handler(api::kCmdImport);
+        return false;
+    }
+    return true;
+}
+
+void sb_unregister_commands(const qol::contracts::QolHostSdk* sdk) {
+    if (sdk == nullptr || sdk->ticket_result.unregister_typed_result_handler == nullptr) return;
+    (void)sdk->ticket_result.unregister_typed_result_handler(api::kCmdExport);
+    (void)sdk->ticket_result.unregister_typed_result_handler(api::kCmdImport);
+    (void)sdk->ticket_result.unregister_typed_result_handler(api::kCmdDelete);
+}
+
+int plugin_install(contracts::PluginContext& ctx) {
+    const void* ui_components_iface = nullptr;
+    const void* save_facts_iface = nullptr;
+    const void* pre_save_iface = nullptr;
+    const void* world_facts_iface = nullptr;
+    const void* ui_confirmation_iface = nullptr;
+    if (ctx.sdk == nullptr || ctx.game == nullptr || ctx.sdk->capabilities.require == nullptr ||
+        ctx.sdk->abi.size < sizeof(contracts::QolHostSdk) || ctx.sdk->abi.minor < 9 ||
+        ctx.sdk->ticket_result.register_typed_result_handler == nullptr ||
+        ctx.sdk->ticket_result.unregister_typed_result_handler == nullptr ||
+        !contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kUiComponentsCapabilityId,
+            {contracts::kUiContractMajor, contracts::kUiContractMinor},
+            &ui_components_iface)) ||
+        !contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kSaveFactsCapabilityId,
+            {contracts::kSaveFactsVersionMajor, contracts::kSaveFactsVersionMinor},
+            &save_facts_iface)) ||
+        !contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kSavePreSaveCapabilityId,
+            {contracts::kSavePreSaveVersion.major, contracts::kSavePreSaveVersion.minor},
+            &pre_save_iface)) ||
+        !contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kWorldFactsCapabilityId,
+            {contracts::kWorldFactsVersion.major, contracts::kWorldFactsVersion.minor},
+            &world_facts_iface)) ||
+        !contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kUiConfirmationCapabilityId,
+            {contracts::kUiConfirmationVersionMajor, contracts::kUiConfirmationVersionMinor},
+            &ui_confirmation_iface)) ||
+        ui_components_iface == nullptr || save_facts_iface == nullptr || pre_save_iface == nullptr ||
+        world_facts_iface == nullptr ||
+        ui_confirmation_iface == nullptr || ctx.ports == nullptr ||
+        ctx.port_count != 1 || ctx.ports[0] == nullptr) {
+        save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
+        return 1;
+    }
+    const auto* save_call = static_cast<const contracts::QolSaveCallPort*>(ctx.ports[0]);
+    const auto* ui_components = static_cast<const contracts::QolUiComponents*>(ui_components_iface);
+    const auto* save_facts = static_cast<const contracts::SaveFactsApi*>(save_facts_iface);
+    const auto* pre_save = static_cast<const contracts::SavePreSaveApi*>(pre_save_iface);
+    const auto* world_facts = static_cast<const contracts::WorldFactsApi*>(world_facts_iface);
+    const auto* ui_confirmation = static_cast<const contracts::UiConfirmationApi*>(ui_confirmation_iface);
+    if (ui_components->size < sizeof(*ui_components) ||
+        !contracts::satisfies({ui_components->major, ui_components->minor},
+                              {contracts::kUiContractMajor, contracts::kUiContractMinor}) ||
+        ui_components->panel_create == nullptr || ui_components->button_create == nullptr ||
+        ui_components->set_rect == nullptr ||
+        ui_components->nav_button_create == nullptr || ui_components->nav_button_draw == nullptr ||
+        ui_components->nav_button_set_enabled == nullptr ||
+        ui_components->arrow_button_create == nullptr || ui_components->arrow_button_set_enabled == nullptr ||
+        ui_components->arrow_button_draw == nullptr ||
+        ui_components->draw_container_styled == nullptr ||
+        ui_components->draw_rounded_rect == nullptr ||
+        ui_components->draw_control_text == nullptr || ui_components->dispatch_native_event == nullptr ||
+        ui_components->destroy == nullptr ||
+        ui_confirmation->open == nullptr || ui_confirmation->active == nullptr ||
+        ui_confirmation->close == nullptr || ui_confirmation->open_text == nullptr ||
+        !contracts::satisfies(save_call->abi_version,
+                              {contracts::kQolPortSaveCallVersion.major,
+                               contracts::kQolPortSaveCallVersion.minor}) ||
+        save_call->write.free_data == nullptr || save_call->write.encrypt == nullptr ||
+        save_call->write.mark_stale == nullptr || save_facts->load_data == nullptr ||
+        save_facts->slot_exists == nullptr || save_facts->hub_key == nullptr ||
+        save_facts->current_slot == nullptr || pre_save->abi.size < sizeof(*pre_save) ||
+        !contracts::satisfies({pre_save->abi.major, pre_save->abi.minor},
+                              {contracts::kSavePreSaveVersion.major,
+                               contracts::kSavePreSaveVersion.minor}) ||
+        pre_save->register_observer == nullptr || pre_save->unregister_observer == nullptr ||
+        world_facts->state == nullptr) {
+        save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
+        return 1;
+    }
+    save_backup_bind_context(ctx.sdk, save_facts, save_call, ctx.game, ctx.owner_token);
+    save_backup_bind_world_facts(world_facts);
+    if (!sb_register_commands(ctx.sdk)) {
+        save_backup_bind_world_facts(nullptr);
+        save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
+        return 1;
+    }
+    g_commands_registered = true;
+    g_active.store(true, std::memory_order_release);
+    if (g_pre_save_observer == 0) {
+        uint64_t observer = 0;
+        if (!contracts::succeeded(
+                pre_save->register_observer(ctx.owner_token, &pre_save_cb, nullptr, &observer)) ||
+            observer == 0) {
+            g_active.store(false, std::memory_order_release);
+            if (g_commands_registered) {
+                sb_unregister_commands(ctx.sdk);
+                g_commands_registered = false;
+            }
+            save_backup_bind_world_facts(nullptr);
+            save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
+            return 1;
+        }
+        g_pre_save_api = pre_save;
+        g_pre_save_observer = observer;
+    }
+    // 自身初始化：资源由宿主声明式安装；本面板注册 provider 供 core.ui 容器打开。
+    if (ctx.sdk == nullptr || ctx.sdk->panels.register_provider == nullptr ||
+        !contracts::succeeded(ctx.sdk->panels.register_provider(&kPanelProvider))) {
+        if (g_pre_save_observer != 0 && g_pre_save_api != nullptr &&
+            g_pre_save_api->unregister_observer != nullptr) {
+            (void)g_pre_save_api->unregister_observer(ctx.owner_token, g_pre_save_observer);
+        }
+        g_pre_save_observer = 0;
+        g_pre_save_api = nullptr;
+        if (g_commands_registered) {
+            sb_unregister_commands(ctx.sdk);
+            g_commands_registered = false;
+        }
+        save_backup_bind_world_facts(nullptr);
+        save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
+        return 1;
+    }
+    savebackup_set_ui_components(ui_components);
+    savebackup_set_ui_confirmation_api(ui_confirmation);
+    // 游戏主线程刷新槽元数据快照；HTTP 导出只读缓存，不跨线程读游戏槽结构。
+    if (ctx.sdk->scheduler.add != nullptr && g_slot_meta_task == 0) {
+        uint64_t task = 0;
+        if (contracts::succeeded(ctx.sdk->scheduler.add(
+                contracts::kQolRuntimeFramePointRenderPre, &slot_meta_tick, nullptr, 30, 0,
+                &task))) {
+            g_slot_meta_task = task;
+        }
+    }
+    return 0;
+}
+
+void plugin_deactivate(contracts::PluginContext& ctx) {
+    // 资源归还包括物理写回原槽值（宿主引擎执行）；本回调只翻转上报标记（幂等）。
+    if (ctx.sdk != nullptr && ctx.sdk->capabilities.require != nullptr) {
+        const void* iface = nullptr;
+        if (contracts::succeeded(ctx.sdk->capabilities.require(
+                contracts::kUiPanelsCapabilityId,
+                {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor}, &iface)) &&
+            iface != nullptr) {
+            const auto* panels = static_cast<const contracts::UiPanelsApi*>(iface);
+            if (panels->deactivate_owner != nullptr) (void)panels->deactivate_owner(kPluginId);
+        }
+    }
+    savebackup_set_ui_components(nullptr);
+    savebackup_set_ui_confirmation_api(nullptr);
+    g_active.store(false, std::memory_order_release);
+    if (g_commands_registered) {
+        sb_unregister_commands(ctx.sdk);
+        g_commands_registered = false;
+    }
+    if (g_slot_meta_task != 0 && ctx.sdk != nullptr && ctx.sdk->scheduler.remove != nullptr) {
+        (void)ctx.sdk->scheduler.remove(g_slot_meta_task);
+    }
+    g_slot_meta_task = 0;
+    if (ctx.sdk != nullptr && ctx.sdk->panels.unregister_owner != nullptr) {
+        (void)ctx.sdk->panels.unregister_owner(kPluginId);
+    }
+    if (g_pre_save_observer != 0 && g_pre_save_api != nullptr &&
+        g_pre_save_api->unregister_observer != nullptr) {
+        (void)g_pre_save_api->unregister_observer(ctx.owner_token, g_pre_save_observer);
+    }
+    g_pre_save_observer = 0;
+    g_pre_save_api = nullptr;
+    save_backup_bind_world_facts(nullptr);
+    save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
+}
+
+void plugin_on_enabled(contracts::PluginContext& ctx) {
+    (void)ctx;
+    g_active.store(true, std::memory_order_release);
+}
+
+void plugin_on_disabled(contracts::PluginContext& ctx) {
+    (void)ctx;
+    g_active.store(false, std::memory_order_release);
+}
+
+int32_t plugin_on_resource_ready(contracts::PluginContext& ctx, const char* resource_id,
+                                 void* backup) {
+    (void)ctx;
+    // 受限回调（§3.3）：只缓存 backup（原函数入口），常数时间、无资源操作。
+    if (resource_id != nullptr && std::strcmp(resource_id, kSlotDeleteResourceId) == 0) {
+        g_slot_delete_orig.store(backup, std::memory_order_release);
+        SB_LOG("slot delete hook: backup handover orig=%p", backup);
+    }
+    return 0;
+}
+
+void plugin_fill_status(contracts::PluginStatusOut& out) {
+    out.enabled = g_active.load(std::memory_order_acquire);
+    out.error = nullptr;
+}
+
+QolResult open_manager_feature(contracts::PluginContext& ctx) {
+    if (ctx.sdk == nullptr || ctx.sdk->capabilities.require == nullptr) {
+        constexpr char message[] = "panel capability lookup unavailable";
+        return contracts::error(kQolErrNotReady, message, sizeof(message) - 1);
+    }
+    const void* iface = nullptr;
+    const auto result = ctx.sdk->capabilities.require(
+        contracts::kUiPanelsCapabilityId,
+        {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor}, &iface);
+    if (!contracts::succeeded(result)) return result;
+    if (iface == nullptr || static_cast<const contracts::UiPanelsApi*>(iface)->open == nullptr) {
+        constexpr char message[] = "panel navigation unavailable";
+        return contracts::error(kQolErrNotReady, message, sizeof(message) - 1);
+    }
+    // Shared navigation preserves the backup page's nested push/back behavior.
+    if (static_cast<const contracts::UiPanelsApi*>(iface)->open("save_backup")) {
+        return contracts::ok();
+    }
+    constexpr char message[] = "save backup manager is not ready or navigation was rejected";
+    return contracts::error(kQolErrBlocked, message, sizeof(message) - 1);
+}
+
+constexpr contracts::FeatureDefinition kFeatures[] = {
+    {"save_backup.open_manager", 1, contracts::FeatureCategory::kTools,
+     contracts::FeatureType::kEntry, "存档备份", "存档备份并支持跨设备导入导出",
+      nullptr, &open_manager_feature, "打开", -2},
+};
+
+const contracts::PluginDescriptor kDescriptor = {
+    kPluginId,
+    kPluginVersion,
+    6, kRequires,  // requires=ui_components + ui_panels + save.facts + save.pre_save + world.facts + ui_confirmation
+    2, kOptionalHttpRequires, // optional_requires=http.registry + http.dispatch
+    0, nullptr,   // provides
+    1, kResources,// resources（删档回调 GOT 槽；PopupState 由 core.custom_ui PopupHost 托管）
+    0, nullptr,   // jni（JNI 入口由 bridge/native/gamebridge_operations.cpp 保留）
+    &plugin_install,
+    &plugin_deactivate,
+    &plugin_on_enabled,
+    &plugin_on_disabled,
+    &plugin_fill_status,
+    &plugin_on_resource_ready,
+    kPorts,
+    1,
+    nullptr, 0,
+    kFeatures, 1,
+    kSbHttpEndpoints,
+    static_cast<uint32_t>(sizeof(kSbHttpEndpoints) / sizeof(kSbHttpEndpoints[0])),
+    nullptr,
+    nullptr, 0,
+};
+
+}  // namespace
+
+const contracts::PluginDescriptor& plugin_descriptor() {
+    return kDescriptor;
+}
+
+}  // namespace qol::features::save_backup

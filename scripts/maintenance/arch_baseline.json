@@ -1,0 +1,5 @@
+{
+  "说明": "架构校验基线快照（棘轮）：只允许收缩。新增违规即失败；消除后重新冻结。",
+  "生成命令": "uv run python scripts/maintenance/check_arch.py --freeze",
+  "violations": []
+}

@@ -1,0 +1,33 @@
+=== check_arch ===
+  ✅ check_layers
+  ✅ check_offsets
+  ✅ check_jni
+  ✅ check_resources
+
+全部通过
+=== check_http_routes ===
+owner distribution: {'autosell': 2, 'core.api': 6, 'core.character': 41, 'core.craft': 1, 'core.custom_ui': 3, 'core.data': 12, 'core.feature': 1, 'core.item': 21, 'core.quest': 8, 'core.save': 3, 'core.system': 5, 'core.ui_state': 9, 'core.world': 12, 'extension_bag': 8, 'legacy.debug': 3, 'save_backup': 4, 'settings': 8}
+duplicates: 0
+controller -> native missing: 0
+native -> controller extra: 0
+api-reference -> native missing: 0
+native -> api-reference extra: 0
+=== check_resources ===
+  ptr slot: 0 文件 / 0 安装点 / 0 符号
+  重复安装资源 0 个（机制|符号 → 安装文件）：
+    （无）
+== 资源安装点与重复安装检测 ==
+  违规 0 条（基线 0 条 / 豁免 0 条 / 新增 0 条）
+[check_resources] 通过
+=== check_jni ===
+  Kotlin external=158，native 导出=158，类名分布=[NativeBridge=158]
+== Kotlin external ↔ native JNI 导出 ==
+  违规 0 条（基线 0 条 / 豁免 0 条 / 新增 0 条）
+[check_jni] 通过
+=== check_offsets ===
+  game 层豁免文件 166 个；命中 无
+== 裸地址与符号头越权 ==
+  违规 0 条（基线 0 条 / 豁免 0 条 / 新增 0 条）
+[check_offsets] 通过
+=== git diff --check ===
+PASS

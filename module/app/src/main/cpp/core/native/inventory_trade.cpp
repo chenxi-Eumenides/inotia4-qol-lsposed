@@ -6,13 +6,12 @@
 
 #include "inventory_trade.h"
 
-#include "core/native/extension_bag_port.h"
-#include "core/native/qol_log.h"
-#include "core/native/stack_codec.h"
-#include "core/native/stack_limit_port.h"
-#include "game_access.h"
-#include "game_state.h"
-#include "game_symbols.h"
+#include "contracts/item_facts.h"
+#include "infra/log/qol_log.h"
+#include "infra/capabilities.h"
+#include "game/access/game_access.h"
+#include "game/access/item_handle_registry.h"
+#include "game/state/game_state.h"
 
 #include <cstdint>
 #include <mutex>
@@ -22,6 +21,21 @@ namespace inventory_trade {
 namespace {
 
 std::mutex g_inventory_trade_mtx;
+
+const qol::contracts::ItemFactsApi* item_facts_api() {
+    const void* iface = qol::infra::require_capability(
+        qol::contracts::kItemFactsCapabilityId,
+        {qol::contracts::kItemFactsVersionMajor, qol::contracts::kItemFactsVersionMinor});
+    const auto* facts = static_cast<const qol::contracts::ItemFactsApi*>(iface);
+    if (!qol::contracts::item_facts_api_quote_size_valid(facts) || facts->quote == nullptr) {
+        return nullptr;
+    }
+    return facts;
+}
+
+bool rollback_money(int64_t price) {
+    return fn_minus_money != nullptr && fn_minus_money(price) != 0;
+}
 
 Result sell_locked(int bag, int slot, const void* expected_item, const char* source) {
     Result result;
@@ -33,8 +47,7 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
         result.status = Status::kTaskBagExcluded;
         return result;
     }
-    if (fn_remove_item == nullptr || fn_add_money == nullptr ||
-        fn_minus_money == nullptr || fn_item_get_sell_price == nullptr ||
+    if (fn_add_money == nullptr || fn_minus_money == nullptr ||
         fn_item_is_no_sell == nullptr || fn_get_bit == nullptr) {
         result.status = Status::kSymbolsUnresolved;
         return result;
@@ -54,6 +67,10 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
         return result;
     }
     void* item = item_ref.native_item;
+    if (fn_remove_item == nullptr) {
+        result.status = Status::kSymbolsUnresolved;
+        return result;
+    }
     const uint16_t flags = *reinterpret_cast<uint16_t*>(
         reinterpret_cast<uint8_t*>(item) + I_TYPE);
     const int category = fn_get_bit(flags, 15, 6);
@@ -63,7 +80,7 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
     // UIEquip_ButtonDestroyExe(0xb6240) 仅做金额预演（x23=0x666 标记）+ 创建确认弹窗；
     // 弹窗 OK 回调 UIEquip_OKDestroyItem(0xb83d0) 才是真实结算（背包分支走 0x1261c4
     // 删物品 + 加钱，game_symbols.h 反汇编结论）。弹窗前步骤无业务副作用，API 在此
-    // 直连结算语义：金额计算 + INVEN_RemoveItem（经 Stage4 Hook，扩展物品透明路由）。
+    // 直连结算语义：金额计算 + INVEN_RemoveItem（经 Stage4 Hook 的物品处理链）。
     if (fn_item_is_no_sell(category) != 0) {
         QOL_LOG_WARN(QolDomain::kInventory,
                      "sell price reject reason=no_sell source=%s category=%d count=%d "
@@ -72,27 +89,43 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
         result.status = Status::kNoSell;
         return result;
     }
-    const int count = fn_get_cumulate_count != nullptr
-        ? fn_get_cumulate_count(item) : 1;
-    result.count = count;
-    const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
-    const int64_t price = extension_bag_sell_price(item, count);  // 默认变体折扣 70%
-    if (price < 0) {
+    const auto* facts = item_facts_api();
+    if (facts == nullptr) {
+        result.status = Status::kSymbolsUnresolved;
+        return result;
+    }
+    uint32_t owner = qol::contracts::kQolItemHandleOwnerGame;
+    qol::contracts::QolItemHandle handle = qol::game::lookup_item(item, &owner);
+    if (handle.slot == 0 || handle.generation == 0) {
+        handle = qol::game::register_item(item, owner);
+    }
+    if (handle.slot == 0 || handle.generation == 0) {
+        result.status = Status::kSymbolsUnresolved;
+        return result;
+    }
+    qol::contracts::QolSaleQuote quote{};
+    quote.struct_size = sizeof(quote);
+    if (!qol::contracts::succeeded(facts->quote(handle, qol::contracts::kDetailSell, &quote)) ||
+        quote.struct_size < sizeof(quote) || quote.count <= 0 || quote.price < 0 ||
+        quote.multiplier_den == 0 || quote.multiplier_num > quote.multiplier_den) {
         QOL_LOG_WARN(QolDomain::kInventory,
                      "sell price reject reason=price_bounds source=%s category=%d count=%d "
-                     "unit=%lld variant=100 payload=0 gen=0",
-                     source, category, count, static_cast<long long>(unit_price));
+                     "unit=%lld multiplier=%u/%u payload=0 gen=0",
+                     source, category, quote.count, static_cast<long long>(quote.unit_price),
+                     quote.multiplier_num, quote.multiplier_den);
         result.status = Status::kPriceInvalid;
         return result;
     }
+    const int64_t price = quote.price;
+    result.count = quote.count;
     QOL_LOG_INFO(QolDomain::kInventory,
-                 "sell price source=%s category=%d count=%d unit=%lld variant=100 "
+                 "sell price source=%s category=%d count=%d unit=%lld multiplier=%u/%u "
                  "final=%lld payload=0 gen=0",
                  source,
                  category,
-                 static_cast<int>(stack_codec::effective_clamp(
-                     static_cast<uint32_t>(count), stack_limit_enabled())),
-                 static_cast<long long>(unit_price), static_cast<long long>(price));
+                 quote.count,
+                 static_cast<long long>(quote.unit_price), quote.multiplier_num,
+                 quote.multiplier_den, static_cast<long long>(price));
     result.price = price;
     // 与原版 UIStore_SellItem(0xd25f0) 的对照：
     //   原版链 = INVEN_RemoveItem(item) 成功后 INVEN_AddMoney(价格)，无回购列表（普通
@@ -105,14 +138,18 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
         result.status = Status::kCreditFailed;
         return result;
     }
-    // 统一走已 Hook 的 INVEN_RemoveItem：扩展物品由 Stage4 识别后走扩展删除，原版物品透传原版。
-    // 删除失败回退金币，保持扩展物品原有退款路径语义。
-    if (fn_remove_item(item) == 0) {
-        fn_minus_money(price);
-        result.status = Status::kRemoveFailed;
+    qol::contracts::QolItemHandle checkpoint{};
+    const bool suspended = qol::game::begin_item_invalidation(
+        item, qol::contracts::kQolItemHandleOwnerAny, &checkpoint);
+    const int remove_result = fn_remove_item(item);
+    if (suspended) qol::game::finish_item_invalidation(checkpoint, remove_result != 0);
+    const bool removed = remove_result != 0;
+    if (removed && !suspended) qol::game::invalidate_item(item);
+    if (!removed) {
+        result.status = rollback_money(price) ? Status::kRemoveFailed
+                                              : Status::kRollbackFailed;
         return result;
     }
-    extension_bag_sync_projected_slot(bag, slot);
     result.status = Status::kOk;
     return result;
 }
@@ -128,9 +165,13 @@ Status discard_locked(int bag, int slot, const void* expected_item) {
     if (expected_item != nullptr && static_cast<const void*>(item_ref.native_item) != expected_item) {
         return Status::kStale;
     }
-    // 统一走已 Hook 的 INVEN_RemoveItem：扩展物品由 Stage4 识别后走扩展删除，原版物品透传原版。
-    if (fn_remove_item(item_ref.native_item) == 0) return Status::kRemoveFailed;
-    extension_bag_sync_projected_slot(bag, slot);
+    qol::contracts::QolItemHandle checkpoint{};
+    const bool suspended = qol::game::begin_item_invalidation(
+        item_ref.native_item, qol::contracts::kQolItemHandleOwnerAny, &checkpoint);
+    const int removed = fn_remove_item(item_ref.native_item);
+    if (suspended) qol::game::finish_item_invalidation(checkpoint, removed != 0);
+    if (removed == 0) return Status::kRemoveFailed;
+    if (!suspended) qol::game::invalidate_item(item_ref.native_item);
     return Status::kOk;
 }
 

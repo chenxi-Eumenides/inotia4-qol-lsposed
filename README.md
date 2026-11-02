@@ -72,7 +72,7 @@
 
 ### 方式二：免 root 集成包（LSPatch）
 
-1. 从 Releases 下载与你的游戏版本对应的 `*_lspatched_v*.apk`。
+1. 从 Releases 下载与你的游戏版本对应的 `*_lspatch.apk`（命名形如 `Inotia4_<变体>_<游戏版本>_release_v<模块版本>_lspatch.apk`）。
 2. 直接覆盖安装（改版与集成包同签名可直接覆盖；原版由 Com2us 签名，需先卸载原版，请注意备份存档）。
 3. 启动游戏即可。
 
@@ -104,9 +104,8 @@ GitHub Releases：<https://github.com/chenxi-Eumenides/inotia4-qol-lsposed/relea
 
 ## 开发者
 
-- 代码架构与规范：`docs/development/architecture.md`
+- 目标架构：`ARCHITECTURE.md`
 - 构建、设备与部署：`docs/guides/build-and-deploy.md`
-- 开发待办：`docs/development/planning/backlog.md`
 - 文档索引：`docs/INDEX.md`
 - 贡献与代理工作规则：`AGENTS.md`
 

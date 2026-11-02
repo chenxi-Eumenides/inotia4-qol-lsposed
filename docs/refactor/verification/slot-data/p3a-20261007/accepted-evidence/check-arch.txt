@@ -1,0 +1,43 @@
+  文件 610 个；层分布：contracts=80、game=155、hooks=10、host=61、infra=39、legacy/inventory=2、legacy/save=1、legacy/system=2、patch=13、plugins/attribute_quality=6、plugins/attribute_range_display=4、plugins/autosell=19、plugins/character_panel_i18n=6、plugins/core.api=5、plugins/core.character=5、plugins/core.craft=2、plugins/core.custom_ui=20、plugins/core.data=4、plugins/core.feature=2、plugins/core.item=7、plugins/core.quest=5、plugins/core.save=6、plugins/core.settings=12、plugins/core.system=3、plugins/core.ui_state=2、plugins/core.world=3、plugins/craft_ui=4、plugins/custom_recipe=13、plugins/device_probe_consumer=2、plugins/device_probe_export_failure=2、plugins/device_probe_provider=2、plugins/extension_bag=50、plugins/inventory_hooks=11、plugins/move_merge=4、plugins/push_all=8、plugins/save_backup=15、plugins/simple_mode=8、plugins/special_equip=6、plugins/stack_limit=5、plugins/world_teleport=6
+  跨层依赖 Top10：
+    host → game: 107
+    game → contracts: 74
+    host → contracts: 58
+    host → infra: 48
+    plugins/extension_bag → contracts: 44
+== 层依赖方向与 include 环 ==
+  违规 0 条（基线 0 条 / 豁免 0 条 / 新增 0 条）
+[check_layers] 通过
+  game 层豁免文件 155 个；命中 无
+== 裸地址与符号头越权 ==
+  违规 0 条（基线 0 条 / 豁免 0 条 / 新增 0 条）
+[check_offsets] 通过
+  Kotlin external=149，native 导出=149，类名分布=[NativeBridge=149]
+== Kotlin external ↔ native JNI 导出 ==
+  违规 0 条（基线 0 条 / 豁免 0 条 / 新增 0 条）
+[check_jni] 通过
+  安装点 6 个 / 文件 2 个 / 去重符号 3 个 / 无法归属 0 个（0%）
+  entry hook: 0 文件 / 0 安装点 / 0 符号
+  call patch: 2 文件 / 6 安装点 / 3 符号
+  ptr slot: 0 文件 / 0 安装点 / 0 符号
+  重复安装资源 0 个（机制|符号 → 安装文件）：
+    （无）
+== 资源安装点与重复安装检测 ==
+  违规 0 条（基线 0 条 / 豁免 0 条 / 新增 0 条）
+[check_resources] 通过
+
+########## check_layers ##########
+
+########## check_offsets ##########
+
+########## check_jni ##########
+
+########## check_resources ##########
+
+===== 架构校验汇总 =====
+  ✅ check_layers
+  ✅ check_offsets
+  ✅ check_jni
+  ✅ check_resources
+
+全部通过

@@ -1,0 +1,343 @@
+// game/state/game_state.cpp —— 由 game_data.cpp 拆分生成（纯搬代码，零逻辑变更）
+
+#include "game/access/game_access.h"
+#include "game/access/inventory.h"
+#include "game/access/ui_state.h"
+#include "game/access/world.h"
+#include "game/symbols/game_symbols.h"
+#include "contracts/runtime_hooks.h"
+
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "game/state/game_state.h"
+
+bool game_in_world() {
+    return g_state != nullptr && *reinterpret_cast<uint16_t*>(g_state) == 5;
+}
+
+namespace qol::game {
+
+bool ui_main_menu_state_observed() {
+    return g_state != nullptr &&
+           is_main_menu_state(*reinterpret_cast<const uint16_t*>(g_state));
+}
+
+}  // namespace qol::game
+
+// HP/MP 上限缓存读取（数据层原语）：直接读 [ch+C_MAX_HP]/[ch+C_MAX_MP]（属性数组 attr 0x1e/0x1f
+// 的缓存槽），不调用 CHAR_GetAttr——其 attr=0x1e 分支在 HP>maxHP 时会写回 HP（str w0,[x20,#0x1f0]），
+// 在 HTTP/缓存预取线程调用会与游戏主线程属性重算竞争并永久钳低角色 HP。
+// 兜底：缓存值 <= 0（世界未就绪/属性失效）时回退当前 C_HP/C_MP，保证输出数值合理。
+int32_t char_max_hp(const void* ch) {
+    const uint8_t* b = reinterpret_cast<const uint8_t*>(ch);
+    const int32_t cached = *reinterpret_cast<const int32_t*>(b + C_MAX_HP);
+    return cached > 0 ? cached : *reinterpret_cast<const int32_t*>(b + C_HP);
+}
+
+int32_t char_max_mp(const void* ch) {
+    const uint8_t* b = reinterpret_cast<const uint8_t*>(ch);
+    const int32_t cached = *reinterpret_cast<const int32_t*>(b + C_MAX_MP);
+    return cached > 0 ? cached : *reinterpret_cast<const int32_t*>(b + C_MP);
+}
+
+// 主属性总属性（数据层原语）：CHAR_GetStat(0xdf8d0) 的直读等价实现。
+// 反汇编：bl CHAR_GetStatBase / CHAR_GetStatMain / CHAR_GetStatBonus / CHAR_GetStatSub 后
+// 依次 add w19 累加，末尾 add w0, w19, w0 返回；无 clamp、无条件分支。
+int32_t char_stat_total(const void* ch, int index) {
+    if (ch == nullptr || index < 0 || index > 4) return 0;
+    const uint8_t* b = reinterpret_cast<const uint8_t*>(ch);
+    const size_t i = static_cast<size_t>(index);
+    const int32_t base = static_cast<int8_t>(b[C_STAT_BASE + i]);   // ldrsb [ch+0x250+i]
+    const int32_t main = *reinterpret_cast<const int16_t*>(b + C_STAT_MAIN + i * 2);   // ldrsh [ch+0x256+i*2]
+    const int32_t bonus = static_cast<int8_t>(b[C_STAT_BONUS + i]); // ldrsb [ch+0x260+i]
+    const int32_t sub = *reinterpret_cast<const int16_t*>(b + C_STAT_SUB + i * 2);     // ldrsh [ch+0x266+i*2]
+    return base + main + bonus + sub;
+}
+
+// ---- next_exp 游戏线程帧缓存 ----
+// 生命周期：char_next_exp_cache_start() 在宿主装配末段注册一个常驻帧任务（kLogicPre，
+// 每帧触发），随进程存活；不进 world 时置无效。读者（JSON 预取/HTTP 线程）只读 atomic 快照，
+// 不调用任何游戏函数；未命中缓存时回退直读游戏自身的惰性缓存 [ch+0x320]。
+namespace {
+
+constexpr int kPartyRoles = 3;
+
+struct CharNextExpSlot {
+    std::atomic<void*> ch{nullptr};   // 缓存对应的角色对象（指针稳定；换角色即重新命中）
+    std::atomic<int64_t> next_exp{0};
+    std::atomic<bool> valid{false};   // false = 本槽无有效缓存（非 world / 未进队 / 符号缺失）
+};
+
+CharNextExpSlot g_char_next_exp[kPartyRoles];
+uint64_t g_char_next_exp_task = 0;  // 仅 nativeInit 线程写入
+
+// 游戏主线程回调：对 3 名队员各调用一次 CHAR_GetNextExperience（首次/升级失效后现算并写回），
+// 结果写入 atomic 快照。返回 true 保持常驻。
+bool char_next_exp_tick(int64_t frame, void* ctx);
+
+// runtime_hooks 表帧回调为 int32(非 0=继续)；本 tick 语义 bool 逐字保留。
+int32_t char_next_exp_tick_adapter(int64_t frame, void* ctx) {
+    return char_next_exp_tick(frame, ctx) ? 1 : 0;
+}
+
+bool char_next_exp_tick(int64_t /*frame*/, void* /*ctx*/) {
+    if (g_base == 0 || !game_in_world()) {
+        for (int i = 0; i < kPartyRoles; ++i) g_char_next_exp[i].valid.store(false);
+        return true;
+    }
+    for (int i = 0; i < kPartyRoles; ++i) {
+        void* ch = (fn_get_member != nullptr) ? fn_get_member(i) : nullptr;
+        const bool ok = ch != nullptr && fn_get_next_exp != nullptr;
+        g_char_next_exp[i].ch.store(ok ? ch : nullptr);
+        if (ok) g_char_next_exp[i].next_exp.store(fn_get_next_exp(ch));
+        g_char_next_exp[i].valid.store(ok);
+    }
+    return true;
+}
+
+}  // namespace
+
+void char_next_exp_cache_start() {
+    if (g_char_next_exp_task != 0) return;
+    g_char_next_exp_task = qol::contracts::qol_runtime_hooks().scheduler_add(
+        qol::contracts::kQolRuntimeFramePointLogicPre, &char_next_exp_tick_adapter, nullptr, 1, 0);
+}
+
+int64_t char_next_exp_cached(const void* ch) {
+    if (ch == nullptr) return 0;
+    for (int i = 0; i < kPartyRoles; ++i) {
+        if (g_char_next_exp[i].valid.load() && g_char_next_exp[i].ch.load() == ch)
+            return g_char_next_exp[i].next_exp.load();
+    }
+    // 回退：直读游戏自身惰性缓存 [ch+0x320]（等同 CHAR_GetNextExperience 非 0 分支）。
+    return *reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(ch) + C_NEXT_EXP);
+}
+
+int current_save_slot() {
+    if (g_base == 0) return -1;
+    uint8_t* slot = *reinterpret_cast<uint8_t**>(g_base + G_CURRENT_SLOT_GOT_VMA);
+    return slot != nullptr ? static_cast<int>(*slot) : -1;
+}
+
+// 统一 UI 状态判定（T2l-u 迁自 api/native/game_ui_read.inc；判定链逐字保持）。调用方只在
+// 游戏主线程使用（依赖 g_state/g_popup_stack）。
+const char* ui_screen() {
+    uint16_t state = g_state != nullptr ? *reinterpret_cast<uint16_t*>(g_state) : 0xFFFF;
+    // UIPopupMsg 不一定进入 popup 栈（启动确认弹窗即是此类），必须先于主菜单分支识别。
+    if (g_base != 0 && g_popup_on != nullptr && *reinterpret_cast<uint8_t*>(g_popup_on))
+        return "dialog_popup";
+    if (state == 4) {
+        // 主菜单：按 popup 栈顶细分（v0.4.18 修复：标题屏/存档选择/职业选择）
+        switch (qol::game::popup_top_vma()) {
+            case F_PANEL_SAVE_SLOT_ENTER: return "main_menu_save_slot";
+            case F_PANEL_CHAR_SELECT_ENTER: return "main_menu_character_select";
+            case F_PANEL_DAILY_REWARD_ENTER: return "main_menu_daily_reward";
+            case F_PANEL_OPTIONS_ENTER: return "main_menu_options";
+            case F_PANEL_SETTINGS_ENTER: return "main_menu_settings";
+            default: return "main_menu";
+        }
+    }
+    if (state != 5) return "loading";
+    // 药水教学残血：自动完成不暂停（阻断教学暂停，避免卡住 API 操控；tutorial_pause 枚举保留不再返回）
+    if (tutorial_state() == 6) tutorial_cancel();
+    if (qol::game::story_active()) return "dialog_story";
+    // popup 栈顶分派：对话框类（dialog_*）优先于面板类（panel_*）
+    uintptr_t top_vma = qol::game::popup_top_vma();
+    if (top_vma == 0) return "world";  // 无任何面板/对话框（含数据残留场景）
+    switch (top_vma) {
+        case F_PANEL_WIPEOUT_ENTER: return "dialog_wipeout";        // 死亡面板
+        case F_PANEL_NPC_QUEST_ENTER: return "dialog_quest";        // 任务完成面板
+        case F_PANEL_NPC_ENTER: return "dialog_npc";                // NPC 对话
+        case F_PANEL_CHOICE_ENTER: return "dialog_choice";          // 选择框（事件驱动）
+        case F_PANEL_INPUT_COUNT_ENTER: return "dialog_input_count"; // 数量输入
+        case F_PANEL_CHARACTER_INFO_ENTER: return "panel_character_info";
+        case F_PANEL_INVENTORY_ENTER: return "panel_inventory";
+        case F_PANEL_MERCENARY_ENTER: return "panel_mercenary";
+        case F_PANEL_CRAFT_ENTER: return "panel_craft";
+        case F_PANEL_NPC_REST_ENTER: return "panel_npc_rest";
+        case F_PANEL_NPC_REVIVE_ENTER: return "panel_npc_revive";
+        case F_PANEL_OPTIONS_ENTER: return "panel_options";
+        case F_PANEL_QUESTS_ENTER: return "panel_quests";
+        case F_PANEL_SAVE_SLOT_ENTER: return "panel_save_slot";
+        case F_PANEL_CHAR_SELECT_ENTER: return "panel_character_select";
+        case F_PANEL_SHORTCUT_ENTER: return "panel_shortcut";
+        case F_PANEL_SKILLS_ENTER: return "panel_skills";
+        case F_PANEL_SHOP_ENTER: return "panel_shop";
+        case F_PANEL_SETTINGS_ENTER: return "panel_settings";
+        case F_PANEL_WORLD_MAP_ENTER: return "panel_world_map";
+        case F_PANEL_IN_APP_ENTER:
+        case F_PANEL_UNK1_ENTER:
+        case F_PANEL_UNK2_ENTER:
+        case F_PANEL_UNK3_ENTER:
+        case F_PANEL_UNK4_ENTER:
+        case F_PANEL_UNK5_ENTER: return "panel_in_app";
+        case F_PANEL_DAILY_REWARD_ENTER: return "panel_daily_reward";
+        default: return "panel_ui_panel";  // 未知栈顶兜底
+    }
+}
+
+// UI 占据检查（v0.5.43）：world 态下 screen 非 "world" 即 UI 占据（对话框 dialog_*/面板 panel_*/教学）。
+// 复用 ui_screen() 统一判定（与 /api/ui/screen 同源）；返回占据的 screen 名，nullptr=无占据。
+// 用于世界操作（移动/战斗/交互/技能/物品）前置阻塞——UI 占据时游戏输入被接管，直接调 CHAR_Move
+// 等会与 UI 竞争破坏控制态（真机实测：dialog 打开时 move 仍执行）。
+const char* ui_blocked() {
+    if (!game_in_world()) return nullptr;  // 非 world 态由各操作自身 game_in_world() 前置处理
+    const char* sc = ui_screen();
+    if (sc != nullptr && strcmp(sc, "world") != 0) return sc;
+    return nullptr;
+}
+
+int tutorial_state() {
+    if (g_base == 0) return 0;
+    uint8_t* obj = *reinterpret_cast<uint8_t**>(g_base + G_TUTORIAL_OBJ_GOT_VMA);
+    if (obj == nullptr) return 0;
+    return static_cast<int>(*reinterpret_cast<uint64_t*>(obj));
+}
+
+void tutorial_cancel() {
+    if (g_base == 0) return;
+    // 复现 F_TUTORIAL_GETSTATE_VMA(0xec340)：Tutorialgetstate 轮转 + 写回 obj170 + 关闭 3 个教学标志
+    uint8_t* obj = *reinterpret_cast<uint8_t**>(g_base + G_TUTORIAL_OBJ_GOT_VMA);
+    if (obj == nullptr) return;
+    // v0.4.50：直接写 obj170=0（无教学态）而非依赖 Tutorialgetstate 返回值——轮转结果依赖
+    // 教学槽位历史，进档后旧槽残留导致轮转返回 6，教学无法退出（真机实测 v0.4.49 复现）
+    *reinterpret_cast<uint64_t*>(obj) = 0;
+    uint8_t* bb8 = *reinterpret_cast<uint8_t**>(g_base + G_TUTORIAL_FLAG1_GOT_VMA);
+    if (bb8 != nullptr) *bb8 = 0;
+    uint8_t* f170 = *reinterpret_cast<uint8_t**>(g_base + G_TUTORIAL_FLAG2_GOT_VMA);
+    if (f170 != nullptr) *f170 = 1;
+    uint8_t* ee0 = *reinterpret_cast<uint8_t**>(g_base + G_TUTORIAL_FLAG3_GOT_VMA);
+    if (ee0 != nullptr) *ee0 = 0;
+}
+
+const char* tutorial_block_error() {
+    if (tutorial_state() == 6) tutorial_cancel();
+    return nullptr;
+}
+
+void* member_or_null(int role) {
+    return (fn_get_member != nullptr && role >= 0 && role < 3) ? fn_get_member(role) : nullptr;
+}
+
+void* lead_member() {
+    // v0.4.38 移动修复：优先读游戏主控角色 PLAYER_pActivePlayer（G_PLAYER_ACTIVE_VMA，CHAR_MoveAsPath 驱动的真实对象）。
+    // 旧实现 PARTY_GetMember(0) 返回队伍槽 0 对象，其坐标是占位值（真机实测固定 240,296），
+    // 用它做 BFS 起点错误 → CHAR_Move 全部判阻挡（返回 1）→ 导航任务立即终止、角色不动。
+    if (g_player_active != nullptr) return *reinterpret_cast<void**>(g_player_active);
+    return fn_get_member != nullptr ? fn_get_member(0) : nullptr;
+}
+
+// 佣兵槽→角色指针（CHARSYSTEM_FindAsMercenarySlot 遍历大池含未上场佣兵）
+void* find_char_by_merc_slot(int slot) {
+    return fn_find_merc_slot != nullptr ? fn_find_merc_slot(slot) : nullptr;
+}
+
+void* find_inventory_item(int category) {
+    InventoryItemRef ref;
+    return find_inventory_item_ref(category, &ref) ? ref.native_item : nullptr;
+}
+
+int inventory_count() {
+    struct Ctx { int n; } ctx{0};
+    for_each_inventory_item([](const InventoryItemRef&, void* c) -> bool {
+        static_cast<Ctx*>(c)->n++;
+        return false;
+    }, &ctx);
+    return ctx.n;
+}
+
+int inventory_quantity(int category) {
+    if (category <= 0) return 0;
+    struct Ctx { int category; int quantity; } ctx{category, 0};
+    for_each_inventory_item([](const InventoryItemRef& item, void* c) -> bool {
+        Ctx* p = static_cast<Ctx*>(c);
+        if (item.category == p->category) p->quantity += item.count;
+        return false;
+    }, &ctx);
+    return ctx.quantity;
+}
+
+void* inventory_item_at(int bag, int slot) {
+    if (bag == 5) return nullptr;
+    InventoryItemRef ref{};
+    if (!inventory_item_ref_at(bag, slot, &ref)) return nullptr;
+    return ref.native_item;
+}
+
+bool find_inventory_item_ref(int category, InventoryItemRef* out) {
+    if (out == nullptr || category <= 0) return false;
+    struct Ctx { int category; InventoryItemRef* out; bool found; } ctx{category, out, false};
+    for_each_inventory_item([](const InventoryItemRef& item, void* c) -> bool {
+        Ctx* p = static_cast<Ctx*>(c);
+        if (item.category != p->category) return false;
+        *p->out = item;
+        p->found = true;
+        return true;
+    }, &ctx);
+    return ctx.found;
+}
+
+bool inventory_item_ref_at(int bag, int slot, InventoryItemRef* out) {
+    if (out == nullptr || bag < 0 || slot < 0 || slot >= 16) return false;
+    *out = {};
+    // Host only resolves native spaces: original bags 0..5 and C18 additions 6..17.
+    const qol::game::NativeBagLayout layout = qol::game::native_bag_layout();
+    if (bag >= layout.bag_limit || layout.slots == nullptr || fn_get_bit == nullptr) {
+        return false;
+    }
+    uint8_t* bag_slots = layout.slots + bag * 0x80;
+    void* item = *reinterpret_cast<void**>(bag_slots + slot * 8);
+    if (item == nullptr) return false;
+    const uint16_t flags = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
+    *out = {InventoryItemKind::kOriginal, bag, slot, fn_get_bit(flags, 15, 6),
+            fn_get_cumulate_count != nullptr ? fn_get_cumulate_count(item) : 1, item};
+    return true;
+}
+
+void for_each_inventory_item(InventoryItemFn fn, void* ctx) {
+    if (fn == nullptr) return;
+    if (fn_get_bit == nullptr) return;
+    const qol::game::NativeBagLayout layout = qol::game::native_bag_layout();
+    if (layout.slots == nullptr) return;
+    for (int bag = 0; bag < layout.bag_limit; ++bag) {
+        for (int slot = 0; slot < 16; ++slot) {
+            InventoryItemRef ref;
+            if (!inventory_item_ref_at(bag, slot, &ref)) continue;
+            if (fn(ref, ctx)) return;
+        }
+    }
+}
+
+void for_each_bag_slot(BagSlotFn fn, void* ctx) {
+    if (fn == nullptr || g_inven == nullptr) return;
+    // This is a read-only physical snapshot primitive: include task bag 5 to
+    // match the original query functions. Transaction callers use explicit
+    // ordinary-bag validation and must not reuse this range as a target domain.
+    for (int b = 0; b < 6; ++b) {
+        uint8_t* bag_slots = reinterpret_cast<uint8_t*>(g_inven) + b * 0x80;
+        for (int j = 0; j < 16; ++j) {
+            void* item = *reinterpret_cast<void**>(bag_slots + j * 8);
+            if (item == nullptr) continue;
+            if (fn(item, b, j, ctx)) return;
+        }
+    }
+}
+
+bool pool_obj_valid(const uint8_t* obj) {
+    if (obj == nullptr) return false;
+    int type = static_cast<int>(reinterpret_cast<const int8_t*>(obj)[C_TYPE]);
+    if (type < 0 || type > 2) return false;
+    if (obj[C_STATUS] > 2) return false;
+    int16_t x = *reinterpret_cast<const int16_t*>(obj + C_POS_X);
+    int16_t y = *reinterpret_cast<const int16_t*>(obj + C_POS_Y);
+    if (x <= 0 || x >= 1500 || y <= 0 || y >= 1500) return false;
+    return true;
+}

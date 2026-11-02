@@ -2,8 +2,10 @@ package com.inotia4.qol.api.controller
 
 import com.inotia4.qol.service.ApiServices
 import com.inotia4.qol.util.ControllerGuard
+import com.inotia4.qol.util.withNativeRouteLease
 import com.yanzhenjie.andserver.annotation.GetMapping
 import com.yanzhenjie.andserver.annotation.RestController
+import com.yanzhenjie.andserver.http.HttpRequest
 
 /**
  * 服务健康：/api/health（顶层，api-reference §7.0）。返回服务运行状态。
@@ -13,5 +15,6 @@ import com.yanzhenjie.andserver.annotation.RestController
 class HealthController {
 
     @GetMapping("/api/health")
-    fun health(): String = ControllerGuard.guard(ApiServices.info::health)
+    fun health(request: HttpRequest): String =
+        withNativeRouteLease(request) { ControllerGuard.guard(ApiServices.info::health) }
 }

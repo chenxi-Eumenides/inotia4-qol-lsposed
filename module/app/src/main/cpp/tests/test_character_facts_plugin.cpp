@@ -1,0 +1,2287 @@
+#include "bridge/native/character_write_result.h"
+#include "contracts/character_facts.h"
+#include "contracts/character_state.h"
+#include "contracts/game_ports/character_http_port.h"
+#include "contracts/game_ports/character_port.h"
+#include "contracts/game_ports/character_state_port.h"
+#include "contracts/game_ports/character_write_ops_port.h"
+#include "contracts/http.h"
+#include "contracts/host_sdk.h"
+#include "game/access/game_access.h"
+#include "game/ops/character_state_read.h"
+#include "game/ops/character_write.h"
+#include "game/state/game_state.h"
+#include "game/access/world.h"
+#include "host/legacy_json_builders.h"
+#include "host/owner_cache_builder.h"
+#include "infra/capabilities.h"
+#include "plugins/core.character/plugin.h"
+#include "test_snapshot_sdk.h"
+
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <thread>
+#include <vector>
+
+static int g_pass = 0;
+static int g_fail = 0;
+static int g_type_calls = 0;
+static int g_active_calls = 0;
+static qol::contracts::QolTypedResultCommandHandler g_result_handler = nullptr;
+static uint32_t g_post_handler_id = 0;
+static unsigned char g_post_payload[qol::contracts::kTypedCommandPayloadCapacity]{};
+static uint32_t g_post_payload_size = 0;
+static uint32_t g_state_party_reads = 0;
+static uint32_t g_state_player_reads = 0;
+static uint32_t g_state_skills_reads = 0;
+static bool g_state_not_in_game = false;
+// 写面 golden 需要 state 反映真实低层原语对 fake 角色内存的改动，走 game/ops 的 typed 读。
+static bool g_state_reads_from_legacy = false;
+// 真实 typed 原语的调用计数（批量族逐点次数断言）。
+static int g_set_stat_base_calls = 0;
+static int g_add_stat_main_calls = 0;
+static int g_add_life_calls = 0;
+static int g_add_mana_calls = 0;
+static int32_t g_last_life_before = 0;
+static int32_t g_last_mana_before = 0;
+static int32_t g_last_life_delta = 0;
+static int32_t g_last_mana_delta = 0;
+// 战斗族写后即时时序：非 0 时，fake 游戏写函数把该值写入角色 C_LEVEL，模拟原语对 live 数据的改动。
+static int g_write_effect_level = 0;
+// 队伍族（T2c-4c）可控 fake 面：佣兵槽 7 解析到的对象、装备槽 0 的 item，以及各原版链调用开关。
+static uint8_t g_merc_object[0x400]{};
+static uint8_t g_merc_item[0x40]{};
+static int g_can_unequip_calls = 0;
+static int g_can_unequip_result = 1;
+static int g_unequip_calls = 0;
+static int g_unequip_result = 1;
+static int g_mercenary_release_calls = 0;
+static int g_include_calls = 0;
+static int g_include_result = 1;
+static int g_exclude_calls = 0;
+static int g_exclude_result = 1;
+static bool g_leader_is_merc = false;
+static bool g_merc_in_party = false;
+static bool g_is_special_npc = false;
+// 玩家族（T2c-4d）可控 fake 面：switch_player 的原版调用开关与 UI 占用桩。
+static int g_set_active_player_calls = 0;
+static int g_set_active_player_result = 1;
+static const char* g_ui_blocked_message = nullptr;
+static qol::contracts::QolCharacterStateParty g_live_party{};
+static qol::contracts::QolCharacterStatePlayer g_live_player{};
+static qol::contracts::QolCharacterStateSkills g_live_skills{};
+static uint8_t g_legacy_members[3][0x400]{};
+static bool g_legacy_member_present[3]{};
+static uint8_t g_legacy_skill_node[0x20]{};
+static uint8_t g_legacy_item[0x40]{};
+static uint8_t g_legacy_option_node[0x20]{};
+static bool g_legacy_item_present = false;
+static uint16_t g_legacy_active_quest = 0;
+static uint8_t g_legacy_leader_slot = 0;
+static char g_legacy_name[qol::contracts::kQolCharacterStateNameCapacity]{};
+
+uintptr_t g_base = 0;
+void* g_active_quest = &g_legacy_active_quest;
+void* g_main_merc_slot = &g_legacy_leader_slot;
+
+#define CHECK(cond) do { \
+    if (cond) ++g_pass; \
+    else { ++g_fail; std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
+} while (0)
+
+namespace {
+
+int legacy_party_size() { return g_live_player.party_count; }
+int64_t legacy_money() { return g_live_player.money; }
+uint32_t legacy_map_id() { return static_cast<uint32_t>(g_live_player.map_id); }
+void* legacy_member(int role) {
+    // 队伍族可控 fake：让佣兵对象顶替队长或已在队成员，覆盖 leader / already-in-party 分支。
+    if (g_leader_is_merc && role == 0) return g_merc_object;
+    if (g_merc_in_party && role == 1) return g_merc_object;
+    return role >= 0 && role < 3 && g_legacy_member_present[role]
+               ? g_legacy_members[role]
+               : nullptr;
+}
+void fake_add_life(void* ch, int32_t delta) {
+    auto* hp = reinterpret_cast<int32_t*>(static_cast<uint8_t*>(ch) + C_HP);
+    g_last_life_before = *hp;
+    g_last_life_delta = delta;
+    ++g_add_life_calls;
+    *hp += delta;
+}
+void fake_add_mana(void* ch, int32_t delta) {
+    auto* mp = reinterpret_cast<int32_t*>(static_cast<uint8_t*>(ch) + C_MP);
+    g_last_mana_before = *mp;
+    g_last_mana_delta = delta;
+    ++g_add_mana_calls;
+    *mp += delta;
+}
+char* legacy_name(void*) { return g_legacy_name; }
+void* legacy_equip(void*, int slot) {
+    return g_legacy_item_present && slot == 0 ? g_legacy_item : nullptr;
+}
+int legacy_item_bit(int, int, int) { return 12; }
+int legacy_item_count(void*) { return 1; }
+int legacy_item_rarity(void*) { return 3; }
+int legacy_item_damage(void*) { return 4; }
+int legacy_item_defense(void*) { return 5; }
+int legacy_item_level(void*) { return 7; }
+int32_t legacy_status_point(void*) { return g_live_party.members[0].status_point; }
+int32_t legacy_stat_base(void*, int index) {
+    return g_live_party.members[0].base_stats[index];
+}
+void append_legacy_item_attrs(std::string&, void*) {}
+
+void sync_legacy_fixture() {
+    std::memset(g_legacy_members, 0, sizeof(g_legacy_members));
+    std::memset(g_legacy_member_present, 0, sizeof(g_legacy_member_present));
+    std::memset(g_legacy_skill_node, 0, sizeof(g_legacy_skill_node));
+    std::memset(g_legacy_item, 0, sizeof(g_legacy_item));
+    std::memset(g_legacy_option_node, 0, sizeof(g_legacy_option_node));
+    std::memset(g_legacy_name, 0, sizeof(g_legacy_name));
+    g_legacy_item_present = false;
+    g_legacy_active_quest = static_cast<uint16_t>(g_live_player.active_quest);
+    g_legacy_leader_slot = static_cast<uint8_t>(g_live_player.leader_slot);
+    for (int role = 0; role < 3; ++role) {
+        if (g_live_party.member_present[role] == 0) continue;
+        g_legacy_member_present[role] = true;
+        auto* bytes = g_legacy_members[role];
+        const auto& member = g_live_party.members[role];
+        reinterpret_cast<int8_t*>(bytes)[C_TYPE] = static_cast<int8_t>(member.type);
+        reinterpret_cast<int8_t*>(bytes)[C_CLASS] = static_cast<int8_t>(member.class_idx);
+        *reinterpret_cast<uint16_t*>(bytes + C_NAME_ID) = static_cast<uint16_t>(member.name_id);
+        reinterpret_cast<int8_t*>(bytes)[C_LEVEL] = static_cast<int8_t>(member.level);
+        *reinterpret_cast<int32_t*>(bytes + C_HP) = member.hp;
+        *reinterpret_cast<int32_t*>(bytes + C_MP) = member.mp;
+        *reinterpret_cast<int32_t*>(bytes + C_EXP) = member.exp;
+        *reinterpret_cast<int16_t*>(bytes + C_POS_X) = static_cast<int16_t>(g_live_player.x);
+        *reinterpret_cast<int16_t*>(bytes + C_POS_Y) = static_cast<int16_t>(g_live_player.y);
+        for (int i = 0; i < 32; ++i) {
+            *reinterpret_cast<int32_t*>(bytes + C_ATTR + i * sizeof(int32_t)) = member.stats[i];
+        }
+        *reinterpret_cast<uint16_t*>(bytes + C_SKILL_BMP) =
+            static_cast<uint16_t>(g_live_skills.members[role].unlock_bitmap);
+        reinterpret_cast<int8_t*>(bytes)[C_SKILL_POINTS] =
+            static_cast<int8_t>(g_live_skills.members[role].skill_points);
+        if (g_live_skills.member_present[role] != 0 &&
+            g_live_skills.members[role].skill_count > 0) {
+            const auto& skill = g_live_skills.members[role].skills[0];
+            *reinterpret_cast<uint16_t*>(g_legacy_skill_node + S_ACTION_ID) =
+                static_cast<uint16_t>(skill.action_id);
+            g_legacy_skill_node[S_LEVEL] = static_cast<uint8_t>(skill.level);
+            *reinterpret_cast<uint8_t**>(g_legacy_skill_node + S_NEXT) = nullptr;
+            *reinterpret_cast<uint8_t**>(bytes + C_SKILL_LIST) = g_legacy_skill_node;
+        }
+        for (uint32_t slot = 0; slot < qol::contracts::kQolCharacterStateEquipSlots; ++slot) {
+            if (g_live_party.member_present[role] == 0 || member.equipment_present[slot] == 0 ||
+                role != 0 || slot != 0) {
+                continue;
+            }
+            const auto& item = member.equipment[slot];
+            *reinterpret_cast<uint16_t*>(g_legacy_item + I_TYPE) =
+                static_cast<uint16_t>(item.type_flags);
+            g_legacy_item[I_MAGIC_RATE] = static_cast<uint8_t>(item.magic_rate);
+            g_legacy_item[I_SOCKET] = static_cast<uint8_t>(item.socket);
+            *reinterpret_cast<uint16_t*>(g_legacy_item + I_ENCHANT) =
+                static_cast<uint16_t>(item.enchant);
+            *reinterpret_cast<uint32_t*>(g_legacy_item + I_COUNT) =
+                static_cast<uint32_t>(item.chaos_level | (item.chaos_rate << 8));
+            *reinterpret_cast<uint16_t*>(g_legacy_option_node + O_INDEX) =
+                static_cast<uint16_t>(item.options[0].id | (item.options[0].type << 13));
+            *reinterpret_cast<int16_t*>(g_legacy_option_node + O_VALUE) =
+                static_cast<int16_t>(item.options[0].value);
+            *reinterpret_cast<uint8_t**>(g_legacy_item + I_OPTION_LIST) =
+                item.option_count == 0 ? nullptr : g_legacy_option_node;
+            g_legacy_item_present = true;
+        }
+        const uint32_t copy_size = member.name_size < sizeof(g_legacy_name) - 1
+                                       ? member.name_size
+                                       : static_cast<uint32_t>(sizeof(g_legacy_name) - 1);
+        std::memcpy(g_legacy_name, member.name, copy_size);
+    }
+}
+
+}  // namespace
+
+GetMoneyFn fn_get_money = &legacy_money;
+GetMemberFn fn_get_member = &legacy_member;
+GetPartySizeFn fn_get_party_size = &legacy_party_size;
+GetEquipFn fn_get_equip = &legacy_equip;
+GetBitFn fn_get_bit = &legacy_item_bit;
+GetCumulateCountFn fn_get_cumulate_count = &legacy_item_count;
+GetRarityFn fn_get_rarity = &legacy_item_rarity;
+GetItemStatFn fn_get_damage = &legacy_item_damage;
+GetItemStatFn fn_get_defense = &legacy_item_defense;
+ItemGetAbilityLevelFn fn_item_get_ability_level = &legacy_item_level;
+GetNameFn fn_get_name = &legacy_name;
+GetStatusPointFn fn_get_status_point = &legacy_status_point;
+GetAttrFn2 fn_get_stat_base = nullptr;
+GetActMaxLevelFn fn_get_act_max_level = nullptr;
+
+// 战斗族写后即时时序：fake 游戏写函数模拟对 live 角色内存的改动（同一结果处理器随后读 kParty）。
+void apply_write_effect(void* ch) {
+    if (g_write_effect_level != 0 && ch != nullptr) {
+        reinterpret_cast<int8_t*>(ch)[C_LEVEL] = static_cast<int8_t>(g_write_effect_level);
+    }
+}
+
+// 真实 typed 写原语依赖的其余 game 函数指针（fake 实现只满足成功/失败判定）。
+void legacy_set_exp(void*, int32_t) {}
+int legacy_set_level(void*, int32_t) { return 1; }
+void legacy_set_status_point(void*, int32_t) {}
+void legacy_set_stat_base(void*, int32_t, int32_t) { ++g_set_stat_base_calls; }
+int legacy_get_stat_main(void*, int32_t) { return 0; }
+void legacy_set_stat_main(void*, int32_t, int32_t) { ++g_add_stat_main_calls; }
+void legacy_set_auto_attack(void* ch, int32_t) { apply_write_effect(ch); }
+// 玩家族写后即时：fake 原版链模拟对主角 live 数据的改动（移动坐标），供随后读 kPlayer。
+void apply_player_effect(void* ch) {
+    if (g_write_effect_level == 0 || ch == nullptr) return;
+    *reinterpret_cast<int16_t*>(static_cast<uint8_t*>(ch) + C_POS_X) =
+        static_cast<int16_t>(g_write_effect_level);
+}
+// 技能族写后即时：fake 原版学习链模拟 live 技能数据改动（技能点/解锁位图），供随后读 kSkills。
+void apply_skill_effect(void* ch) {
+    if (g_write_effect_level == 0 || ch == nullptr) return;
+    auto* bytes = static_cast<uint8_t*>(ch);
+    reinterpret_cast<int8_t*>(bytes)[C_SKILL_POINTS] = 1;
+    *reinterpret_cast<uint16_t*>(bytes + C_SKILL_BMP) = 0x1F;
+}
+void* legacy_learn_action(void* ch, int32_t, int32_t) {
+    apply_skill_effect(ch);
+    return nullptr;
+}
+void legacy_char_initialize_status(void* ch) { apply_player_effect(ch); }
+void legacy_char_initialize_skill(void* ch) { apply_player_effect(ch); }
+void* legacy_char_get_enemy_target(void*, int32_t, int32_t) { return legacy_member(0); }
+void legacy_char_set_action_id(void* ch, int32_t, void*) { apply_write_effect(ch); }
+void legacy_char_set_target(void* ch, void*) { apply_write_effect(ch); }
+void legacy_char_stop_combat(void* ch) { apply_player_effect(ch); }
+void legacy_party_swap(int32_t, int32_t) {}
+// 队伍族写后即时：fake 原版链模拟对 live 队伍成员（slot 0）的改动，供同一结果处理器随后读 kParty。
+void apply_party_effect() {
+    if (g_write_effect_level == 0) return;
+    void* member = legacy_member(0);
+    if (member != nullptr) {
+        reinterpret_cast<int8_t*>(member)[C_LEVEL] = static_cast<int8_t>(g_write_effect_level);
+    }
+}
+int legacy_include_party(void*) { ++g_include_calls; apply_party_effect(); return g_include_result; }
+int legacy_exclude_party(void*) { ++g_exclude_calls; apply_party_effect(); return g_exclude_result; }
+void legacy_mercenary_release(int32_t) { ++g_mercenary_release_calls; apply_party_effect(); }
+int legacy_unequip(void*, int32_t) { ++g_unequip_calls; apply_party_effect(); return g_unequip_result; }
+int legacy_can_unequip(void*, void*) { ++g_can_unequip_calls; return g_can_unequip_result; }
+int legacy_is_special_npc(void*) { return g_is_special_npc ? 1 : 0; }
+int legacy_set_active_player(int32_t) {
+    ++g_set_active_player_calls;
+    return g_set_active_player_result;
+}
+
+SetExpFn fn_set_exp = &legacy_set_exp;
+SetLevelFn fn_set_level = &legacy_set_level;
+SetStatusPointFn fn_set_status_point = &legacy_set_status_point;
+SetStatBaseFn fn_set_stat_base = &legacy_set_stat_base;
+GetStatMainFn fn_get_stat_main = &legacy_get_stat_main;
+SetStatMainFn fn_set_stat_main = &legacy_set_stat_main;
+SetAutoAttackFn fn_set_auto_attack = &legacy_set_auto_attack;
+LearnActionFn fn_learn_action = &legacy_learn_action;
+CharInitializeStatusFn fn_char_initialize_status = &legacy_char_initialize_status;
+CharInitializeSkillFn fn_char_initialize_skill = &legacy_char_initialize_skill;
+CharGetEnemyTargetFn fn_char_get_enemy_target = &legacy_char_get_enemy_target;
+CharSetActionIdFn fn_char_set_action_id = &legacy_char_set_action_id;
+CharSetTargetFn fn_char_set_target = &legacy_char_set_target;
+CharStopCombatFn fn_char_stop_combat = &legacy_char_stop_combat;
+PartySwapFn fn_party_swap = &legacy_party_swap;
+IncludePartyFn fn_include_party = &legacy_include_party;
+ExcludePartyFn fn_exclude_party = &legacy_exclude_party;
+MercenaryReleaseFn fn_mercenary_release = &legacy_mercenary_release;
+UnequipFn fn_unequip = &legacy_unequip;
+CanUnequipFn fn_can_unequip = &legacy_can_unequip;
+IsSpecialNpcFn fn_is_special_npc = &legacy_is_special_npc;
+SetActivePlayerFn fn_set_active_player = &legacy_set_active_player;
+CharAddResourceFn fn_add_life = &fake_add_life;
+CharAddResourceFn fn_add_mana = &fake_add_mana;
+
+void* member_or_null(int role) { return legacy_member(role); }
+// 佣兵槽 7 解析到一个不在队伍中的独立对象，用于 include/exclude/discharge/withdraw 成功路径。
+void* find_char_by_merc_slot(int slot) {
+    return slot == 7 ? g_merc_object : nullptr;
+}
+const char* ui_blocked() { return g_ui_blocked_message; }
+void frame_cache_force_refresh() {}
+bool pool_obj_valid(const uint8_t* obj) { return obj != nullptr; }
+
+bool game_in_world() { return !g_state_not_in_game; }
+uint32_t current_map_id() { return legacy_map_id(); }
+void* lead_member() { return legacy_member(0); }
+void append_position(std::string& out, void* member) {
+    if (member == nullptr) {
+        out += ",\"x\":-1,\"y\":-1";
+        return;
+    }
+    auto* bytes = static_cast<uint8_t*>(member);
+    out += ",\"x\":" + std::to_string(*reinterpret_cast<int16_t*>(bytes + C_POS_X));
+    out += ",\"y\":" + std::to_string(*reinterpret_cast<int16_t*>(bytes + C_POS_Y));
+}
+int32_t char_max_hp(const void*) { return g_live_party.members[0].max_hp; }
+int32_t char_max_mp(const void*) { return g_live_party.members[0].max_mp; }
+int32_t char_stat_total(const void*, int index) {
+    return index >= 0 && index < 5 ? g_live_party.members[0].main_stats[index] : 0;
+}
+int64_t char_next_exp_cached(const void*) { return g_live_party.members[0].exp_next; }
+bool item_is_equip(void*) { return true; }
+void append_item_attrs(std::string& out, void* item) {
+    auto* bytes = static_cast<uint8_t*>(item);
+    if (fn_get_damage != nullptr) out += ",\"damage\":" + std::to_string(fn_get_damage(item));
+    if (fn_get_defense != nullptr) out += ",\"defense\":" + std::to_string(fn_get_defense(item));
+    out += ",\"magic_rate\":" + std::to_string(bytes[I_MAGIC_RATE]);
+    if (fn_item_get_ability_level != nullptr) {
+        out += ",\"need_level\":" + std::to_string(fn_item_get_ability_level(item));
+    }
+    const uint8_t socket = bytes[I_SOCKET];
+    out += ",\"socket\":" + std::to_string(socket);
+    out += ",\"socket_filled\":" + std::to_string(socket & 0x0F);
+    out += ",\"socket_total\":" + std::to_string((socket >> 4) & 0x0F);
+    const uint16_t enchant = *reinterpret_cast<const uint16_t*>(bytes + I_ENCHANT);
+    out += ",\"enchant\":" + std::to_string(enchant);
+    out += (enchant & 1) != 0 ? ",\"chaos\":true" : ",\"chaos\":false";
+    out += ",\"enchant_id\":" + std::to_string((enchant >> 11) & 0x1F);
+    out += ",\"enchant_level\":" + std::to_string((enchant >> 6) & 0x1F);
+    const uint32_t count = *reinterpret_cast<const uint32_t*>(bytes + I_COUNT);
+    out += ",\"chaos_level\":" + std::to_string(count & 0xFF);
+    out += ",\"chaos_rate\":" + std::to_string((count >> 8) & 0xFF);
+    auto* option = *reinterpret_cast<uint8_t**>(bytes + I_OPTION_LIST);
+    out += ",\"options\":[";
+    for (uint32_t i = 0; option != nullptr && i < 32; ++i) {
+        if (i != 0) out.push_back(',');
+        out += std::to_string(*reinterpret_cast<int16_t*>(option + O_VALUE));
+        option = *reinterpret_cast<uint8_t**>(option + O_NEXT);
+    }
+    out += "],\"option_ids\":[";
+    option = *reinterpret_cast<uint8_t**>(bytes + I_OPTION_LIST);
+    for (uint32_t i = 0; option != nullptr && i < 32; ++i) {
+        if (i != 0) out.push_back(',');
+        out += std::to_string(*reinterpret_cast<uint16_t*>(option + O_INDEX) & 0x7F);
+        option = *reinterpret_cast<uint8_t**>(option + O_NEXT);
+    }
+    out += "],\"option_types\":[";
+    option = *reinterpret_cast<uint8_t**>(bytes + I_OPTION_LIST);
+    for (uint32_t i = 0; option != nullptr && i < 32; ++i) {
+        if (i != 0) out.push_back(',');
+        out += std::to_string((*reinterpret_cast<uint16_t*>(option + O_INDEX) >> 13) & 0x7);
+        option = *reinterpret_cast<uint8_t**>(option + O_NEXT);
+    }
+    out += "]";
+}
+std::string json_escape(const char* value) {
+    std::string out;
+    for (; value != nullptr && *value != '\0'; ++value) {
+        const unsigned char ch = static_cast<unsigned char>(*value);
+        switch (ch) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (ch < 0x20) {
+                    char escaped[8]{};
+                    std::snprintf(escaped, sizeof(escaped), "\\u%04x", ch);
+                    out += escaped;
+                } else {
+                    out += static_cast<char>(ch);
+                }
+        }
+    }
+    return out;
+}
+
+// T2h-0 读面 frozen 复刻：逐字节搬入角色/队伍 legacy 读实现（含成员 JSON 主体），作为
+// legacy 读面退役后（T2i-2 已删 api/native 原 TU）的独立 state 对照源。
+// 证据链：T2c golden（owner == build_*，已提交）∧ frozen == build_*（本批复刻 + 等值断言）
+// ⇒ owner == frozen；此后 TU 删除不改变对照源语义。
+std::string frozen_member_json(void* ch) {
+    std::string s = "{";
+    s += "\"type\":" + std::to_string(static_cast<int>(reinterpret_cast<int8_t*>(ch)[C_TYPE]));
+    s += ",\"class_idx\":" + std::to_string(static_cast<int>(reinterpret_cast<int8_t*>(ch)[C_CLASS]));
+    uint16_t name_id = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(ch) + C_NAME_ID);
+    s += ",\"name_id\":" + std::to_string(name_id);
+    s += ",\"level\":" + std::to_string(static_cast<int>(reinterpret_cast<int8_t*>(ch)[C_LEVEL]));
+    s += ",\"hp\":" + std::to_string(*reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(ch) + C_HP));
+    s += ",\"mp\":" + std::to_string(*reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(ch) + C_MP));
+    s += ",\"max_hp\":" + std::to_string(char_max_hp(ch));
+    s += ",\"max_mp\":" + std::to_string(char_max_mp(ch));
+    s += ",\"exp\":" + std::to_string(*reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(ch) + C_EXP));
+    s += ",\"exp_next\":" + std::to_string(char_next_exp_cached(ch));
+    s += ",\"stats\":{";
+    bool first = true;
+    for (int a = 0; a < 32; ++a) {
+        int32_t v = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(ch) + C_ATTR + a * 4);
+        if (!first) s += ",";
+        s += "\"" + std::to_string(a) + "\":" + std::to_string(v);
+        first = false;
+    }
+    s += "}";
+    s += ",\"main_stats\":[";
+    for (int a = 0; a < 5; ++a) {
+        if (a > 0) s += ",";
+        s += std::to_string(char_stat_total(ch, a));
+    }
+    s += "]";
+    if (fn_get_stat_base != nullptr) {
+        s += ",\"base_stats\":[";
+        for (int a = 0; a < 5; ++a) {
+            if (a > 0) s += ",";
+            s += std::to_string(fn_get_stat_base(ch, a));
+        }
+        s += "]";
+    }
+    if (fn_get_status_point != nullptr) {
+        s += ",\"status_point\":" + std::to_string(fn_get_status_point(ch));
+    }
+    s += ",\"equipment\":[";
+    for (int slot = 0; slot < C_EQUIP_SLOTS; ++slot) {
+        void* item = nullptr;
+        if (fn_get_equip != nullptr) item = fn_get_equip(ch, slot);
+        if (slot > 0) s += ",";
+        if (item == nullptr) {
+            s += "null";
+        } else {
+            uint16_t flags = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
+            s += "{\"slot\":" + std::to_string(slot);
+            s += ",\"type_flags\":" + std::to_string(flags);
+            s += ",\"raw_rarity\":" + std::to_string((flags >> 2) & 0x0F);
+            if (fn_get_bit != nullptr) {
+                s += ",\"category\":" + std::to_string(fn_get_bit(flags, 15, 6));
+            }
+            if (fn_get_cumulate_count != nullptr) {
+                s += ",\"count\":" + std::to_string(fn_get_cumulate_count(item));
+            }
+            s += std::string(",\"equip\":") + (item_is_equip(item) ? "true" : "false");
+            if (fn_get_rarity != nullptr) {
+                s += ",\"rarity\":" + std::to_string(fn_get_rarity(item));
+            }
+            append_item_attrs(s, item);
+            s += "}";
+        }
+    }
+    s += "]";
+    if (fn_get_name != nullptr) {
+        s += ",\"name\":\"" + json_escape(fn_get_name(ch)) + "\"";
+    }
+    s += "}";
+    return s;
+}
+
+std::string frozen_party_json() {
+    if (!game_in_world()) return "{\"error\":\"not in game\"}";
+    std::string s = "[";
+    for (int i = 0; i < 3; ++i) {
+        void* ch = (fn_get_member != nullptr) ? fn_get_member(i) : nullptr;
+        if (i > 0) s += ",";
+        if (ch == nullptr) {
+            s += "null";
+        } else {
+            s += frozen_member_json(ch);
+        }
+    }
+    s += "]";
+    return s;
+}
+
+std::string frozen_player_json() {
+    if (!game_in_world()) return "{\"error\":\"not in game\"}";
+    std::string s = "{";
+    s += "\"money\":" + std::to_string(fn_get_money != nullptr ? fn_get_money() : -1);
+    s += ",\"map_id\":" + std::to_string(current_map_id());
+    append_position(s, lead_member());
+    s += ",\"active_quest\":" + std::to_string(g_active_quest != nullptr ? *reinterpret_cast<uint16_t*>(g_active_quest) : -1);
+    s += ",\"leader_slot\":" + std::to_string(g_main_merc_slot != nullptr ? *reinterpret_cast<uint8_t*>(g_main_merc_slot) : -1);
+    s += ",\"party_count\":" + std::to_string(fn_get_party_size != nullptr ? fn_get_party_size() : 3);
+    s += "}";
+    return s;
+}
+
+std::string frozen_skills_json() {
+    std::string s = "[";
+    for (int i = 0; i < 3; ++i) {
+        void* ch = (fn_get_member != nullptr) ? fn_get_member(i) : nullptr;
+        if (i > 0) s += ",";
+        if (ch == nullptr) {
+            s += "null";
+            continue;
+        }
+        uint8_t* base_ch = reinterpret_cast<uint8_t*>(ch);
+        s += "{\"role\":" + std::to_string(i);
+        s += ",\"skills\":[";
+        uint8_t* node = *reinterpret_cast<uint8_t**>(base_ch + C_SKILL_LIST);
+        bool first = true;
+        int count = 0;
+        while (node != nullptr && count < 64) {
+            if (!first) s += ",";
+            s += "{\"action_id\":" + std::to_string(*reinterpret_cast<uint16_t*>(node + S_ACTION_ID));
+            s += ",\"level\":" + std::to_string(node[S_LEVEL]);
+            if (fn_get_act_max_level != nullptr) {
+                s += ",\"max_level\":" + std::to_string(fn_get_act_max_level(ch, *reinterpret_cast<uint16_t*>(node + S_ACTION_ID)));
+            }
+            s += "}";
+            first = false;
+            node = *reinterpret_cast<uint8_t**>(node + S_NEXT);
+            ++count;
+        }
+        s += "]";
+        s += ",\"unlock_bitmap\":" + std::to_string(*reinterpret_cast<uint16_t*>(base_ch + C_SKILL_BMP));
+        uint8_t* active = *reinterpret_cast<uint8_t**>(base_ch + C_ACTIVE_SKILL);
+        s += ",\"active_skill_id\":" + std::to_string(active != nullptr ? *reinterpret_cast<uint16_t*>(active + S_ACTION_ID) : -1);
+        s += ",\"skill_points\":" + std::to_string(static_cast<int>(reinterpret_cast<int8_t*>(ch)[C_SKILL_POINTS]));
+        s += "}";
+    }
+    s += "]";
+    return s;
+}
+
+// T2i-1（W12 独立 oracle）：佣兵 legacy 读实现的逐字节复刻（T2h-0 手法）。
+std::string frozen_mercenaries_json() {
+    if (!game_in_world()) return "{\"error\":\"not in game\"}";
+    // 佣兵槽：*(*(G_MERC_SLOTLIST_GOT_VMA)) 槽数组（20B/槽），flags bit0=占用 bit1=在队伍。
+    // 关联角色：角色池 +0x352==slot；名称 CHAR_GetName、等级 +0x0E、坐标 +0x02/+0x04。
+    std::string s = "[";
+    if (g_base != 0) {
+        uintptr_t got = *reinterpret_cast<uintptr_t*>(g_base + G_MERC_SLOTLIST_GOT_VMA);
+        uint8_t* slots = got != 0 ? *reinterpret_cast<uint8_t**>(got) : nullptr;
+        uintptr_t max_got = *reinterpret_cast<uintptr_t*>(g_base + G_MERC_MAX_GOT_VMA);
+        int8_t max_slots = max_got != 0 ? *reinterpret_cast<int8_t*>(max_got) : 0;
+        if (slots != nullptr && max_slots > 0) {
+            int emitted = 0;
+            for (int i = 0; i < max_slots && i < 128; ++i) {
+                uint8_t* slot = slots + i * M_SLOT_SIZE;
+                uint8_t flags = slot[M_FLAGS];
+                if ((flags & 0x01) == 0) continue;
+                if (slot[M_TYPE] > 2) continue;
+                if (emitted > 0) s += ",";
+                s += "{\"slot\":" + std::to_string(i);
+                s += ",\"type\":" + std::to_string(slot[M_TYPE]);
+                s += ",\"flags\":" + std::to_string(flags);
+                s += ",\"in_party\":" + std::string((flags & 0x02) ? "true" : "false");
+                void* ch = find_char_by_merc_slot(i);
+                if (ch != nullptr) {
+                    if (fn_get_name != nullptr) {
+                        char* nm = fn_get_name(ch);
+                        s += ",\"name\":\"" + json_escape(nm) + "\"";
+                    }
+                    s += ",\"level\":" + std::to_string(static_cast<int>(reinterpret_cast<int8_t*>(ch)[C_LEVEL]));
+                    append_position(s, ch);
+                } else {
+                    s += ",\"name\":null";
+                }
+                s += "}";
+                ++emitted;
+            }
+        }
+    }
+    s += "]";
+    return s;
+}
+
+QolResult fake_type(const void*, int32_t* out_type) {
+    ++g_type_calls;
+    if (out_type == nullptr) return QolResult{kQolErrInvalidArgument, kQolErrInvalidArgument, nullptr, 0};
+    *out_type = 7;
+    return qol::contracts::ok();
+}
+
+QolResult fake_active(const void*, int32_t* out_active) {
+    ++g_active_calls;
+    if (out_active == nullptr) {
+        return QolResult{kQolErrInvalidArgument, kQolErrInvalidArgument, nullptr, 0};
+    }
+    *out_active = 1;
+    return qol::contracts::ok();
+}
+
+// install 只校验函数指针非空，不在此测试中调用。
+QolResult fake_body_json(int32_t, char*, uint32_t, uint32_t*) {
+    return qol::contracts::ok();
+}
+
+QolResult fake_state_party(qol::contracts::QolCharacterStateParty* out) {
+    ++g_state_party_reads;
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    if (g_state_not_in_game) return qol::contracts::error(kQolErrNotReady, "not in game", 11);
+    if (g_state_reads_from_legacy) return qol::game::ops::read_character_party(out);
+    *out = g_live_party;
+    return qol::contracts::ok();
+}
+
+QolResult fake_state_player(qol::contracts::QolCharacterStatePlayer* out) {
+    ++g_state_player_reads;
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    if (g_state_not_in_game) return qol::contracts::error(kQolErrNotReady, "not in game", 11);
+    if (g_state_reads_from_legacy) return qol::game::ops::read_character_player(out);
+    *out = g_live_player;
+    return qol::contracts::ok();
+}
+
+QolResult fake_state_skills(qol::contracts::QolCharacterStateSkills* out) {
+    ++g_state_skills_reads;
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    if (g_state_reads_from_legacy) return qol::game::ops::read_character_skills(out);
+    *out = g_live_skills;
+    return qol::contracts::ok();
+}
+
+// 注入真实 typed 写原语端口：owner 分派 → game/ops；state 经 typed 读获取。
+const qol::contracts::QolCharacterWriteOpsPort kRealWriteOpsPort{
+    qol::contracts::kQolPortCharacterWriteOpsVersion,
+    &qol::game::ops::set_hp,
+    &qol::game::ops::set_mp,
+    &qol::game::ops::set_level,
+    &qol::game::ops::set_experience,
+    &qol::game::ops::set_attr,
+    &qol::game::ops::set_status_point,
+    &qol::game::ops::party_swap,
+    &qol::game::ops::set_auto_attack,
+    &qol::game::ops::cast_skill,
+    &qol::game::ops::attack_target,
+    &qol::game::ops::switch_player,
+    &qol::game::ops::stop_combat,
+    &qol::game::ops::learn_action,
+    &qol::game::ops::add_stat,
+    &qol::game::ops::stat_reset,
+    &qol::game::ops::skill_reset,
+    &qol::game::ops::party_include,
+    &qol::game::ops::party_exclude,
+    &qol::game::ops::party_discharge,
+    &qol::game::ops::party_withdraw,
+};
+
+// 与 plugins/core.character 的私有载荷同构；golden 直接驱动 owner 结果处理器。
+struct CharWritePayloadMirror {
+    int32_t kind;
+    int32_t i0;
+    int32_t i1;
+    int32_t i2;
+    int64_t i64;
+    int32_t point_count;
+    int32_t point_idx[8];
+    int32_t point_amt[8];
+};
+
+// T2d-0 冻结对照源：旧 data_op_* 已随 B-character 退役，本函数改用 game/ops typed 原语直调，
+// 并复刻旧信封字节（成功 {"ok":true}；失败 {"ok":false,"error":"<out.error_message>"}，空文案
+// 回退 "character write failed"）。state 部分继续用未退役的 build_{party,player,skills}_json；
+// 组合规则保持（仅成功时在末尾插 state）。owner 输出仍须与本函数逐字节一致。
+std::string frozen_character_write_result_json(const CharWritePayloadMirror& p) {
+    using qol::contracts::QolCharacterWriteKind;
+    using qol::contracts::QolCharacterWriteOpResult;
+    const auto envelope = [](const QolResult& result, const QolCharacterWriteOpResult& op) {
+        if (qol::contracts::succeeded(result)) return std::string("{\"ok\":true}");
+        return std::string("{\"ok\":false,\"error\":\"") +
+               (op.error_message_len != 0 ? op.error_message : "character write failed") + "\"}";
+    };
+    QolCharacterWriteOpResult op{};
+    QolResult result = qol::contracts::ok();
+    std::string state;
+    switch (static_cast<QolCharacterWriteKind>(p.kind)) {
+        case QolCharacterWriteKind::kSetHp:
+            result = qol::game::ops::set_hp(p.i0, p.i1, &op);
+            break;
+        case QolCharacterWriteKind::kSetMp:
+            result = qol::game::ops::set_mp(p.i0, p.i1, &op);
+            break;
+        case QolCharacterWriteKind::kSetLevel:
+            result = qol::game::ops::set_level(p.i0, p.i1, p.i2 != 0 ? 1 : 0, &op);
+            break;
+        case QolCharacterWriteKind::kSetExperience:
+            result = qol::game::ops::set_experience(p.i0, p.i64, &op);
+            break;
+        case QolCharacterWriteKind::kSetAttr:
+            result = qol::game::ops::set_attr(p.i0, p.i1, p.i2, &op);
+            break;
+        case QolCharacterWriteKind::kSetStatusPoint:
+            result = qol::game::ops::set_status_point(p.i0, p.i1, &op);
+            break;
+        case QolCharacterWriteKind::kPartySwap:
+            result = qol::game::ops::party_swap(p.i0, p.i1, &op);
+            break;
+        case QolCharacterWriteKind::kSetAutoAttack:
+            result = qol::game::ops::set_auto_attack(p.i0, p.i1, &op);
+            state = frozen_party_json();
+            break;
+        case QolCharacterWriteKind::kCastSkill:
+            result = qol::game::ops::cast_skill(p.i0, p.i1, &op);
+            state = frozen_party_json();
+            break;
+        case QolCharacterWriteKind::kAttackTarget:
+            result = qol::game::ops::attack_target(p.i0, p.i1, &op);
+            state = frozen_party_json();
+            break;
+        case QolCharacterWriteKind::kSwitchPlayer:
+            result = qol::game::ops::switch_player(p.i0, &op);
+            state = frozen_player_json();
+            break;
+        case QolCharacterWriteKind::kStopCombat:
+            result = qol::game::ops::stop_combat(p.i0, &op);
+            state = frozen_player_json();
+            break;
+        case QolCharacterWriteKind::kLearnAction:
+            result = qol::game::ops::learn_action(p.i0, p.i1, p.i2, &op);
+            state = frozen_skills_json();
+            break;
+        case QolCharacterWriteKind::kAddStat:
+            result = qol::game::ops::add_stat(p.i0, p.i1, &op);
+            break;
+        case QolCharacterWriteKind::kStatReset:
+            result = qol::game::ops::stat_reset(p.i0, &op);
+            state = frozen_player_json();
+            break;
+        case QolCharacterWriteKind::kSkillReset:
+            result = qol::game::ops::skill_reset(p.i0, &op);
+            state = frozen_player_json();
+            break;
+        case QolCharacterWriteKind::kPartyInclude:
+            result = qol::game::ops::party_include(p.i0, &op);
+            state = frozen_party_json();
+            break;
+        case QolCharacterWriteKind::kPartyExclude:
+            result = qol::game::ops::party_exclude(p.i0, &op);
+            state = frozen_party_json();
+            break;
+        case QolCharacterWriteKind::kPartyDischarge:
+            result = qol::game::ops::party_discharge(p.i0, &op);
+            state = frozen_party_json();
+            break;
+        case QolCharacterWriteKind::kPartyWithdraw:
+            result = qol::game::ops::party_withdraw(p.i0, p.i1, &op);
+            state = frozen_party_json();
+            break;
+        default:
+            return "";
+    }
+    const std::string body = envelope(result, op);
+    if (qol::contracts::succeeded(result) && !state.empty()) {
+        return body.substr(0, body.size() - 1) + ",\"state\":" + state + "}";
+    }
+    return body;
+}
+
+bool run_owner_write(const CharWritePayloadMirror& payload, std::string* body) {
+    char storage[8192]{};
+    uint32_t size = 0;
+    const bool ok = g_result_handler != nullptr &&
+                    g_result_handler(nullptr, reinterpret_cast<const uint8_t*>(&payload),
+                                     sizeof(payload), storage, sizeof(storage), &size);
+    *body = std::string(storage, size);
+    return ok;
+}
+
+// 写面 golden 的统一 fake 角色状态：单一角色、队伍 1 人、技能 1 条。
+void setup_write_fixture() {
+    g_live_party = {};
+    g_live_party.member_present[0] = 1;
+    auto& member = g_live_party.members[0];
+    member.fields = qol::contracts::kQolCharacterStateHasName;
+    member.type = 0;
+    member.class_idx = 1;
+    member.name_id = 7;
+    member.level = 10;
+    member.hp = 50;
+    member.mp = 5;
+    member.max_hp = 60;
+    member.max_mp = 6;
+    member.exp = 1;
+    member.exp_next = 2;
+    member.status_point = 5;
+    member.stats[0] = 1;
+    member.main_stats[0] = 9;
+    member.name[0] = 'A';
+    member.name_size = 1;
+    g_live_player = {100, 34, 3, 4, 8, 0, 1};
+    g_live_skills = {};
+    g_live_skills.member_present[0] = 1;
+    g_live_skills.members[0].skill_count = 1;
+    g_live_skills.members[0].skills[0] = {7, 2, 0, 0};
+    g_live_skills.members[0].unlock_bitmap = 9;
+    g_live_skills.members[0].active_skill_id = -1;
+    g_live_skills.members[0].skill_points = 3;
+}
+
+void test_resource_setters_use_game_delta_functions() {
+    setup_write_fixture();
+    sync_legacy_fixture();
+    auto* character = g_legacy_members[0];
+    qol::contracts::QolCharacterWriteOpResult result{};
+
+    g_add_life_calls = 0;
+    CHECK(qol::contracts::succeeded(qol::game::ops::set_hp(0, 40, &result)));
+    CHECK(g_add_life_calls == 1 && g_last_life_before == 50 && g_last_life_delta == -10);
+    CHECK(*reinterpret_cast<int32_t*>(character + C_HP) == 40);
+    CHECK(qol::contracts::succeeded(qol::game::ops::set_hp(0, 60, &result)));
+    CHECK(g_add_life_calls == 2 && g_last_life_before == 40 && g_last_life_delta == 20);
+    CHECK(*reinterpret_cast<int32_t*>(character + C_HP) == 60);
+    CHECK(qol::contracts::succeeded(qol::game::ops::set_hp(0, -1, &result)));
+    CHECK(g_add_life_calls == 3 && g_last_life_before == 60 && g_last_life_delta == -60);
+    CHECK(*reinterpret_cast<int32_t*>(character + C_HP) == 0);
+    CHECK(qol::contracts::succeeded(qol::game::ops::set_hp(0, 100, &result)));
+    CHECK(g_add_life_calls == 4 && g_last_life_before == 0 && g_last_life_delta == 60);
+    CHECK(*reinterpret_cast<int32_t*>(character + C_HP) == 60);
+    CHECK(qol::contracts::succeeded(qol::game::ops::set_hp(0, 60, &result)));
+    CHECK(g_add_life_calls == 4);
+
+    g_add_mana_calls = 0;
+    CHECK(qol::contracts::succeeded(qol::game::ops::set_mp(0, 3, &result)));
+    CHECK(g_add_mana_calls == 1 && g_last_mana_before == 5 && g_last_mana_delta == -2);
+    CHECK(*reinterpret_cast<int32_t*>(character + C_MP) == 3);
+    CHECK(qol::contracts::succeeded(qol::game::ops::set_mp(0, 6, &result)));
+    CHECK(g_add_mana_calls == 2 && g_last_mana_before == 3 && g_last_mana_delta == 3);
+    CHECK(*reinterpret_cast<int32_t*>(character + C_MP) == 6);
+    CHECK(qol::contracts::succeeded(qol::game::ops::set_mp(0, -1, &result)));
+    CHECK(g_add_mana_calls == 3 && g_last_mana_before == 6 && g_last_mana_delta == -6);
+    CHECK(*reinterpret_cast<int32_t*>(character + C_MP) == 0);
+    CHECK(qol::contracts::succeeded(qol::game::ops::set_mp(0, 100, &result)));
+    CHECK(g_add_mana_calls == 4 && g_last_mana_before == 0 && g_last_mana_delta == 6);
+    CHECK(*reinterpret_cast<int32_t*>(character + C_MP) == 6);
+    CHECK(qol::contracts::succeeded(qol::game::ops::set_mp(0, 6, &result)));
+    CHECK(g_add_mana_calls == 4);
+}
+
+// 单点 kind 持续验证底层写操作成功/失败语义；新票据投影字节 golden 由 dispatch 接缝覆盖。
+void test_write_golden() {
+    using qol::contracts::QolCharacterWriteKind;
+    g_state_reads_from_legacy = true;
+
+    setup_write_fixture();
+
+    struct Case {
+        QolCharacterWriteKind kind;
+        int32_t i0;
+        int32_t i1;
+        int32_t i2;
+        int64_t i64;
+    };
+    const Case single[] = {
+        {QolCharacterWriteKind::kSetHp, 0, 50, 0, 0},
+        {QolCharacterWriteKind::kSetMp, 0, 10, 0, 0},
+        {QolCharacterWriteKind::kSetLevel, 0, 12, 1, 0},
+        {QolCharacterWriteKind::kSetExperience, 0, 0, 0, 100},
+        {QolCharacterWriteKind::kSetStatusPoint, 0, 5, 0, 0},
+        {QolCharacterWriteKind::kPartySwap, 0, 1, 0, 0},
+        {QolCharacterWriteKind::kSetAutoAttack, 0, 1, 0, 0},
+        {QolCharacterWriteKind::kCastSkill, 0, 7, 0, 0},
+        {QolCharacterWriteKind::kAttackTarget, 0, 0, 0, 0},
+        {QolCharacterWriteKind::kSwitchPlayer, 1, 0, 0, 0},
+        {QolCharacterWriteKind::kStopCombat, 0, 0, 0, 0},
+        {QolCharacterWriteKind::kLearnAction, 0, 7, 2, 0},
+        {QolCharacterWriteKind::kStatReset, 0, 0, 0, 0},
+        {QolCharacterWriteKind::kSkillReset, 0, 0, 0, 0},
+        {QolCharacterWriteKind::kPartyInclude, 7, 0, 0, 0},
+        {QolCharacterWriteKind::kPartyExclude, 7, 0, 0, 0},
+        {QolCharacterWriteKind::kPartyDischarge, 7, 0, 0, 0},
+        {QolCharacterWriteKind::kPartyWithdraw, 7, 0, 0, 0},
+    };
+
+    for (const auto& test : single) {
+        CharWritePayloadMirror payload{};
+        payload.kind = static_cast<int32_t>(test.kind);
+        payload.i0 = test.i0;
+        payload.i1 = test.i1;
+        payload.i2 = test.i2;
+        payload.i64 = test.i64;
+        sync_legacy_fixture();
+        std::string owner;
+        const bool owner_ok = run_owner_write(payload, &owner);
+        sync_legacy_fixture();
+        const std::string legacy = frozen_character_write_result_json(payload);
+        CHECK(owner_ok == (legacy.find("\"ok\":false") == std::string::npos));
+        if (!owner_ok) {
+            CHECK(owner == legacy);
+            continue;
+        }
+        CHECK(owner.compare(0, 10, "{\"ok\":true") == 0);
+        CHECK(owner.find("\"state\"") == std::string::npos);
+        switch (test.kind) {
+            case QolCharacterWriteKind::kSetAutoAttack:
+                CHECK(owner == "{\"ok\":true,\"role\":{\"role\":0,\"auto_attack\":true}}");
+                break;
+            case QolCharacterWriteKind::kSwitchPlayer:
+                CHECK(owner.find("{\"ok\":true,\"player\":{\"leader_slot\":") == 0);
+                break;
+            case QolCharacterWriteKind::kStopCombat:
+                CHECK(owner == "{\"ok\":true,\"role\":{\"role\":0,\"combat\":false}}");
+                break;
+            case QolCharacterWriteKind::kStatReset:
+                CHECK(owner.find("{\"ok\":true,\"role\":{\"role\":0,\"main_stats\":[") == 0);
+                break;
+            case QolCharacterWriteKind::kPartyWithdraw:
+                CHECK(owner == "{\"ok\":true,\"equipment\":{\"mercenary_slot\":7,"
+                              "\"slot\":0,\"item\":null}}");
+                break;
+            default:
+                break;
+        }
+    }
+
+    // 非 world 态：18 kind 统一失败体逐字对照（owner 不附 state）。
+    g_state_not_in_game = true;
+    for (const auto& test : single) {
+        CharWritePayloadMirror payload{};
+        payload.kind = static_cast<int32_t>(test.kind);
+        payload.i0 = test.i0;
+        payload.i1 = test.i1;
+        payload.i2 = test.i2;
+        payload.i64 = test.i64;
+        std::string owner;
+        const bool owner_ok = run_owner_write(payload, &owner);
+        const std::string legacy = frozen_character_write_result_json(payload);
+        CHECK(owner == legacy);
+        CHECK(!owner_ok && owner == "{\"ok\":false,\"error\":\"not in game\"}");
+    }
+    g_state_not_in_game = false;
+
+    // 批量 kind：`set` 保持原字节；`add_stat` 额外投影写后差量。
+    CharWritePayloadMirror set_attr{};
+    set_attr.kind = static_cast<int32_t>(QolCharacterWriteKind::kSetAttr);
+    set_attr.i0 = 0;
+    set_attr.point_count = 1;
+    set_attr.point_idx[0] = 2;
+    set_attr.point_amt[0] = 9;
+    sync_legacy_fixture();
+    std::string set_owner;
+    CHECK(run_owner_write(set_attr, &set_owner));
+    CHECK(set_owner == "{\"ok\":true,\"set\":[{\"attr\":2,\"value\":9}]}");
+
+    CharWritePayloadMirror add_stat{};
+    add_stat.kind = static_cast<int32_t>(QolCharacterWriteKind::kAddStat);
+    add_stat.i0 = 0;
+    add_stat.point_count = 1;
+    add_stat.point_idx[0] = 2;
+    add_stat.point_amt[0] = 2;
+    sync_legacy_fixture();
+    std::string add_owner;
+    CHECK(run_owner_write(add_stat, &add_owner));
+    CHECK(add_owner.find("{\"ok\":true,\"applied\":[{\"attr\":2},{\"attr\":2}],"
+                         "\"role\":{\"role\":0,\"main_stats\":[") == 0);
+
+    g_state_not_in_game = true;
+    std::string set_fail;
+    CHECK(!run_owner_write(set_attr, &set_fail));
+    CHECK(set_fail == "{\"ok\":false,\"error\":\"set attr 2 failed\"}");
+    std::string add_fail;
+    CHECK(!run_owner_write(add_stat, &add_fail));
+    CHECK(add_fail == "{\"ok\":false,\"error\":\"not in game\"}");
+    g_state_not_in_game = false;
+
+    // switch_player 只回读写后 leader_slot，不再附加完整 player。
+    CharWritePayloadMirror instant{};
+    instant.kind = static_cast<int32_t>(QolCharacterWriteKind::kSwitchPlayer);
+    instant.i0 = 2;
+    sync_legacy_fixture();
+    std::string instant_body;
+    CHECK(run_owner_write(instant, &instant_body));
+    CHECK(instant_body == "{\"ok\":true,\"player\":{\"leader_slot\":2}}");
+
+    g_state_reads_from_legacy = false;
+}
+
+// T2c-4a：无 state 数值/属性族（8 kind）typed 单路径族级覆盖。
+// 6 单点 kind 与 legacy 逐字节对照且不含 state；批量 set_attr/add_stat 的组装与失败语义逐字断言。
+void test_write_no_state_family() {
+    using qol::contracts::QolCharacterWriteKind;
+    g_state_reads_from_legacy = true;
+    setup_write_fixture();
+    // 普通 OP/write-ack 路由不读状态；add_stat 单独读取前后状态以计算差量。
+    const uint32_t state_reads_before =
+        g_state_party_reads + g_state_player_reads + g_state_skills_reads;
+
+    struct Case {
+        QolCharacterWriteKind kind;
+        int32_t i0;
+        int32_t i1;
+        int32_t i2;
+        int64_t i64;
+    };
+    const Case singles[] = {
+        {QolCharacterWriteKind::kSetHp, 0, 50, 0, 0},
+        {QolCharacterWriteKind::kSetMp, 0, 10, 0, 0},
+        {QolCharacterWriteKind::kSetLevel, 0, 12, 1, 0},
+        {QolCharacterWriteKind::kSetExperience, 0, 0, 0, 100},
+        {QolCharacterWriteKind::kSetStatusPoint, 0, 5, 0, 0},
+        {QolCharacterWriteKind::kPartySwap, 0, 1, 0, 0},
+    };
+
+    // 成功体：typed 单路径 → {"ok":true}，无 state 附加，且与 legacy 基线逐字一致。
+    for (const auto& test : singles) {
+        CharWritePayloadMirror payload{};
+        payload.kind = static_cast<int32_t>(test.kind);
+        payload.i0 = test.i0;
+        payload.i1 = test.i1;
+        payload.i2 = test.i2;
+        payload.i64 = test.i64;
+        sync_legacy_fixture();
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        sync_legacy_fixture();
+        const std::string legacy = frozen_character_write_result_json(payload);
+        CHECK(ok && owner == legacy && owner == "{\"ok\":true}");
+        CHECK(owner.find("\"state\"") == std::string::npos);
+    }
+
+    // 非 world：失败体逐字、无 state、ticket 记失败。
+    g_state_not_in_game = true;
+    for (const auto& test : singles) {
+        CharWritePayloadMirror payload{};
+        payload.kind = static_cast<int32_t>(test.kind);
+        payload.i0 = test.i0;
+        payload.i1 = test.i1;
+        payload.i2 = test.i2;
+        payload.i64 = test.i64;
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        const std::string legacy = frozen_character_write_result_json(payload);
+        CHECK(!ok && owner == legacy && owner == "{\"ok\":false,\"error\":\"not in game\"}");
+        CHECK(owner.find("\"state\"") == std::string::npos);
+    }
+    g_state_not_in_game = false;
+
+    // role 边界：role=9 在结果处理器返回 role not found（HTTP 解析层不新增 400），逐字对照。
+    const Case role_boundary[] = {
+        {QolCharacterWriteKind::kSetHp, 9, 5, 0, 0},
+        {QolCharacterWriteKind::kSetMp, 9, 5, 0, 0},
+        {QolCharacterWriteKind::kSetLevel, 9, 12, 1, 0},
+        {QolCharacterWriteKind::kSetExperience, 9, 0, 0, 100},
+        {QolCharacterWriteKind::kSetStatusPoint, 9, 5, 0, 0},
+    };
+    for (const auto& test : role_boundary) {
+        CharWritePayloadMirror payload{};
+        payload.kind = static_cast<int32_t>(test.kind);
+        payload.i0 = test.i0;
+        payload.i1 = test.i1;
+        payload.i2 = test.i2;
+        payload.i64 = test.i64;
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        const std::string legacy = frozen_character_write_result_json(payload);
+        CHECK(!ok && owner == legacy && owner == "{\"ok\":false,\"error\":\"role not found\"}");
+    }
+    CharWritePayloadMirror swap_boundary{};
+    swap_boundary.kind = static_cast<int32_t>(QolCharacterWriteKind::kPartySwap);
+    swap_boundary.i0 = 3;
+    swap_boundary.i1 = 0;
+    std::string swap_body;
+    CHECK(!run_owner_write(swap_boundary, &swap_body));
+    CHECK(swap_body == frozen_character_write_result_json(swap_boundary) &&
+          swap_body == "{\"ok\":false,\"error\":\"bad slot\"}");
+
+    // 批量 set_attr：逐项设置；组装留 owner。
+    CharWritePayloadMirror set_ok{};
+    set_ok.kind = static_cast<int32_t>(QolCharacterWriteKind::kSetAttr);
+    set_ok.i0 = 0;
+    set_ok.point_count = 3;
+    set_ok.point_idx[0] = 0;
+    set_ok.point_amt[0] = 7;
+    set_ok.point_idx[1] = 1;
+    set_ok.point_amt[1] = 8;
+    set_ok.point_idx[2] = 2;
+    set_ok.point_amt[2] = 9;
+    g_set_stat_base_calls = 0;
+    sync_legacy_fixture();
+    std::string set_ok_body;
+    CHECK(run_owner_write(set_ok, &set_ok_body));
+    CHECK(set_ok_body ==
+          "{\"ok\":true,\"set\":[{\"attr\":0,\"value\":7},{\"attr\":1,\"value\":8},"
+          "{\"attr\":2,\"value\":9}]}");
+    CHECK(g_set_stat_base_calls == 3 && set_ok_body.find("\"state\"") == std::string::npos);
+
+    // 批量 set_attr：中途失败包装为 set attr $idx failed，且只下发到失败点。
+    CharWritePayloadMirror set_mid{};
+    set_mid.kind = static_cast<int32_t>(QolCharacterWriteKind::kSetAttr);
+    set_mid.i0 = 0;
+    set_mid.point_count = 2;
+    set_mid.point_idx[0] = 0;
+    set_mid.point_amt[0] = 7;
+    set_mid.point_idx[1] = 9;
+    set_mid.point_amt[1] = 8;
+    g_set_stat_base_calls = 0;
+    sync_legacy_fixture();
+    std::string set_mid_body;
+    CHECK(!run_owner_write(set_mid, &set_mid_body));
+    CHECK(set_mid_body == "{\"ok\":false,\"error\":\"set attr 9 failed\"}");
+    CHECK(g_set_stat_base_calls == 1);
+
+    // 批量 set_attr：role 边界同样包装（与迁移前 owner 语义一致）。
+    CharWritePayloadMirror set_role{};
+    set_role.kind = static_cast<int32_t>(QolCharacterWriteKind::kSetAttr);
+    set_role.i0 = 9;
+    set_role.point_count = 1;
+    set_role.point_idx[0] = 0;
+    set_role.point_amt[0] = 7;
+    std::string set_role_body;
+    CHECK(!run_owner_write(set_role, &set_role_body));
+    CHECK(set_role_body == "{\"ok\":false,\"error\":\"set attr 0 failed\"}");
+
+    // 批量 set_attr：非 world 首点失败透传包装体，ticket 记失败。
+    g_state_not_in_game = true;
+    std::string set_world_body;
+    CHECK(!run_owner_write(set_ok, &set_world_body));
+    CHECK(set_world_body == "{\"ok\":false,\"error\":\"set attr 0 failed\"}");
+    g_state_not_in_game = false;
+
+    // 批量 add_stat：按数量逐点 +1；首次失败透传原错误体，且只下发到失败点。
+    CharWritePayloadMirror add_ok{};
+    add_ok.kind = static_cast<int32_t>(QolCharacterWriteKind::kAddStat);
+    add_ok.i0 = 0;
+    add_ok.point_count = 1;
+    add_ok.point_idx[0] = 2;
+    add_ok.point_amt[0] = 3;
+    g_add_stat_main_calls = 0;
+    sync_legacy_fixture();
+    std::string add_ok_body;
+    CHECK(run_owner_write(add_ok, &add_ok_body));
+    CHECK(add_ok_body.find("{\"ok\":true,\"applied\":[{\"attr\":2},{\"attr\":2},"
+                          "{\"attr\":2}],\"role\":{\"role\":0,\"main_stats\":[") == 0);
+    CHECK(g_add_stat_main_calls == 3 && add_ok_body.find("\"state\"") == std::string::npos);
+
+    CharWritePayloadMirror add_mid{};
+    add_mid.kind = static_cast<int32_t>(QolCharacterWriteKind::kAddStat);
+    add_mid.i0 = 0;
+    add_mid.point_count = 2;
+    add_mid.point_idx[0] = 0;
+    add_mid.point_amt[0] = 1;
+    add_mid.point_idx[1] = 9;
+    add_mid.point_amt[1] = 1;
+    g_add_stat_main_calls = 0;
+    sync_legacy_fixture();
+    std::string add_mid_body;
+    CHECK(!run_owner_write(add_mid, &add_mid_body));
+    CHECK(add_mid_body == "{\"ok\":false,\"error\":\"bad attr\"}");
+    CHECK(g_add_stat_main_calls == 1);
+
+    // 批量 add_stat：role 边界透传原错误体（与 legacy builder 单点一致）。
+    CharWritePayloadMirror add_role{};
+    add_role.kind = static_cast<int32_t>(QolCharacterWriteKind::kAddStat);
+    add_role.i0 = 9;
+    add_role.point_count = 1;
+    add_role.point_idx[0] = 0;
+    add_role.point_amt[0] = 1;
+    std::string add_role_body;
+    CHECK(!run_owner_write(add_role, &add_role_body));
+    CHECK(add_role_body == "{\"ok\":false,\"error\":\"role not found\"}");
+
+    // 批量 add_stat：非 world 首次失败透传，ticket 记失败且可回取错误体。
+    g_state_not_in_game = true;
+    g_add_stat_main_calls = 0;
+    std::string add_world_body;
+    const bool add_world_ok = run_owner_write(add_ok, &add_world_body);
+    CHECK(!add_world_ok);
+    CHECK(add_world_body == "{\"ok\":false,\"error\":\"not in game\"}");
+    CHECK(g_add_stat_main_calls == 0);
+    g_state_not_in_game = false;
+
+    CHECK(g_state_party_reads + g_state_player_reads + g_state_skills_reads ==
+          state_reads_before + 4);
+    g_state_reads_from_legacy = false;
+}
+
+// T2c-4b：战斗 party-state 族（kSetAutoAttack/kCastSkill/kAttackTarget）typed 单路径 +
+// owner 自组装 kParty 投影（与 character.state capability 同一实现）覆盖。
+// kAttackTarget 成功路径需 g_base 非 0 且池槽有效；用小型 fake 池避免依赖真实 VMA 布局。
+void test_write_party_state_family(const qol::contracts::CharacterStateApi* state_api) {
+    using qol::contracts::QolCharacterWriteKind;
+    (void)state_api;
+    g_state_reads_from_legacy = true;
+    setup_write_fixture();
+    alignas(8) static uint8_t pool_base_slot[8]{};
+    alignas(8) static uint8_t pool_object[64]{};
+    *reinterpret_cast<uint8_t**>(pool_base_slot) = pool_object;
+    const uintptr_t pool_g_base =
+        reinterpret_cast<uintptr_t>(pool_base_slot) - G_CHAR_POOL_VMA;
+    g_base = pool_g_base;
+
+    struct Case {
+        QolCharacterWriteKind kind;
+        int32_t i0;
+        int32_t i1;
+        int32_t i2;
+        int64_t i64;
+    };
+    const Case success[] = {
+        {QolCharacterWriteKind::kSetAutoAttack, 0, 1, 0, 0},
+        {QolCharacterWriteKind::kCastSkill, 0, 7, 0, 0},
+        {QolCharacterWriteKind::kAttackTarget, 0, 0, 0, 0},
+    };
+
+    const auto make_payload = [](const Case& test) {
+        CharWritePayloadMirror payload{};
+        payload.kind = static_cast<int32_t>(test.kind);
+        payload.i0 = test.i0;
+        payload.i1 = test.i1;
+        payload.i2 = test.i2;
+        payload.i64 = test.i64;
+        return payload;
+    };
+    // 成功体：auto-attack 可报告受理值；cast/attack 无对应终态读面时不得伪造 state。
+    for (const auto& test : success) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        CHECK(ok);
+        if (test.kind == QolCharacterWriteKind::kSetAutoAttack) {
+            CHECK(owner == "{\"ok\":true,\"role\":{\"role\":0,\"auto_attack\":true}}");
+        } else {
+            CHECK(owner == "{\"ok\":true}");
+        }
+        CHECK(owner.find("\"state\"") == std::string::npos);
+    }
+
+    // 操作仍按 typed 原语执行；state 不再因周期快照或无关字段进入票据。
+    g_write_effect_level = 42;
+    for (const auto& test : success) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        sync_legacy_fixture();
+        std::string owner;
+        CHECK(run_owner_write(payload, &owner));
+        CHECK(owner.find("\"state\"") == std::string::npos);
+    }
+    g_write_effect_level = 0;
+
+    // 非 world：失败体逐字、无 state、票据 result 可回取原错误体。
+    g_state_not_in_game = true;
+    for (const auto& test : success) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        const std::string legacy = frozen_character_write_result_json(payload);
+        CHECK(!ok && owner == legacy && owner == "{\"ok\":false,\"error\":\"not in game\"}");
+        CHECK(owner.find("\"state\"") == std::string::npos);
+    }
+    g_state_not_in_game = false;
+
+    // role 边界：结果处理器返回 role not found（HTTP 解析层不新增 400），逐字对照。
+    const Case role_boundary[] = {
+        {QolCharacterWriteKind::kSetAutoAttack, 9, 1, 0, 0},
+        {QolCharacterWriteKind::kCastSkill, 9, 7, 0, 0},
+        {QolCharacterWriteKind::kAttackTarget, 9, 0, 0, 0},
+    };
+    for (const auto& test : role_boundary) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        const std::string legacy = frozen_character_write_result_json(payload);
+        CHECK(!ok && owner == legacy && owner == "{\"ok\":false,\"error\":\"role not found\"}");
+    }
+
+    // 参数边界：cast 未学技能、attack 目标槽无效，均透传原错误体。
+    CharWritePayloadMirror cast_unknown{};
+    cast_unknown.kind = static_cast<int32_t>(QolCharacterWriteKind::kCastSkill);
+    cast_unknown.i0 = 0;
+    cast_unknown.i1 = 99;
+    std::string cast_unknown_body;
+    CHECK(!run_owner_write(cast_unknown, &cast_unknown_body));
+    CHECK(cast_unknown_body == frozen_character_write_result_json(cast_unknown) &&
+          cast_unknown_body == "{\"ok\":false,\"error\":\"skill not learned\"}");
+    CharWritePayloadMirror attack_bad_target{};
+    attack_bad_target.kind = static_cast<int32_t>(QolCharacterWriteKind::kAttackTarget);
+    attack_bad_target.i0 = 0;
+    attack_bad_target.i1 = C_CHARSYSTEM_POOL_SLOTS + 1;
+    std::string attack_bad_target_body;
+    CHECK(!run_owner_write(attack_bad_target, &attack_bad_target_body));
+    CHECK(attack_bad_target_body == frozen_character_write_result_json(attack_bad_target) &&
+          attack_bad_target_body == "{\"ok\":false,\"error\":\"target not found\"}");
+
+    // g_base==0 时目标不存在仍保留原错误；装池后写调用成功，但终态没有读面字段可确认。
+    g_base = 0;
+    CharWritePayloadMirror attack_success{};
+    attack_success.kind = static_cast<int32_t>(QolCharacterWriteKind::kAttackTarget);
+    attack_success.i0 = 0;
+    attack_success.i1 = 0;
+    std::string no_pool_body;
+    CHECK(!run_owner_write(attack_success, &no_pool_body) &&
+          no_pool_body == "{\"ok\":false,\"error\":\"target not found\"}");
+    g_base = pool_g_base;
+    sync_legacy_fixture();
+    std::string with_pool_body;
+    CHECK(run_owner_write(attack_success, &with_pool_body) &&
+          with_pool_body == "{\"ok\":true}");
+
+    g_base = 0;
+    g_state_reads_from_legacy = false;
+}
+
+// T2c-4c：队伍 party-state 族（kPartyInclude/kPartyExclude/kPartyDischarge/kPartyWithdraw）
+// typed 单路径 + owner 自组装 kParty 投影覆盖。withdraw 必须走 fn_can_unequip 前检再 fn_unequip
+// （原队伍写实现的成功条件），discharge 保留 fn_mercenary_release 原版副作用，
+// 两者以调用计数锁定；失败体逐字对照 legacy 基线，失败时不触发原版副作用。
+void test_write_party_member_family(const qol::contracts::CharacterStateApi* state_api) {
+    using qol::contracts::QolCharacterWriteKind;
+    (void)state_api;
+    g_state_reads_from_legacy = true;
+    setup_write_fixture();
+    std::memset(g_merc_object, 0, sizeof(g_merc_object));
+    // 装备槽 0 预置非空 item：withdraw 必须经 fn_can_unequip 前检。
+    *reinterpret_cast<void**>(g_merc_object + C_EQUIP) = g_merc_item;
+    g_can_unequip_calls = 0;
+    g_can_unequip_result = 1;
+    g_unequip_calls = 0;
+    g_unequip_result = 1;
+    g_mercenary_release_calls = 0;
+    g_include_calls = 0;
+    g_include_result = 1;
+    g_exclude_calls = 0;
+    g_exclude_result = 1;
+    g_leader_is_merc = false;
+    g_merc_in_party = false;
+    g_is_special_npc = false;
+
+    struct Case {
+        QolCharacterWriteKind kind;
+        int32_t i0;
+        int32_t i1;
+        int32_t i2;
+        int64_t i64;
+    };
+    const auto make_payload = [](const Case& test) {
+        CharWritePayloadMirror payload{};
+        payload.kind = static_cast<int32_t>(test.kind);
+        payload.i0 = test.i0;
+        payload.i1 = test.i1;
+        payload.i2 = test.i2;
+        payload.i64 = test.i64;
+        return payload;
+    };
+    // 成功体：party read 面不可用时不伪造成员投影；withdraw 仍明确回装备空槽。
+    const auto run_golden = [&](const Case& test, int* owner_can_unequip, int* owner_unequip,
+                                int* owner_release) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        g_can_unequip_calls = 0;
+        g_unequip_calls = 0;
+        g_mercenary_release_calls = 0;
+        sync_legacy_fixture();
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        if (owner_can_unequip != nullptr) *owner_can_unequip = g_can_unequip_calls;
+        if (owner_unequip != nullptr) *owner_unequip = g_unequip_calls;
+        if (owner_release != nullptr) *owner_release = g_mercenary_release_calls;
+        CHECK(ok);
+        CHECK(owner.find("\"state\"") == std::string::npos);
+        if (test.kind == QolCharacterWriteKind::kPartyWithdraw) {
+            CHECK(owner == "{\"ok\":true,\"equipment\":{\"mercenary_slot\":7,"
+                           "\"slot\":0,\"item\":null}}");
+        } else {
+            CHECK(owner == "{\"ok\":true}");
+        }
+    };
+    const auto run_failure = [&](const Case& test, const char* expected) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        CHECK(!ok && owner == frozen_character_write_result_json(payload) &&
+              owner == expected);
+        CHECK(owner.find("\"state\"") == std::string::npos);
+    };
+
+    const Case success[] = {
+        {QolCharacterWriteKind::kPartyInclude, 7, 0, 0, 0},
+        {QolCharacterWriteKind::kPartyExclude, 7, 0, 0, 0},
+        {QolCharacterWriteKind::kPartyDischarge, 7, 0, 0, 0},
+        {QolCharacterWriteKind::kPartyWithdraw, 7, 0, 0, 0},
+    };
+
+    // 成功体：typed 单路径输出与 legacy 基线逐字节一致；内嵌 kParty 子树与 capability 同源。
+    for (const auto& test : success) {
+        int owner_can = 0;
+        int owner_unequip = 0;
+        int owner_release = 0;
+        run_golden(test, &owner_can, &owner_unequip, &owner_release);
+        if (test.kind == QolCharacterWriteKind::kPartyWithdraw) {
+            // item 非空 → can_unequip 前检恰一次，通过后 fn_unequip 恰一次。
+            CHECK(owner_can == 1 && owner_unequip == 1);
+        }
+        if (test.kind == QolCharacterWriteKind::kPartyDischarge) {
+            // 原版遣散副作用 MERCENARYSYSTEM_Release 恰一次。
+            CHECK(owner_release == 1);
+        }
+    }
+
+    // 操作写入仍执行；缺少 read-face JSON 时只回 ACK。
+    g_write_effect_level = 42;
+    for (const auto& test : success) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        sync_legacy_fixture();
+        std::string owner;
+        CHECK(run_owner_write(payload, &owner));
+        if (test.kind == QolCharacterWriteKind::kPartyWithdraw) {
+            CHECK(owner == "{\"ok\":true,\"equipment\":{\"mercenary_slot\":7,"
+                          "\"slot\":0,\"item\":null}}");
+        } else {
+            CHECK(owner == "{\"ok\":true}");
+        }
+    }
+    g_write_effect_level = 0;
+
+    // 非 world：失败体逐字、无 state、票据 result 可回取原错误体。
+    g_state_not_in_game = true;
+    for (const auto& test : success) {
+        run_failure(test, "{\"ok\":false,\"error\":\"not in game\"}");
+    }
+    g_state_not_in_game = false;
+
+    // 佣兵槽无效（非 7）：mercenary not found。
+    for (const auto& test : success) {
+        Case missing = test;
+        missing.i0 = 5;
+        run_failure(missing, "{\"ok\":false,\"error\":\"mercenary not found\"}");
+    }
+
+    // withdraw 装备槽越界：bad slot（先于任何 can_unequip 调用）。
+    g_can_unequip_calls = 0;
+    run_failure({QolCharacterWriteKind::kPartyWithdraw, 7, C_EQUIP_SLOTS, 0, 0},
+                "{\"ok\":false,\"error\":\"bad slot\"}");
+    CHECK(g_can_unequip_calls == 0);
+
+    // withdraw 前检拒绝：can_unequip 恰一次且不调 fn_unequip（原队伍写实现口径）。
+    g_can_unequip_result = 0;
+    g_can_unequip_calls = 0;
+    g_unequip_calls = 0;
+    {
+        const CharWritePayloadMirror payload =
+            make_payload({QolCharacterWriteKind::kPartyWithdraw, 7, 0, 0, 0});
+        sync_legacy_fixture();
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        CHECK(!ok && owner == "{\"ok\":false,\"error\":\"cannot unequip\"}");
+        CHECK(g_can_unequip_calls == 1 && g_unequip_calls == 0);
+        sync_legacy_fixture();
+        CHECK(owner == frozen_character_write_result_json(payload));
+    }
+    g_can_unequip_result = 1;
+
+    // withdraw 底层失败：fn_unequip 返回 0 → withdraw failed。
+    g_unequip_result = 0;
+    run_failure({QolCharacterWriteKind::kPartyWithdraw, 7, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"withdraw failed\"}");
+    g_unequip_result = 1;
+
+    // 队伍闸门：队长不可离队/遣散（先于原版副作用），任务 NPC 同理。
+    g_leader_is_merc = true;
+    g_mercenary_release_calls = 0;
+    run_failure({QolCharacterWriteKind::kPartyExclude, 7, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"cannot exclude leader\"}");
+    run_failure({QolCharacterWriteKind::kPartyDischarge, 7, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"cannot discharge leader\"}");
+    CHECK(g_mercenary_release_calls == 0);
+    g_leader_is_merc = false;
+
+    g_is_special_npc = true;
+    run_failure({QolCharacterWriteKind::kPartyExclude, 7, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"cannot exclude quest npc\"}");
+    run_failure({QolCharacterWriteKind::kPartyDischarge, 7, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"cannot discharge quest npc\"}");
+    g_is_special_npc = false;
+
+    // include 闸门：已在队 / 队伍已满。
+    g_merc_in_party = true;
+    run_failure({QolCharacterWriteKind::kPartyInclude, 7, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"already in party\"}");
+    g_merc_in_party = false;
+    const int32_t saved_party_count = g_live_player.party_count;
+    g_live_player.party_count = 3;
+    run_failure({QolCharacterWriteKind::kPartyInclude, 7, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"party full\"}");
+    g_live_player.party_count = saved_party_count;
+
+    // 原版调用失败：include/exclude 返回 0 时透传原错误体。
+    g_include_result = 0;
+    run_failure({QolCharacterWriteKind::kPartyInclude, 7, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"party full or include failed\"}");
+    g_include_result = 1;
+    g_exclude_result = 0;
+    run_failure({QolCharacterWriteKind::kPartyExclude, 7, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"exclude failed\"}");
+    g_exclude_result = 1;
+
+    g_state_reads_from_legacy = false;
+}
+
+// T2c-4d：player-state 族（kSwitchPlayer/kStopCombat/kStatReset/kSkillReset）typed 单路径 +
+// owner 自组装 kPlayer 投影覆盖。switch_player 必须保留 fn_set_active_player 成功后的
+// g_main_merc_slot 同步（原队伍写实现口径）；失败/越界时先返回、不得写槽，以桩状态与计数锁定。
+void test_write_player_family(const qol::contracts::CharacterStateApi* state_api) {
+    using qol::contracts::QolCharacterWriteKind;
+    (void)state_api;
+    g_state_reads_from_legacy = true;
+    setup_write_fixture();
+    g_set_active_player_calls = 0;
+    g_set_active_player_result = 1;
+    g_ui_blocked_message = nullptr;
+
+    struct Case {
+        QolCharacterWriteKind kind;
+        int32_t i0;
+        int32_t i1;
+        int32_t i2;
+        int64_t i64;
+    };
+    const auto make_payload = [](const Case& test) {
+        CharWritePayloadMirror payload{};
+        payload.kind = static_cast<int32_t>(test.kind);
+        payload.i0 = test.i0;
+        payload.i1 = test.i1;
+        payload.i2 = test.i2;
+        payload.i64 = test.i64;
+        return payload;
+    };
+    // owner 侧调用计数与 leader 槽在 legacy 原语基线之前捕获。
+    const auto run_golden = [&](const Case& test, int* owner_calls, uint8_t* owner_leader) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        g_set_active_player_calls = 0;
+        sync_legacy_fixture();
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        if (owner_calls != nullptr) *owner_calls = g_set_active_player_calls;
+        if (owner_leader != nullptr) *owner_leader = g_legacy_leader_slot;
+        sync_legacy_fixture();
+        CHECK(ok);
+        CHECK(owner.find("\"state\"") == std::string::npos);
+        if (test.kind == QolCharacterWriteKind::kSwitchPlayer) {
+            CHECK(owner == "{\"ok\":true,\"player\":{\"leader_slot\":2}}");
+        } else if (test.kind == QolCharacterWriteKind::kStopCombat) {
+            CHECK(owner == "{\"ok\":true,\"role\":{\"role\":0,\"combat\":false}}");
+        } else if (test.kind == QolCharacterWriteKind::kStatReset) {
+            CHECK(owner.find("{\"ok\":true,\"role\":{\"role\":0,\"main_stats\":[") == 0);
+        } else {
+            CHECK(owner == "{\"ok\":true}");
+        }
+    };
+    const auto run_failure = [&](const Case& test, const char* expected) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        CHECK(!ok && owner == frozen_character_write_result_json(payload) && owner == expected);
+        CHECK(owner.find("\"state\"") == std::string::npos);
+    };
+
+    const Case success[] = {
+        {QolCharacterWriteKind::kSwitchPlayer, 2, 0, 0, 0},
+        {QolCharacterWriteKind::kStopCombat, 0, 0, 0, 0},
+        {QolCharacterWriteKind::kStatReset, 0, 0, 0, 0},
+        {QolCharacterWriteKind::kSkillReset, 0, 0, 0, 0},
+    };
+
+    // 成功体：逐路由字段按操作投影，不回传完整 Player。
+    for (const auto& test : success) {
+        int owner_calls = 0;
+        uint8_t owner_leader = 0;
+        run_golden(test, &owner_calls, &owner_leader);
+        if (test.kind == QolCharacterWriteKind::kSwitchPlayer) {
+            // fn_set_active_player 恰一次；成功后 g_main_merc_slot 同步为 slot。
+            CHECK(owner_calls == 1 && owner_leader == 2);
+        } else {
+            CHECK(owner_calls == 0);
+        }
+    }
+
+    // 写后即时：switch_player 的 leader_slot 来自同步后的 player 读面。
+    g_write_effect_level = 42;
+    for (const auto& test : success) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        sync_legacy_fixture();
+        std::string owner;
+        CHECK(run_owner_write(payload, &owner));
+        if (test.kind == QolCharacterWriteKind::kSwitchPlayer) {
+            CHECK(owner == "{\"ok\":true,\"player\":{\"leader_slot\":2}}");
+        }
+    }
+    g_write_effect_level = 0;
+
+    // 非 world：失败体逐字、无 state、票据 result 可回取原错误体。
+    g_state_not_in_game = true;
+    for (const auto& test : success) {
+        run_failure(test, "{\"ok\":false,\"error\":\"not in game\"}");
+    }
+    g_state_not_in_game = false;
+
+    // switch_player slot 越界：bad slot，且不调原版函数、不动 leader 槽。
+    sync_legacy_fixture();
+    g_set_active_player_calls = 0;
+    run_failure({QolCharacterWriteKind::kSwitchPlayer, 3, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"bad slot\"}");
+    run_failure({QolCharacterWriteKind::kSwitchPlayer, -1, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"bad slot\"}");
+    CHECK(g_set_active_player_calls == 0 && g_legacy_leader_slot == 0);
+
+    // switch_player 原版切换失败：switch failed，且先于同步返回、不写 g_main_merc_slot。
+    g_set_active_player_result = 0;
+    g_set_active_player_calls = 0;
+    run_failure({QolCharacterWriteKind::kSwitchPlayer, 1, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"switch failed\"}");
+    CHECK(g_set_active_player_calls == 2 && g_legacy_leader_slot == 0);
+    g_set_active_player_result = 1;
+
+    // role 边界：stop_combat/stat_reset/skill_reset 的 role=9 -> role not found。
+    for (const auto kind : {QolCharacterWriteKind::kStopCombat, QolCharacterWriteKind::kStatReset,
+                            QolCharacterWriteKind::kSkillReset}) {
+        run_failure({kind, 9, 0, 0, 0}, "{\"ok\":false,\"error\":\"role not found\"}");
+    }
+
+    // 停攻前置 UI 占用：透传 "ui occupied: <screen>"，且先于角色解析。
+    g_ui_blocked_message = "popup";
+    run_failure({QolCharacterWriteKind::kStopCombat, 0, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"ui occupied: popup\"}");
+    g_ui_blocked_message = nullptr;
+
+    // 符号未解析：stat_reset/skill_reset 在初始化函数缺失时 unsupported（先于 member 解析）。
+    auto saved_status_init = fn_char_initialize_status;
+    fn_char_initialize_status = nullptr;
+    run_failure({QolCharacterWriteKind::kStatReset, 0, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"symbol not resolved\"}");
+    fn_char_initialize_status = saved_status_init;
+    auto saved_skill_init = fn_char_initialize_skill;
+    fn_char_initialize_skill = nullptr;
+    run_failure({QolCharacterWriteKind::kSkillReset, 0, 0, 0, 0},
+                "{\"ok\":false,\"error\":\"symbol not resolved\"}");
+    fn_char_initialize_skill = saved_skill_init;
+
+    g_state_reads_from_legacy = false;
+}
+
+// T2c-4e：skills-state 族（kLearnAction）typed 单路径 + owner 自组装 kSkills 投影覆盖。
+// O3：写后 state 必须是 raw 形状（frozen_skills_json，无技能名注入），与 capability kSkills 同源；
+// 写面不得引用 enriched build_character_skills_json（后者仅 GET 读面使用）。
+void test_write_skills_family(const qol::contracts::CharacterStateApi* state_api) {
+    using qol::contracts::QolCharacterWriteKind;
+    (void)state_api;
+    g_state_reads_from_legacy = true;
+    setup_write_fixture();
+    g_write_effect_level = 0;
+
+    struct Case {
+        QolCharacterWriteKind kind;
+        int32_t i0;
+        int32_t i1;
+        int32_t i2;
+        int64_t i64;
+    };
+    const auto make_payload = [](const Case& test) {
+        CharWritePayloadMirror payload{};
+        payload.kind = static_cast<int32_t>(test.kind);
+        payload.i0 = test.i0;
+        payload.i1 = test.i1;
+        payload.i2 = test.i2;
+        payload.i64 = test.i64;
+        return payload;
+    };
+    const auto run_failure = [&](const Case& test, const char* expected) {
+        const CharWritePayloadMirror payload = make_payload(test);
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        CHECK(!ok && owner == frozen_character_write_result_json(payload) && owner == expected);
+        CHECK(owner.find("\"state\"") == std::string::npos);
+    };
+
+    // read-face skills JSON 在本测试 fake 中不可用时，仅回 ACK，不伪造技能终态。
+    const Case success{QolCharacterWriteKind::kLearnAction, 0, 7, 2, 0};
+    {
+        const CharWritePayloadMirror payload = make_payload(success);
+        sync_legacy_fixture();
+        std::string owner;
+        const bool ok = run_owner_write(payload, &owner);
+        CHECK(ok && owner == "{\"ok\":true}");
+        CHECK(owner.find("\"state\"") == std::string::npos);
+    }
+
+    // read-face JSON 未提供时不回传技能数组；原版学习链的 live 副作用仍发生。
+    g_write_effect_level = 1;
+    {
+        const CharWritePayloadMirror payload = make_payload(success);
+        sync_legacy_fixture();
+        std::string owner;
+        CHECK(run_owner_write(payload, &owner) && owner == "{\"ok\":true}");
+        void* member = legacy_member(0);
+        CHECK(member != nullptr &&
+              reinterpret_cast<int8_t*>(static_cast<uint8_t*>(member))[C_SKILL_POINTS] == 1);
+        CHECK(member != nullptr &&
+              *reinterpret_cast<uint16_t*>(static_cast<uint8_t*>(member) + C_SKILL_BMP) == 0x1F);
+    }
+    g_write_effect_level = 0;
+
+    // action_id 传递：legacy 不做 action 合法性校验；无 read-face 技能投影时保留 ACK。
+    {
+        const Case passthrough{QolCharacterWriteKind::kLearnAction, 0, 9999, 3, 0};
+        const CharWritePayloadMirror payload = make_payload(passthrough);
+        sync_legacy_fixture();
+        std::string owner;
+        CHECK(run_owner_write(payload, &owner));
+        CHECK(owner == "{\"ok\":true}");
+    }
+
+    // 非 world：失败体逐字、无 state、票据 result 可回取原错误体。
+    g_state_not_in_game = true;
+    run_failure(success, "{\"ok\":false,\"error\":\"not in game\"}");
+    g_state_not_in_game = false;
+
+    // role 边界与符号未解析（结果处理器不新增 400）。
+    run_failure({QolCharacterWriteKind::kLearnAction, 9, 7, 2, 0},
+                "{\"ok\":false,\"error\":\"role not found\"}");
+    auto saved_learn = fn_learn_action;
+    fn_learn_action = nullptr;
+    run_failure(success, "{\"ok\":false,\"error\":\"symbol not resolved\"}");
+    fn_learn_action = saved_learn;
+
+    g_state_reads_from_legacy = false;
+}
+
+// T2d-0：bridge JNI 信封 helper 的独立字节断言（与测试内 frozen 信封实现相互独立）。
+void test_bridge_write_envelope() {
+    qol::contracts::QolCharacterWriteOpResult op{};
+    CHECK(qol::bridge::character_write_result_json(qol::contracts::ok(), op) == "{\"ok\":true}");
+    std::memcpy(op.error_message, "not in game", 11);
+    op.error_message_len = 11;
+    CHECK(qol::bridge::character_write_result_json(
+              qol::contracts::error(kQolErrNotReady, "not in game", 11), op) ==
+          "{\"ok\":false,\"error\":\"not in game\"}");
+    // 空文案回退（防御分支）。
+    qol::contracts::QolCharacterWriteOpResult empty{};
+    CHECK(qol::bridge::character_write_result_json(
+              qol::contracts::error(kQolErrInternal, "x", 1), empty) ==
+          "{\"ok\":false,\"error\":\"character write failed\"}");
+}
+
+// T2h-0：frozen 复刻与产品读面实现的逐字节等值证明（T2i-2 后产品读面 = host 内联 legacy）。
+void test_read_face_frozen_equivalence() {
+    g_state_reads_from_legacy = true;
+    setup_write_fixture();
+    sync_legacy_fixture();
+    CHECK(frozen_party_json() == qol::host::legacy_build_party_json());
+    CHECK(frozen_player_json() == qol::host::legacy_build_player_json());
+    CHECK(frozen_skills_json() == qol::host::legacy_build_skills_json());
+    // 非 world 分支：party/player 走 `{"error":"not in game"}`，skills 无 world 短路，均须等值。
+    g_state_not_in_game = true;
+    CHECK(frozen_party_json() == qol::host::legacy_build_party_json());
+    CHECK(frozen_player_json() == qol::host::legacy_build_player_json());
+    CHECK(frozen_skills_json() == qol::host::legacy_build_skills_json());
+    g_state_not_in_game = false;
+    g_state_reads_from_legacy = false;
+}
+
+// T2i-1（W12）：host 内联 legacy 读面（host/legacy_json_builders.h）与 T2h-0 frozen 复刻
+// 逐字节等值。覆盖 default / 非 world / 边界（g_base==0 空佣兵、
+// 佣兵槽含空槽与 type>2 槽、成员缺失的 null 分支）。
+void test_legacy_builders_byte_equivalence() {
+    g_state_reads_from_legacy = true;
+    setup_write_fixture();
+    sync_legacy_fixture();
+
+    // default fixture：player/party/skills/成员 JSON 与 frozen 复刻逐字节等值。
+    CHECK(qol::host::legacy_member_json(legacy_member(0)) == frozen_member_json(legacy_member(0)));
+    CHECK(qol::host::legacy_build_player_json() == frozen_player_json());
+    CHECK(qol::host::legacy_build_party_json() == frozen_party_json());
+    CHECK(qol::host::legacy_build_skills_json() == frozen_skills_json());
+    // T2i-2：api/native 原实现删除后，原 4 条「与 api/native 对照」改由 frozen 独立复刻
+    // 一对一承接（保留删除前的对照语义与断言条数）。
+    CHECK(qol::host::legacy_build_player_json() == frozen_player_json());
+    CHECK(qol::host::legacy_build_party_json() == frozen_party_json());
+    CHECK(qol::host::legacy_build_skills_json() == frozen_skills_json());
+    CHECK(qol::host::legacy_build_mercenaries_json() == frozen_mercenaries_json());
+
+    // 非 world：player/party/mercenaries 走错误短体；skills 无 world 短路（仍走成员路径）。
+    g_state_not_in_game = true;
+    CHECK(qol::host::legacy_build_player_json() == frozen_player_json());
+    CHECK(qol::host::legacy_build_party_json() == frozen_party_json());
+    CHECK(qol::host::legacy_build_skills_json() == frozen_skills_json());
+    CHECK(qol::host::legacy_build_mercenaries_json() == frozen_mercenaries_json());
+    CHECK(qol::host::legacy_build_player_json() == "{\"error\":\"not in game\"}");
+    CHECK(qol::host::legacy_build_mercenaries_json() == "{\"error\":\"not in game\"}");
+    g_state_not_in_game = false;
+
+    // 边界：g_base==0 → 佣兵空数组。
+    CHECK(qol::host::legacy_build_mercenaries_json() == frozen_mercenaries_json());
+    CHECK(qol::host::legacy_build_mercenaries_json() == "[]");
+    CHECK(qol::host::legacy_build_mercenaries_json() == frozen_mercenaries_json());
+
+    // 边界：构造合成佣兵槽（slot0 占用但无角色对象 → name:null；slot7 type=1 → 角色分支）。
+    // G_MERC_MAX_GOT_VMA / G_MERC_SLOTLIST_GOT_VMA 两 GOT 共用一个基址区，取两偏移跨度分配。
+    constexpr uintptr_t kMercLo = G_MERC_MAX_GOT_VMA;
+    constexpr uintptr_t kMercHi = G_MERC_SLOTLIST_GOT_VMA;
+    static uint8_t merc_region[kMercHi - kMercLo + 8]{};
+    static uint8_t merc_slots[8 * M_SLOT_SIZE]{};
+    static uint8_t* merc_slots_ptr = merc_slots;
+    static int8_t merc_max = 8;
+    *reinterpret_cast<uint8_t**>(merc_region) = reinterpret_cast<uint8_t*>(&merc_max);
+    // 槽列表为双层解引用：GOT 槽持有「指向槽数组指针」的地址。
+    *reinterpret_cast<uintptr_t*>(merc_region + (kMercHi - kMercLo)) =
+        reinterpret_cast<uintptr_t>(&merc_slots_ptr);
+    merc_slots[0 * M_SLOT_SIZE + M_FLAGS] = 0x01;  // 占用、无角色对象
+    merc_slots[0 * M_SLOT_SIZE + M_TYPE] = 0;
+    merc_slots[7 * M_SLOT_SIZE + M_FLAGS] = 0x03;  // 占用 + 在队伍
+    merc_slots[7 * M_SLOT_SIZE + M_TYPE] = 1;      // find_char_by_merc_slot(7) → 角色对象
+    const uintptr_t saved_base = g_base;
+    g_base = reinterpret_cast<uintptr_t>(merc_region) - kMercLo;
+    CHECK(qol::host::legacy_build_mercenaries_json() == frozen_mercenaries_json());
+    // T2i-2：原「与 api/native 对照」由 frozen 独立复刻承接。
+    CHECK(qol::host::legacy_build_mercenaries_json() == frozen_mercenaries_json());
+    CHECK(qol::host::legacy_build_mercenaries_json().find("\"slot\":7") != std::string::npos);
+    CHECK(qol::host::legacy_build_mercenaries_json().find("\"name\":null") != std::string::npos);
+    g_base = saved_base;
+
+    // 边界：成员缺失（member_present 全 0）→ party/skills 的 null 分支等值。
+    std::memset(g_legacy_member_present, 0, sizeof(g_legacy_member_present));
+    CHECK(qol::host::legacy_build_party_json() == frozen_party_json());
+    CHECK(qol::host::legacy_build_skills_json() == frozen_skills_json());
+    // T2i-2：原「与 api/native 对照」两条由 frozen 独立复刻承接。
+    CHECK(qol::host::legacy_build_party_json() == frozen_party_json());
+    CHECK(qol::host::legacy_build_skills_json() == frozen_skills_json());
+
+    g_state_reads_from_legacy = false;
+}
+
+// T2h-B1（v3）：W2 —— owner 适配器四情形 fallback 逐字节断言（host 可测钩子）。
+static std::string fake_legacy_cache_body() { return "{\"legacy\":true}"; }
+static QolResult fake_owner_ok(qol::contracts::QolCharacterStateKind, char* out, uint32_t capacity,
+                               uint32_t* out_size) {
+    constexpr char kBody[] = "{\"owner\":true}";
+    const uint32_t size = sizeof(kBody) - 1;
+    if (out == nullptr || out_size == nullptr || size > capacity) {
+        return qol::contracts::error(kQolErrBlocked, "small", 5);
+    }
+    std::memcpy(out, kBody, size);
+    *out_size = size;
+    return qol::contracts::ok();
+}
+static QolResult fake_owner_fail(qol::contracts::QolCharacterStateKind, char*, uint32_t,
+                                 uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
+    return qol::contracts::error(kQolErrNotReady, "not in game", 11);
+}
+static QolResult fake_owner_oversize(qol::contracts::QolCharacterStateKind, char*, uint32_t,
+                                     uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 9999;
+    return qol::contracts::ok();
+}
+
+void test_owner_cache_builder_v3(const qol::contracts::CharacterStateApi* state_api) {
+    // W2 情形 1：capability 未注册/未取到 → legacy。
+    CHECK(qol::host::build_character_state_json_via_owner(nullptr, 1, 64,
+                                                          &fake_legacy_cache_body) ==
+          fake_legacy_cache_body());
+    // W2 情形 2：api 无 write_state_json → legacy。
+    const qol::contracts::CharacterStateApi null_api{nullptr};
+    CHECK(qol::host::build_character_state_json_via_owner(&null_api, 1, 64,
+                                                          &fake_legacy_cache_body) ==
+          fake_legacy_cache_body());
+    // W2 情形 3：write_state_json 失败 → legacy。
+    const qol::contracts::CharacterStateApi fail_api{&fake_owner_fail};
+    CHECK(qol::host::build_character_state_json_via_owner(&fail_api, 1, 64,
+                                                          &fake_legacy_cache_body) ==
+          fake_legacy_cache_body());
+    // W2 情形 4：size > buffer（owner 自报超限）→ legacy。
+    const qol::contracts::CharacterStateApi oversize_api{&fake_owner_oversize};
+    CHECK(qol::host::build_character_state_json_via_owner(&oversize_api, 1, 64,
+                                                          &fake_legacy_cache_body) ==
+          fake_legacy_cache_body());
+    // 成功路径：owner 字节原样返回（不 fallback、不改写）。
+    const qol::contracts::CharacterStateApi ok_api{&fake_owner_ok};
+    CHECK(qol::host::build_character_state_json_via_owner(&ok_api, 0, 64,
+                                                          &fake_legacy_cache_body) ==
+          "{\"owner\":true}");
+
+    // W1：非主线程调用真实 owner serializer，输出与主线程逐字节一致（纯内存读前提）。
+    g_state_reads_from_legacy = true;
+    setup_write_fixture();
+    sync_legacy_fixture();
+    char main_buf[8192]{};
+    uint32_t main_size = 0;
+    CHECK(state_api->write_state_json(qol::contracts::QolCharacterStateKind::kParty, main_buf,
+                                      sizeof(main_buf), &main_size).ok == kQolOk);
+    char worker_buf[8192]{};
+    uint32_t worker_size = 0;
+    int32_t worker_code = kQolErrInternal;
+    std::thread worker([&] {
+        worker_code = state_api->write_state_json(qol::contracts::QolCharacterStateKind::kParty,
+                                                  worker_buf, sizeof(worker_buf), &worker_size)
+                          .code;
+    });
+    worker.join();
+    CHECK(worker_code == kQolOk);
+    CHECK(std::string(main_buf, main_size) == std::string(worker_buf, worker_size));
+    // W2 交叉：真实 owner serializer 的 not-in-world 输出 == legacy（已由 T2c/T2h-0 锁定）。
+    g_state_not_in_game = true;
+    char nw[512]{};
+    uint32_t nw_size = 0;
+    CHECK(state_api->write_state_json(qol::contracts::QolCharacterStateKind::kPlayer, nw, sizeof(nw),
+                                      &nw_size).ok == kQolOk);
+    CHECK(std::string(nw, nw_size) == frozen_player_json());
+    g_state_not_in_game = false;
+    g_state_reads_from_legacy = false;
+}
+
+QolResult fake_register_result(uint32_t, qol::contracts::QolTypedResultCommandHandler handler,
+                               void*) {
+    g_result_handler = handler;
+    return qol::contracts::ok();
+}
+
+QolResult fake_unregister_result(uint32_t) {
+    g_result_handler = nullptr;
+    return qol::contracts::ok();
+}
+
+QolResult fake_post_typed(uint32_t handler_id, const void* payload, uint32_t size,
+                          qol::contracts::QolCommandTicket* ticket) {
+    if (payload == nullptr || size > sizeof(g_post_payload) || ticket == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad command", 11);
+    }
+    g_post_handler_id = handler_id;
+    g_post_payload_size = size;
+    std::memcpy(g_post_payload, payload, size);
+    *ticket = 41;
+    return qol::contracts::ok();
+}
+
+int main() {
+    const auto& descriptor = qol::features::core_character::plugin_descriptor();
+    CHECK(std::strcmp(descriptor.id, "core.character") == 0);
+    CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
+    CHECK(descriptor.requires_count == 0 && descriptor.requires == nullptr &&
+          descriptor.optional_count == 3 &&
+          descriptor.optional_requires != nullptr);
+    CHECK(std::strcmp(descriptor.optional_requires[0].id,
+                      qol::contracts::kItemStateCapabilityId) == 0);
+    CHECK(descriptor.optional_requires[0].range.major == 1 &&
+          descriptor.optional_requires[0].range.min_minor == 1);
+    CHECK(std::strcmp(descriptor.optional_requires[1].id,
+                      qol::contracts::kHttpRegistryCapabilityId) == 0);
+    CHECK(std::strcmp(descriptor.optional_requires[2].id,
+                      qol::contracts::kHttpDispatchCapabilityId) == 0);
+    for (uint32_t i = 1; i < 3; ++i) {
+        CHECK(descriptor.optional_requires[i].range.major == 1);
+        CHECK(descriptor.optional_requires[i].range.min_minor == 1);
+    }
+    CHECK(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
+    CHECK(descriptor.http_endpoint_count == 35 && descriptor.http_endpoints != nullptr);
+    CHECK(descriptor.http_route_metadata_count == 6 &&
+          descriptor.http_route_metadata != nullptr);
+    CHECK(descriptor.http_endpoint_count + descriptor.http_route_metadata_count == 41);
+    std::vector<std::string> route_keys;
+    uint32_t op_endpoint_count = 0;
+    for (uint32_t i = 0; i < descriptor.http_endpoint_count; ++i) {
+        const auto& endpoint = descriptor.http_endpoints[i];
+        CHECK(endpoint.path != nullptr);
+        if (endpoint.path != nullptr) {
+            route_keys.push_back(std::to_string(static_cast<int>(endpoint.method)) + ":" +
+                                 endpoint.path);
+        }
+        CHECK(endpoint.route_owner != nullptr &&
+              std::strcmp(endpoint.route_owner, "core.character") == 0);
+        CHECK(endpoint.lease_required == 1);
+        if (endpoint.op_required != 0) ++op_endpoint_count;
+        CHECK(endpoint.method == qol::contracts::HttpMethod::kGet ||
+              endpoint.method == qol::contracts::HttpMethod::kPost);
+        if (endpoint.method == qol::contracts::HttpMethod::kGet) {
+            CHECK(endpoint.kind == qol::contracts::HttpHandlerKind::kQuery);
+            CHECK(endpoint.query_handler != nullptr && endpoint.command_handler == nullptr &&
+                  endpoint.ctx != nullptr);
+        } else if (endpoint.method == qol::contracts::HttpMethod::kPost) {
+            CHECK(endpoint.kind == qol::contracts::HttpHandlerKind::kCommand);
+            CHECK(endpoint.query_handler == nullptr && endpoint.command_handler != nullptr &&
+                  endpoint.ctx != nullptr);
+        } else {
+            CHECK(false);
+        }
+    }
+    CHECK(op_endpoint_count == 7);
+    const char* const metadata_paths[] = {
+        "/api/op/character/{role}/skill-point", "/api/op/character/{role}/skill-level",
+        "/api/op/combat/{role}/heal", "/api/op/combat/{role}/rest",
+        "/api/op/combat/{role}/revive", "/api/op/combat/{role}/hate",
+    };
+    for (uint32_t i = 0; i < descriptor.http_route_metadata_count; ++i) {
+        const auto& metadata = descriptor.http_route_metadata[i];
+        CHECK(metadata.method == qol::contracts::HttpMethod::kPost);
+        CHECK(metadata.path != nullptr);
+        if (metadata.path != nullptr) {
+            route_keys.push_back(std::to_string(static_cast<int>(metadata.method)) + ":" +
+                                 metadata.path);
+        }
+        CHECK(metadata.path != nullptr &&
+              std::strcmp(metadata.path, metadata_paths[i]) == 0);
+        CHECK(std::strcmp(metadata.route_owner, "core.character") == 0);
+        CHECK(metadata.op_required == 1 && metadata.lease_required == 1);
+    }
+    std::sort(route_keys.begin(), route_keys.end());
+    CHECK(route_keys.size() == 41);
+    CHECK(std::unique(route_keys.begin(), route_keys.end()) == route_keys.end());
+    CHECK(descriptor.provides_count == 2 && descriptor.provides != nullptr);
+    CHECK(std::strcmp(descriptor.provides[0].id,
+                      qol::contracts::kCharacterFactsCapabilityId) == 0);
+    CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 0);
+    CHECK(descriptor.provides[0].iface != nullptr);
+    CHECK(std::strcmp(descriptor.provides[1].id,
+                      qol::contracts::kCharacterStateCapabilityId) == 0);
+    CHECK(descriptor.provides[1].version.major == 1 && descriptor.provides[1].version.minor == 0);
+    CHECK(descriptor.provides[1].iface != nullptr);
+    CHECK(descriptor.port_count == 4 && descriptor.ports != nullptr);
+    CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_CHARACTER);
+    CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_CHARACTER_HTTP);
+    CHECK(descriptor.ports[2].id == qol::contracts::QolPortId::QOL_PORT_CHARACTER_WRITE_OPS);
+    CHECK(descriptor.ports[3].id ==
+          qol::contracts::QolPortId::QOL_PORT_CHARACTER_STATE);
+
+    const auto* api = static_cast<const qol::contracts::CharacterFactsApi*>(
+        descriptor.provides[0].iface);
+    CHECK(api->type != nullptr);
+    CHECK(api->is_active_player_group != nullptr);
+    const auto* state_api = static_cast<const qol::contracts::CharacterStateApi*>(
+        descriptor.provides[1].iface);
+    CHECK(state_api->write_state_json != nullptr);
+
+    qol::contracts::QolHostSdk sdk{};
+    sdk.abi = {sizeof(qol::contracts::QolHostSdk), qol::contracts::kHostSdkMajor,
+               qol::contracts::kHostSdkMinor};
+    sdk.commands.post_typed = &fake_post_typed;
+    sdk.ticket_result.register_typed_result_handler = &fake_register_result;
+    sdk.ticket_result.unregister_typed_result_handler = &fake_unregister_result;
+    test_snapshot_sdk::attach(&sdk);
+    const qol::contracts::QolCharacterPort port{{1, 0}, {&fake_type, &fake_active}};
+    const qol::contracts::QolCharacterHttpPort http_port{{1, 0}, {&fake_body_json}};
+    const qol::contracts::QolCharacterStatePort state_port{
+        qol::contracts::kQolPortCharacterStateVersion,
+        {&fake_state_party, &fake_state_player, &fake_state_skills}};
+    const void* ports[] = {&port, &http_port, &kRealWriteOpsPort, &state_port};
+    qol::contracts::PluginContext ctx{
+        qol::contracts::PLUGIN_CONTEXT_STRUCT_SIZE,
+        qol::contracts::kHostSdkMajor,
+        qol::contracts::kHostSdkMinor,
+        &sdk,
+        nullptr,
+        "core.character",
+        ports,
+        4,
+    };
+
+    CHECK(descriptor.install(ctx) == 0);
+    CHECK(g_result_handler != nullptr);
+    int32_t type_value = 0;
+    int32_t active_value = 0;
+    CHECK(api->type(reinterpret_cast<const void*>(1), &type_value).ok == kQolOk);
+    CHECK(type_value == 7 && g_type_calls == 1);
+    CHECK(api->is_active_player_group(reinterpret_cast<const void*>(1), &active_value).ok == kQolOk);
+    CHECK(active_value == 1 && g_active_calls == 1);
+
+    g_live_player = {100, 34, 3, 4, 8, 1, 2};
+    char state_output[8192]{};
+    uint32_t state_size = 0;
+    CHECK(state_api->write_state_json(qol::contracts::QolCharacterStateKind::kPlayer,
+                                     state_output, sizeof(state_output), &state_size).ok == kQolOk);
+    CHECK(std::string(state_output, state_size) ==
+          "{\"money\":100,\"map_id\":34,\"x\":3,\"y\":4,\"active_quest\":8,"
+          "\"leader_slot\":1,\"party_count\":2}");
+    constexpr char kPlayerGolden[] =
+        "{\"money\":100,\"map_id\":34,\"x\":3,\"y\":4,\"active_quest\":8,"
+        "\"leader_slot\":1,\"party_count\":2}";
+    char exact_capacity_output[sizeof(kPlayerGolden) - 1]{};
+    uint32_t exact_capacity_size = 0;
+    CHECK(state_api->write_state_json(
+              qol::contracts::QolCharacterStateKind::kPlayer, exact_capacity_output,
+              static_cast<uint32_t>(sizeof(exact_capacity_output)), &exact_capacity_size).ok ==
+          kQolOk);
+    CHECK(exact_capacity_size == sizeof(exact_capacity_output));
+    CHECK(std::string(exact_capacity_output, exact_capacity_size) == kPlayerGolden);
+
+    g_live_party = {};
+    g_live_party.member_present[0] = 1;
+    auto& member = g_live_party.members[0];
+    member.fields = qol::contracts::kQolCharacterStateHasName |
+                    qol::contracts::kQolCharacterStateHasStatusPoint;
+    member.type = 0;
+    member.class_idx = 1;
+    member.name_id = 7;
+    member.level = 10;
+    member.hp = 50;
+    member.mp = 5;
+    member.max_hp = 60;
+    member.max_mp = 6;
+    member.exp = 1;
+    member.exp_next = 2;
+    member.stats[0] = 1;
+    member.main_stats[0] = 9;
+    member.status_point = 3;
+    member.name[0] = 'A';
+    member.name[1] = '"';
+    member.name[2] = '\n';
+    member.name_size = 3;
+
+    sync_legacy_fixture();
+    state_size = 0;
+    CHECK(state_api->write_state_json(qol::contracts::QolCharacterStateKind::kParty,
+                                     state_output, sizeof(state_output), &state_size).ok == kQolOk);
+    CHECK(std::string(state_output, state_size) == frozen_party_json());
+    state_size = 0;
+    CHECK(state_api->write_state_json(qol::contracts::QolCharacterStateKind::kPlayer,
+                                     state_output, sizeof(state_output), &state_size).ok == kQolOk);
+    CHECK(std::string(state_output, state_size) == frozen_player_json());
+
+    member.equipment_present[0] = 1;
+    auto& item = member.equipment[0];
+    item.fields = qol::contracts::kQolCharacterStateItemHasCategory |
+                  qol::contracts::kQolCharacterStateItemHasCount |
+                  qol::contracts::kQolCharacterStateItemHasRarity |
+                  qol::contracts::kQolCharacterStateItemHasDamage |
+                  qol::contracts::kQolCharacterStateItemHasDefense |
+                  qol::contracts::kQolCharacterStateItemHasNeedLevel;
+    item.type_flags = 8;
+    item.raw_rarity = 2;
+    item.category = 12;
+    item.count = 1;
+    item.equip = 1;
+    item.rarity = 3;
+    item.damage = 4;
+    item.defense = 5;
+    item.magic_rate = 6;
+    item.need_level = 7;
+    item.socket = 33;
+    item.socket_filled = 1;
+    item.socket_total = 2;
+    item.enchant = 1;
+    item.chaos = 1;
+    item.enchant_id = 0;
+    item.enchant_level = 0;
+    item.chaos_level = 9;
+    item.chaos_rate = 10;
+    item.option_count = 1;
+    item.options[0] = {11, 12, 1};
+    sync_legacy_fixture();
+
+    std::string expected_party =
+        "[{\"type\":0,\"class_idx\":1,\"name_id\":7,\"level\":10,\"hp\":50,\"mp\":5,"
+        "\"max_hp\":60,\"max_mp\":6,\"exp\":1,\"exp_next\":2,\"stats\":{";
+    for (int index = 0; index < 32; ++index) {
+        if (index != 0) expected_party.push_back(',');
+        expected_party += "\"" + std::to_string(index) + "\":" +
+                          std::to_string(index == 0 ? 1 : 0);
+    }
+    expected_party += "},\"main_stats\":[9,0,0,0,0],\"status_point\":3,\"equipment\":["
+                      "{\"slot\":0,\"type_flags\":8,\"raw_rarity\":2,\"category\":12,"
+                      "\"count\":1,\"equip\":true,\"rarity\":3,\"damage\":4,\"defense\":5,"
+                      "\"magic_rate\":6,\"need_level\":7,\"socket\":33,\"socket_filled\":1,"
+                      "\"socket_total\":2,\"enchant\":1,\"chaos\":true,\"enchant_id\":0,"
+                      "\"enchant_level\":0,\"chaos_level\":9,\"chaos_rate\":10,"
+                      "\"options\":[11],\"option_ids\":[12],\"option_types\":[1]}";
+    for (int slot = 1; slot < 10; ++slot) expected_party += ",null";
+    expected_party += "],\"name\":\"A\\\"\\n\"},null,null]";
+    state_size = 0;
+    CHECK(state_api->write_state_json(qol::contracts::QolCharacterStateKind::kParty,
+                                     state_output, sizeof(state_output), &state_size).ok == kQolOk);
+    CHECK(std::string(state_output, state_size) == expected_party);
+    CHECK(std::string(state_output, state_size) == frozen_party_json());
+
+    g_live_skills = {};
+    g_live_skills.member_present[0] = 1;
+    auto& skills_member = g_live_skills.members[0];
+    skills_member.skill_count = 1;
+    skills_member.skills[0] = {7, 2, 0, 0};
+    skills_member.unlock_bitmap = 9;
+    skills_member.active_skill_id = -1;
+    skills_member.skill_points = 3;
+    sync_legacy_fixture();
+    state_size = 0;
+    CHECK(state_api->write_state_json(qol::contracts::QolCharacterStateKind::kSkills,
+                                     state_output, sizeof(state_output), &state_size).ok == kQolOk);
+    CHECK(std::string(state_output, state_size) ==
+          "[{\"role\":0,\"skills\":[{\"action_id\":7,\"level\":2}],\"unlock_bitmap\":9,"
+          "\"active_skill_id\":-1,\"skill_points\":3},null,null]");
+    CHECK(std::string(state_output, state_size) == frozen_skills_json());
+
+    g_state_not_in_game = true;
+    state_size = 0;
+    CHECK(state_api->write_state_json(qol::contracts::QolCharacterStateKind::kParty,
+                                     state_output, sizeof(state_output), &state_size).ok == kQolOk);
+    CHECK(std::string(state_output, state_size) == "{\"error\":\"not in game\"}");
+    CHECK(std::string(state_output, state_size) == frozen_party_json());
+    state_size = 0;
+    CHECK(state_api->write_state_json(qol::contracts::QolCharacterStateKind::kPlayer,
+                                     state_output, sizeof(state_output), &state_size).ok == kQolOk);
+    CHECK(std::string(state_output, state_size) == frozen_player_json());
+    state_size = 0;
+    CHECK(state_api->write_state_json(qol::contracts::QolCharacterStateKind::kSkills,
+                                     state_output, sizeof(state_output), &state_size).ok == kQolOk);
+    CHECK(std::string(state_output, state_size) == frozen_skills_json());
+    g_state_not_in_game = false;
+
+    // owner 写结果处理器：18 单点 kind 与 legacy builder 逐字节对照；批量与写后即时另断言。
+    test_resource_setters_use_game_delta_functions();
+    test_write_golden();
+    test_write_no_state_family();
+    test_write_party_state_family(state_api);
+    test_write_party_member_family(state_api);
+    test_write_player_family(state_api);
+    test_write_skills_family(state_api);
+    test_bridge_write_envelope();
+    test_read_face_frozen_equivalence();
+    test_legacy_builders_byte_equivalence();
+    test_owner_cache_builder_v3(state_api);
+
+    char tiny_output[4] = {'!', '!', '!', '!'};
+    uint32_t tiny_size = 99;
+    CHECK(state_api->write_state_json(qol::contracts::QolCharacterStateKind::kPlayer,
+                                     tiny_output, sizeof(tiny_output), &tiny_size).code ==
+          kQolErrBlocked);
+    CHECK(tiny_size == 0 && tiny_output[0] == '!');
+
+    qol::infra::capabilities_reset_for_test();
+    const auto& state_provision = descriptor.provides[1];
+    CHECK(qol::infra::register_capability({state_provision.id, state_provision.version,
+                                           state_provision.iface}));
+    CHECK(qol::infra::require_capability(qol::contracts::kCharacterStateCapabilityId,
+                                         {1, 0}) == state_provision.iface);
+    CHECK(qol::infra::unregister_capability(qol::contracts::kCharacterStateCapabilityId));
+    CHECK(qol::infra::require_capability(qol::contracts::kCharacterStateCapabilityId,
+                                         {1, 0}) == nullptr);
+    qol::infra::capabilities_reset_for_test();
+
+    const char body[] = "{\"action_id\":7,\"level\":2}";
+    constexpr char kAddSkillPath[] = "/api/character/grow/add_skill";
+    qol::contracts::HttpReq request{qol::contracts::HttpMethod::kPost,
+                                    kAddSkillPath, sizeof(kAddSkillPath) - 1,
+                                    reinterpret_cast<const uint8_t*>(body),
+                                    static_cast<uint32_t>(sizeof(body) - 1),
+                                    nullptr, 0, nullptr, 0};
+    char response_storage[256]{};
+    qol::contracts::HttpRes response{reinterpret_cast<uint8_t*>(response_storage),
+                                     sizeof(response_storage), 0, 0};
+    const qol::contracts::HttpEndpointDescriptor* route = nullptr;
+    for (uint32_t i = 0; i < descriptor.http_endpoint_count; ++i) {
+        if (std::strcmp(descriptor.http_endpoints[i].path, kAddSkillPath) == 0) {
+            route = &descriptor.http_endpoints[i];
+            break;
+        }
+    }
+    CHECK(route != nullptr);
+    CHECK(route != nullptr && route->command_handler(&request, &response, route->ctx).ok == kQolOk);
+    CHECK(std::string(response_storage, response.body_size) == "{\"ok\":true,\"ticket\":41}");
+    CHECK(g_post_handler_id != 0 && g_post_payload_size > 0);
+    int32_t posted_fields[4]{};
+    std::memcpy(posted_fields, g_post_payload, sizeof(posted_fields));
+    CHECK(posted_fields[0] == static_cast<int32_t>(
+              qol::contracts::QolCharacterWriteKind::kLearnAction));
+    CHECK(posted_fields[1] == 0 && posted_fields[2] == 7 && posted_fields[3] == 2);
+    char result_storage[256]{};
+    uint32_t result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result_storage,
+                           sizeof(result_storage), &result_size));
+    CHECK(std::string(result_storage, result_size) == "{\"ok\":true}");
+
+    descriptor.deactivate(ctx);
+    CHECK(g_result_handler == nullptr);
+    CHECK(api->type(reinterpret_cast<const void*>(1), &type_value).code == kQolErrNotReady);
+    CHECK(api->is_active_player_group(reinterpret_cast<const void*>(1), &active_value).code ==
+          kQolErrNotReady);
+    state_size = 99;
+    CHECK(state_api->write_state_json(qol::contracts::QolCharacterStateKind::kPlayer,
+                                     state_output, sizeof(state_output), &state_size).code ==
+          kQolErrNotReady);
+    CHECK(state_size == 0);
+    CHECK(g_fail == 0);
+    std::printf("character_facts_plugin: pass=%d fail=%d\n", g_pass, g_fail);
+    return g_fail == 0 ? 0 : 1;
+}

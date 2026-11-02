@@ -1,0 +1,7 @@
+QOL_HTTP_ROUTE(kPost, "/api/ui/go_main_menu", "core.ui_state", 0, 1)
+QOL_HTTP_ROUTE(kPost, "/api/ui/close_panel", "core.ui_state", 0, 1)
+QOL_HTTP_ROUTE(kPost, "/api/ui/open_panel", "core.ui_state", 0, 1)
+QOL_HTTP_ROUTE(kPost, "/api/ui/start_interact", "core.ui_state", 0, 1)
+QOL_HTTP_ROUTE(kPost, "/api/ui/dialog/select", "core.ui_state", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/ui/state", "core.ui_state", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/ui/state/table", "core.ui_state", 0, 1)

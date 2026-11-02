@@ -1,0 +1,5 @@
+QOL_HTTP_ROUTE(kPost, "/api/debug/settings-ui/inject", "settings", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/debug/settings-ui/status", "settings", 0, 1)
+QOL_HTTP_ROUTE(kPost, "/api/debug/settings-ui/restore", "settings", 0, 1)
+QOL_HTTP_ROUTE(kPost, "/api/debug/settings-ui/open-option", "settings", 0, 1)
+QOL_HTTP_ROUTE(kPost, "/api/debug/settings-ui/open-panel", "settings", 0, 1)

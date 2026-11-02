@@ -1,126 +1,84 @@
 package com.inotia4.qol
 
-import android.content.Context
-import com.inotia4.qol.store.ModuleSaveStore
-import com.inotia4.qol.store.ModuleSaveCoordinator
 import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Module-owned extension backpack data. It persists stable item descriptors plus lossless native
- * serialization payloads (SAVE_SaveItem records, base64-encoded). It never persists native item
- * pointers or original inventory records.
+ * Extension backpack payload 规范化/校验纯函数（bytes ↔ EB 状态）。
+ *
+ * P3c：容器 IO 与保存协调已收口到 core.save 的 save.slot_data（C++ 侧 EB 内部 codec，
+ * 见 plugins/extension_bag/extension_bag_persistence.cpp）；本桥不再持有 section 读写、
+ * 事务 prepare/commit 或 slot 参数——只保留 payload 规范化/校验的纯函数语义
+ *（无 IO、无槽位、无 ModuleSaveStore / ModuleSaveCoordinator 依赖），供既有调用面与
+ * 等价性测试使用。
  */
 object ExtensionBagUiBridge {
 
     private const val SECTION_NAME = "extensionbags.items"
-    private const val SECTION_VERSION = 4
     private const val BAG_COUNT = 5
     private const val SLOT_COUNT = 16
     private const val MAX_PAYLOAD_CHARS = 512
 
     private val payloadPattern = Regex("^[A-Za-z0-9+/]*={0,2}$")
 
-    /** Idempotent; ApiServer restart may call it again. 无自有状态，保留入口稳定调用方。 */
+    /** 幂等；ApiServer 重启可重复调用。无自有状态，保留入口稳定调用方。 */
     @JvmStatic
     @Suppress("UNUSED_PARAMETER")
-    fun initialize(context: Context) {
-        // sidecar IO 与格式校验统一经 ModuleSaveStore；本桥不再持有上下文或游戏签名身份。
+    fun initialize(context: android.content.Context) {
+        // sidecar IO 已随 P3c 收口到 save.slot_data；本桥仅存留纯函数。
     }
 
+    /** section 名/版本常量：与 C++ 侧 EB codec（extensionbags.items v4）保持同源。 */
+    val sectionName: String get() = SECTION_NAME
+
+    /**
+     * 规范化字节 → 规范化字节：解析并校验，输出与 C++ codec 相同的规范化 JSON 文本字节。
+     * 解析失败返回 null。本函数是纯函数：不写日志、不做 IO；诊断信息经
+     * [normalizeStateBytesDetailed] 返回给调用层记录。
+     */
     @JvmStatic
-    fun loadStateJson(slot: Int): String {
-        val section = try {
-            ModuleSaveStore.readSection(slot, SECTION_NAME)
-        } catch (t: Throwable) {
-            LogFile.error(LogDomain.EXTENSION_BAG, "extension bag UI state load failed", t)
-            return defaultStateJson()
-        } ?: return defaultStateJson()
-        val raw = section.payload.toString(Charsets.UTF_8)
-        // v4-only：读取只认当前 section 名与 v4 布局；未知版本也按当前布局尽力解析，
-        // 解析失败（parseState 返回 null）才回退空状态；不做旧版本迁移/回写，不使用身份门禁。
-        val parsed = parseState(raw, rejectPayloadlessItems = true)
-        return parsed?.toString() ?: defaultStateJson()
+    fun normalizeStateBytes(bytes: ByteArray): ByteArray? {
+        return parseState(String(bytes, Charsets.UTF_8), rejectPayloadlessItems = false).json
+            ?.toString()?.toByteArray(Charsets.UTF_8)
     }
 
+    /**
+     * 读面规范化：读档侧拒绝无 payload 的非空物品（与迁移前 loadStateJson 的
+     * rejectPayloadlessItems 语义一致），供等价性测试对照 C++ load 行为。
+     */
     @JvmStatic
-    fun saveStateJson(slot: Int, stateJson: String): String {
-        val normalized = parseState(stateJson) ?: return "error:invalid_state"
-        return try {
-            val saved = ModuleSaveStore.writeSection(
-                slot,
-                SECTION_NAME,
-                SECTION_VERSION,
-                normalized.toString().toByteArray(Charsets.UTF_8),
-            )
-            if (saved) "ok" else "error:storage"
-        } catch (t: Throwable) {
-            LogFile.error(LogDomain.EXTENSION_BAG, "extension bag UI state save failed", t)
-            "error:storage"
-        }
+    fun normalizeLoadedStateBytes(bytes: ByteArray): ByteArray? {
+        return parseState(String(bytes, Charsets.UTF_8), rejectPayloadlessItems = true).json
+            ?.toString()?.toByteArray(Charsets.UTF_8)
     }
 
-    /** Prepare the extension section; commit is allowed only after complete SAVE_Save success. */
+    /** 规范化结果：bytes 为规范化 JSON 字节（失败为 null）；diagnostics 供调用层记录。 */
+    data class NormalizeResult(val bytes: ByteArray?, val diagnostics: List<String>)
+
+    /**
+     * 带诊断的规范化入口：解析函数返回诊断信息，由调用层决定如何记录；
+     * codec 自身不调用 LogFile/native/logcat。
+     */
     @JvmStatic
-    fun prepareSave(slot: Int, transactionId: String, stateJson: String): String {
-        val normalized = parseState(stateJson) ?: return "error:invalid_state"
-        val prepared = ModuleSaveCoordinator.prepare(
-            slot,
-            transactionId,
-            listOf(
-                ModuleSaveCoordinator.PreparedSection(
-                    SECTION_NAME,
-                    SECTION_VERSION,
-                    normalized.toString().toByteArray(Charsets.UTF_8),
-                ),
-            ),
-        )
-        return if (prepared) "ok" else "error:storage"
+    fun normalizeStateBytesDetailed(bytes: ByteArray, rejectPayloadlessItems: Boolean): NormalizeResult {
+        val parsed = parseState(String(bytes, Charsets.UTF_8), rejectPayloadlessItems)
+        return NormalizeResult(parsed.json?.toString()?.toByteArray(Charsets.UTF_8), parsed.diagnostics)
     }
 
-    @JvmStatic
-    fun commitSave(slot: Int, transactionId: String, stateJson: String): String {
-        val normalized = parseState(stateJson) ?: return "error:invalid_state"
-        val committed = ModuleSaveCoordinator.commitAfterOriginalSave(
-            slot,
-            transactionId,
-            listOf(
-                ModuleSaveCoordinator.PreparedSection(
-                    SECTION_NAME,
-                    SECTION_VERSION,
-                    normalized.toString().toByteArray(Charsets.UTF_8),
-                ),
-            ),
-        )
-        return if (committed) "ok" else "error:storage"
-    }
+    private data class ParsedState(val json: JSONObject?, val diagnostics: List<String>)
 
-    @JvmStatic
-    fun abortKnownFailedSave(slot: Int, transactionId: String): String {
-        return if (ModuleSaveCoordinator.abortKnownFailedSave(slot, transactionId)) "ok" else "error:storage"
-    }
-
-    private fun defaultStateJson(): String = stateJson(
-        mode = "original",
-        originalSelected = 0,
-        types = IntArray(BAG_COUNT),
-        selected = -1,
-        inspected = -1,
-        items = emptyItems(),
-        pending = null,
-    ).toString()
-
-    private fun parseState(raw: String, rejectPayloadlessItems: Boolean = false): JSONObject? {
+    private fun parseState(raw: String, rejectPayloadlessItems: Boolean): ParsedState {
+        val diagnostics = ArrayList<String>()
         return try {
             val source = JSONObject(raw)
             val sourceTypes = source.getJSONArray("types")
-            if (sourceTypes.length() != BAG_COUNT) return null
+            if (sourceTypes.length() != BAG_COUNT) return ParsedState(null, diagnostics)
             val types = IntArray(BAG_COUNT) { index -> sourceTypes.getInt(index) }
-            if (types.any { it !in 0..4 }) return null
+            if (types.any { it !in 0..4 }) return ParsedState(null, diagnostics)
             val mode = source.optString("mode", "original")
-            if (mode != "original" && mode != "module") return null
+            if (mode != "original" && mode != "module") return ParsedState(null, diagnostics)
             val originalSelected = source.optInt("originalSelected", 0)
-            if (originalSelected !in 0..5) return null
+            if (originalSelected !in 0..5) return ParsedState(null, diagnostics)
             var selected = source.optInt("selected", -1)
             if (selected !in types.indices) selected = -1
             var normalizedMode = mode
@@ -131,7 +89,7 @@ object ExtensionBagUiBridge {
             var inspected = source.optInt("inspected", -1)
             if (inspected != selected) inspected = -1
             val sourceItems = source.getJSONArray("items")
-            if (sourceItems.length() != BAG_COUNT) return null
+            if (sourceItems.length() != BAG_COUNT) return ParsedState(null, diagnostics)
             val items = Array(BAG_COUNT) { bag ->
                 val sourceBag = sourceItems.getJSONArray(bag)
                 if (sourceBag.length() != SLOT_COUNT) throw IllegalArgumentException("invalid slot count")
@@ -147,18 +105,18 @@ object ExtensionBagUiBridge {
                     } else {
                         ""
                     }
-                    // P4.5：无效 payload 不得静默转 ItemData(0,0)——隔离告警保留审计痕迹
-                    //（受限原始编码入日志；section 写入保持净荷，落盘时机归 P7）。
+                    // P4.5：无效 payload 不得静默转 ItemData(0,0)——诊断信息交调用层记录，
+                    // codec 自身不写日志（受限编码预览）。
                     if (hasPayload && safePayload.isEmpty()) {
                         val preview = payload.take(64).map {
                             if (it.isWhitespace() || it == '"') '?' else it
                         }.joinToString("")
-                        LogFile.info(LogDomain.EXTENSION_BAG, "extension bag isolated reason=invalid_payload " +
+                        diagnostics.add("extension bag isolated reason=invalid_payload " +
                             "bag=${bag + 6} slot=$slot payloadLength=${payload.length} " +
                             "payloadPreview=$preview")
                     }
                     if (rejectPayloadlessItems && category > 0 && count > 0 && !hasPayload) {
-                        LogFile.info(LogDomain.EXTENSION_BAG, "extension bag isolated reason=payloadless_rejected " +
+                        diagnostics.add("extension bag isolated reason=payloadless_rejected " +
                             "bag=${bag + 6} slot=$slot category=$category count=$count")
                     }
                     when {
@@ -169,10 +127,10 @@ object ExtensionBagUiBridge {
                 }
             }
             val pending = if (source.has("pending")) source.optJSONObject("pending") else null
-            stateJson(normalizedMode, originalSelected, types, selected, inspected, items, pending)
+            ParsedState(stateJson(normalizedMode, originalSelected, types, selected, inspected, items, pending), diagnostics)
         } catch (t: Throwable) {
-            LogFile.error(LogDomain.EXTENSION_BAG, "extension bag UI state parse failed", t)
-            null
+            diagnostics.add("extension bag UI state parse failed: ${t.javaClass.simpleName}: ${t.message}")
+            ParsedState(null, diagnostics)
         }
     }
 

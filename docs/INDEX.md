@@ -1,102 +1,94 @@
 # 文档导航
 
-本目录按文档用途划分为四类：使用指南、开发维护、共享参考和历史归档。
+本文说明 `docs/` 内文档的目录、职责和阅读入口。目标架构见根目录 `ARCHITECTURE.md`。
 
-## 阅读入口
+## 按任务查找
 
-| 任务 | 首先阅读 | 继续阅读 |
+| 任务 | 首选文档 | 相关文档 |
 |---|---|---|
-| 了解项目和交付物 | 根目录 `README.md` | 本索引、`guides/` |
-| 使用已构建模块 | `guides/game-guide.md` | `reference/api-reference.md` |
-| 从源码构建和部署 | `guides/build-and-deploy.md` | 根目录 `AGENTS.md`、`development/architecture.md` |
-| 修改 Kotlin/Native 代码 | 根目录 `AGENTS.md` | `development/architecture.md`、相关功能文档 |
-| 理解 API 契约 | `reference/api-reference.md` | `guides/game-guide.md` |
-| 理解原版游戏机制 | `reference/game/` | 相关 `development/features/` |
-| 查静态分析产物（解码 / 反编译 / 静态表） | `apk/decoded/`、`apk/decompiled/`、`apk/static-data/` | `guides/build-and-deploy.md` §1 |
-| 继续重构工作 | `development/planning/refactor-plan.md` | `development/planning/backlog.md` |
-| 查看历史过程 | `history/` | 仅用于追溯，不作为当前实现依据 |
+| 了解模块、安装和基本使用 | 根目录 `README.md` | `guides/game-guide.md` |
+| 使用 HTTP API | `reference/api-reference.md` | `guides/game-guide.md` |
+| 理解 API 服务开关与 OP 权限边界 | `refactor/api-optional-op-design.md` | `reference/api-reference.md` §7.6/§8、`reference/plugins/core.api.md` |
+| 构建、部署与设备验收 | `guides/build-and-deploy.md` | `reference/api-reference.md`（涉及 API 验收时）、`reference/logging.md`（崩溃取证） |
+| 排查崩溃、读日志与符号化 | `reference/logging.md` | `guides/build-and-deploy.md` §3.3/§3.3.1 |
+| 修改源码或设计边界 | 根目录 `ARCHITECTURE.md` | `refactor/`、相关 `reference/plugins/` |
+| 插件审计 | `refactor/plugin-audit-playbook.md` | `refactor/audits/`、`refactor/issues.md` |
+| 插件重构架构指导 | `refactor/plugin-architecture-guide.md` | `refactor/extension-bag/final-architecture.md` |
+| 配置 `enable` 与插件生命周期方案评审 | `refactor/config-enable-lifecycle-proposal.md` | `ARCHITECTURE.md` §7.2/§8.2、`reference/api-reference.md` §7.6 |
+| 查询验证标准和当前欠账 | `refactor/verification.md` | `refactor/verification/`、`refactor/slot-data-contract.md` |
+| 理解原版游戏机制 | `reference/game/` | `archive/` 中相关历史记录仅用于追溯 |
 
 ## 目录职责
 
-### `guides/`：使用指南
+### `reference/`：稳定参考资料
 
-面向模块使用者、源码构建者和设备操作者，描述如何完成任务，不描述内部实现细节。
+保存当前可复用的事实和契约。
 
-- `game-guide.md`：游戏与模块 API 的使用流程。
-- `build-and-deploy.md`：环境、构建、设备连接、安装和验收。
+- `api-reference.md`：HTTP API 路径、方法、参数、响应和状态码的唯一权威。
+- `logging.md`：日志行格式、级别与域、文件清单与保留/轮转策略、`qol-crash.log`/`java-crash.log` 格式契约与符号化用法的唯一权威。
+- `game/`：原版游戏系统与逆向结论。
+- `game/equipment.md`：群友推荐的可获得与不可获得装备清单。
+- `plugins/`：官方插件当前职责与实现参考。
 
-### `development/`：开发维护
+插件参考：[`core.world`](reference/plugins/core.world.md)、[`core.item`（对外契约）](reference/plugins/core.item.md)、[`core.item-internals`](reference/plugins/core.item-internals.md)（core.item 内部实现参考）、[`better_move`（对外契约）](reference/plugins/better_move.md)、[`better_move-internals`](reference/plugins/better_move-internals.md)（内部实现参考）、[`core.character`](reference/plugins/core.character.md)、[`core.quest`](reference/plugins/core.quest.md)、[`core.system`](reference/plugins/core.system.md)、[`core.craft`](reference/plugins/core.craft.md)、[`craft_lottery`](reference/plugins/craft_lottery.md)、[`core.save`](reference/plugins/core.save.md)、[`settings`](reference/plugins/settings.md)、[`core.api`](reference/plugins/core.api.md)、[`core.custom_ui`](reference/plugins/core.custom_ui.md)、[`core.data`](reference/plugins/core.data.md)、[`core.ui_state`](reference/plugins/core.ui_state.md)、[`module_health`](reference/plugins/module_health.md)、[`attribute_quality`](reference/plugins/attribute_quality.md)、[`autosell`（对外契约）](reference/plugins/autosell.md)、[`autosell-internals`](reference/plugins/autosell-internals.md)（内部实现参考）、[`custom_recipe`](reference/plugins/custom_recipe.md)、[`attribute_range_display`](reference/plugins/attribute_range_display.md)、[`character_panel_i18n`](reference/plugins/character_panel_i18n.md)、[`push_all`](reference/plugins/push_all.md)、[`world_teleport`](reference/plugins/world_teleport.md)、[`custom_map`](reference/plugins/custom_map.md)、[`stack_limit`](reference/plugins/stack_limit.md)、[`extension_bag`](reference/plugins/extension_bag.md)、[`save_backup`](reference/plugins/save_backup.md)、[`special_equip`](reference/plugins/special_equip.md)、[`world_tuning`](reference/plugins/world_tuning.md)、[`popup_blocker`](reference/plugins/popup_blocker.md)。
 
-面向代码维护者和 AI 代理，描述如何修改、扩展和验证项目。
+模块平台兜底提示（非业务插件）：[`module_error_dialog`](reference/plugins/module_error_dialog.md)。
 
-- `development/architecture.md`：当前代码结构、分层和工程约束。
-- `development/logging.md`：统一日志系统规范（级别、domain 词表、行格式、配置接线与合规检查的唯一权威）。
-- `planning/`：当前待办和重构计划。
-- `features/`：模块新增或修改功能的设计、实现和验收。
+### `guides/`：操作指南
 
-扩展背包按七册推荐顺序阅读：先读 Hub，再读规则册，最后按任务读取专题册；后续实现不得回到聊天记录恢复状态：
+说明读者如何完成一项任务，重点是步骤和操作结果。
 
-1. `development/features/extension-bag/control-plane.md`（Hub）
-2. `development/features/extension-bag/rulebook.md`（规则册）
-3. `development/features/extension-bag/runtime-architecture.md`（架构册）
-4. `development/features/extension-bag/inventory-integration-decision-plan.md`（库存册）
-5. `development/features/extension-bag/drag-protocol.md`（拖动册）
-6. `development/features/extension-bag/module-save-store.md`（存档册）
-7. `development/features/extension-bag/verification-matrix.md`（验收册）
+- `game-guide.md`：游戏及模块 API 的使用流程。
+- `build-and-deploy.md`：开发环境、构建、设备部署和验收流程。
+- `plugin-docs.md`：插件权威文档写作规范（对外契约 + 内部实现两份、职责不重叠、代理执行清单）。
 
-存档管理器（save-backup）：`development/features/save-backup.md`（`.qol_save` 备份格式、导出/导入事务与跨槽/跨设备语义）。
+### `refactor/`：当前重构、审计与验证材料
 
-属性显示范围（attribute-range-display）：`development/features/attribute-range-display.md`（宝石/装备详情按随机属性百分位着色的目标、结论与可行性测试记录；装备词缀范围与渲染注入已真机验证，未实现）。
+这里是仍在使用和维护的执行材料，新审计记录和验证证据写入此目录，不写入 `archive/`。
 
-自动出售（auto-sell）：`development/features/auto-sell.md`（背包页入口、品质阈值配置面板、扫描/保护/处置语义与风险验证计划；设计稿）。
+- `verification.md`：验证规则、验收矩阵与活跃债务唯一登记处。
+- `verification/`：具体阶段或验收批次的验证记录及证据。
+- `audits/`：插件审计记录与对应证据；后续审计沿用此目录。
+- `issues.md`：已确认问题台账。
+- `plugin-audit-playbook.md`：审计、修复、测试闭环流程。
+- `config-enable-lifecycle-proposal.md`：已被实现模型取代（superseded）；现行契约见 ARCHITECTURE §8.2 与 API 参考 §7.6。
+- `baseline.md`：脚本生成的结构基线。
+- `map.md`：脚本生成的当前源码结构统计；不定义目标架构。
+- `api-route-map.md`：API 路由核对材料。
+- `api-optional-op-design.md`：API 服务归属、可选 HTTP 接线和通用 OP 授权合同。
+- `plugin-architecture-guide.md`：从 extension_bag 重构沉淀的通用分层/线程/数据/迁移准则，供其他插件参照。
+- `custom-recipe/refactor-plan.md`：custom_recipe 整改方案（表槽位地址下沉到 game 端口、目录分层、主线程契约；含提交切分与验证矩阵）。
+- `extension-bag/refactor-plan.md`：扩展背包插件分层与内部组件重构方案（执行契约、组件边界、分阶段迁移）。
+- `audits/performance-20261028/analysis.md`：真机性能采样（simpleperf/perfetto）结论、热点根因与分阶段优化方案。
+- `audits/infrastructure-20261013/inspection.md`：近址 thunk mmap 检查与验证证据状态。
+- `audits/ui-handle-lifecycle-20261021/delete-path-audit.md`：游戏控件删除路径审计（C 方案：`TouchHandle_DeleteControl` 不递归、推荐 `ControlObject_Delete` 入口；袋容器子树释放链 UNPROVEN）。
+- `audits/plugin-audit/attribute-quality-20261014/verification-log.md`、`audits/plugin-audit/attribute-quality-20261014/design-card.md`：attribute_quality v2.0 审计登记与 VM-AQ-01 验收卡。
+- `audits/plugin-audit/custom-recipe-20261014/`：custom_recipe 单 owner 合并的设计/实施记录（`design-card.md`）、静态 finding（`static-audit.md`）与审阅登记（`verification-log.md`）；合并验收卡 VM-CR-MERGE-01 仍 `NOT_ACCEPTED`。
+- `audits/plugin-audit/device-probe-export-failure-20261016/verification-log.md`：Debug-only 探针 `device_probe_export_failure` 审阅与删除登记（零消费者、无独占断言覆盖面；探针能力保留在 host 侧 `probe_entry_export_resolution()`）；真机 probe 行为 `NOT_ACCEPTED`。
+- `audits/plugin-audit/simple-mode-20261022/verification-log.md`：旧 `simple_mode`（已改名为 `world_tuning`）审阅登记（12 findings、5 项用户裁决、Host 153/153 与构建证据；设备面 `NOT_ACCEPTED`）。
+- `slot-data-contract.md`：Slot data 当前契约与状态。
+- `extension-bag/rulebook.md`、`extension-bag/verification-matrix.md`：扩展背包当前规则和操作验收卡。
+- `extension-bag/display-hook.md`：装备页/商店/合成投影读取虚拟化（`ControlItem_SetItem/GetItem`、`INVEN_GetBagSize` hooks；不写 `INVEN_pItem` 或容量字）。
+- `custom-ui/refactor-plan.md`：`core.custom_ui` 局部拆分方案（Debug 编译门、形状绘制抽离、确认框 overlay 可选拆分；不做 L0–L6 全量重构）。
+- `core-item/item-type-and-use-paths.md`：`item.facts` 4.0 权威物品类型、原生使用路径、`ITEMDATABASE_IsUse` 边界与 EB 迁移规则。
+- `core-item/item-lifecycle-capability.md`：物品生成/落位/释放能力方案（`inventory.action` v3.3 的 `create`/`place`/`discard_handle` 与端口层 detached 释放口）。
+- `core-item/hard-constraints.md`：core.item 硬约束（游戏原生 ABI/索引域、S2、裸指针生命周期、存档两段式调用、正确性不变量；不含空间袋号/pending/import-remove 等设计选择）。
+- `core-item/three-plugin-architecture.md`：core.item 三插件架构（方案 A：inventory 被动存储、item 动作调用 inventory、extension_bag 负责 UI 投影/刷新/拖拽合并；含调用链、数据流、权责矩阵）。
+- `core-item/bag-system-design.md`：背包系统设计（原生袋/C18/多袋源统一指针槽表、分层职责与层间调用、函数级 hook 接入矩阵、预检后单次写、不流转 ItemData/payload、无回滚/无 pending）。
+- `handoff-extension-bag-20261028.md`：扩展背包当前交接：礼盒 924、拾取 SaveItem/FindSaveSlot、扩展袋背包装备优先级的未完成问题与排查入口。
+- `core-character/architecture.md`：`core.character` 收敛方案（写面判定单点化、路由表 drift 防护、解析器合并、快照只读视图；不做 L0–L6 全量重构）。
+- `eight-way-move/design.md`：触屏方向摇杆八向/全向移动设计与原型记录（历史材料；当前对外契约为 `better_move`，动态候选点与步长档位见 `docs/reference/plugins/better_move-internals.md`）。
+- `adr/`：架构决策记录。
 
-新合成系统（craft-ui + custom-craft-recipe）：`development/features/craft-ui.md`（合成器界面层：UIMix 控件原语、11 处 hook 单一挂载、自动选中格）、`development/features/custom-craft-recipe.md`（配方层：配方表 / 规则 / 结果枚举 / 产物与扣料）。原 gem-craft-optimization 已并入这两层，设计书归档至 `history/features/gem-craft-optimization.md`。
+### `archive/`：只读历史归档
 
-合成器自定义配方（custom-craft-recipe）：`development/features/custom-craft-recipe.md`（向混沌合成面板注入模块配方、选中时改写放料与合成按钮；配方 1 = 1 宝石 + 1 卓越灵药 → 宝石数值提升一档；表注入落位、档位定义、共存方案与 VM 验收卡；设计稿，未实现）。
+保存已退役的开发资料、阶段记录、实验、交接、日志和证据。归档材料用于追溯，不作为当前规则或状态依据；**不得在此新建审计、验证或执行记录**。
 
-简单模式（simple-mode）：`development/features/simple-mode.md`（怪物最大生命减半 + 玩家侧打敌人伤害 ×2 + 玩家侧受到伤害 ×0.5；双 Native Hook 落点、阵营判定原语、mod 跳板跟随与半血幂等账本；已实现并真机验证）。
+## 文档权威关系
 
-推怪（push-all）：`development/features/push-all.md`（`CHAR_Move` 推动分支双闸门 patch 的全局配置开关 `pushAllEnabled`：可推开怪物/队友/召唤物、场景设施不可推；fail-closed 指令字校验与部分失败回滚；已实现，待真机验证）。
-
-模块自定义文本层（custom-text）：`development/features/custom-text.md`（独占 `MEMORYTEXT_GetText` 单一 hook + 窗口作用域替换 + 内置语义键表；角色面板属性标签与合成器配方按钮文案的服务者；已实现并真机验证）。
-
-帧派发宿主（frame-dispatch-host）：`development/features/frame-dispatch-host.md`（FrameTaskManager 是否可用 hook 重构、游戏帧周期 §2 逆向结论、锚点与相位模型、统一 `frame_tick` + `frame_host` 设计与分阶段实施、真机验证开放项；可行性调查与设计稿，未实现）。
-
-进入存档回调（save-enter-callback）：`development/features/save-enter-callback.md`（存档生命周期回调：读档/新档加载完成进入 world 后触发一次；world→主菜单退出触发一次；call_patch 发起点 + frame_task world 就绪检测；切图返回不触发。进入回调已真机验证，退出回调未真机验证）。
-
-原生选择框组件（native-choice）：`development/features/native-choice.md`（可复用 UICHOICE 选择框组件 `feature/ui/native_choice`：API、原版透传门禁、文本归属校验、单活动约束、世界传送集成与真机验证；并列后续可复用对话框组件候选 `native_popup` / `popup_state` / `native_dialog_router`）。
-
-### `reference/`：共享参考
-
-面向使用者、开发者和 AI 代理，保存稳定、可复用的公共事实。
-
-- `api-reference.md`：API 路由、参数、响应和状态码的唯一权威。
-- `game/`：原版游戏系统和逆向结论。
-
-### `history/`：历史归档
-
-保存已结束的方案、交接、实验和旧版本记录。历史内容不得替代当前文档中的规则和状态。
-
-- `history/native-inventory-hook-development.md`
-- `history/stage-0-static-inventory-audit.md`
-- `history/stage-1-physical-inventory-contract.md`
-- `history/stage-2-static-support-matrix.md`
-- `history/stage-3-bypass-audit.md`
-- `history/hp-clamp-offthread-incident.md`（HP 离线程钳制写回事故：经过、根因与同类排查；当前线程规则见 `development/architecture.md` §9.6）
-
-## 权威关系
-
-- 项目总览：根目录 `README.md`
-- 代理规则：根目录及各源码目录的 `AGENTS.md`
-- 当前代码规范：`development/architecture.md`
-- API 契约：`reference/api-reference.md`
-- 当前待办：`development/planning/backlog.md`
-- 功能状态与验收：对应 `development/features/` 文档
-- 原版游戏事实：`reference/game/`
-- 历史资料：`history/`
-
-## 临时文件约定
-
-当前任务的日志、截图和可重建中间文件统一写入 `.tmp/<task-name>/`，任务完成后清理；需要长期保留的证据必须迁移到 `docs/history/` 或 `archive/`。正式文档一律不得引用 `.tmp/...` 路径（扩展背包取证已迁至 `archive/extension-bag/`）。
-
-普通 Markdown 文档默认面向人类，同时保证 AI 可读取；`AGENTS.md` 只用于代理执行规则，不复制普通文档内容。
+- 项目介绍与玩家入口：根目录 `README.md`。
+- 目标架构及依赖边界：根目录 `ARCHITECTURE.md`。
+- API 契约：`reference/api-reference.md`。
+- 原版游戏机制事实：`reference/game/`。
+- 当前问题、审计和验收状态：`refactor/`。
+- 已结束的过程与历史证据：`archive/`，不覆盖当前文档。

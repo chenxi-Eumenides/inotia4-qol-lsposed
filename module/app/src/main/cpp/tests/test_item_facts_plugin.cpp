@@ -1,0 +1,314 @@
+#include "contracts/item_facts.h"
+#include "contracts/bag.h"
+#include "contracts/inventory_slot.h"
+#include "contracts/inventory_action.h"
+#include "contracts/inventory_refresh.h"
+#include "contracts/inventory_projection.h"
+#include "contracts/character_state.h"
+#include "contracts/item_state.h"
+#include "contracts/world_facts.h"
+#include "contracts/game_ports/ports.h"
+#include "contracts/game_ports/character_extras_port.h"
+#include "contracts/game_host.h"
+#include "contracts/attribute_quality.h"
+#include "plugins/core.item/plugin.h"
+
+#include <cstdio>
+#include <cstddef>
+#include <cstring>
+#include <type_traits>
+
+static int g_pass = 0;
+static int g_fail = 0;
+
+#define CHECK(cond) do { \
+    if (cond) ++g_pass; \
+    else { ++g_fail; std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
+} while (0)
+
+static_assert(std::is_same<qol::contracts::ItemFactsCategoryFn,
+                           QolResult (*)(qol::contracts::QolItemHandle, int32_t*)>::value,
+               "item.facts category must be handle-keyed");
+static_assert(offsetof(qol::contracts::ItemFactsApi, count_limit) ==
+                  offsetof(qol::contracts::ItemFactsApi, effective_count) +
+                      sizeof(qol::contracts::ItemFactsEffectiveCountFn),
+              "ItemFactsApi count_limit must be tail-appended");
+static_assert(offsetof(qol::contracts::QolItemPortReadApi, count_limit) ==
+                  offsetof(qol::contracts::QolItemPortReadApi, reserved_3_7) +
+                      sizeof(decltype(qol::contracts::QolItemPortReadApi::reserved_3_7)),
+               "Item Port retired slot must preserve the count_limit offset");
+static_assert(offsetof(qol::contracts::ItemFactsApi, count_encoding) ==
+                  offsetof(qol::contracts::ItemFactsApi, count_limit) +
+                      sizeof(qol::contracts::ItemFactsCountLimitFn),
+              "ItemFacts count_encoding must be tail-appended");
+static_assert(offsetof(qol::contracts::QolItemPortReadApi, count_encoding) ==
+                  offsetof(qol::contracts::QolItemPortReadApi, count_limit) +
+                      sizeof(decltype(qol::contracts::QolItemPortReadApi::count_limit)),
+              "Item Port count_encoding must be tail-appended");
+static_assert(offsetof(qol::contracts::ItemFactsApi, quote) ==
+                  offsetof(qol::contracts::ItemFactsApi, count_encoding) +
+                      sizeof(qol::contracts::ItemFactsCountEncodingFn),
+              "ItemFacts quote must be tail-appended");
+static_assert(offsetof(qol::contracts::QolItemPortReadApi, quote) ==
+                  offsetof(qol::contracts::QolItemPortReadApi, count_encoding) +
+                      sizeof(decltype(qol::contracts::QolItemPortReadApi::count_encoding)),
+               "Item Port quote must be tail-appended");
+static_assert(offsetof(qol::contracts::QolItemPortReadApi, serialize_item) ==
+                  offsetof(qol::contracts::QolItemPortReadApi, for_each_space_slot) +
+                      sizeof(decltype(qol::contracts::QolItemPortReadApi::for_each_space_slot)),
+              "Item Port transfer primitive must be tail-appended");
+static_assert(std::is_same<decltype(qol::contracts::QolItemPortReadApi::serialize_item),
+                           QolResult (*)(qol::contracts::QolItemHandle, uint8_t*, uint32_t,
+                                         uint32_t*)>::value,
+              "Item Port serialization must be handle-keyed and size-query capable");
+static_assert(std::is_same<qol::contracts::ItemFactsCountEncodingFn,
+                           QolResult (*)(qol::contracts::QolItemHandle,
+                                         qol::contracts::QolItemCountEncoding*)>::value,
+               "item.facts count encoding must be handle-keyed");
+static_assert(std::is_same<qol::contracts::ItemFactsQuoteFn,
+                           QolResult (*)(qol::contracts::QolItemHandle, uint32_t,
+                                         qol::contracts::QolSaleQuote*)>::value,
+              "item.facts quote must be handle-keyed");
+static_assert(std::is_same<qol::contracts::QolItemPortQuoteFn,
+                           QolResult (*)(qol::contracts::QolItemHandle, uint32_t,
+                                         qol::contracts::QolSaleQuote*)>::value,
+              "Item Port quote must be handle-keyed");
+static_assert(std::is_same<decltype(qol::contracts::QolInventorySlotApi::remove),
+                           QolResult (*)(int32_t, int32_t, qol::contracts::QolItemHandle,
+                                         uint32_t)>::value,
+              "inventory.slot remove must carry the expected handle");
+static_assert(offsetof(qol::contracts::QolCharacterExtrasReadApi, can_apply_stuff_items) ==
+                  offsetof(qol::contracts::QolCharacterExtrasReadApi, party_member) +
+                      sizeof(decltype(qol::contracts::QolCharacterExtrasReadApi::party_member)),
+              "CharacterExtras typed apply-stuff must be tail-appended");
+static_assert(offsetof(qol::contracts::QolCharacterExtrasReadApi, struct_size) ==
+                  offsetof(qol::contracts::QolCharacterExtrasReadApi, can_apply_stuff_items) +
+                      sizeof(decltype(qol::contracts::QolCharacterExtrasReadApi::can_apply_stuff_items)),
+              "CharacterExtras size must follow the typed API tail");
+static_assert(std::is_same<qol::contracts::ItemFactsPhysicalItemAtFn,
+                           QolResult (*)(int32_t, int32_t,
+                                         qol::contracts::QolItemHandle*)>::value,
+              "item.facts physical lookup must return a handle");
+static_assert(std::is_same<decltype(qol::contracts::QolItemPortReadApi::inventory_item_view),
+                           QolResult (*)(qol::contracts::QolItemHandle,
+                                         qol::contracts::QolItemInventoryView*)>::value,
+              "Item Port view must be handle-keyed");
+static_assert(std::is_same<decltype(qol::contracts::QolItemPortReadApi::physical_item_at),
+                           QolResult (*)(int32_t, int32_t,
+                                         qol::contracts::QolItemHandle*)>::value,
+               "Item Port physical lookup must not return an object pointer");
+static_assert(std::is_same<qol::contracts::ItemFactsDetailItemContextFn,
+                           QolResult (*)(qol::contracts::QolItemDetailContext*)>::value,
+              "item.facts detail context must be an atomic handle snapshot");
+static_assert(std::is_same<decltype(qol::contracts::QolItemPortReadApi::detail_item_context),
+                            QolResult (*)(qol::contracts::QolItemDetailContext*)>::value,
+               "Item Port detail context must be an atomic handle snapshot");
+static_assert(qol::contracts::kQolItemInventoryOptionCapacity == 32,
+              "inventory option enumeration capacity is an ABI constant");
+static_assert(offsetof(qol::contracts::QolItemInventoryView, native_options) == 100,
+              "native option list must follow jewel attributes");
+static_assert(offsetof(qol::contracts::QolItemInventoryView, jewel_option_count) ==
+                  offsetof(qol::contracts::QolItemInventoryView, native_options) +
+                      sizeof(qol::contracts::QolItemInventoryView::native_options),
+              "jewel option list must follow the native option list");
+static_assert(offsetof(qol::contracts::QolItemInventoryView, enchant_option_count) ==
+                  offsetof(qol::contracts::QolItemInventoryView, jewel_options) +
+                      sizeof(qol::contracts::QolItemInventoryView::jewel_options),
+              "enchant option list must follow the jewel option list");
+static_assert(sizeof(qol::contracts::QolItemInventoryView) == 1260,
+              "inventory view must only contain the three split option lists");
+static_assert(qol::contracts::kQolItemInventoryHasOptionCompleteness == (1u << 7) &&
+                  qol::contracts::kQolItemInventoryOptionsTruncated == (1u << 8) &&
+                  qol::contracts::kQolItemInventoryHasNativeOptions == (1u << 9) &&
+                  qol::contracts::kQolItemInventoryHasJewelOptions == (1u << 10) &&
+                  qol::contracts::kQolItemInventoryHasEnchantOptions == (1u << 11),
+              "option completeness and split-list flags must occupy the appended bits");
+static_assert(qol::contracts::kAttributeQualityVersionMajor == 2 &&
+                  qol::contracts::kAttributeQualityVersionMinor == 0,
+              "attribute.quality contract must be v2.0");
+static_assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 9,
+              "Game Host contract must be v2.9");
+static_assert(sizeof(qol::contracts::QolItemHandleApi) == sizeof(void*) * 6,
+              "Host SDK handle table must not expose resolve_item");
+static_assert(sizeof(qol::contracts::QolInventoryItemRef) ==
+                  sizeof(int32_t) * 6 + sizeof(qol::contracts::QolItemHandle),
+              "inventory reference must not carry a native object pointer");
+
+int main() {
+    CHECK(qol::contracts::kItemFactsVersion.major == 4 &&
+          qol::contracts::kItemFactsVersion.minor == 0);
+    CHECK(qol::contracts::kQolPortItemVersion.major == 4 &&
+          qol::contracts::kQolPortItemVersion.minor == 1);
+    CHECK(qol::contracts::kQolPortCharacterExtrasVersion.major == 1 &&
+          qol::contracts::kQolPortCharacterExtrasVersion.minor == 2);
+    qol::contracts::ItemFactsApi old_size_api{};
+    old_size_api.struct_size = static_cast<uint32_t>(
+        offsetof(qol::contracts::ItemFactsApi, count_encoding));
+    CHECK(qol::contracts::item_facts_api_size_valid(&old_size_api));
+    CHECK(!qol::contracts::item_facts_api_count_encoding_size_valid(&old_size_api));
+    CHECK(!qol::contracts::item_facts_api_quote_size_valid(&old_size_api));
+    old_size_api.struct_size = sizeof(old_size_api);
+    CHECK(qol::contracts::item_facts_api_size_valid(&old_size_api));
+    CHECK(qol::contracts::item_facts_api_count_encoding_size_valid(&old_size_api));
+    CHECK(qol::contracts::item_facts_api_quote_size_valid(&old_size_api));
+    qol::contracts::QolItemPort old_item_port{};
+    old_item_port.struct_size = static_cast<uint32_t>(
+        offsetof(qol::contracts::QolItemPort, read) +
+        offsetof(qol::contracts::QolItemPortReadApi, count_encoding));
+    CHECK(qol::contracts::qol_item_port_size_valid(&old_item_port));
+    CHECK(!qol::contracts::qol_item_port_count_encoding_size_valid(&old_item_port));
+    CHECK(!qol::contracts::qol_item_port_quote_size_valid(&old_item_port));
+    old_item_port.struct_size = sizeof(old_item_port);
+    CHECK(qol::contracts::qol_item_port_size_valid(&old_item_port));
+    CHECK(qol::contracts::qol_item_port_count_encoding_size_valid(&old_item_port));
+    CHECK(qol::contracts::qol_item_port_quote_size_valid(&old_item_port));
+    CHECK(!qol::contracts::satisfies(qol::contracts::kItemFactsVersion, {1, 1}));
+    CHECK(!qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {1, 4}));
+    CHECK(!qol::contracts::satisfies(qol::contracts::kItemFactsVersion, {2, 0}));
+    CHECK(!qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {2, 0}));
+    CHECK(!qol::contracts::satisfies({2, 0}, {3, 0}));
+    CHECK(!qol::contracts::satisfies(
+        {2, 0}, {qol::contracts::kQolPortItemVersion.major,
+                 qol::contracts::kQolPortItemVersion.minor}));
+    CHECK(qol::contracts::satisfies(qol::contracts::kItemFactsVersion, {4, 0}));
+    CHECK(qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {4, 0}));
+    CHECK(qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {4, 0}));
+    const auto& descriptor = qol::features::core_item::plugin_descriptor();
+    CHECK(std::strcmp(descriptor.id, "core.item") == 0);
+    CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
+    CHECK(descriptor.requires_count == 0 && descriptor.requires == nullptr);
+    // 合并 inventory_hooks 后新增 world.facts optional：匹配与物品事实按调用时 require，
+    // 缺失时只降级对应行为，不阻断 item.facts。
+    // 库存刷新 trampoline（inventory_refresh）owner 迁往 extension_bag 后改为 optional。
+    CHECK(descriptor.optional_count == 6 && descriptor.optional_requires != nullptr);
+    CHECK(std::strcmp(descriptor.optional_requires[0].id,
+                      qol::contracts::kCharacterStateCapabilityId) == 0);
+    CHECK(descriptor.optional_requires[0].range.major == qol::contracts::kCharacterStateVersion.major);
+    CHECK(descriptor.optional_requires[0].range.min_minor ==
+          qol::contracts::kCharacterStateVersion.minor);
+    CHECK(std::strcmp(descriptor.optional_requires[1].id,
+                      qol::contracts::kHttpRegistryCapabilityId) == 0);
+    CHECK(std::strcmp(descriptor.optional_requires[2].id,
+                      qol::contracts::kHttpDispatchCapabilityId) == 0);
+    for (uint32_t i = 1; i < 3; ++i) {
+        CHECK(descriptor.optional_requires[i].range.major == 1);
+        CHECK(descriptor.optional_requires[i].range.min_minor == 1);
+    }
+    CHECK(std::strcmp(descriptor.optional_requires[3].id,
+                      qol::contracts::kWorldFactsCapabilityId) == 0);
+    CHECK(descriptor.optional_requires[3].range.major ==
+          qol::contracts::kWorldFactsVersionMajor);
+    CHECK(descriptor.optional_requires[3].range.min_minor ==
+          qol::contracts::kWorldFactsVersionMinor);
+    CHECK(std::strcmp(descriptor.optional_requires[4].id,
+                      qol::contracts::kBagSourceCapabilityId) == 0);
+    CHECK(descriptor.optional_requires[4].range.major ==
+          qol::contracts::kBagSourceVersion.major);
+    CHECK(descriptor.optional_requires[4].range.min_minor ==
+          qol::contracts::kBagSourceVersion.minor);
+    CHECK(std::strcmp(descriptor.optional_requires[5].id,
+                      qol::contracts::kInventoryRefreshCapabilityId) == 0);
+    CHECK(descriptor.optional_requires[5].range.major ==
+          qol::contracts::kInventoryRefreshVersionMajor);
+    CHECK(descriptor.optional_requires[5].range.min_minor ==
+          qol::contracts::kInventoryRefreshVersionMinor);
+    CHECK(descriptor.feature_count == 1 && descriptor.features != nullptr);
+    CHECK(std::strcmp(descriptor.features[0].id, "core.item.provider") == 0);
+    CHECK(!descriptor.deactivate_allowed);
+    // ptrslot:MOVE_MERGE_GOT 与 5 条装备页 UI hook 已迁往 extension_bag；core.item 只保留
+    // 11 条 inventory claims。
+    CHECK(descriptor.resources_count == 11 && descriptor.resources != nullptr);
+    for (uint32_t i = 0; i < descriptor.resources_count; ++i) {
+        CHECK(descriptor.resources[i].owner != nullptr &&
+              std::strcmp(descriptor.resources[i].owner, "core.item") == 0);
+        CHECK(descriptor.resources[i].requirement ==
+              qol::contracts::ResourceRequirement::kRequired);
+        CHECK(descriptor.resources[i].failure ==
+              qol::contracts::ResourceFailure::kFailClosed);
+    }
+    CHECK(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
+    // 库存读侧 5 条 GET 与写 move/money 迁往 core.inventory 后，core.item 只剩
+    // shop query + 11 条写命令；metadata 只保留 set-equip。
+    CHECK(descriptor.http_endpoint_count == 12 && descriptor.http_endpoints != nullptr);
+    CHECK(descriptor.http_route_metadata_count == 1 &&
+          descriptor.http_route_metadata != nullptr);
+    uint32_t native_op_count = 0;
+    for (uint32_t i = 0; i < descriptor.http_endpoint_count; ++i) {
+        const auto& endpoint = descriptor.http_endpoints[i];
+        CHECK(endpoint.route_owner != nullptr &&
+              std::strcmp(endpoint.route_owner, "core.item") == 0);
+        CHECK(endpoint.lease_required == 1);
+        if (endpoint.op_required != 0) ++native_op_count;
+        if (endpoint.method == qol::contracts::HttpMethod::kGet) {
+            CHECK(endpoint.kind == qol::contracts::HttpHandlerKind::kQuery);
+            CHECK(endpoint.query_handler != nullptr && endpoint.command_handler == nullptr);
+        } else {
+            CHECK(endpoint.kind == qol::contracts::HttpHandlerKind::kCommand);
+            CHECK(endpoint.query_handler == nullptr && endpoint.command_handler != nullptr);
+        }
+    }
+    CHECK(native_op_count == 1);
+    CHECK(std::strcmp(descriptor.http_route_metadata[0].path,
+                      "/api/op/inventory/set-equip") == 0);
+    for (uint32_t i = 0; i < descriptor.http_route_metadata_count; ++i) {
+        CHECK(descriptor.http_route_metadata[i].method == qol::contracts::HttpMethod::kPost);
+        CHECK(descriptor.http_route_metadata[i].op_required == 1);
+        CHECK(descriptor.http_route_metadata[i].lease_required == 1);
+    }
+    CHECK(descriptor.provides_count == 5 && descriptor.provides != nullptr);
+    CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
+    CHECK(descriptor.provides[0].version.major == 4 && descriptor.provides[0].version.minor == 0);
+    CHECK(descriptor.provides[0].iface != nullptr);
+    // T2h-B2：owner raw inventory 投影 capability（复用 serialize_inventory_json）。
+    CHECK(std::strcmp(descriptor.provides[1].id, qol::contracts::kItemStateCapabilityId) == 0);
+    CHECK(descriptor.provides[1].version.major == 1 && descriptor.provides[1].version.minor == 1);
+    CHECK(descriptor.provides[1].iface != nullptr);
+    CHECK(static_cast<int32_t>(qol::contracts::QolItemStateKind::kRawInventory) == 0);
+    CHECK(static_cast<int32_t>(qol::contracts::QolItemStateKind::kEnrichedInventory) == 1);
+    CHECK(static_cast<const qol::contracts::ItemStateApi*>(descriptor.provides[1].iface)
+              ->write_state_json != nullptr);
+    // inventory_refresh 已由 extension_bag 提供（provider 自 core.item 迁出）。
+    CHECK(std::strcmp(descriptor.provides[2].id,
+                      qol::contracts::kInventoryActionCapabilityId) == 0);
+    CHECK(descriptor.provides[2].iface != nullptr);
+    CHECK(std::strcmp(descriptor.provides[3].id,
+                      qol::contracts::kInventorySlotCapabilityId) == 0);
+    CHECK(descriptor.provides[3].iface != nullptr);
+    CHECK(std::strcmp(descriptor.provides[4].id,
+                      qol::contracts::kInventoryProjectionCapabilityId) == 0);
+    CHECK(descriptor.provides[4].iface != nullptr);
+    // move_merge.control 提供面随 feature 迁往 extension_bag 后撤除。
+    CHECK(descriptor.port_count == 5 && descriptor.ports != nullptr);
+    CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
+    CHECK(descriptor.ports[0].range.major == qol::contracts::kQolPortItemVersion.major &&
+          descriptor.ports[0].range.min_minor == qol::contracts::kQolPortItemVersion.minor);
+    CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE);
+    CHECK(descriptor.ports[2].id == qol::contracts::QolPortId::QOL_PORT_ITEM_DICE_WRITE);
+    CHECK(descriptor.ports[3].id ==
+          qol::contracts::QolPortId::QOL_PORT_ITEM_INVENTORY_STATE_WRITE);
+    CHECK(descriptor.ports[4].id == qol::contracts::QolPortId::QOL_PORT_CHARACTER_EXTRAS);
+
+    qol::contracts::PluginContext ctx{};
+    int dummy = 0;
+    CHECK(descriptor.on_resource_ready != nullptr);
+    CHECK(descriptor.on_resource_ready(ctx, "hook:CHAR_UseItemEx", &dummy) == 0);
+
+    const auto* api = static_cast<const qol::contracts::ItemFactsApi*>(descriptor.provides[0].iface);
+    CHECK(api->category != nullptr);
+    CHECK(api->item_type != nullptr);
+    CHECK(api->is_no_sell != nullptr);
+    CHECK(api->sell_price != nullptr);
+    CHECK(api->cumulate_count != nullptr);
+    CHECK(api->item_ref_at != nullptr);
+    CHECK(api->physical_item_at != nullptr);
+    CHECK(api->detail_item_context != nullptr);
+    CHECK(api->money != nullptr);
+    CHECK(api->view != nullptr);
+    CHECK(api->effective_count != nullptr);
+    CHECK(api->count_limit != nullptr);
+    CHECK(api->count_encoding != nullptr);
+    CHECK(api->quote != nullptr);
+    CHECK(g_fail == 0);
+    std::printf("item_facts_plugin: pass=%d fail=%d\n", g_pass, g_fail);
+    return g_fail == 0 ? 0 : 1;
+}

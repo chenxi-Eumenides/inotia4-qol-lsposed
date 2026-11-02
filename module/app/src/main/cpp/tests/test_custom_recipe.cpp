@@ -1,13 +1,14 @@
-#include "feature/custom_recipe/custom_recipe_catalog.h"
-#include "feature/custom_recipe/custom_recipe_rules.h"
-#include "feature/custom_recipe/custom_recipe_table.h"
+#include "plugins/custom_recipe/model/catalog.h"
+#include "plugins/custom_recipe/model/rules.h"
+#include "plugins/custom_recipe/table/table.h"
 
-#include "feature/attribute_range/attribute_range.h"
+#include "plugins/attribute_quality/rules.h"
 
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <initializer_list>
+#include <limits>
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -17,44 +18,129 @@ static int g_fail = 0;
     else { ++g_fail; std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
 } while (0)
 
-using attr_range::classify;
-using attr_range::Tier;
+using attribute_quality::classify;
+using attribute_quality::Tier;
 namespace cr = custom_recipe;
+
+struct ClassifierContext {
+    int calls = 0;
+    int fail_value = std::numeric_limits<int>::min();
+    int fail_code = kQolErrNotReady;
+    bool fail = false;
+    bool classify_extreme_range = false;
+    bool all_values_gold = false;
+};
+
+static QolResult classify_candidate(int32_t value, cr::AttributeRange range, void* context,
+                                    cr::Tier* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "null tier", 9);
+    auto* state = static_cast<ClassifierContext*>(context);
+    if (state != nullptr) {
+        ++state->calls;
+        if (state->fail && value == state->fail_value) {
+            return qol::contracts::error(state->fail_code, "candidate failed", 16);
+        }
+        if (state->all_values_gold) {
+            *out = cr::Tier::Gold;
+            return qol::contracts::ok();
+        }
+    }
+    if (range.max <= range.min || value >= range.max) {
+        *out = cr::Tier::Gold;
+        return qol::contracts::ok();
+    }
+    if (state != nullptr && state->classify_extreme_range) {
+        const int64_t percentile =
+            (static_cast<int64_t>(value) - range.min) * 100 /
+            (static_cast<int64_t>(range.max) - range.min);
+        *out = percentile >= 90 ? cr::Tier::Purple
+              : percentile >= 75 ? cr::Tier::Blue
+              : percentile >= 60 ? cr::Tier::Green
+              : percentile >= 30 ? cr::Tier::White
+                                 : cr::Tier::Grey;
+        return qol::contracts::ok();
+    }
+    *out = classify(value, range.min, range.max);
+    return qol::contracts::ok();
+}
 
 static uint16_t rd_u16(const uint8_t* p) {
     return static_cast<uint16_t>(p[0] | (static_cast<uint16_t>(p[1]) << 8));
 }
 
+// 固定返回下界的随机源（可预测）。
+static QolResult rand_lo(int32_t lo, int32_t hi, int32_t* out) {
+    (void)hi;
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
+    *out = lo;
+    return qol::contracts::ok();
+}
+// 固定返回上界的随机源。
+static QolResult rand_hi(int32_t lo, int32_t hi, int32_t* out) {
+    (void)lo;
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
+    *out = hi;
+    return qol::contracts::ok();
+}
+// 覆盖式：每次调用返回区间内递增位置（由外部游标驱动）。
+static int g_rand_cursor = 0;
+static QolResult rand_sweep(int32_t lo, int32_t hi, int32_t* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
+    const int32_t span = hi - lo;
+    const int32_t idx = g_rand_cursor % (span + 1);
+    *out = lo + idx;
+    return qol::contracts::ok();
+}
+// 恒定失败的随机源：错误必须传播，不得 clamp、不得返 lo 伪成功（CR03）。
+static QolResult rand_failing(int32_t, int32_t, int32_t* out) {
+    if (out != nullptr) *out = 0;
+    return qol::contracts::error(kQolErrBlocked, "rand blocked", 12);
+}
+// 越界随机值：显式报错，不静默钳制。
+static QolResult rand_out_of_range(int32_t, int32_t hi, int32_t* out) {
+    if (out != nullptr) *out = hi + 1;
+    return qol::contracts::ok();
+}
+
+static QolResult compute_upgrade(Tier current, cr::AttributeRange range,
+                                 ClassifierContext* context,
+                                 cr::RandomInclusiveFn random, cr::UpgradeResult* result,
+                                 cr::Tier* target, int32_t* value) {
+    return cr::compute_tier_up_value(current, range, &classify_candidate, context, random,
+                                     result, target, value);
+}
+
 // ---------------------------------------------------------------------------
-// §5.1(1) 档位区间边界 + 严格互逆：对每个 (min,max) 与每档，区间端点归属正确。
+// 档位区间逆运算、Gold/退化、空档跳过与失败传播。
 // ---------------------------------------------------------------------------
 static void test_interval_inverse_boundaries() {
-    // 退化（max<=min）恒金档、不可升。
-    CHECK(cr::compute_tier_up_value(5, 10, 10, nullptr, nullptr, nullptr) ==
-          cr::UpgradeResult::kDegenerate);
-    CHECK(cr::compute_tier_up_value(0, 0, 0, nullptr, nullptr, nullptr) ==
-          cr::UpgradeResult::kDegenerate);
+    cr::UpgradeResult result = cr::UpgradeResult::kOk;
+    CHECK(compute_upgrade(Tier::Grey, {10, 10}, nullptr, nullptr, &result, nullptr, nullptr).ok ==
+          kQolOk);
+    CHECK(result == cr::UpgradeResult::kDegenerate);
+    CHECK(compute_upgrade(Tier::Grey, {0, 0}, nullptr, nullptr, &result, nullptr, nullptr).ok ==
+          kQolOk);
+    CHECK(result == cr::UpgradeResult::kDegenerate);
 
-    // 穷举小范围：对每个非金档 value，next_tier_interval 得到的 [lo,hi] 内所有值
-    // classify 恒等于目标档，且端点外侧不属于目标档（严格互逆，无浮点漂移）。
     const int min = 0;
-    const int max = 100;  // R=100，六档均有整数代表值
+    const int max = 100;
     int seen_tiers = 0;
+    Tier target = Tier::Grey;
+    int32_t lo = 0;
+    int32_t hi = 0;
+    bool found = false;
     for (int v = min; v < max; ++v) {
-        const Tier cur = classify(v, min, max);
-        if (cur == Tier::Gold) continue;
-        Tier target = Tier::Grey;
-        int lo = 0;
-        int hi = 0;
-        if (!cr::next_tier_interval(v, min, max, &target, &lo, &hi)) {
+        const Tier current = classify(v, min, max);
+        if (current == Tier::Gold) continue;
+        const QolResult interval = cr::next_tier_interval(
+            current, {min, max}, &classify_candidate, nullptr, &target, &lo, &hi, &found);
+        if (interval.ok != kQolOk || !found) {
             ++g_fail;
             std::printf("FAIL interval missing for v=%d\n", v);
             continue;
         }
         ++seen_tiers;
-        // 目标档严格高于当前档。
-        CHECK(cr::tier_ordinal(target) == cr::tier_ordinal(cur) + 1);
-        // 区间内每个值都判为目标档（与 classify 互逆）。
+        CHECK(cr::tier_ordinal(target) == cr::tier_ordinal(current) + 1);
         CHECK(classify(lo, min, max) == target);
         CHECK(classify(hi, min, max) == target);
         for (int x = lo; x <= hi; ++x) {
@@ -65,29 +151,93 @@ static void test_interval_inverse_boundaries() {
                 break;
             }
         }
-        // 端点外侧（在 [min,max] 内）不得属于目标档。
         if (lo > min) CHECK(classify(lo - 1, min, max) != target);
         if (hi < max) CHECK(classify(hi + 1, min, max) != target);
     }
     CHECK(seen_tiers > 0);
 
-    // 金档不可升（v>=max）。
-    CHECK(cr::compute_tier_up_value(100, 0, 100, nullptr, nullptr, nullptr) ==
-          cr::UpgradeResult::kAlreadyGold);
-    CHECK(cr::compute_tier_up_value(150, 0, 100, nullptr, nullptr, nullptr) ==
-          cr::UpgradeResult::kAlreadyGold);
+    // Current tier is authoritative and Gold never evaluates a candidate.
+    ClassifierContext untouched{};
+    CHECK(compute_upgrade(Tier::Gold, {0, 100}, &untouched, nullptr,
+                          &result, nullptr, nullptr).ok == kQolOk);
+    CHECK(result == cr::UpgradeResult::kAlreadyGold);
+    CHECK(untouched.calls == 0);
+    int32_t upgraded = 0;
+    CHECK(compute_upgrade(Tier::Purple, {0, 100}, nullptr, rand_lo,
+                          &result, &target, &upgraded).ok == kQolOk);
+    CHECK(result == cr::UpgradeResult::kOk && target == Tier::Gold && upgraded == 100);
+
+    // 区间过窄时跳过没有整数代表值的 White/Green/Blue/Purple，继续到 Gold。
+    CHECK(cr::next_tier_interval(Tier::White, {1, 3}, &classify_candidate, nullptr,
+                                 &target, &lo, &hi, &found).ok == kQolOk);
+    CHECK(found && target == Tier::Gold && lo == 3 && hi == 3);
+
+    // 二分跨度覆盖 int32 全域；bound-1 在 INT_MIN 处以 int64 计算而不回绕。
+    ClassifierContext extreme{};
+    extreme.classify_extreme_range = true;
+    const cr::AttributeRange full_range{std::numeric_limits<int32_t>::min(),
+                                        std::numeric_limits<int32_t>::max()};
+    int32_t white_bound = 0;
+    CHECK(cr::tier_lower_bound(Tier::White, full_range, &classify_candidate,
+                               &extreme, &white_bound).ok == kQolOk);
+    CHECK(white_bound > full_range.min && white_bound < full_range.max);
+    extreme.all_values_gold = true;
+    CHECK(cr::next_tier_interval(Tier::Grey, full_range, &classify_candidate,
+                                 &extreme, &target, &lo, &hi, &found).ok == kQolOk);
+    CHECK(found && target == Tier::Gold && lo == full_range.min && hi == full_range.max);
 }
 
-// 固定返回下界的随机源（可预测）。
-static int rand_lo(int lo, int hi) { (void)hi; return lo; }
-// 固定返回上界的随机源。
-static int rand_hi(int lo, int hi) { (void)lo; return hi; }
-// 覆盖式：每次调用返回区间内递增位置（由外部游标驱动）。
-static int g_rand_cursor = 0;
-static int rand_sweep(int lo, int hi) {
-    const int span = hi - lo;
-    const int idx = g_rand_cursor % (span + 1);
-    return lo + idx;
+static int g_failure_random_calls = 0;
+static QolResult fail_random(int32_t lo, int32_t, int32_t* out) {
+    ++g_failure_random_calls;
+    if (out != nullptr) *out = lo;
+    return qol::contracts::ok();
+}
+
+static void test_candidate_errors_propagate() {
+    ClassifierContext context{};
+    context.fail = true;
+    context.fail_value = 50;
+    context.fail_code = kQolErrBlocked;
+    int32_t out_value = -1;
+    CHECK(cr::tier_lower_bound(Tier::White, {0, 100}, &classify_candidate,
+                               &context, &out_value).code == kQolErrBlocked);
+    CHECK(cr::next_tier_interval(Tier::Grey, {0, 100}, &classify_candidate,
+                                 &context, nullptr, &out_value, &out_value, nullptr).code ==
+          kQolErrInvalidArgument);
+    bool found = false;
+    CHECK(cr::next_tier_interval(Tier::Grey, {0, 100}, &classify_candidate,
+                                 &context, nullptr, &out_value, &out_value, &found).code ==
+          kQolErrBlocked);
+    g_failure_random_calls = 0;
+    cr::UpgradeResult result = cr::UpgradeResult::kOk;
+    CHECK(compute_upgrade(Tier::Grey, {0, 100}, &context, &fail_random,
+                          &result, nullptr, &out_value).code == kQolErrBlocked);
+    CHECK(g_failure_random_calls == 0);
+
+    // CR03：随机源错误/越界/缺失都必须显式失败，且不写 target/new_value（不 clamp、不返 lo）。
+    Tier target = Tier::Grey;
+    int32_t new_value = -1;
+    cr::UpgradeResult upgrade = cr::UpgradeResult::kOk;
+    CHECK(compute_upgrade(Tier::Grey, {0, 100}, nullptr, &rand_failing, &upgrade, &target,
+                          &new_value).code == kQolErrBlocked);
+    CHECK(target == Tier::Grey && new_value == -1);
+    CHECK(compute_upgrade(Tier::Grey, {0, 100}, nullptr, &rand_out_of_range, &upgrade, &target,
+                          &new_value).ok != kQolOk);
+    CHECK(target == Tier::Grey && new_value == -1);
+    CHECK(compute_upgrade(Tier::Grey, {0, 100}, nullptr, nullptr, &upgrade, &target,
+                          &new_value).code == kQolErrInvalidArgument);
+    CHECK(target == Tier::Grey && new_value == -1);
+    // 闭区间两端都可能被取到（不恒 lo）：rand_hi 结果严格大于 rand_lo 结果。
+    CHECK(compute_upgrade(Tier::Grey, {0, 100}, nullptr, &rand_lo, &upgrade, &target,
+                          &new_value).ok == kQolOk);
+    const int32_t lower_value = new_value;
+    const Tier lower_target = target;
+    CHECK(compute_upgrade(Tier::Grey, {0, 100}, nullptr, &rand_hi, &upgrade, &target,
+                          &new_value).ok == kQolOk);
+    CHECK(new_value > lower_value);
+    CHECK(target == lower_target);
+    CHECK(classify(new_value, 0, 100) == target);
 }
 
 // ---------------------------------------------------------------------------
@@ -102,25 +252,32 @@ static void test_random_matches_target() {
     for (const Case& c : cases) {
         const Tier cur = classify(c.value, c.min, c.max);
         if (cur == Tier::Gold) continue;
-        for (int (*rand)(int, int) : {rand_lo, rand_hi}) {
+        for (cr::RandomInclusiveFn rand : {rand_lo, rand_hi}) {
             Tier target = Tier::Grey;
-            int out = 0;
-            const auto r = cr::compute_tier_up_value(c.value, c.min, c.max, rand, &target, &out);
-            CHECK(r == cr::UpgradeResult::kOk);
+            int32_t out = 0;
+            cr::UpgradeResult result = cr::UpgradeResult::kDegenerate;
+            const auto r = compute_upgrade(cur, {c.min, c.max}, nullptr, rand,
+                                           &result, &target, &out);
+            CHECK(r.ok == kQolOk);
+            CHECK(result == cr::UpgradeResult::kOk);
             CHECK(classify(out, c.min, c.max) == target);
             CHECK(cr::tier_ordinal(target) == cr::tier_ordinal(cur) + 1);
         }
         // 扫掠区间内每个可能取值都必须判为目标档。
         Tier target = Tier::Grey;
-        int lo = 0;
-        int hi = 0;
-        CHECK(cr::next_tier_interval(c.value, c.min, c.max, &target, &lo, &hi));
+        int32_t lo = 0;
+        int32_t hi = 0;
+        bool found = false;
+        CHECK(cr::next_tier_interval(cur, {c.min, c.max}, &classify_candidate, nullptr,
+                                     &target, &lo, &hi, &found).ok == kQolOk && found);
         for (int i = 0; i <= hi - lo; ++i) {
             g_rand_cursor = i;
-            int out = 0;
+            int32_t out = 0;
             Tier t2 = Tier::Grey;
-            CHECK(cr::compute_tier_up_value(c.value, c.min, c.max, rand_sweep, &t2, &out) ==
-                  cr::UpgradeResult::kOk);
+            cr::UpgradeResult result = cr::UpgradeResult::kDegenerate;
+            CHECK(compute_upgrade(cur, {c.min, c.max}, nullptr, rand_sweep,
+                                  &result, &t2, &out).ok == kQolOk);
+            CHECK(result == cr::UpgradeResult::kOk);
             CHECK(out >= lo && out <= hi);
             CHECK(t2 == target);
             CHECK(classify(out, c.min, c.max) == target);
@@ -149,16 +306,16 @@ static void test_catalog_mapping() {
     CHECK(real[0].count_rule == cr::CountRule::kFixed);
     CHECK(real[0].form == cr::Form::kMultiInputCreate);
     CHECK(real[0].group == 3);
-    // 第 2 条「宝石强化」= kJewelTierUp：借 type 3（目标物 + 材料 → 原地修改）形态。
+    // 第 2 条「升阶」= kTierUp：借 type 3（目标物 + 材料 → 原地修改）形态。
     CHECK(real[1].label_word_id == 35291);
-    CHECK(real[1].kind == cr::Kind::kJewelTierUp);
+    CHECK(real[1].kind == cr::Kind::kTierUp);
     CHECK(real[1].material_count == 1);
     CHECK(real[1].materials[0].item_id == 15);
-    // 必须填合法公式 wordId（不能为 0）：宝石强化页是 type 1，而 UIMix_ButtonRecipeExe 内部
+    // 必须填合法公式 wordId（不能为 0）：升阶页是 type 1，而 UIMix_ButtonRecipeExe 内部
     // 自带一次 InitMixingState，其 type==1 分支会用本记录 b8-9 求值 CAL_Calculate —— 填 0 会给
     // CAL_Calculate 传空公式并崩溃（真机实证，见设计册 §7.27）。实际费用由放料 hook 强制 0。
     CHECK(real[1].cost_word_id == 188);
-    CHECK(real[1].count_rule == cr::CountRule::kJewelGradeAndLevel);
+    CHECK(real[1].count_rule == cr::CountRule::kGradeAndLevel);
     CHECK(real[1].form == cr::Form::kTargetAndCreate);
     CHECK(real[1].group == 3);
     // b11 组位推导：1 << group；group >= 8 视为非法（不占任何页）。
@@ -190,11 +347,11 @@ static void test_catalog_mapping() {
     const cr::Material m2[] = {{15, 1}, {16, 2}};
     const cr::Material m3[] = {{15, 1}, {16, 1}, {17, 1}};
     const cr::Def synth[3] = {
-        {35291, cr::Kind::kJewelTierUp, m1, 1, 0, cr::CountRule::kFixed,
+        {35291, cr::Kind::kTierUp, m1, 1, 0, cr::CountRule::kFixed,
          cr::Form::kTargetAndCreate, 3},
         {35292, cr::Kind::kNativePassThrough, m2, 2, 0, cr::CountRule::kFixed,
          cr::Form::kConsumeToCreate, 1},
-        {35293, cr::Kind::kJewelTierUp, m3, 3, 0, cr::CountRule::kFixed,
+        {35293, cr::Kind::kTierUp, m3, 3, 0, cr::CountRule::kFixed,
          cr::Form::kMultiInputCreate, 3},
     };
     CHECK(cr::mix_type_at(base_rec, 0) == 69);
@@ -332,7 +489,19 @@ static void test_material_count() {
     CHECK(cr::jewel_grade_from_category(-1) == 0);
     CHECK(cr::kJewelCategoryFirst == 28 && cr::kJewelCategoryLast == 32);
 
-    // 满级 105 → 0 瓶（idea.md §7：满级后无需消耗卓越灵药）；超上限同样 0，不得为负。
+    CHECK(cr::equipment_grade_from_rarity(-1) == 0);
+    CHECK(cr::equipment_grade_from_rarity(0) == 1);
+    CHECK(cr::equipment_grade_from_rarity(4) == 5);
+    CHECK(cr::equipment_grade_from_rarity(5) == 0);
+
+    const cr::AttributeRange range{0, 100};
+    CHECK(cr::affix_upgradable(kQolOk, 0, range));
+    CHECK(cr::affix_upgradable(kQolOk, 4, range));
+    CHECK(!cr::affix_upgradable(kQolErrNotReady, 1, range));
+    CHECK(!cr::affix_upgradable(kQolOk, 5, range));
+    CHECK(!cr::affix_upgradable(kQolOk, 1, {10, 10}));
+
+    // 满级 105 → 0（95 级起全部组合免费）；超上限同样 0，不得为负。
     for (int cat = cr::kJewelCategoryFirst; cat <= cr::kJewelCategoryLast; ++cat) {
         const int grade = cr::jewel_grade_from_category(cat);
         CHECK(cr::material_count_for(1, grade, 105) == 0);
@@ -340,31 +509,41 @@ static void test_material_count() {
     }
     CHECK(cr::material_count_for(1, 5, 200) == 0);
 
-    // 低等级 ≈ 原量：grade 1..5 对应 1..5 瓶（低级1瓶、中级2瓶、类推）。
-    for (int g = 1; g <= 5; ++g) {
-        CHECK(cr::material_count_for(1, g, 1) == g);
-        CHECK(cr::material_count_for(1, g, 0) == g);
-        CHECK(cr::material_count_for(1, g, -5) == g);  // 负等级钳到 0
-    }
-    CHECK(cr::material_count_for(2, 1, 1) == 2);  // base_count 作倍率
-    CHECK(cr::material_count_for(3, 5, 105) == 0);
+    // 零费等级边界：最低组合 (1,1) 在 25 级免费、24 级仍为 1；最高组合 (5,5) 在 95 级免费、94 级仍为 1。
+    CHECK(cr::material_count_for(1, 1, 25) == 0);
+    CHECK(cr::material_count_for(1, 1, 24) == 1);
+    CHECK(cr::material_count_for(5, 5, 95) == 0);
+    CHECK(cr::material_count_for(5, 5, 94) == 1);
+    // 自升组合 (g,g) 的零费等级随档位升高：25 / 43 / 60 / 78 / 95，且前一级为 1。
+    CHECK(cr::material_count_for(2, 2, 43) == 0);
+    CHECK(cr::material_count_for(2, 2, 42) == 1);
+    CHECK(cr::material_count_for(3, 3, 60) == 0);
+    CHECK(cr::material_count_for(3, 3, 59) == 1);
+    CHECK(cr::material_count_for(4, 4, 78) == 0);
+    CHECK(cr::material_count_for(4, 4, 77) == 1);
 
-    // 向上取整：ceil(5 × 53/105) = ceil(2.52…) = 3；ceil(5 × 52/105) = 3。
-    CHECK(cr::material_count_for(1, 5, 52) == 3);
-    CHECK(cr::material_count_for(1, 5, 53) == 3);
-    // 任何非零需求不得被取整成 0：ceil(1 × 104/105) = 1、ceil(1 × 52/105) = 1。
-    CHECK(cr::material_count_for(1, 1, 1) == 1);
-    CHECK(cr::material_count_for(1, 1, 53) == 1);
+    // 低等级折扣为负：消耗 = base+grade+|F|；负等级钳到 0，与 level=0 同值。
+    for (int g = 1; g <= 5; ++g) {
+        CHECK(cr::material_count_for(1, g, 0) == g + 2);
+        CHECK(cr::material_count_for(1, g, -5) == g + 2);
+    }
+    CHECK(cr::material_count_for(2, 1, 0) == 4);  // 底价 base+grade 作加数
+
+    // 同一 level 下不同档位严格 +1 递增、非零两两互异：25 级 [0,1,2,3,4]、43 级 [0,0,0,1,2]。
+    for (int g = 1; g <= 5; ++g) {
+        CHECK(cr::material_count_for(1, g, 25) == g - 1);
+        CHECK(cr::material_count_for(1, g, 43) == (g >= 4 ? g - 3 : 0));
+    }
 
     // 非法输入 → 0（调用方据此保持原需求数，不会变成免费合成）。
     CHECK(cr::material_count_for(0, 5, 0) == 0);
     CHECK(cr::material_count_for(-1, 1, 0) == 0);
     CHECK(cr::material_count_for(1, 0, 0) == 0);
 
-    // 对等级单调不增，且始终落在 [0, base×grade]。
+    // 对等级单调不增，且始终非负，最终归 0。
     for (int g = 1; g <= 5; ++g) {
         int prev = cr::material_count_for(1, g, 0);
-        CHECK(prev == g);
+        CHECK(prev == g + 2);
         for (int lv = 1; lv <= cr::kMaxCharacterLevel; ++lv) {
             const int cur = cr::material_count_for(1, g, lv);
             CHECK(cur <= prev);
@@ -460,6 +639,36 @@ static void test_chaos_scroll_recipe() {
 }
 
 // ---------------------------------------------------------------------------
+// 三同类档位宝石 → 原版宝石配方 mixType 推导（委托原版 UIMix_StartMix 用）。
+// ---------------------------------------------------------------------------
+static void test_delegate_mix_type_for() {
+    size_t n = 0;
+    const cr::ThreeSlotRecipe* recipes = cr::three_slot_recipes(&n);
+    CHECK(recipes != nullptr && n == 8);
+
+    // 规则 3-6（索引 2-5）：三同类档位宝石 → 原版 RECIPEBASE 12..15（product − 17）。
+    const uint16_t gems[4] = {28, 29, 30, 31};
+    const uint16_t want_mix[4] = {12, 13, 14, 15};
+    for (int i = 0; i < 4; ++i) {
+        const uint16_t slots[3] = {gems[i], gems[i], gems[i]};
+        const cr::ThreeSlotRecipe* hit = cr::match_three_slot(slots);
+        CHECK(hit == &recipes[2 + i]);
+        CHECK(cr::delegate_mix_type_for(*hit, slots) == want_mix[i]);
+    }
+
+    // 非档位宝石 / 混档 / 混沌（32 无上级）/ 产物与档位不衔接 → 不委托。
+    const uint16_t chaos[3] = {32, 32, 32};
+    CHECK(cr::delegate_mix_type_for(recipes[2], chaos) == 0);
+    const uint16_t mixed_tiers[3] = {28, 29, 28};
+    CHECK(cr::delegate_mix_type_for(recipes[2], mixed_tiers) == 0);
+    const uint16_t scrolls[3] = {20, 20, 25};
+    CHECK(cr::delegate_mix_type_for(recipes[6], scrolls) == 0);
+    const uint16_t leather[3] = {35, 0, 41};
+    CHECK(cr::delegate_mix_type_for(recipes[0], leather) == 0);
+    CHECK(cr::delegate_mix_type_for(recipes[0], nullptr) == 0);
+}
+
+// ---------------------------------------------------------------------------
 // 「两件相同特殊装备 + 元气恢复药水」配方：槽位严格顺序 + 槽0/槽2 必须同类别 + 通配特殊装备槽。
 // ---------------------------------------------------------------------------
 static bool fake_is_special(uint16_t category) {
@@ -506,113 +715,250 @@ static void test_max_socket_enchant_recipe() {
 }
 
 // ---------------------------------------------------------------------------
-// 动态特殊装备配方：进档随机生成「装备 → 3 个不同材料（顺序严格）」的映射。
+// 静态和动态配方共用精确匹配语义：ordered、unordered、通配与空槽。
 // ---------------------------------------------------------------------------
-static const int* g_rand_seq = nullptr;
-static size_t g_rand_len = 0;
-static size_t g_rand_pos = 0;
+static void test_recipe_match_helpers() {
+    size_t n = 0;
+    const cr::ThreeSlotRecipe* recipes = cr::three_slot_recipes(&n);
+    CHECK(n == 8);
 
-// 可编程随机序列：取值 = lo + (seq[i] mod span)。测试用它同时驱动「是否为空」与「选哪个材料」。
-static void set_rand_seq(const int* seq, size_t len) {
-    g_rand_seq = seq;
-    g_rand_len = len;
-    g_rand_pos = 0;
+    const uint16_t leather[3] = {35, 0, 41};
+    const uint16_t leather_filled[3] = {35, 33, 41};
+    const uint16_t leather_swapped[3] = {41, 0, 35};
+    CHECK(cr::three_slot_recipe_matches(recipes[0], leather));
+    CHECK(!cr::three_slot_recipe_matches(recipes[0], leather_filled));
+    CHECK(!cr::three_slot_recipe_matches(recipes[0], leather_swapped));
+    CHECK(cr::match_static_three_slot(leather) == &recipes[0]);
+
+    const uint16_t potion_scroll[3] = {5, 16, 5};
+    const uint16_t potion_scroll_empty[3] = {0, 5, 16};
+    CHECK(cr::three_slot_recipe_matches(recipes[1], potion_scroll));
+    CHECK(!cr::three_slot_recipe_matches(recipes[1], potion_scroll_empty));
 }
 
-static int fake_rand(int lo, int hi) {
-    const int span = hi - lo + 1;
-    if (span <= 0 || g_rand_seq == nullptr || g_rand_len == 0) return lo;
-    const int v = g_rand_seq[g_rand_pos++ % g_rand_len];
-    return lo + (v % span);
+static bool same_dynamic_recipe(const cr::ThreeSlotRecipe& left,
+                                const cr::ThreeSlotRecipe& right) {
+    return left.slots[0] == right.slots[0] && left.slots[1] == right.slots[1] &&
+           left.slots[2] == right.slots[2] && left.ordered == right.ordered &&
+           left.product == right.product && left.product_mode == right.product_mode &&
+           left.scale_permille == right.scale_permille &&
+           left.same_first_last == right.same_first_last;
+}
+
+struct DynamicCacheGeneratorState {
+    size_t calls = 0;
+    bool fail = false;
+};
+
+static QolResult counted_dynamic_generator(uint64_t seed, cr::ThreeSlotRecipe* out,
+                                           size_t out_capacity, size_t* out_count,
+                                           void* context) {
+    if (context == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "missing generator state",
+                                     sizeof("missing generator state") - 1);
+    }
+    auto* state = static_cast<DynamicCacheGeneratorState*>(context);
+    ++state->calls;
+    if (state->fail) {
+        return qol::contracts::error(kQolErrBlocked, "injected generator failure", 26);
+    }
+    return cr::build_dynamic_recipes_seeded(
+        cr::kSpecialEquipCategories, cr::kSpecialEquipCategoryCount, seed, cr::kMaterialPool,
+        cr::kMaterialPoolSize, out, out_capacity, out_count);
+}
+
+static void test_dynamic_recipe_cache() {
+    cr::DynamicRecipeCache cache{};
+    DynamicCacheGeneratorState generator_state{};
+    cr::ThreeSlotRecipe first[cr::kMaxDynamicRecipes]{};
+    cr::ThreeSlotRecipe repeated[cr::kMaxDynamicRecipes]{};
+    cr::ThreeSlotRecipe other_save[cr::kMaxDynamicRecipes]{};
+    size_t first_count = 0;
+    size_t repeated_count = 0;
+    size_t other_count = 0;
+    bool cache_hit = true;
+
+    CHECK(cr::dynamic_recipe_cache_get_or_build(
+              &cache, 1001, &counted_dynamic_generator, &generator_state, first,
+              cr::kMaxDynamicRecipes, &first_count, &cache_hit).ok == kQolOk);
+    CHECK(generator_state.calls == 1 && !cache_hit);
+    CHECK(first_count == cr::kSpecialEquipCategoryCount);
+    const uint64_t before_first_publish = cr::dynamic_recipe_generation();
+    cr::set_dynamic_three_slot_recipes(first, first_count);
+    const uint64_t after_first_publish = cr::dynamic_recipe_generation();
+    CHECK(after_first_publish != before_first_publish);
+
+    // 同一角色创建时间第二次 refresh 命中缓存，生成器不再运行且完整目录复用。
+    CHECK(cr::dynamic_recipe_cache_get_or_build(
+              &cache, 1001, &counted_dynamic_generator, &generator_state, repeated,
+              cr::kMaxDynamicRecipes, &repeated_count, &cache_hit).ok == kQolOk);
+    CHECK(generator_state.calls == 1 && cache_hit);
+    CHECK(repeated_count == first_count);
+    cr::set_dynamic_three_slot_recipes(repeated, repeated_count);
+    CHECK(cr::dynamic_recipe_generation() != after_first_publish);
+    CHECK(cr::dynamic_three_slot_recipe_count() == repeated_count);
+    for (size_t i = 0; i < first_count; ++i) {
+        CHECK(same_dynamic_recipe(first[i], repeated[i]));
+    }
+
+    // 不同角色创建时间是 cache miss；时间戳之外不使用当前槽或保存时间作为 key。
+    CHECK(cr::dynamic_recipe_cache_get_or_build(
+              &cache, 2002, &counted_dynamic_generator, &generator_state, other_save,
+              cr::kMaxDynamicRecipes, &other_count, &cache_hit).ok == kQolOk);
+    CHECK(generator_state.calls == 2 && !cache_hit);
+    CHECK(other_count == first_count);
+    bool differs = false;
+    for (size_t i = 0; i < first_count && !differs; ++i) {
+        differs = !same_dynamic_recipe(first[i], other_save[i]);
+    }
+    CHECK(differs);
+
+    // 失败的生成不写缓存；相同 key 再次请求仍会重新调用 generator。
+    generator_state.fail = true;
+    size_t failed_count = 7;
+    CHECK(cr::dynamic_recipe_cache_get_or_build(
+              &cache, 3003, &counted_dynamic_generator, &generator_state, other_save,
+              cr::kMaxDynamicRecipes, &failed_count, &cache_hit).ok != kQolOk);
+    CHECK(generator_state.calls == 3 && failed_count == 0 && !cache_hit);
+    generator_state.fail = false;
+    CHECK(cr::dynamic_recipe_cache_get_or_build(
+              &cache, 3003, &counted_dynamic_generator, &generator_state, other_save,
+              cr::kMaxDynamicRecipes, &failed_count, &cache_hit).ok == kQolOk);
+    CHECK(generator_state.calls == 4 && !cache_hit);
+
+    // 超过三个不同创建时间后，最初的成功 key 仍驻留并命中，不会再次生成。
+    cr::DynamicRecipeCache long_lived_cache{};
+    DynamicCacheGeneratorState long_lived_generator{};
+    cr::ThreeSlotRecipe scratch[cr::kMaxDynamicRecipes]{};
+    size_t scratch_count = 0;
+    cr::ThreeSlotRecipe oldest[cr::kMaxDynamicRecipes]{};
+    size_t oldest_count = 0;
+    for (uint64_t timestamp = 10; timestamp <= 16; ++timestamp) {
+        CHECK(cr::dynamic_recipe_cache_get_or_build(
+                  &long_lived_cache, timestamp, &counted_dynamic_generator,
+                  &long_lived_generator, scratch,
+                  cr::kMaxDynamicRecipes, &scratch_count, &cache_hit).ok == kQolOk);
+        CHECK(!cache_hit);
+        if (timestamp == 10) {
+            oldest_count = scratch_count;
+            for (size_t i = 0; i < oldest_count; ++i) oldest[i] = scratch[i];
+        }
+    }
+    CHECK(long_lived_generator.calls == 7);
+    CHECK(cr::dynamic_recipe_cache_get_or_build(
+              &long_lived_cache, 10, &counted_dynamic_generator, &long_lived_generator,
+              scratch, cr::kMaxDynamicRecipes, &scratch_count, &cache_hit).ok == kQolOk);
+    CHECK(cache_hit && long_lived_generator.calls == 7 && scratch_count == oldest_count);
+    for (size_t i = 0; i < oldest_count; ++i) {
+        CHECK(same_dynamic_recipe(oldest[i], scratch[i]));
+    }
 }
 
 static void test_dynamic_special_recipes() {
-    cr::set_dynamic_three_slot_recipes(nullptr, 0);  // 前置：从空表开始
-    const uint16_t equips[2] = {485, 493};
-    const uint16_t pool[4] = {33, 35, 41, 57};  // 秘银/皮革/魔法衣料/生命之叶
-    // 池下标 4（== pool_size）是「空」项 → 类别 0。
-    constexpr size_t kEmptyIdx = 4;
-    cr::ThreeSlotRecipe out[8];
-
-    // A) 三格全有料：抽到池下标 0/1/2 → 33/35/41。顺序 = 抽取次序。
-    {
-        const int seq[] = {0, 1, 2};
-        set_rand_seq(seq, 3);
-        const size_t n = cr::build_dynamic_recipes(equips, 1, pool, 4, &fake_rand, out, 8);
-        CHECK(n == 1);
-        CHECK(out[0].ordered);
-        CHECK(out[0].product == 485);
-        CHECK(out[0].product_mode == cr::ProductMode::kFixedCategory);
-        CHECK(out[0].slots[0] == 33);
-        CHECK(out[0].slots[1] == 35);
-        CHECK(out[0].slots[2] == 41);
-    }
-
-    // B) 「空」是池里的普通候选：抽到空项 → 该格写 0（匹配语义 = 该格必须为空）。
-    {
-        const int seq[] = {0, 1, static_cast<int>(kEmptyIdx)};
-        set_rand_seq(seq, 3);
-        const size_t n = cr::build_dynamic_recipes(equips, 1, pool, 4, &fake_rand, out, 8);
-        CHECK(n == 1);
-        CHECK(out[0].slots[0] == 33);
-        CHECK(out[0].slots[1] == 35);
-        CHECK(out[0].slots[2] == 0);
-    }
-
-    // C) 空可以落在任意格（含第 0 格）。
-    {
-        const int seq[] = {static_cast<int>(kEmptyIdx), 1, 2};
-        set_rand_seq(seq, 3);
-        const size_t n = cr::build_dynamic_recipes(equips, 1, pool, 4, &fake_rand, out, 8);
-        CHECK(n == 1);
-        CHECK(out[0].slots[0] == 0);
-        CHECK(out[0].slots[1] == 35);
-        CHECK(out[0].slots[2] == 41);
-    }
-
-    // D) 「3 个不同」按池下标去重 ⇒ 空项最多出现一次（不可能三格全空）。
-    {
-        const int seq[] = {static_cast<int>(kEmptyIdx), static_cast<int>(kEmptyIdx), 2, 3};
-        set_rand_seq(seq, 4);
-        const size_t n = cr::build_dynamic_recipes(equips, 1, pool, 4, &fake_rand, out, 8);
-        CHECK(n == 1);
-        const int zeros = (out[0].slots[0] == 0) + (out[0].slots[1] == 0) + (out[0].slots[2] == 0);
-        CHECK(zeros <= 1);
-    }
-
-    // E) 两条装备各生成一条；空格语义经 match_three_slot 生效（空格要求该格确实为空）。
-    {
-        const int seq[] = {0, 1, 2, static_cast<int>(kEmptyIdx), 3, 0};
-        set_rand_seq(seq, 6);
-        const size_t n = cr::build_dynamic_recipes(equips, 2, pool, 4, &fake_rand, out, 8);
-        CHECK(n == 2);
-        CHECK(out[0].product == 485);
-        CHECK(out[1].product == 493);
-        cr::set_dynamic_three_slot_recipes(out, n);
-        CHECK(cr::dynamic_three_slot_recipe_count() == 2);
-        const uint16_t hit0[3] = {out[0].slots[0], out[0].slots[1], out[0].slots[2]};
-        const cr::ThreeSlotRecipe* h0 = cr::match_three_slot(hit0);
-        CHECK(h0 != nullptr && h0->product == 485);
-        // 顺序严格：换位后不得再命中 485。
-        const uint16_t swap0[3] = {out[0].slots[1], out[0].slots[0], out[0].slots[2]};
-        const cr::ThreeSlotRecipe* s0 = cr::match_three_slot(swap0);
-        CHECK(s0 == nullptr || s0->product != 485);
-        // 第 2 条含空格：把该格填上料就不该命中。
-        if (out[1].slots[0] == 0) {
-            const uint16_t filled[3] = {33, out[1].slots[1], out[1].slots[2]};
-            const cr::ThreeSlotRecipe* f = cr::match_three_slot(filled);
-            CHECK(f == nullptr || f->product != 493);
-        }
-    }
-
-    // FAIL-CLOSED：池不足 3 条 / 随机源为空 / 容量为 0。
-    CHECK(cr::build_dynamic_recipes(equips, 2, pool, 2, &fake_rand, out, 8) == 0);
-    CHECK(cr::build_dynamic_recipes(equips, 2, pool, 4, nullptr, out, 8) == 0);
-    CHECK(cr::build_dynamic_recipes(equips, 2, pool, 4, &fake_rand, out, 0) == 0);
-
-    // 清空后动态配方立即失效。
     cr::set_dynamic_three_slot_recipes(nullptr, 0);
+    cr::ThreeSlotRecipe first[cr::kMaxDynamicRecipes]{};
+    cr::ThreeSlotRecipe repeated[cr::kMaxDynamicRecipes]{};
+    cr::ThreeSlotRecipe changed[cr::kMaxDynamicRecipes]{};
+    size_t first_count = 0;
+    size_t repeated_count = 0;
+    size_t changed_count = 0;
+    size_t rerolls = 0;
+    constexpr uint64_t kSeed = UINT64_C(0x123456789ABCDEF0);
+
+    CHECK(cr::build_dynamic_recipes_seeded(
+              cr::kSpecialEquipCategories, cr::kSpecialEquipCategoryCount, kSeed,
+              cr::kMaterialPool, cr::kMaterialPoolSize, first, cr::kMaxDynamicRecipes,
+              &first_count, &rerolls).ok == kQolOk);
+    CHECK(first_count == cr::kSpecialEquipCategoryCount);
+    CHECK(cr::build_dynamic_recipes_seeded(
+              cr::kSpecialEquipCategories, cr::kSpecialEquipCategoryCount, kSeed,
+              cr::kMaterialPool, cr::kMaterialPoolSize, repeated, cr::kMaxDynamicRecipes,
+              &repeated_count).ok == kQolOk);
+    CHECK(repeated_count == first_count);
+    for (size_t i = 0; i < first_count; ++i) {
+        CHECK(same_dynamic_recipe(first[i], repeated[i]));
+        CHECK(first[i].ordered);
+        CHECK(first[i].product == cr::kSpecialEquipCategories[i]);
+        CHECK(first[i].product_mode == cr::ProductMode::kFixedCategory);
+        const uint16_t* slots = first[i].slots;
+        CHECK(slots[0] != slots[1] && slots[0] != slots[2] && slots[1] != slots[2]);
+        CHECK(cr::match_static_three_slot(slots, &fake_is_special) == nullptr);
+    }
+
+    // 不同存档 seed 应产生变化；跨多个 seed 做非脆弱检查，不依赖某一条具体随机组合。
+    bool seeds_changed_list = false;
+    for (uint64_t seed = kSeed + 1; seed < kSeed + 8 && !seeds_changed_list; ++seed) {
+        CHECK(cr::build_dynamic_recipes_seeded(
+                  cr::kSpecialEquipCategories, cr::kSpecialEquipCategoryCount, seed,
+                  cr::kMaterialPool, cr::kMaterialPoolSize, changed, cr::kMaxDynamicRecipes,
+                  &changed_count).ok == kQolOk);
+        bool differs = changed_count != first_count;
+        for (size_t i = 0; i < first_count && !differs; ++i) {
+            differs = !same_dynamic_recipe(first[i], changed[i]);
+        }
+        seeds_changed_list = differs;
+    }
+    CHECK(seeds_changed_list);
+
+    // 用皮革/魔法衣料/空槽构造固定配方冲突。挑选发生重抽的 seed，并确认另一个类别
+    // 的结果与单独生成时完全相同，说明重抽只消费该类别自己的 PRNG 状态。
+    const uint16_t collision_pool[] = {33, 35, 41};
+    const uint16_t equip_a[] = {485};
+    const uint16_t equip_b[] = {493};
+    const uint16_t both_equips[] = {485, 493};
+    cr::ThreeSlotRecipe recipe_a{};
+    cr::ThreeSlotRecipe recipe_b{};
+    cr::ThreeSlotRecipe both[2]{};
+    bool found_isolated_collision = false;
+    for (uint64_t seed = 1; seed <= 4096 && !found_isolated_collision; ++seed) {
+        size_t count_a = 0;
+        size_t count_b = 0;
+        size_t count_both = 0;
+        size_t rerolls_a = 0;
+        size_t rerolls_b = 0;
+        if (cr::build_dynamic_recipes_seeded(equip_a, 1, seed, collision_pool, 3,
+                                             &recipe_a, 1, &count_a, &rerolls_a).ok != kQolOk ||
+            cr::build_dynamic_recipes_seeded(equip_b, 1, seed, collision_pool, 3,
+                                             &recipe_b, 1, &count_b, &rerolls_b).ok != kQolOk ||
+            cr::build_dynamic_recipes_seeded(both_equips, 2, seed, collision_pool, 3,
+                                             both, 2, &count_both).ok != kQolOk) {
+            continue;
+        }
+        found_isolated_collision = rerolls_a > 0 && rerolls_b == 0 && count_a == 1 &&
+                                   count_b == 1 && count_both == 2 &&
+                                   same_dynamic_recipe(both[0], recipe_a) &&
+                                   same_dynamic_recipe(both[1], recipe_b);
+    }
+    CHECK(found_isolated_collision);
+    CHECK(cr::match_static_three_slot(recipe_a.slots, &fake_is_special) == nullptr);
+
+    // 动态表每次替换（含清空）递增，清空后动态配方立即失效。
+    const uint64_t before_generation = cr::dynamic_recipe_generation();
+    cr::set_dynamic_three_slot_recipes(first, first_count);
+    const uint64_t after_generation = cr::dynamic_recipe_generation();
+    CHECK(after_generation != before_generation);
+    CHECK(cr::dynamic_three_slot_recipe_count() == first_count);
+    for (size_t i = 0; i < first_count; ++i) {
+        const cr::ThreeSlotRecipe* hit = cr::match_three_slot(first[i].slots, &fake_is_special);
+        CHECK(hit != nullptr && hit->product == first[i].product);
+        CHECK(cr::match_static_three_slot(first[i].slots, &fake_is_special) == nullptr);
+    }
+    cr::set_dynamic_three_slot_recipes(nullptr, 0);
+    CHECK(cr::dynamic_recipe_generation() != after_generation);
     CHECK(cr::dynamic_three_slot_recipe_count() == 0);
+
+    // 无效 seed、输出容量不足和重复池项均 fail-closed，不返回半成品计数。
+    size_t out_count = 123;
+    CHECK(cr::build_dynamic_recipes_seeded(equip_a, 1, 0, collision_pool, 3,
+                                           &recipe_a, 1, &out_count).ok != kQolOk);
+    CHECK(out_count == 0);
+    CHECK(cr::build_dynamic_recipes_seeded(equip_a, 1, 1, collision_pool, 3,
+                                           &recipe_a, 0, &out_count).ok != kQolOk);
+    CHECK(out_count == 0);
+    const uint16_t duplicate_pool[] = {33, 35, 35};
+    CHECK(cr::build_dynamic_recipes_seeded(equip_a, 1, 1, duplicate_pool, 3,
+                                           &recipe_a, 1, &out_count).ok != kQolOk);
+    CHECK(out_count == 0);
 }
 
 // 宝石数值缩放：**ceil**(value × permille / 1000)，钳到 [0, 2047]。
@@ -675,35 +1021,103 @@ static void test_recipe_book_bit_invariant() {
     }
 }
 
-static void test_table_failure_log_state() {
-    CHECK(cr::table_failure_should_log(cr::TableFailureState::kNone,
-                                       cr::TableFailureState::kNotLoaded));
-    CHECK(!cr::table_failure_should_log(cr::TableFailureState::kNotLoaded,
-                                        cr::TableFailureState::kNotLoaded));
-    CHECK(!cr::table_failure_should_log(cr::TableFailureState::kNotLoaded,
-                                        cr::TableFailureState::kNone));
-    CHECK(cr::table_failure_should_log(cr::TableFailureState::kNone,
-                                       cr::TableFailureState::kNotLoaded));
-    CHECK(cr::table_failure_should_log(cr::TableFailureState::kNotLoaded,
-                                       cr::TableFailureState::kInvalid));
-    CHECK(!cr::table_failure_should_log(cr::TableFailureState::kInvalid,
-                                        cr::TableFailureState::kInvalid));
+// ---------------------------------------------------------------------------
+// Step 0（停用 fail-closed）：确认框回调的 pending/token 校验（纯逻辑）。
+// 场景：残留面板上关总开关后点「确认合成」——停用 + 代际已在 set_enabled(false) 自增，
+// 校验必须拒绝，调用方按 kStaleSlots 处理（不消耗、不产出）。
+// ---------------------------------------------------------------------------
+static void test_execute_token_valid() {
+    // 启用 + 存在待确认条目 + 代际一致 → 放行。
+    CHECK(cr::execute_token_valid(true, 7, 7));
+    CHECK(cr::execute_token_valid(true, 1, 1));
+    // 停用：即使 pending/token 一致也必须拒绝。
+    CHECK(!cr::execute_token_valid(false, 7, 7));
+    // 无待确认（pending_token==0）→ 拒绝（未 prepare / 重复回调）。
+    CHECK(!cr::execute_token_valid(true, 0, 0));
+    CHECK(!cr::execute_token_valid(true, 0, 7));
+    // 代际不一致（停用/表重载已作废该确认）→ 拒绝。
+    CHECK(!cr::execute_token_valid(true, 6, 7));
+    CHECK(!cr::execute_token_valid(true, 8, 7));
+    // 停用且代际不一致的组合同样拒绝。
+    CHECK(!cr::execute_token_valid(false, 6, 7));
+}
+
+// ---------------------------------------------------------------------------
+// 表注入「全局未就绪」日志去重（门禁 fail-soft 逐帧重试期间同因只记一条）。
+// ---------------------------------------------------------------------------
+static void test_table_invalid_log_dedupe() {
+    constexpr uint8_t kSu8 = 0xFF;
+    constexpr uint16_t kSu16 = 0xFFFF;
+    // 首次（哨兵）→ 记录。
+    CHECK(cr::table_invalid_log_needed(0, 0, 0, kSu8, kSu8, kSu16));
+    // 同因（尺寸/计数完全一致）→ 不记录（去重）。
+    CHECK(!cr::table_invalid_log_needed(0, 0, 0, 0, 0, 0));
+    CHECK(!cr::table_invalid_log_needed(6, 0, 0, 6, 0, 0));
+    // 尺寸变化 → 记录。
+    CHECK(cr::table_invalid_log_needed(6, 0, 0, 0, 0, 0));
+    CHECK(cr::table_invalid_log_needed(6, 3, 71, 6, 0, 71));
+    // 计数变化 → 记录。
+    CHECK(cr::table_invalid_log_needed(6, 3, 71, 6, 3, 70));
+    CHECK(!cr::table_invalid_log_needed(6, 3, 71, 6, 3, 71));
+}
+
+// ---------------------------------------------------------------------------
+// 表停用组位还原：inject 会清掉原版记录 b11 的模块组位；停用必须逐字节还原，否则模块页
+// （宝石强化 group 3）原版配方列表为空 → 标签页执行链空指针崩溃。重激活需重新清除。
+// ---------------------------------------------------------------------------
+static void test_table_group_bits_restore() {
+    size_t n = 0;
+    const cr::Def* cat = cr::catalog(&n);
+    CHECK(cr::module_group_bits(cat, n) == 0x08);  // 两条注入记录都挂 group 3
+    CHECK(cr::module_group_bits(nullptr, n) == 0);
+
+    uint8_t buf[3 * cr::kRecipeRecordSize];
+    std::memset(buf, 0, sizeof(buf));
+    buf[0 * cr::kRecipeRecordSize + cr::kRbGroup] = 0x08;
+    buf[1 * cr::kRecipeRecordSize + cr::kRbGroup] = 0x03;  // 不含模块位 → 清位后不变
+    buf[2 * cr::kRecipeRecordSize + cr::kRbGroup] = 0x28;  // bit5 + bit3 → 清后剩 0x20
+    const uint8_t snapshot[3] = {0x08, 0x03, 0x28};
+
+    // 重激活：以快照为基清除模块位（幂等，不累积）。
+    cr::clear_original_group_bits(buf, 3, cr::kRecipeRecordSize, snapshot, 0x08);
+    CHECK(buf[0 * cr::kRecipeRecordSize + cr::kRbGroup] == 0x00);
+    CHECK(buf[1 * cr::kRecipeRecordSize + cr::kRbGroup] == 0x03);
+    CHECK(buf[2 * cr::kRecipeRecordSize + cr::kRbGroup] == 0x20);
+    cr::clear_original_group_bits(buf, 3, cr::kRecipeRecordSize, snapshot, 0x08);
+    CHECK(buf[2 * cr::kRecipeRecordSize + cr::kRbGroup] == 0x20);
+
+    // 停用还原：逐字节回到快照（原版配方列表恢复）。
+    cr::restore_original_group_bits(buf, 3, cr::kRecipeRecordSize, snapshot);
+    CHECK(buf[0 * cr::kRecipeRecordSize + cr::kRbGroup] == 0x08);
+    CHECK(buf[1 * cr::kRecipeRecordSize + cr::kRbGroup] == 0x03);
+    CHECK(buf[2 * cr::kRecipeRecordSize + cr::kRbGroup] == 0x28);
+
+    // 空指针 / recipe_size 过小：安全 no-op。
+    cr::restore_original_group_bits(nullptr, 3, cr::kRecipeRecordSize, snapshot);
+    cr::clear_original_group_bits(buf, 3, cr::kRbGroup, snapshot, 0x08);
+    CHECK(buf[0 * cr::kRecipeRecordSize + cr::kRbGroup] == 0x08);
 }
 
 int main() {
     test_interval_inverse_boundaries();
+    test_candidate_errors_propagate();
     test_random_matches_target();
     test_catalog_mapping();
     test_inject_bytes();
     test_material_count();
     test_module_recipe_desc_constants();
     test_three_slot_stack_rules();
+    test_execute_token_valid();
+    test_table_invalid_log_dedupe();
+    test_table_group_bits_restore();
     test_chaos_scroll_recipe();
+    test_delegate_mix_type_for();
     test_max_socket_enchant_recipe();
+    test_recipe_match_helpers();
+    test_dynamic_recipe_cache();
     test_dynamic_special_recipes();
     test_scaled_jewel_value();
     test_recipe_book_bit_invariant();
-    test_table_failure_log_state();
     std::printf("custom_recipe_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

@@ -1,0 +1,86 @@
+#pragma once
+
+#include <cstdint>
+
+#include "contracts/plugin.h"
+#include "hooks/install.h"
+
+// 内置静态插件注册表与声明式安装器（ARCHITECTURE.md §3.2 生命周期、§7.2 装配顺序）。
+//
+// 固定容量数组，不使用 STL 容器；机制原语（hook/unhook、符号解析）由宿主注入，
+// 使 host 单测可脱离游戏进程。
+//
+// 线程纪律：注册与安装只在装配期/主线程发生；本模块不引入锁。
+
+namespace qol::host {
+
+struct HostDeps {
+    uintptr_t (*resolve_entry)(const char* symbol, bool* out_followed);
+    qol::hooks::NativeHookFn hook_fn;
+    int (*unhook_fn)(void* func);
+};
+
+// 注册插件描述符（描述符、字符串与数组须为静态存储，生命周期 ≥ 进程）。
+// 空 id / 重复 id / 非法描述符 / 资源登记冲突 → false。
+bool register_plugin(const contracts::PluginDescriptor& plugin);
+
+// 宿主装配 sidecar 授权；注册身份与命名空间绑定，不按插件名称特判。
+bool bind_plugin_store(const contracts::PluginDescriptor& plugin, const char* store_namespace);
+
+// 宿主装配 sidecar 授权；绑定后该注册身份的 token 可申请中立槽操作门。
+bool bind_plugin_slot_operation(const contracts::PluginDescriptor& plugin);
+
+// 宿主装配 sidecar 授权；绑定后该注册身份的 token 可向 save_route 注册领域回调。
+bool bind_plugin_save_route(const contracts::PluginDescriptor& plugin);
+
+// 宿主选定的管理 SDK 副本（feature_control 非空）。只有 settings 插件 context 获得该副本；
+// 其余插件 context 保持普通 SDK（feature_control=nullptr），不得访问管理通道。
+void bind_management_sdk(const contracts::QolHostSdk& sdk);
+
+// 生命周期动作（主线程唯一执行器；命令经命令端口投递后由本函数执行）。
+// action 取 contracts::kFeatureLifecycle*；状态机见 ARCHITECTURE.md §3.2。
+// 前置拒绝（返回 false）：插件不存在 / 该插件有未终态事务 / 任一资源已隔离。
+bool lifecycle_apply(const char* plugin_id, int32_t action);
+
+// Explicit new-model seam. All registered descriptors must have validated features and
+// no legacy resource gates. Preparation registers status/DAG only, not product resources.
+bool feature_registry_prepare(const HostDeps& deps);
+using FeatureDesiredRequest = bool (*)(void*, const char*, bool);
+void feature_registry_bind_desired_request(FeatureDesiredRequest, void* context);
+uint32_t feature_registry_order(const char** ids, uint32_t capacity);
+using FeatureWants = bool (*)(void*, const char*);
+bool feature_registry_dependencies_wanted(const char*, FeatureWants, void*);
+bool feature_registry_dependencies_ready(const char*);
+bool feature_registry_busy(const char*);
+// 是否存在需要 step() 推进的宿主侧工作：在途生命周期事务或待处理的 HTTP 停用/撤销。
+// 供 FeatureReconciler 的空闲快速路径使用；不包含插件业务状态。
+bool feature_registry_has_pending_work();
+bool feature_registry_active(const char*);
+bool feature_registry_transition(const char*, bool activate);
+bool feature_registry_context(const char*, contracts::PluginContext*);
+void feature_registry_set_wanted(const char*, bool);
+uint32_t feature_registry_step();
+bool feature_registry_owner_ready(const char*);
+
+// Host 私有：SaveEnter 信号锁存。只记录当前有效 activation owner token（installing 期间
+// token 已存在，故信号早于安装末步失败到达也不会丢）；不安装资源、不调用插件、无游戏访问。
+void feature_registry_notify_save_ready();
+// Host 私有：对「启动期 ownership NotReady 且仍为 Free」的 claim 做一次定向恢复。
+// 每 SaveEnter 信号每 owner 至多尝试一次（非逐帧/非定时）；返回本次实际尝试次数。
+// 仅在 feature-mode、wanted、依赖就绪、owner Enabled、无在途事务、未停止/隔离、
+// 当前 token 与 deferred/save-ready 一致时准入；不向插件 SDK 暴露。
+uint32_t feature_registry_retry_pending_ownership();
+
+// 未注册返回 nullptr。
+const contracts::PluginDescriptor* find_plugin(const char* id);
+
+// 按插件 id 查询当前 owner token；未注册或已 suspend（token=0）返回 0。
+// 供宿主过渡缝（runtime_hooks → save_route 派发）定位领域 owner。
+contracts::QolOwnerToken owner_token_of(const char* id);
+
+uint32_t plugin_count();
+
+// 测试用：清空注册表（资源登记表另有 hooks::registry_reset_for_test）。
+void plugin_registry_reset_for_test();
+
+}  // namespace qol::host

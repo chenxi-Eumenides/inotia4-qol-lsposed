@@ -1,0 +1,6 @@
+$ adb -s 192.168.3.56:5555 install -r output/Inotia4_v1.3.2_monster_v29_lspatched.apk
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1792178171.905439  335405 adb_install.cpp:153] pm command: 'package install -r -S 58689039'
+Performing Streamed Install
+Success
+exit_code=0

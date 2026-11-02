@@ -1,20 +1,13 @@
 package com.inotia4.qol
 
 import android.app.Activity
-import android.content.Context
-import android.content.Intent
-import android.os.Handler
-import android.os.HandlerThread
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
-import com.inotia4.qol.patch.AgreementGate
-import com.inotia4.qol.patch.ActivityIndicatorBlocker
-import com.inotia4.qol.patch.IapBlocker
 import com.inotia4.qol.patch.ImmersiveMode
+import com.inotia4.qol.patch.PopupBlockers
 import com.inotia4.qol.patch.ResourceNamespaceBridge
 import com.inotia4.qol.patch.WatermarkOverlay
 import io.github.libxposed.api.XposedModuleInterface
-import java.io.File
 
 class HookMain : XposedModule() {
 
@@ -29,17 +22,32 @@ class HookMain : XposedModule() {
         LogFile.initEarly()
         LogFile.info(LogDomain.PLATFORM, "module loaded in process: ${param.processName}")
 
-        // 捕获未处理异常写日志（防闪退信息丢失）
-        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            LogFile.error(LogDomain.PLATFORM, "uncaught exception on ${thread.name}", throwable)
-        }
+        // 捕获未处理异常：写独立崩溃取证文件并转发前序 handler（防闪退信息丢失）
+        JavaCrashReporter.install()
 
-        startBridgeLoop()
+        ModuleHealthMonitor.start()
     }
 
     override fun onPackageLoaded(param: XposedModuleInterface.PackageLoadedParam) {
         if (!TargetPackages.contains(param.packageName)) return
         TargetPackages.activate(param.packageName)
+        val moduleApkPath = getModuleApplicationInfo().sourceDir
+        MainActivityStartupHook.install(param) { method ->
+            hook(method)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    (chain.thisObject as? Activity)?.let {
+                        MainActivityStartupHook.onActivityCreated(it, moduleApkPath)
+                    }
+                    result
+                }
+        }
+        if (BuildConfig.KERNEL_ONLY) {
+            installWatermarkHook(param, moduleApkPath)
+            LogFile.info(LogDomain.PLATFORM, "kernel-only mode: business hooks skipped")
+            return
+        }
         ResourceNamespaceBridge.install(param) { method ->
             hook(method)
                 .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
@@ -53,39 +61,13 @@ class HookMain : XposedModule() {
                     }
                 }
         }
-        IapBlocker.install(param) { method ->
-            hook(method)
-                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                .intercept { chain ->
-                    LogFile.info(LogDomain.PLATFORM, "blocked Hive SelectTarget.iapSelectTarget (payment dialog)")
-                    IapBlocker.recover()
-                    null
-                }
-        }
 
-        AgreementGate.install(param) { method, intentIdx ->
+        // 弹窗屏蔽收束入口：更新通知弹窗、Hive 内购弹窗、同意页启动拦截与自动关闭、
+        // "Connecting.." 进度框，全部在 patch/PopupBlockers.kt 一个文件内管理。
+        PopupBlockers.install(param) { method, mode, handler ->
             hook(method)
-                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                .intercept { chain ->
-                    val intent = chain.getArg(intentIdx) as? Intent
-                    if (intent?.component?.className == AgreementGate.AGREEMENT_ACTIVITY && AgreementGate.shouldBlock()) {
-                        LogFile.info(LogDomain.PLATFORM, "blocked AgreementUIActivity launch (outside main menu or world load in progress)")
-                        null
-                    } else {
-                        chain.proceed()
-                    }
-                }
-        }
-
-        // "Connecting.." 模态进度框：native 只在联网等待点调用 Open，且关闭完全依赖 native 再调
-        // Close；显示期间切场景会让 Close 不再到达，弹窗永久抢占输入。直接空实现 Open（纯 UI，无副作用）。
-        ActivityIndicatorBlocker.install(param) { method ->
-            hook(method)
-                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                .intercept { chain ->
-                    LogFile.info(LogDomain.PLATFORM, "blocked ActivityIndicatorOpen (Connecting.. progress dialog)")
-                    null
-                }
+                .setExceptionMode(mode)
+                .intercept(handler)
         }
 
         // 沉浸模式：hook 获焦回调隐藏系统栏（导航栏/手势条）。先 proceed 走原逻辑再做副作用。
@@ -98,53 +80,24 @@ class HookMain : XposedModule() {
                     result
                 }
         }
+        installWatermarkHook(param, moduleApkPath)
+    }
 
-        // 常驻水印：获焦回调后向 content 末尾注入半透明白 "qol" 视图（纯装饰，fail-safe）。
+    private fun installWatermarkHook(param: XposedModuleInterface.PackageLoadedParam, moduleApkPath: String) {
+        // Health overlay and the regular watermark share the existing MainActivity focus seam.
         WatermarkOverlay.install(param) { method ->
             hook(method)
                 .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                 .intercept { chain ->
+                    val focused = chain.getArg(0) as? Boolean ?: false
                     val result = chain.proceed()
-                    (chain.thisObject as? Activity)?.let { WatermarkOverlay.attachWatermark(it) }
+                    ModuleHealthMonitor.onMainActivityVisibility(focused)
+                    (chain.thisObject as? Activity)?.let { activity ->
+                        if (focused) MainActivityStartupHook.onActivityFocused(activity, moduleApkPath)
+                        WatermarkOverlay.attachWatermark(activity)
+                    }
                     result
                 }
         }
-    }
-
-    // 零 hook 方案：轮询 dlopen libgame.so（游戏加载后 dlsym 即成功），
-    // 规避 hook 框架方法（System.loadLibrary 等）导致宿主崩溃的风险。
-    private fun startBridgeLoop() {
-        val thread = HandlerThread("bridge-init").also { it.start() }
-        val handler = Handler(thread.looper)
-        handler.post(object : Runnable {
-            override fun run() {
-                val ctx = currentApplication()
-                if (ctx == null) {
-                    LogFile.info(LogDomain.PLATFORM, "context not ready, retrying in 500ms")
-                    handler.postDelayed(this, 500)
-                    return
-                }
-                if (!NativeBridge.init()) {
-                    LogFile.info(LogDomain.PLATFORM, "NativeBridge init failed: ${NativeBridge.nativeGetInitReport()}, retrying in 1s")
-                    handler.postDelayed(this, 1000)
-                    return
-                }
-                LogFile.onNativeReady()
-                LogFile.info(LogDomain.PLATFORM, "NativeBridge init OK: ${NativeBridge.nativeGetInitReport()}")
-                val moduleApk = getModuleApplicationInfo().sourceDir
-                LogFile.logModuleIdentity(File(moduleApk))
-                // feature 初始化无条件执行；HTTP 服务器按 apiEnabled 决定是否启动，
-                // native 预取线程由 feature 初始化内的 applyToNative（nativeSetApiEnabled）控制。
-                ApiServer.bootstrap(ctx, moduleApk)
-            }
-        })
-    }
-
-    private fun currentApplication(): Context? = try {
-        val cl = Class.forName("android.app.ActivityThread")
-        cl.getMethod("currentApplication").invoke(null) as? Context
-    } catch (t: Throwable) {
-        LogFile.error(LogDomain.PLATFORM, "currentApplication failed", t)
-        null
     }
 }

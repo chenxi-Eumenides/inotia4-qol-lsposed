@@ -1,0 +1,2 @@
+Command: mkdir -p .tmp/attribute-range-display-phase4
+Exit code: 0

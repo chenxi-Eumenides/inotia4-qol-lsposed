@@ -1,16 +1,18 @@
 # API 参考手册
 
 > **本文档 = API 规格（面向调用方）**：每个 API 的路径、用途、请求格式、返回格式与注意事项。
-> 技术实现细节（VMA/函数签名/调用链/游戏内机制）见 `docs/development/architecture.md` 与 `docs/development/planning/refactor-plan.md`（原 `docs/research/` 系列已于 2026-08-16 清理）。
-> 状态：**v0.5.13**。全部域（character/world/item/quest/ui/system/op/debug/health）端点已与 controller 真实路由对齐：v0.5.13 完成端点重构（36 处路径按本文档修正、废弃端点删除、缺失端点补齐或占位），本文档为唯一权威路由来源。
+> 技术实现细节（VMA/函数签名/调用链/游戏内机制）：目标架构见根目录 `ARCHITECTURE.md`；历史实现细节见 `docs/archive/development/`（已归档，仅供参考，不得作为落地依据）。
+> 状态：**v0.5.13 + 配置 `enable`/`features`/`selections`/`config` 收口**。本文档为唯一权威路由来源；当前 native/Kotlin 路由校验基线为 145 条。配置契约见 §7.6。
+> 架构重构不改变既有路径与 HTTP 方法；已迁移的写端点按 §7.10 返回票据，操作结果由 §7.9 回取。内置插件 id 不映射为 URL 前缀。外部插件路由另限定在 `/api/ext/<插件id>/...`，不得占用本文档命名空间。
+> UI 状态查询迁移：旧路由 `/api/ui`、`/api/ui/screen`、`/api/ui/panel`、`/api/ui/dialog` 已移除，由 `GET /api/ui/state` 与 `GET /api/ui/state/table` 替代；五个 UI POST action 保持不变。
 >
 > 通用约定：
 > - 服务地址：`http://<设备IP>:8088`（局域网，模块监听 0.0.0.0）
 > - 请求/响应均为 JSON；写操作（POST）的 body 是 JSON 字符串
-> - `role` = 出战槽位 0..2；`bag` = 背包袋 0..5 + 扩展逻辑袋 6..10（`extensionBagEnabled=true` 时并入读取与移动，见 §4.1/§4.2）；`slot` = 袋内槽位 0..15
-> - 写操作成功返回 `{"ok":true,...}`；失败返回 `{"ok":false,"error":"<原因>"}`（错误信封格式 A，v0.5.45 统一）
+> - `role` = 出战槽位 0..2；`bag` = 背包袋 0..5 + 扩展逻辑袋 6..10（`extension_bag.extended_bag=true` 时并入读取与移动，见 §4.1/§4.2）；`slot` = 袋内槽位 0..15
+> - 未迁移的同步写操作成功返回 `{"ok":true,...}`；票据化写操作立即返回 `{"ok":true,"ticket":N}`，操作成功/失败结果由 §7.9 的 `result` 回取。错误信封格式 A（v0.5.45 统一）。
 > - **错误信封与 HTTP 状态码（v0.5.45 统一）**：所有错误响应统一 `{"ok":false,"error":"<原因>"}` + 语义状态码——**400** 参数错误（路由参数解析异常/body 解析失败/参数校验不过）、**403** 权限不足（OP 门禁未开启 `op disabled`）、**404** 未找到、**500** 内部错误、**501** 未实现（OP 占位端点）、**503** 未就绪（native 初始化中）。实现机制：controller 抛 `ApiException(code,msg)` → `GlobalExceptionResolver`（@Resolver）统一转响应
-> - 写操作返回会附带 `state` 字段 = 操作后的最新状态快照（类型见各端点说明）
+> - 票据 `result` 由 §7.10 按写操作定义；结果瘦身路由返回操作相关字段/槽位差量，不保证包含完整 `state` 快照。整数 path/body 输入的收紧规则见 §7.10。
 
 ---
 
@@ -27,14 +29,16 @@
 | **world**（地图与移动） | `/api/world/*` | 当前地图 map、移动操作 movement、静态地图 maps（含瓦片矩阵） | 15 |
 | **item**（物品与背包） | `/api/item/*` | 背包 inventory、商店 shop | 17 |
 | **quest**（任务） | `/api/quest/*` | 任务 | 6 |
-| **ui**（界面与对话） | `/api/ui/*` | 界面状态 ui、对话/弹窗 dialog | 9 |
+| **ui**（界面与对话） | `/api/ui/*` | 统一界面状态与对话/面板操作 | 7 |
 | **system**（系统与会话） | `/api/system/*` | 游戏整体 game、事件流 events、存档 save、静态数据表 tables（含 text/story-events）、帮助文档 help | 16 |
-| **config**（模块配置） | `/api/config/*` | 模块配置读取与修改（list/set） | 2 |
+| **config**（模块配置） | `/api/config/*` | registered plugin 对象投影与单 key feature/config/desired 提交、receipt 回取（list/set/receipt） | 2 |
 | **op**（越权操作） | `/api/op/*` | 改数据/强行操作（全局开关门禁，默认关闭，见 §8） | 10 已实现 + 11 定稿 |
-| debug（调试） | `/api/debug/*` | 开发期调试（含扩展背包视图/状态，见 §九） | 7 |
+| debug（调试） | `/api/debug/*` | 开发期调试（含扩展背包视图/状态，见 §九） | 8 |
 | health（顶层） | `/api/health` | 服务健康检查 | 1 |
 
-> 全量端点 = 112（character 29 + world 15 + item 17 + quest 6 + ui 9 + system 16 + config 2 + op 10 + debug 7 + health 1；其中 GET 60 / POST 52）。
+> 当前冻结路由验证基线 = 145。本文的
+> method/path 集合由 controller 注解与下文补充端点共同组成；重构只迁移 owner，不改变既有
+> URL、HTTP 方法与成功响应。
 
 ---
 
@@ -64,6 +68,8 @@
 | `active_quest` | 当前激活任务 ID |
 | `leader_slot` | 当前主控角色对应出战槽 |
 | `party_count` | 出战人数 |
+
+> 写操作票据可仅返回 `player` 的部分字段（例如 `leader_slot` 或实际变化的 `hp`/`mp`），也可能不返回 `player`；不要将其当作完整 Player 模型。精确 result 形状见 §7.10。
 
 ### Role（出战角色）
 
@@ -111,8 +117,8 @@
 | `class_idx` | 职业索引 0-5（`[ch+0x0D]` int8，CHARCLASSBASE 记录下标；`type==2` 装饰物该字段存 type 值非职业索引） |
 | `class_name` | 职业名（service 层注入，`class_idx` → CHARCLASSBASE 联查：黑暗骑士/忍者/黑魔导/祭司/暗影猎手/狂战士；仅 `class_idx∈[0,5]` 时注入） |
 | `level` | 等级 |
-| `hp`/`max_hp`/`mp`/`max_mp` | 当前血量魔力 + 最大血量魔力。`max_hp`/`max_mp` **直读属性缓存字段 `[ch+0x9c]`/`[ch+0xa0]`**（`char_max_hp`/`char_max_mp`），不调用 `CHAR_GetAttr(0x1e/0x1f)`——其 0x1e 分支在 HP>上限时会写回 HP，离线程调用会与游戏主线程属性重算竞争钳低 HP（见 `docs/history/hp-clamp-offthread-incident.md`）；缓存值 ≤0 时回退当前 `hp`/`mp` |
-| `exp`/`exp_next` | 当前经验/升级所需经验。`exp` 直读 `[ch+0x318]`（等价 `CHAR_GetExperience` 纯读）；`exp_next` 取自**游戏线程帧缓存**（`char_next_exp_cached`，`kFramePointLogicPre` 每帧对 3 名队员缓存 `CHAR_GetNextExperience` 结果，见 `docs/development/features/frame-dispatch-host.md`），未命中缓存时回退直读游戏自身惰性缓存 `[ch+0x320]` |
+| `hp`/`max_hp`/`mp`/`max_mp` | 当前血量魔力 + 最大血量魔力。`max_hp`/`max_mp` **直读属性缓存字段 `[ch+0x9c]`/`[ch+0xa0]`**（`char_max_hp`/`char_max_mp`），不调用 `CHAR_GetAttr(0x1e/0x1f)`——其 0x1e 分支在 HP>上限时会写回 HP，离线程调用会与游戏主线程属性重算竞争钳低 HP（见 `docs/archive/hp-clamp-offthread-incident.md`）；缓存值 ≤0 时回退当前 `hp`/`mp` |
+| `exp`/`exp_next` | 当前经验/升级所需经验。`exp` 直读 `[ch+0x318]`（等价 `CHAR_GetExperience` 纯读）；`exp_next` 取自**游戏线程帧缓存**（`char_next_exp_cached`，`kFramePointLogicPre` 每帧对 3 名队员缓存 `CHAR_GetNextExperience` 结果，见 `docs/archive/development/features/frame-dispatch-host.md`），未命中缓存时回退直读游戏自身惰性缓存 `[ch+0x320]` |
 | `main_stats` | 主属性列表（0-4=力量/敏捷/体力/智力/精力），每项 `{stat_name, base_stat, additional_stat}`；`base_stat`=基础属性（[ch+0x250+i] s8），`additional_stat`=总属性-基础（含分配/加成/动态）。总属性由 `char_stat_total` **直读 `C_STAT_BASE/MAIN/BONUS/SUB` 求和**（= `CHAR_GetStat` 的 Base+Main+Bonus+Sub，无 clamp），不调用 `CHAR_GetStat`（经 `CHAR_GetStatSub` 在动态派生脏位置位时会重算写回角色对象） |
 | `status_point` | 剩余能力点 |
 | `equipment` | 10 装备槽数组（每件为物品统一结构：`slot`/`name`/`category`/`item_type`/`need_level`/`rarity`/`rarity_tier`/`base`/`bonus`/`gem`/`chaos`/`enchant`，见 Inventory 段物品字段表），空槽为 `null`；位置映射见第二章 |
@@ -132,7 +138,7 @@
         "gem": { "total_slots": 0, "slots": [] },
         "chaos": { "is_chaos": false, "level": null, "rate": null },
         "enchant": { "id": 0, "level": 0, "effect": null } }
-    ], "capacity": 16, "slot_count": 13 }
+    ], "capacity": 16, "occupied_slots": 13 }
   ]
 }
 ```
@@ -155,7 +161,9 @@
 | `chaos` | 混沌对象：`{is_chaos 是否混沌, level 混沌等级, rate 混沌成功率}` |
 | `enchant` | 附魔对象：`{id 附魔ID, level 附魔等级, effect 附魔名(ITEMENCHANTBASE 联查)}` |
 
-> 物品对象为统一结构（装备/消耗品/材料同构）：**缺失的标量字段置 `null`，列表字段恒为数组（无内容时空列表）**；`base`/`bonus`/`gem`/`chaos`/`enchant` 为重组后的可读对象，替代原位域拆解字段（`type_flags`/`raw_rarity`/`socket`/`enchant`/`chaos_*`/`options`/`option_ids`/`option_names`/`options_detailed`/`static_options`/`socket_info`/`enchant_info`/`chaos_info`）。`capacity` 袋容量 16 格；`slot_count` 占用数。
+> 物品对象为统一结构（装备/消耗品/材料同构）：**缺失的标量字段置 `null`，列表字段恒为数组（无内容时空列表）**；`base`/`bonus`/`gem`/`chaos`/`enchant` 为重组后的可读对象，替代原位域拆解字段（`type_flags`/`raw_rarity`/`socket`/`enchant`/`chaos_*`/`options`/`option_ids`/`option_names`/`options_detailed`/`static_options`/`socket_info`/`enchant_info`/`chaos_info`）。`capacity` 袋容量 16 格；`occupied_slots` 占用数。
+
+> 写操作 result 中的 `slots[].item`、`equipment.item`、`inventory[].item` 复用上述完整 Item 结构或 `null`；外层只包含本次写入涉及或实测发生变化的槽，不是完整 Inventory/Party 快照。
 
 ### Skills（角色技能）
 
@@ -204,23 +212,53 @@
 - 自研 BFS 导航（v0.4.29，替代游戏 CHAR_SearchPath）：瓦片矩阵（bit3=阻挡 bit7=出口）+ 单位占用（NPC/怪物不可穿越，v0.4.30）
 - `found=false` 时返回 `nearest`（最近可达 tile）与最近可达路径；路径节点 = tile 中心像素（tile×16+8）
 
-### GameState（游戏界面状态）
+### UI State（统一界面状态）
+
+`GET /api/ui/state` 返回唯一的当前顶层状态：
 
 ```json
-{ "screen": "dialog_npc", "dialog": { "type": "npc", "active": true, "speaker": "杂货商人", "text": "……", "options": [...] } }
+{
+  "name": "game_story",
+  "type": 4,
+  "source": 1,
+  "info": {
+    "title": "凯恩",
+    "content": "……"
+  },
+  "options": [
+    {"id": "next", "label": "下一句"},
+    {"id": "skip", "label": "跳过"}
+  ]
+}
 ```
 
 | 字段 | 说明 |
 |---|---|
-| `screen` | 当前界面（v0.5.42 起统一枚举，`GET /api/ui/screen` 同值）：`"loading"` / `"main_menu"` / `"world"` / `"tutorial_pause"`（药水教学）/ 对话框 `dialog_*`（`dialog_popup` 弹窗 / `dialog_story` 剧情 AVG / `dialog_npc` NPC 对话 / `dialog_quest` 任务完成面板 / `dialog_wipeout` 死亡面板 / `dialog_choice` 选择框 / `dialog_input_count` 数量输入）/ 面板 `panel_*`（`panel_character_info`/`panel_inventory`/`panel_skills`/`panel_mercenary`/`panel_quests`/`panel_settings`/`panel_shop`/`panel_craft`/`panel_npc_rest`/`panel_npc_revive`/`panel_save_slot`/`panel_character_select`/`panel_options`/`panel_shortcut`/`panel_world_map`/`panel_daily_reward`/`panel_in_app`/`panel_ui_panel`）/ 主菜单面板 `main_menu_*`（`main_menu_save_slot`/`main_menu_character_select`/`main_menu_daily_reward`/`main_menu_options`/`main_menu_settings`）/ `"agreement"`（Android Java 层同意页 `AgreementUIActivity`，独立于 native dialog_*/panel_*；仅主菜单前触发，`POST /api/ui/dialog/select` `{"action":"ok"}` 关闭）。 |
-| `story` | 仅 screen=dialog_story：`active`/`speaker`/`text`/`index`/`count` |
-| `dialog` | 仅 UI 被占据时存在：`<DialogContent 模型>`（type/title/text/options）。注意：type 残留时 `displayed` 字段为 false（数据残留，非实际 UI），以 `screen` 为准 |
+| `name` | 稳定状态名，也是状态主键；不另设 per-state `id`。例如 `world`、`game_story`、`game_wipeout`、`panel_inventory`、`android_agreement`。 |
+| `type` | `0` unknown / `1` boot / `2` menu / `3` world / `4` dialog / `5` panel。 |
+| `source` | `0` unknown / `1` native / `2` module / `3` external / `4` android。 |
+| `info` | 状态数据对象，仅允许 `title`、`content`；不适用时为 `{}`。 |
+| `options` | 当前状态可执行动作数组，元素为 `{id,label}`；无动作时为 `[]`，动作通过对应 POST action 执行。 |
 
-> **v0.5.42 变更**：`dialog_active` 字段已移除——`screen` 精确表达 UI 占据状态（`dialog_*`/`panel_*`/`main_menu_*` 前缀即 UI 占据）。不再有数据残留导致的误报（旧版：关闭 NPC 对话框后 dialog_active 残留 true）。
->
-> **v0.5.43 变更**：世界操作（移动 `move_to`/`walk_dir`/`stop_move`、战斗 `attack_target`/`cast_skill`/`stop_combat`、交互 `interact_with`、技能、物品使用、传送、`start_interact`）在 UI 占据时返回 `ui occupied: <screen>` 而非继续执行——UI 占据时游戏输入被接管，直接调 CHAR_Move 等会与 UI 竞争破坏控制态。面板内操作（装备/出售/整理/佣兵等）、对话操作（dialog/select）、菜单操作不受影响。
->
-> **商店/合成面板识别修复**：模块把 PopupState 的 enter 回调换成自己的 wrapper（商店宿主、合成宿主、扩展背包）后，popup 栈顶保存的是模块 .so 地址，而判定层按「enter − libgame 基址」换算，得到负值被当作「无面板」——真机表现为商店/合成界面打开时 `screen` 仍为 `world`、`close_panel` 报 `top of stack is not a panel`、世界操作不被 `ui occupied` 拦截。现安装 wrapper 时同步登记 `(wrapper, 原版 enter VMA)`，判定层按栈顶 enter 反查（`core/native/popup_enter_alias`）。真机验证：商店 `panel_shop`、合成 `panel_craft`；商店态下 `move_to` 返回 `ui occupied: panel_shop`；`close_panel` 可关闭商店，关闭后 `screen=world` 且世界操作恢复。
+`info` 与 `options` 同级；dialog 状态的标题/正文位于 `info.title` / `info.content`，动作位于 `options`。旧 `GameState` / `DialogContent` GET 响应模型及其 `screen`、`panel`、`dialog`、`active`、`text`、`speaker` 等字段不再是 UI 状态 API 契约。
+
+`type` 与 `name` 一起用于识别具体场景：例如世界操作前要求 `type=3` 且 `name="world"`；死亡弹窗为 `type=4` 且 `name="game_wipeout"`；启动同意页为 `type=4` 且 `name="android_agreement"`。不得再按 `screen` 前缀判断 UI 占据。
+
+UI 状态表 `GET /api/ui/state/table` 返回当前可用状态名及来源：
+
+```json
+{
+  "states": [
+    {"name": "world", "type": 3, "source": 1, "stability": "static"},
+    {"name": "module_panel_autosell", "type": 5, "source": 2, "stability": "static"},
+    {"name": "ext_panel_vendor_inventory", "type": 5, "source": 3, "stability": "session"}
+  ]
+}
+```
+
+`stability` 为 `static`（原生/内置模块，跨构建不变）或 `session`（外部插件，仅本进程）。
+
+> 世界操作（移动、战斗、交互、物品使用、传送）在 UI 占据时仍由服务端守卫，失败返回 `ui occupied: <状态名>`；调用方可先读取 `/api/ui/state` 判断当前 `type` 与 `name`。面板内操作、对话选择及菜单操作依各自 action 守卫执行。
 
 ### Snapshot（快速状态快照）
 
@@ -240,29 +278,19 @@
 
 一站式聚合：UI 状态 + 玩家全局 + 队伍摘要（角色类型/职业/等级/HP MP/主属性/角色名）。**不含装备明细（party 每角色无 equipment 字段）与佣兵列表**——装备明细走 `GET /api/character/party/{slot}/equipment`，佣兵走 `GET /api/character/mercenary`。party 角色含 `class_idx`/`class_name`（职业索引/职业名注入）与 `type_name`（0 主角/1 佣兵）；不含 `party_count`（出战人数走 `GET /api/character/party/count`）。
 
-### DialogContent（对话/弹窗内容）
+### Dialog / panel content（旧 DialogContent 的替代）
 
-`GET /api/ui/dialog` 返回的统一结构（一个检测函数覆盖多种类型）：
+UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/state` 读取：
 
-```json
-{
-  "type": "sell",
-  "active": true,
-  "title": "出售物品",
-  "text": "确定要出售 治疗药水 ×5 吗？",
-  "options": [ { "id": "confirm", "label": "确定" }, { "id": "cancel", "label": "取消" } ]
-}
-```
-
-| 字段 | 说明 |
+| 旧字段 | 新位置 |
 |---|---|
-| `type` | 弹窗/对话种类：`save`/`sell`/`quest`/`npc`/`story`/`popup`/`wipeout`/`agreement`/`none`（随逆向扩展；`agreement` 为 Java 层同意页，非 native 对话） |
-| `active` | 是否有对话/弹窗 |
-| `title` | 标题（任务对话框/出售弹窗等有标题的类型；无标题为 null） |
-| `text` | 内容文本 |
-| `options` | 可选动作列表 `{ id, label }`——供 `POST /api/ui/select_option` 选择；`id` 为动作标识（confirm/cancel/next/skip/quit/shop/revive/... 或具体选项），`label` 为按钮文案 |
+| `type` | `name`（如 `game_popup`、`game_story`、`game_npc_dialog`、`module_dialog_*`） |
+| `title` / `speaker` | `info.title`（若存在） |
+| `text` | `info.content`（若存在） |
+| `options` | `options: [{id,label}]`，供 `POST /api/ui/dialog/select` 选择 |
+| `active` | 状态存在即活动；未知/未就绪为 `name="unknown"` |
 
-各类型 options 见第六章 dialog 端点说明。
+`options` 的 `id` 是动作标识（`ok`/`cancel`/`next`/`skip`/`game_over`/`complete`/`close` 或具体选项）。
 
 ### 静态数据表
 
@@ -476,7 +504,7 @@
 
 **请求格式**：`{ "mercenary_slot": 1 }`
 
-**返回格式**：`{"ok":true,"state":<Party 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；终态 result 尽力返回实际变化的 party 槽差量，读面不可用时退化为 `{"ok":true}`。
 
 **注意**：已在队→`already in party`；满员→`party full`。⚠️ 参数索引见 2.2「两套索引」说明。
 
@@ -488,7 +516,7 @@
 
 **请求格式**：`{ "mercenary_slot": 1 }`
 
-**返回格式**：`{"ok":true,"state":<Party 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；终态 result 尽力返回实际变化的 party 槽差量，读面不可用时退化为 `{"ok":true}`。
 
 **注意**：主控→`cannot exclude leader`；任务 NPC→`cannot exclude quest npc`。
 
@@ -500,7 +528,7 @@
 
 **请求格式**：`{ "mercenary_slot": 27 }`
 
-**返回格式**：`{"ok":true,"state":<Party 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；终态 result 尽力返回实际变化的 party 槽差量，读面不可用时退化为 `{"ok":true}`。
 
 **注意**：无该槽角色→`mercenary not found`；主控/任务 NPC→不可遣散。
 
@@ -512,7 +540,7 @@
 
 **请求格式**：`{ "mercenary_slot": 0, "equip_slot": 3 }`
 
-**返回格式**：`{"ok":true,"state":<Party 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；result 返回目标佣兵装备槽清空摘要，并在 item.state 前后快照可读时附 `inventory` 槽差量（背包读面不可用时省略该字段）。
 
 **注意**：无佣兵→`mercenary not found`；装备槽越界→`bad slot`。
 
@@ -567,7 +595,7 @@
 
 **请求格式**：`{ "slot": 1 }`（目标出战槽 0/1/2）
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；终态 result 尽力返回 `{"ok":true,"player":{"leader_slot":N}}`，玩家状态读面不可用时退化为 `{"ok":true}`。
 
 **注意**：目标槽越界/不可切换→`switch failed`；主控切换后 `/api/character/leader` 返回相应角色。
 
@@ -579,7 +607,7 @@
 
 **请求格式**：`{ "on": true }`
 
-**返回格式**：`{"ok":true,"state":<Party 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；result 为 `{"ok":true,"role":{"role":R,"auto_attack":B}}`，其中 `B` 为请求的 `on` 值。
 
 **注意**：⚠️ 此开关只控制「**被怪物攻击后的自动反击**」——角色受击后自动还击；**不是**自动攻击附近怪物的挂机行为，角色不会主动索敌。开启后仍需先通过 `attack_target` 进入战斗。
 
@@ -587,15 +615,15 @@
 
 `POST /api/character/combat/{role}/set_skill_usage`
 
-**用途**：设置指定出战槽**单个已学技能**是否被战斗 AI 自动使用及其使用频率（每个技能独立设置）。
+**实现状态**：端点尚未实现，由开发迁移期临时插件 `core.feature` 持有占位 handler；插件不属于最终发布插件，端点实现后迁入对应领域。Kotlin 仅透传请求，不解析请求体、不投递票据。
 
 **请求格式**：`{ "action_id": 3, "mode": "normal" }`
 
-**返回格式**：`{"ok":true,"state":<Party 模型>}`
+**返回格式**：`{"ok":false,"error":"not implemented"}`（HTTP 501；无票据）
 
-**mode 三档**：`off` 不使用 / `normal` 一般频率 / `high` 高频率
+**请求格式仅作规划文档**：`action_id` / `mode` 目前不解析；规划中的 `mode` 值为 `off` / `normal` / `high`。
 
-**注意**：`action_id` 必须为已学技能（未学→`skill not learned`）；`off` 等价于关闭该技能自动使用。底层为 CHAR_SetSkillUsage 写 [ch+0x3a0] bit0-2 总开关 + 技能链表节点 +0x07 单技能 AI 等级（待需）。
+**注意**：无论请求内容如何，当前固定返回 HTTP 501 `{"ok":false,"error":"not implemented"}`。
 
 #### 释放技能
 
@@ -605,7 +633,7 @@
 
 **请求格式**：`{ "action_id": 5 }`
 
-**返回格式**：`{"ok":true,"state":<Party 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；result 尽力返回 `{"ok":true,"role":{"role":R,"active_skill_id":N}}`；技能读面不可用时退化为 `{"ok":true}`。
 
 **注意**：当前校验 = 技能链表成员资格（未学→`skill not learned`）。⚠️ 0-7 基础动作（普攻）也在技能链表中，`cast 5` = 普攻（2026-08-09 真机实测 -403 伤害）；「真技能 vs 基础动作」白名单与 MP 校验待实现（见 backlog 攻击/cast 校验条目）。无目标→`no target`。
 
@@ -617,7 +645,7 @@
 
 **请求格式**：`{ "target_slot": 5 }`
 
-**返回格式**：`{"ok":true,"state":<Party 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；仅读面确认目标和战斗状态时 result 含 `role.target_slot`/`role.combat:true`；当前读面不提供这两项，实际 result 退化为 `{"ok":true}`，表示操作已受理，不声称已确认目标终态。
 
 **注意**：目标无效→`target not found`；缺参→`target_slot required`。此操作使角色进入战斗姿态，随后持续普攻该目标直至目标死亡/离开/`stop_combat`。
 
@@ -629,7 +657,7 @@
 
 **请求格式**：无 body
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；result 为 `{"ok":true,"role":{"role":R,"combat":false}}`。
 
 **注意**：非战斗态调用安全（清标志幂等）。
 
@@ -645,7 +673,7 @@
 
 **请求格式**：`{ "action_id": 3, "level": 1 }`
 
-**返回格式**：`{"ok":true,"state":<Skills 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；终态 result 返回目标技能 `{action_id,level}` 与 `skill_points`；技能读面不可用或目标技能未能读回时退化为 `{"ok":true}`。
 
 **注意**：主角专用，无 role 路径段。
 
@@ -663,9 +691,9 @@
 
 `attrs` 为字典：字段名=主属性英文名（`strength`/`agility`/`vitality`/`intelligence`/`spirit`，对应索引 0=力量/1=敏捷/2=体力/3=智力/4=精力，**可只传部分**），值为分配数量。
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；终态 result 保留 `applied` 数组，并在角色状态读写前后均可读时追加本次变化的 `role.main_stats` 与 `role.status_point`。逐点首次失败即停止，ticket `failed` 且 result 保留首次原错误体；已执行点不回滚。
 
-**注意**：⚠️ 分配数量只能为正整数；各属性分配数量**总和不能超过剩余能力点**，否则报错（`no status point`）；属性名非法→`bad attr`。
+**注意**：⚠️ 分配数量只能为正整数；属性名非法→HTTP 400 `bad attr`。各属性分配数量**总和不能超过剩余能力点**：HTTP 层只校验请求格式并照常返回 `ticket`，点数判定在主线程执行，票据终态 `failed`，result 为 `{"ok":false,"error":"no status point"}`，不产生任何属性变更。
 
 #### 属性重置
 
@@ -675,7 +703,7 @@
 
 **请求格式**：无 body
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；终态 result 返回主角 `role.main_stats` 五项与 `status_point`；读面不可用时退化为 `{"ok":true}`。
 
 **注意**：⚠️ 只能对主角使用，无 role 路径段。
 
@@ -687,7 +715,7 @@
 
 **请求格式**：无 body
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；终态 result 为 `{"ok":true,"skill_points":N}`（重置后仅返回剩余技能点——其余技能字段重置后均为默认值，不回传）；读面不可用时退化为 `{"ok":true}`。
 
 **注意**：⚠️ 只能对主角使用，无 role 路径段。
 
@@ -697,7 +725,7 @@
 
 #### 运行时逆向缺口
 
-> ✅ **v0.5.1 实机 frida 验证已全部闭环**（2026-08-13 真机，证据见 `docs/development/planning/backlog.md` 对应条目）。
+> ✅ **v0.5.1 实机 frida 验证已全部闭环**（2026-08-13 真机，证据见 `docs/archive/development/planning/backlog.md` 对应条目）。
 
 | # | 缺口 | 状态与结论 |
 |---|---|---|
@@ -824,7 +852,7 @@
 { "x": 600, "y": 400 }
 ```
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**：立即返回票据 ACK `{"ok":true,"ticket":N}`；终态 result 为 `{"ok":true,"player":{"map_id":N,"x":N,"y":N}}`，坐标是当时实际位置，不承诺已到达请求目的地。失败仍回原错误体。
 
 **注意**：
 - 目标不可达时走到最近可达点并转身面向目标（face-target）
@@ -839,7 +867,7 @@
 
 **请求格式**：`{ "direction": 1 }`（0=下 1=左 2=上 3=右）
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**：立即返回票据 ACK `{"ok":true,"ticket":N}`；终态 result 为 `{"ok":true,"player":{"map_id":N,"x":N,"y":N}}`，坐标是当时实际位置，不承诺已到达请求目的地。失败仍回原错误体。
 
 **注意**：撞墙即停；direction 越界返回 `direction 0-3 required`；持续移动到达出口区域自动切图。
 
@@ -851,7 +879,7 @@
 
 **请求格式**：无 body
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**：立即返回票据 ACK `{"ok":true,"ticket":N}`；成功 result 为原始 op JSON `{"ok":true}`，失败仍回原错误体。
 
 #### 场景交互
 
@@ -861,13 +889,15 @@
 
 **请求格式**：无 body
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**：立即返回票据 ACK `{"ok":true,"ticket":N}`；终态 result 为 `{"ok":true,"player":{"map_id":N,"x":N,"y":N}}`，坐标是交互完成时实际位置。失败仍回原错误体。
 
 **注意**：与 `start_interact` 等价（内部同链）。
 
 ### 3.3 静态地图 maps
 
 > 静态数据查询域：地图信息与静态瓦片矩阵（assets maps/tiles.json，416 图）。**瓦片数据只从静态数据获取，不再从运行时内存读取**；原运行时端点 `/api/world/map/tile`（单格瓦片）与 `/api/world/map/tiles`（矩阵）已移除。
+>
+> 本节四条静态地图路由 owner 为 `core.data`。启动时 Kotlin 从模块 assets 按文件分批传入原始字节；解析、缓存、查表及响应由 native owner 完成。路径、方法和响应保持不变。
 
 #### 地图列表
 
@@ -934,15 +964,31 @@
 
 ### 4.1 背包读 inventory
 
-> **扩展逻辑袋并入（v0.6.16）**：`extensionBagEnabled=true` 且处于 world 时，全部背包读端点自动并入扩展逻辑袋 `6..10`（schema 与原版袋一致：`bag/items/capacity/slot_count`，物品项为 `slot/category/count`）；`false` 或非 world 时仅返回原版 `0..5`。原型阶段容量固定 `16/8/4/0/0`；扩展物品不进入原版 `g_inven`（模块自持）。原版第 6 袋（索引 `5`，任务物品专用袋）不属于扩展域。
+> **三空间编号**：
+>
+> | 空间 | `space` | 空间内 `bag` 索引 | 来源 |
+> |---|---:|---|---|
+> | 原版 | 0 | 0..5 | 索引固定；袋 5 为任务袋，只可作为读取来源，不得作为移动源或目标 |
+> | 改版（C18 追加袋） | 1 | 0..c−1 | 动态探测；原生袋号为 `6 + bag` |
+> | 扩展 | 2 | 0..e−1 | 注册袋源 |
+>
+> 各空间内的 `bag` 索引均从 0 开始。扁平袋号按「原版 → 改版 → 注册源」连接；注册源之间的顺序不保证。扁平袋号仅为便利入口，不可持久化、用作跨请求稳定标识或排序键；排序与游标使用 `(space, bag, slot)`。
+
+> 本节 5 条 GET 的 route owner 为 `core.inventory`（逻辑帧快照读面）；§4.2 写端点 owner 为 `core.item`。
 
 #### 背包复合
 
-`GET /api/item/inventory`
+`GET /api/item/inventory?space=&bag=&cursor=&limit=`
 
-**用途**：获取背包完整信息（原版 6 袋 × 16 槽 + 扩展逻辑袋 6..10（启用时），含名称注入）。
+**用途**：按空间、袋筛选并分页获取袋元数据与物品列表，物品含名称注入。
 
-**返回格式**：`<Inventory 模型>`
+**返回格式**：
+
+```text
+{"bags":[{space,bag,capacity,occupied_slots}],"items":[{space,bag,slot,<item fields>}],"next_cursor":"S:B:K"|null,"has_more":bool}
+```
+
+`bags` 返回快照中的袋元数据；`items` 按游标分页。查询参数 `space`、`bag`、`cursor`、`limit` 均可选；指定 `space` 时 `bag` 是该空间内索引，未指定 `space` 时 `bag` 是扁平袋号；只指定 `space` 时筛选该空间。扁平袋号或空间内袋索引无法解析时返回 HTTP 404 `bag not found`。
 
 #### 金币
 
@@ -954,33 +1000,39 @@
 
 #### 全部物品展平
 
-`GET /api/item/inventory/items`
+`GET /api/item/inventory/items?space=&bag=&cursor=&limit=`
 
-**用途**：获取全部物品展平列表（每项附 bag 字段；启用时含扩展袋物品 bag=6..10）。
+**用途**：按空间、袋筛选并分页获取物品展平列表。
 
-**返回格式**：`{ "items": [ { "bag": 0, "slot": 3, "category": 1, "count": 1, "name": "治疗药水" }, ... ] }`
+**返回格式**：`{"items":[{space,bag,slot,<item fields>}],"next_cursor":"S:B:K"|null,"has_more":bool}`（不含 `bags`）
+
+**分页规则（以上两条列表端点）**：`limit` 默认 100、最大 500，限制每页物品数；无效值返回 HTTP 400 `bad limit`。游标格式为 `<space>:<bag>:<slot>`，无效游标返回 HTTP 400 `bad cursor`。物品按 `(space,bag,slot)` 排序，`next_cursor` 指向当前页最后一件物品；没有后续页时为 `null`。不返回总数；分页期间袋发生变化时，后续页可能跳过或重复物品。
 
 #### 袋信息
 
-`GET /api/item/inventory/bag/{bag}/info`
+`GET /api/item/inventory/bag/{bag}/info?space=`
 
-**用途**：获取指定袋（0..5 原版；6..10 扩展，启用时）信息（容量/占用）。
+**用途**：获取指定袋的容量与占用数。指定 `space` 时 `{bag}` 是空间内索引；省略时 `{bag}` 是扁平袋号；无效袋返回 HTTP 404 `bag not found`。
 
-**返回格式**：`{ "bag": 0, "capacity": 16, "slot_count": 13 }`
+**返回格式**：`{"space":S,"bag":B,"capacity":C,"occupied_slots":N}`
 
 #### 袋内指定槽
 
-`GET /api/item/inventory/bag/{bag}/{slot}`
+`GET /api/item/inventory/bag/{bag}/{slot}?space=`
 
-**用途**：获取指定袋内指定槽物品（**按 `slot` 字段匹配，不跳过空格**）。
+**用途**：获取指定袋内指定槽物品（**按 `slot` 字段匹配，不跳过空格**）。`{bag}` 按袋信息端点的规则解析；无效袋返回 HTTP 404 `bag not found`，越界槽返回 HTTP 404 `slot not found`。
 
-**返回格式**：`<Item 对象>`（含 name）或 `null`（空槽）
+**返回格式**：`<Item 对象>`（含 `space`、`bag`、`slot` 和既有 Item 字段）或 `null`（有效范围内的空槽）
 
 **注意**：按实际格号（物品的 `slot` 字段）匹配，不做数组下标偏移——native 输出跳过空格后数组下标 ≠ 实际格号，查询以 `slot` 为准。
 
 ### 4.2 背包操作 inventory
 
-> 写操作统一「动词+宾语」两词命名。
+> 写操作统一「动词+宾语」两词命名。涉及背包位置的请求可带 `space`，省略时 `bag` 按扁平袋号解析；移动请求的目标可带 `to_space`，省略时 `to_bag` 按扁平袋号解析。提供 `space` / `to_space` 时，对应的 `bag` / `to_bag` 为该空间内索引。
+
+**数字字段错误**：body 数字字段缺失时返回该端点原有的 `... required` 错误；字段存在但不是有效 int32 整数（包括小数、指数、前导 `+`、超 int32 或超长数字）时返回 HTTP 400 `{"ok":false,"error":"bad value for <field>"}`。整包 JSON 语法非法或 body 不是对象时仍返回 `bad request`。适用于本节中的 `bag`、`space`、`slot`、`count`、`to_bag`、`to_space`、`to_slot`、`category`、`equip_slot`，以及 OP add 的 `socket`/`enhanceRemaining`/`rarity` 和 OP money 的 `money`。
+
+空间 1 中对应原生袋号（`6 + bag`）已被扩展 provider 认领时，写入返回 HTTP 409 `{"ok":false,"error":"c18 bag write requires host arbitration"}`。成功结果中 `slots[]` / `inventory[]` 的槽条目以 `space` 为首字段，后续为 `bag`、`slot`、`item`；`gained[]` 条目也以 `space` 为首字段，后续为 `bag`、`slot`、`category`、`count`。
 
 #### 使用物品
 
@@ -990,7 +1042,7 @@
 
 **请求格式**：`{ "bag": 0, "slot": 3 }`
 
-**返回格式**：`{"ok":true,"state":<Inventory 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；result 含实际变化槽的 `slots`，有获得物品时另含 `gained`（位置条目均带 `space`），且只有当前主控 HP/MP 发生变化时才附对应 `player` 字段。
 
 **注意**：骰子→掷骰预览返回 `base/pending/delta`（不应用，由 `accept_dice`/`reject_dice` 处理）；非消耗品→`item not usable`；常规物品冷却中/状态不符→`on cooldown`（不消耗）。
 
@@ -1002,7 +1054,7 @@
 
 **请求格式**：无 body
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；result 保留 `base`、`applied`、`delta`，并以 `player.main_stats` 返回实际变化属性 `{attr,value}` 列表及更新后的 `status_point`。
 
 **注意**：无未确认结果→`no dice result pending`。
 
@@ -1014,7 +1066,7 @@
 
 **请求格式**：无 body
 
-**返回格式**：`{"ok":true}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原始 op JSON 经 §7.9 回取，不附 state。
 
 **注意**：无未确认结果→`no dice result pending`。
 
@@ -1026,7 +1078,7 @@
 
 **请求格式**：`{ "bag": 0, "slot": 5 }`
 
-**返回格式**：`{"ok":true,"state":<Inventory 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；result 为 `{"ok":true,"slots":[{"space":S,"bag":B,"slot":K,"item":null},…]}`，列出源槽与其他实际变化槽。
 
 **注意**：按槽位清空判定成功。
 
@@ -1034,28 +1086,27 @@
 
 `POST /api/item/inventory/move_item`
 
-**用途**：移动物品或堆叠合并。按 bag 域自动分派：原版↔原版走 `INVEN_MoveItem`（支持部分数量）；任一端为扩展逻辑袋（6..10）时走扩展事务路径（整堆移动、序列化/重建、自动选槽）。
+**用途**：在背包空间之间移动物品或堆叠合并；源、目标通过 `space` / `to_space` 与对应袋索引确定，省略空间时使用扁平袋号。
 
 **请求格式**：`{ "bag": 0, "slot": 3, "count": 1, "to_bag": 0, "to_slot": 4 }`
 
-**返回格式**：`{"ok":true,"state":<Inventory 模型>}`（原版路径）；`{"ok":true,"state":<扩展状态,含 items>}`（扩展路径）
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；成功 result 为 `{"ok":true,"slots":[{"space":S,"bag":B,"slot":K,"item":<Item|null>},…]}`，列出源/目标槽及其他实际变化槽，重复槽去重；失败返回对应错误。
 
 **注意**：
 - 源空槽→`slot empty`；count≤0→参数错；同槽→`same slot`；目标越界→`bad target`。
-- **扩展路径（bag 含 6..10）**：整堆移动（`count` 忽略）；同一扩展逻辑袋内同类可堆叠物品才尝试合并，跨扩展袋不合并；原版→扩展属于跨域移动，也不合并；放置槽自动选择（优先同袋可合并槽/空槽，`to_slot` 仅扩展→扩展生效）；`bag`/`to_bag`=5（任务物品袋）→`task bag excluded`；扩展开关关闭→`extension bag disabled`；跨域移动写入模块 unsaved journal，显式保存（`/api/system/save`）成功后清零。
-- 原版→原版不可经扩展路径分派；扩展内部事务失败自动回滚，可安全重试。
+- 任务袋 `(space=0, bag=5)` 不得作为移动源或目标，返回 `task bag excluded`。
 
 #### 出售物品
 
 `POST /api/item/inventory/sell_item`
 
-**用途**：出售指定背包物品（价格=ITEM_GetPrice 静态表）。
+**用途**：出售指定背包物品（价格=ITEM_GetSellPrice × 详情出售倍率）。
 
 **请求格式**：`{ "bag": 0, "slot": 5 }`
 
-**返回格式**：`{"ok":true,"price":15,"state":<Inventory 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；成功 result 为 `{"ok":true,"price":N,"slots":[…],"money":N}`，包含变化槽差量和更新后的金币，不含完整 Inventory。
 
-**注意**：空槽→`slot empty`；价格由静态表决定（防刷钱）。
+**注意**：空槽→`slot empty`；任务袋 `(space=0, bag=5)` 拒绝；倍率按游戏变体：original/unknown 0%、overhaul/monster 70%、c18 85%。原价（100%）仅用于商店手动出售，不用于本 API。
 
 #### 穿装备
 
@@ -1072,7 +1123,7 @@
 { "category": 512 }
 ```
 
-**返回格式**：`{"ok":true,"state":<Party 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；成功 result 为 `{"ok":true,"equipment":{"role":R,"slot":E,"item":<Item|null>},"inventory":[…]}`；category 未找到时 ticket 为 `failed`，result 为 `{"ok":false,"error":"item not found"}`。
 
 **注意**：目标槽占用自动替换（先卸后穿）；不可装备（等级/职业/类型不符）按 CHAR_CanEquipItem 校验失败。
 
@@ -1084,7 +1135,7 @@
 
 **请求格式**：`{ "slot": 2 }`
 
-**返回格式**：`{"ok":true,"state":<Party 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；成功 result 为 `{"ok":true,"equipment":{"role":R,"slot":E,"item":null},"inventory":[…]}`，背包数组只列实际变化槽。
 
 **注意**：空槽返回 `unequip failed`。
 
@@ -1096,7 +1147,7 @@
 
 **请求格式**：`{ "bag": 0, "slot": 3, "equip_slot": 3 }`
 
-**返回格式**：`{"ok":true,"state":<Party 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；成功 result 含目标 `equipment` 对象及背包 `inventory` 槽差量，不附完整 Party。
 
 **注意**：无孔→`no socket`；非宝石→`not jewel`；空装备槽→`equip slot empty`；**镶嵌后自动消耗背包宝石（防刷）**。
 
@@ -1108,7 +1159,7 @@
 
 **请求格式**：`{ "bag": 0, "slot": 3, "equip_slot": 5 }`
 
-**返回格式**：`{"ok":true,"state":<Party 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；成功 result 只含目标 `equipment` 对象，不附完整 Party 或 Inventory。
 
 **注意**：装备槽空→`equip slot empty`；背包物品非强化卷轴→`not enchant scroll`（IsEnchantScroll 0x10b2f0：武器卷轴 16-20/946、防具卷轴 21-25/947）；不可强化装备→`cannot enchant`（ITEMCLASSBASE bit1/bit2）；失败→`enchant failed`；成功写回 +0x1A bit6-10 新等级且消耗卷轴 1 张（防刷）。
 
@@ -1132,7 +1183,7 @@
 
 **请求格式**：`{ "slot": 0 }`
 
-**返回格式**：`{"ok":true,"state":<Inventory 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；成功 result 形状为 `{"ok":true,"price":N,"money":N,"slots":[…]}`，不附完整 Inventory。
 
 **注意**：金币不足→`not enough money`；无商品→`item not found`。
 ---
@@ -1218,94 +1269,77 @@
 
 `POST /api/quest/quit_quest`
 
-**用途**：放弃指定任务（QUESTSYSTEM_Find + RemoveSlot）。
+**用途**：放弃指定任务（QUESTSYSTEM_Find + RemoveSlot）。阶段 5 批 5-3 起为 owner（`quest`）命令，游戏写在主线程执行。
 
 **请求格式**：`{ "quest_id": 381 }`
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原结果经 `GET /api/system/tickets/{id}` 回取：成功时 `result` 为 `{"ok":true,"state":<Player 模型>}`，失败时 `result` 为 `{"ok":false,"error":...}` 且票据 `state=failed`。
 
-**注意**：无任务→`quest not found`。
+**注意**：缺/负 `quest_id` → 400 `questId required`（校验在投递前）；无任务→ `quest not found`（在票据 `result` 中）。该路由此前被 `/api/quest/{id}` 通配遮蔽而恒返回 405，本批一并修复（校验通过即投递）。
 ---
 
 ## 六、ui（界面与对话）— GET/POST /api/ui/*
 
-**界面交互**：界面状态感知（ui）、对话/弹窗统一检测（dialog）、选项选择（select_option）、NPC 交互（start_interact）。操作前置检查统一看 `dialog.active`（有阻塞弹窗时操作被 UI 阻塞）。
+**界面交互**：通过统一状态快照读取当前顶层 UI；状态由 `type`、`name`、`source` 识别，`info` 提供可选文本，`options` 提供当前动作。状态表可用于枚举可用状态名。五个 POST action 保持既有路径、参数与响应/票据契约。
 
-### 6.1 界面状态
+### 6.1 统一状态查询
 
-#### 界面状态复合
+#### 当前状态
 
-`GET /api/ui`
+`GET /api/ui/state`
 
-**用途**：获取界面状态复合（screen/dialog）。
+**用途**：获取当前唯一的顶层 UI 状态。
 
-**返回格式**：`<GameState 模型>`
+**返回格式**：`{name,type,source,info,options}`（完整字段和类型说明见 [UI State 模型](#ui-state统一界面状态)）。`info` 仅包含 `title`、`content`；`options` 为 `[{id,label}]`。
 
-#### 当前界面
+#### 可用状态表
 
-`GET /api/ui/screen`
+`GET /api/ui/state/table`
 
-**用途**：获取当前界面名（v0.5.42 枚举：loading/main_menu/world/tutorial_pause/dialog_*/panel_*/main_menu_*）。
+**用途**：枚举当前可用状态名及其类型、来源和稳定性；未安装的插件状态不出现。
 
-**返回格式**：`{ "screen": "world" }`
+**返回格式**：`{"states":[{"name":"world","type":3,"source":1,"stability":"static"}]}`。
 
-#### 当前面板
+### 6.2 对话与弹窗 action
 
-`GET /api/ui/panel`
+`type=4` 的 dialog 状态通过 `/api/ui/state` 返回；具体状态由 `name` 标识，标题/正文（若存在）位于 `info.title` / `info.content`，可执行动作由 `options` 给出。
 
-**用途**：获取当前面板（screen 为 `panel_*` 或 `main_menu_*` 时，返回带前缀值）。
+**支持类型**（options 随状态给出；✅ v0.5.6 实机验证，面板态已纳入）：
 
-**返回格式**：`{ "panel": "panel_inventory" }` 或 `{ "panel": null }`
-
-### 6.2 对话与弹窗
-
-#### 对话/弹窗状态检测
-
-`GET /api/ui/dialog`
-
-**用途**：统一检测当前对话/弹窗状态（**一个函数覆盖多种类型**），返回类型、标题、内容与可选动作。
-
-**返回格式**：`<DialogContent 模型>`（`type` + `title`/`text` + `options`）
-
-**支持类型**（options 随类型给出；✅ v0.5.6 实机验证，面板态已纳入）：
-
-| type | 场景 | options 示例 |
+| `name` | 场景 | options 示例 |
 |---|---|---|
-| `popup` | 普通确认弹窗 | `[ok 确认, cancel 取消]` |
-| `agreement` | Android 同意页（主菜单前，Java 层） | `[ok 同意]` |
-| `story` | 剧情对话 | `[next 下一句, skip 跳过]` |
-| `npc` | 商人/村民对话 | 分支选项 `[0..n + close 关闭]`（选择框型，v0.6.6）或 `[next 下一句]`（线性型） |
-| `npc_quest` | NPC 任务完成面板 | `[complete 完成任务, close 关闭]` |
-| `wipeout` | 死亡面板 | `[game_over 游戏结束]`（`revive`/`special_revive` 走网络链，离线无作用，不再提供） |
-| `save_slot` | 存档槽面板 | `[save 存档, close 关闭]` |
-| `character_info`/`inventory`/`skills`/`mercenary`/`quests`/`settings`/`shop`/`craft`/`npc_rest`/`npc_revive`/`options`/`shortcut`/`world_map`/`input_count`/`choice`/`daily_reward`/`in_app` | 各可交互面板 | `[close 关闭]` |
-| `save` | 保存弹窗 | `[confirm 确认]` |
-| `sell` | 出售弹窗 | `[confirm 确认, cancel 取消]` |
-| `quest` | 任务对话框（含标题） | `[confirm 确认, quit 退出]` |
-| `none` | 无对话 | 空 options |
+| `game_popup` | 普通原生弹窗 | `[ok 确认, cancel 取消]` |
+| `android_agreement` | Android 同意页（主菜单前，Java 层） | `[ok 同意]` |
+| `game_story` | 剧情对话 | `[next 下一句, skip 跳过]` |
+| `game_npc_dialog` | 商人/村民对话 | NPC 选项与 `close`（具体动作由状态提供） |
+| `game_npc_quest` | NPC 任务完成面板 | `[complete 完成任务, close 关闭]` |
+| `game_wipeout` | 死亡面板 | `[game_over 游戏结束]`（`revive`/`special_revive` 走网络链，离线无作用，不再提供） |
+| `game_choice` / `game_input_count` | 事件选择 / 数量输入 | 由当前状态提供 |
+| `panel_*` / `main_menu_*` | 原生面板或主菜单面板 | 面板动作由状态提供，例如 `close`、存档槽面板的 `save` |
+| `module_dialog_*` / `ext_dialog_*` | 模块或外部插件对话 | 由对应状态提供 |
 
-**注意**：type 检测与 options 生成见 backlog U1/U2（✅ v0.5.6 已实现：面板态经 popup 栈顶 enter 识别，`save_slot` 额外暴露 save；`select_option` 的 close 走 panel/close 官方流程3）。
+**注意**：动作 id 以 `/api/ui/state` 当前响应的 `options` 为准；面板态关闭走对应的 `/api/ui/close_panel` 官方流程。
 
 #### 选择选项
 
 `POST /api/ui/dialog/select`
 
-**用途**：从 `GET /api/ui/dialog/content` 返回的 `options` 中选择一项（**唯一选择端点**，替代确认/取消/按钮/选项选择全部逻辑）。
+**用途**：从 `GET /api/ui/state` 返回的 `options` 中选择一项（**唯一选择端点**，替代确认/取消/按钮/选项选择全部逻辑）。
 
-**请求格式**：`{ "action": "close" }`（`action` 取 dialog.content options 中的一项 id；`index` 可选，NPC 对话选项用 `{"index":n}`）
+**请求格式**：`{ "action": "close" }`（`action` 取 `/api/ui/state` 当前 `options` 中的一项 id；`index` 可选，NPC 对话选项用 `{"index":n}`）
 
 **返回格式**：`{"ok":true}` 或 `{"ok":false,"error":<原因>}`
 
 **支持动作**（✅ v0.5.6 实机验证）：
-- agreement（Java 层同意页，主菜单前）：`ok`（同意——反射走 SDK 自身的放行分支关闭同意页且**不结束游戏**，返回 `{"ok":true,"result":"close_dispatched"}`；关闭异步生效，随后轮询 `GET /api/ui/screen` 直到 `main_menu`；同意页开场动画期间模块在主线程等待就绪后自动关闭（最多约 3s），调用方在页面刚可见时立刻调用也能一次成功；仅当同意页结构不可用时返回 `{"ok":false,"error":"agreement window unavailable"}`）；其他动作→`no such option in agreement`
-- popup：`ok`/`cancel`（UIPopupMsg 官方按钮）
-- story：`next`（下一句）/`skip`（跳过）
-- npc：`index`（选项选择，选择框型）/`next`（下一句，线性型）/`close`（关闭对话框，v0.6.6）
-- npc_quest：`complete`（完成任务）/`close`（关闭）
-- wipeout：`game_over`（仅此一项；`revive`/`special_revive` 走网络链，离线无作用，已移除）
-- 面板态：`close`（关闭面板，panel/close 官方流程3）；save_slot 面板另接受 `save`（存档落盘）
+- Agreement（Java 层同意页，主菜单前；状态名 `android_agreement`）：`ok`（同意——反射走 SDK 自身的放行分支关闭同意页且**不结束游戏**，返回 `{"ok":true,"result":"close_dispatched"}`；关闭异步生效，随后轮询 `GET /api/ui/state` 直到 `name="main_menu"`；同意页开场动画期间模块在主线程等待就绪后自动关闭（最多约 3s），调用方在页面刚可见时立刻调用也能一次成功；仅当同意页结构不可用时返回 `{"ok":false,"error":"agreement window unavailable"}`）；其他动作→`no such option in agreement`
+- `game_popup`：`ok`/`cancel`（UIPopupMsg 官方按钮）
+- `game_story`：`next`（下一句）/`skip`（跳过）
+- `game_npc_dialog`：NPC 选项（`index`）/线性对话（`next`）/`close`（关闭对话框，v0.6.6）
+- `game_npc_quest`：`complete`（完成任务）/`close`（关闭）
+- `game_wipeout`：`game_over`（仅此一项；`revive`/`special_revive` 走网络链，离线无作用，已移除）
+- panel 状态：`close`（关闭面板，panel/close 官方流程3）；`panel_save_slot` 另接受 `save`（存档落盘）
 
-**注意**：`action` 必须匹配当前对话态的 options（不匹配→`no such option in <type>`）；无对话→`no dialog`；Java 层同意页（screen=`agreement`）存在时走 agreement 分支，不进入 native 检测。
+**注意**：`action` 必须匹配当前状态的 options（不匹配→`no such option in <type>`）；无对话→`no dialog`；当前状态为 `name="android_agreement"` 时走 Agreement 分支，不进入 native 检测。
 
 #### 开始交互
 
@@ -1332,9 +1366,11 @@
 
 **请求格式**：无 body
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**：`{"ok":true,"ticket":N}`（owner 命令 + 票据契约，ADR 0001 第 4 批；owner 为 `core.ui_state`，路径与 POST 方法不变）
 
-**注意**：非 world→`not in game`。**UI 守卫（2026-09-14）**：栈顶是面板时模块先走官方 Pop 关闭并等栈清空再切换；栈顶是非面板弹窗（对话/剧情/数量输入等脚本态）→ `ui occupied: close current dialog first`（fail-closed，不由模块代关）；面板关闭未完成→`panel close pending`。带面板直接切换会触发游戏 `ControlItem_Draw(NULL)` 崩溃，故必须走守卫。
+**结果回取**：经 `GET /api/system/tickets/{id}` 的 `result` 取原响应 `{"ok":true,"state":<Player 模型>}`（失败时为原错误体，如 `not in game`）。
+
+**注意**：非 world→票据结果 `not in game`。**UI 守卫（2026-09-14）**：栈顶是面板时模块先走官方 Pop 关闭并等栈清空再切换；栈顶是非面板弹窗（对话/剧情/数量输入等脚本态）→ `ui occupied: close current dialog first`（fail-closed，不由模块代关）；面板关闭未完成→`panel close pending`。带面板直接切换会触发游戏 `ControlItem_Draw(NULL)` 崩溃，故必须走守卫。命令在主线程逻辑帧内联执行切换（不得改用会跨帧同步等待的 `transition_run`，否则自阻塞超时）。
 
 #### 打开面板
 
@@ -1342,9 +1378,9 @@
 
 **用途**：打开指定面板（UI_SetPopupProcessInfo(1,id) 官方流程1 Push）。
 
-**请求格式**：`{ "panel": "inventory" }`（v0.5.42 起兼容裸名与 `panel_` 前缀，如 `"panel_inventory"`，与 screen 输出对称）
+**请求格式**：`{ "panel": "inventory" }`（v0.5.42 起兼容裸名与 `panel_` 前缀，如 `"panel_inventory"`，与统一状态 `name` 对称）
 
-**返回格式**：`{"ok":true,"state":<GameState 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原结果经 `GET /api/system/tickets/{id}` 的 `result` 回取，成功为 `{"ok":true,"state":<action state>}`，失败为原 op 错误体。
 
 **注意**：面板白名单（character_info/choice/inventory/mercenary/quests/settings/skills/wipeout/world_map）真机验证；需游戏内上下文的面板→`panel requires in-game context`。
 
@@ -1356,7 +1392,7 @@
 
 **请求格式**：无 body
 
-**返回格式**：`{"ok":true,"state":<GameState 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原结果经 `GET /api/system/tickets/{id}` 的 `result` 回取，成功为 `{"ok":true,"state":<action state>}`，失败为原 op 错误体。
 ---
 
 ## 七、system（系统与会话）— GET/POST /api/system/*
@@ -1367,9 +1403,28 @@
 
 `GET /api/health`
 
-**用途**：模块服务存活检查（v0.5.8 起只返回 ok，其余属性收编入 `/api/system/info`）。
+**用途**：模块服务存活检查。v0.5.8 起只返回 `ok`，其余属性收编入 `/api/system/info`；P1 诊断加法扩展 `ready` 与 `variant`。
 
-**返回格式**：`{ "ok": true }`
+**返回格式**：
+
+```json
+{
+  "ok": true,
+  "ready": true,
+  "variant": { "series": "monster", "version": "v27", "known": true, "capabilities": 3 }
+}
+```
+
+**字段说明**：
+
+- `ok`：服务存活，恒为 `true`（原有字段，语义不变）。
+- `ready`：native 侧 `NativeBridge.ready`。该端点经 `ControllerGuard` 校验后就绪才返回 200，因此成功响应中恒为 `true`，属诚实上报。
+- `variant`：当前 libgame.so 的变体查表结果（`{"series","version","known","capabilities"}`）。
+  - `series`：`unknown` / `original` / `overhaul` / `monster` / `c18`。
+  - `version`：变体表内静态版本标签，可能为空串 `""`。
+  - `known`：是否命中变体表。
+  - `capabilities`：能力位十进制整数（bit0 隐藏段、bit1 WH4JRN01 仓库容器、bit2 内嵌 WH96v002 仓库段）。
+  - 未命中变体表时为 `{"series":"unknown","version":"","known":false,"capabilities":0}`；native 未就绪时 `variant` 为 `null`（此时端点由 `ControllerGuard` 返回 503）。
 
 > **注意**：version/game/base 等属性在 `/api/system/info` 提供（见下）；`version` 跟随构建版本（BuildConfig.VERSION_NAME）。
 
@@ -1444,7 +1499,7 @@
 
 **请求格式**：无 body
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**：立即返回票据 ACK `{"ok":true,"ticket":N}`；终态 result 为 `{"ok":true,"slot":S,"sidecar":"ensured"}`。
 
 **注意**：非 world→`not in game`。
 
@@ -1456,7 +1511,7 @@
 
 **请求格式**：`{ "slot": 0 }`（0/1/2）
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**：立即返回票据 ACK `{"ok":true,"ticket":N}`；进入及世界态提交完成后 result 为 `{"ok":true,"slot":S,"entered":true}`。延迟结算期间票据仍为 pending。
 
 **注意**：非 world 才可调（world 中→`already in game`）；原生 `UIPopupMsg` 弹窗存在时返回 `ui occupied: dialog_popup`，Android 同意页（screen=`agreement`）存在时返回 `ui occupied: agreement`，需先 `dialog/select {"action":"ok"}` 关闭同意页或处理弹窗；进档流程期间（调用后 15s 宽限）同意页启动会被模块拦截，不会打断读档；UI 状态检测失败时 fail-closed 返回 `ui state unavailable`；slot 越界→`bad slot`；空槽、损坏或不兼容存档会在进入前由内部完整性门禁拦截，返回结构化错误，不触发原版进档崩溃路径。当前没有独立的存档预检 HTTP API。
 
@@ -1468,23 +1523,23 @@
 
 **请求格式**：`{ "slot": 1, "class_idx": 2 }`（slot 0/1/2；class_idx 0-5）
 
-**返回格式**：`{"ok":true,"state":<Player 模型>}`
+**返回格式**：立即返回票据 ACK `{"ok":true,"ticket":N}`；新档创建及世界态提交完成后 result 为 `{"ok":true,"slot":S,"created":true}`。延迟结算期间票据仍为 pending。
 
 **注意**：创建后自动进初始营地（map_id=0）+ 剧情对话激活（dialog type=story，可 skip）；职业映射 0=黑暗骑士 1=忍者 2=黑魔导法师 3=祭司 4=暗影射手 5=狂战士；新档未保存前槽区 exists=false；与 enter_slot 相同的同意页/弹窗门禁（`ui occupied: agreement` / `ui occupied: dialog_popup` / `ui state unavailable`）及 15s 进档宽限拦截；损坏槽可直接 create_slot 重建覆盖（2026-08-28 save1 实测）。
 
 #### 存档备份（导出 / 列表 / 导入 / 删除）
 
-> 存档管理器：把「原版 `save{slot}.dat` 解密明文 + 模块 sidecar」打包为自包含 `.qol_save` 备份，可还原到任意槽位（原版 + 模块一起）。备份目录 `getExternalFilesDir(null)/save_backup/`。
+> 存档管理器：把「原版 `save{slot}.dat` 解密明文 + 模块 sidecar」打包为自包含 `.qol.bak` 备份（旧 `.qol_save` 继续识别/导入），可还原到任意槽位（原版 + 模块一起）。备份目录 `getExternalFilesDir(null)/qol/backups/`。
 >
-> **备份标识 = `checksum`**：`sha256(origPlain ‖ module)` 的前 12 位小写 hex，即备份文件名 `<yyyyMMdd-HHmmss>_s<slot>_<checksum>.qol_save` 的末段。同一游戏内容的备份 `checksum` 恒相同；导入/删除均按 `checksum` 定位备份，不再使用文件名。
+> **备份标识 = `checksum`**：覆盖全部可还原内容段——bundle v2+ 为 `sha256(origPlain ‖ module ‖ warehouseBlob)`（v2 引入仓库段时即如此，v3 只改段内编码），v1 旧备份为 `sha256(origPlain ‖ module)`（无仓库段，空 blob 等价）；取前 12 位小写 hex，即备份文件名 `<yyyyMMdd-HHmmss>_s<slot>_<checksum>.qol.bak` 的末段。同一内容的备份 `checksum` 恒相同；导入/删除均按 `checksum` 定位备份，不再使用文件名，并在写盘/删除前按 bundle 内实际 payload 重算校验。
 >
-> 导入导出时机与责任由调用方负责，模块只保证原子写、CRC 校验与内容完整。
+> 导入仅在主菜单允许（`save.facts.current_slot == -1`）；导出任意时刻可调。模块保证原子写、CRC 校验与内容完整。
 
 ##### 导出备份
 
 `POST /api/system/backup/export`
 
-**用途**：把指定槽导出为 `.qol_save` 备份（原版存档解密为明文 + 模块 sidecar 原始字节 + 元数据 + CRC32）。
+**用途**：把指定槽导出为 `.qol.bak` 备份（原版存档解密为明文 + 模块 sidecar 原始字节 + 元数据 + CRC32）。旧版 `.qol_save` 备份继续可列出/导入/删除。
 
 **请求格式**：`{ "slot": 0 }`（0/1/2）
 
@@ -1500,17 +1555,17 @@
 { "ok": true, "backup": <BackupMeta>, "deduplicated": true }
 ```
 
-**注意**：先算出 `checksum`，再扫描 `save_backup/*.qol_save`：任一既有备份的**内部 `checksum`（bundle metaJson 字段）**与新算值相同 → 不写入新文件直接返回；同 `checksum` 判定不依赖文件名，被重命名或带浏览器重名后缀（如 `(1)`）的副本同样命中。不存在 → 按命名规则写入。读取已落盘的 `save{slot}.dat` 与 sidecar，**不触发游戏保存**，任意时刻可调；备份内原版明文的槽位字段归一化为 `0xFF`，导入时写入目标槽。slot 越界→`bad slot`；槽为空或读取失败→`load failed`；写盘失败→`bundle write failed`。
+**注意**：先算出 `checksum`，再扫描 `qol/backups/*.qol.bak` 与旧 `*.qol_save`：任一既有备份的**内部 `checksum`（bundle metaJson 字段）**与新算值相同 → 不写入新文件直接返回；同 `checksum` 判定不依赖文件名，被重命名或带浏览器重名后缀（如 `(1)`）的副本同样命中（命中项的 payload 也会按上述规则重算校验）。不存在 → 按命名规则写入 `.qol.bak`。读取已落盘的 `save{slot}.dat` 与 sidecar，**不触发游戏保存**，任意时刻可调；备份内原版明文的槽位字段归一化为 `0xFF`，导入时写入目标槽。导出持该槽的 slot operation lease，被占用→`slot operation unavailable`；sidecar 损坏/不可读→`module container unreadable`（不再生成“仅原版”备份）；warehouse 单文件读失败→`warehouse read failed`、单项超 4 MiB→`warehouse file too large`、数量/总量超 64 项/8 MiB→`warehouse limit exceeded`。slot 越界→`bad slot`；槽为空或读取失败→`load failed`；写盘失败→`bundle write failed`。
 
 ##### 备份列表
 
 `GET /api/system/backup/list`
 
-**用途**：列出 `save_backup/` 下全部备份，按导出时间倒序。
+**用途**：列出 `qol/backups/` 下全部备份，按导出时间倒序。
 
 **返回格式**：`{"ok":true,"backups":[<BackupMeta>,...]}`
 
-**注意**：只读文件头元数据，不解密正文；`checksum` 从 bundle 的 metaJson 读取（文件名解析兜底）；损坏文件跳过并记日志。
+**注意**：逐个完整读取并校验 CRC32 后取元数据（损坏文件跳过并记日志）；单文件超过 64 MiB 跳过，单次扫描累计超过 512 MiB 停止返回已解析结果。`checksum` 从 bundle 的 metaJson 读取（文件名解析兜底）。
 
 ##### 导入备份
 
@@ -1522,7 +1577,7 @@
 
 **返回格式**：`{"ok":true,"backup":<BackupMeta>}`
 
-**注意**：按 bundle **内部 `checksum`（metaJson 字段）**定位——目录下全部 `*.qol_save` 均为候选，逐个完整解析（含 CRC32 校验）后比对内部值，文件名不参与匹配（浏览器重名后缀 `(1)`、任意重命名均可导入）；仅 `metaJson` 缺失 `checksum` 字段的旧备份退回文件名 `_<checksum>.qol_save` 后缀。校验值非法→`bad checksum`；无此备份→`backup not found`；文件损坏→`backup unreadable or corrupt`；重加密失败→`encrypt failed`；原版写盘失败→`save file write failed`；sidecar 导入失败→`module container import failed`。写入前把目标槽现存原版文件与 sidecar 复制到 `save_backup/.rollback/`，任一步失败自动还原，成功后清理回滚副本；导入不自动刷新游戏内存态，主菜单下一次 `enter_slot`/`system/info` 会重载。
+**注意**：**仅在主菜单允许**（`current_slot == -1`，否则 `import requires main menu`；槽状态读取失败→`save state unavailable`，fail-closed）。按 bundle **内部 `checksum`（metaJson 字段）**定位——目录下全部 `*.qol.bak` 与旧 `*.qol_save` 均为候选，逐个完整解析（含 CRC32 校验）后比对内部值，文件名不参与匹配（浏览器重名后缀 `(1)`、任意重命名均可导入）；仅 `metaJson` 缺失 `checksum` 字段的旧备份退回文件名 `_<checksum>.qol.bak`/`.qol_save` 后缀。写入前按 bundle 版本重算 payload checksum，不一致→`backup checksum mismatch`；校验值非法→`bad checksum`；无此备份→`backup not found`；文件损坏→`backup unreadable or corrupt`；重加密失败→`encrypt failed`；原版写盘失败→`save file write failed`；sidecar 导入失败→`module container import failed`。备份标记 `module_state=0`（无 sidecar）时按完整替换语义清除目标槽现存 sidecar；`module_state=1` 时写入并覆盖。目标变体/版本与备份不同不导致导入失败：备份带 C18 背包镜像但目标不是 C18（或 C18 版本布局未知）时跳过 C18 数据；目标不具备 wh4 仓库能力（非 monster）时跳过 warehouse 伴生文件；被跳过的目标文件保持原字节，dat 与 sidecar 仍按事务导入。写入前把目标槽现存原版文件与 sidecar 复制到 `qol/backups/.rollback/`（事务 id 命名），任一步失败自动还原，成功后清理回滚副本；导入不自动刷新游戏内存态，主菜单下一次 `enter_slot`/`system/info` 会重载。
 
 ##### 删除备份
 
@@ -1534,13 +1589,15 @@
 
 **返回格式**：`{"ok":true}`
 
-**注意**：定位规则与导入一致（内部 `checksum` 匹配，文件名不参与）。校验值非法→`bad checksum`；无此备份→`backup not found`；删除 IO 失败→`delete failed`（记日志）。
+**注意**：定位规则与导入一致（内部 `checksum` 匹配，文件名不参与），删除前同样按 payload 重算，不一致→`backup checksum mismatch`。校验值非法→`bad checksum`；无此备份→`backup not found`；删除 IO 失败→`delete failed`（记日志）。
 
-**BackupMeta 字段**：`file_name`（含导出时间与 `checksum` 前缀）、`size_bytes`、`source_slot`（导出源槽）、`export_time`（ms）、`map_id`、`hero_level`、`hero_index`、`save_version`、`save_time`、`original_sha256`、`module_sha256`、`checksum`（备份标识，12 位小写 hex）。
+**BackupMeta 字段**：`file_name`（含导出时间与 `checksum` 前缀）、`size_bytes`、`source_slot`（导出源槽）、`export_time`（ms）、`map_id`、`map_name`、`hero_level`、`hero_index`、`class_idx`、`class_name`、`save_version`、`save_time`、`original_sha256`、`module_sha256`、`checksum`（备份标识，12 位小写 hex）；bundle 内 metaJson 另含 `module_state`（0=无 sidecar，1=有 sidecar）。
 
 ### 7.4 静态数据表 tables
 
 > 静态知识库：游戏静态表 + 多语言文本（text）+ 剧情事件（story-events）统一作为 table 查询。
+>
+> 本节六条路由 owner 为 `core.data`。启动时 Kotlin 只读取并分批传输 `manifest.json`、`tables/*.json`、`reverse/events.json`、`text/*.json`、`maps/*.json` 原始资产字节；每文件上限 16 MiB、总量上限 32 MiB。native 插件负责解析、缓存、查询和 JSON 组装，资产尚未装载时返回 503 `not ready`，所需资产缺失或需要解析的 JSON 无效时返回 404 `not found`。成功响应体保持迁移前不变。
 
 #### 静态表列表
 
@@ -1600,6 +1657,8 @@
 
 ### 7.5 帮助文档 help
 
+> 两条占位路由 owner 为 `core.data`；当前仍逐字节保持 HTTP 501 `{"ok":false,"error":"not implemented"}`。`NativeBridge` 的既有 external 方法与签名不变，仅新增有界静态资产导入入口。
+
 #### 帮助文档
 
 `GET /api/system/help`
@@ -1620,90 +1679,291 @@
 
 **注意**：⏳ 占位（帮助文档内容待提供）。
 
-### 7.6 模块配置 config（v0.5.22）
+### 7.6 插件对象配置与 lifecycle 控制 config
 
-> 模块级配置的读取与修改。配置为纯 Kotlin 层能力，**不走 ControllerGuard**——
-> native 未就绪时配置端点同样可用（如修改监听端口解决端口冲突）。
-> **外部存储 `getExternalFilesDir(null)/config.json` 为唯一配置来源**（v0.5.21 起，
-> 与日志同目录，`/sdcard/Android/data/<游戏包>/files/config.json`，用户可见可编辑）：
-> - 外部文件存在 → 读取生效
-> - 外部文件不存在/损坏 → 使用默认值，并**立即写入外部 config.json**
-> - 每次 `POST /api/config/set` 修改立即持久化到该文件；删除外部文件即恢复出厂默认
-> - `stackLimitIncrease` 变化时通知 native 生效（切换运行时操作视图与 99/999 clamp），无需重启；sidecar 数量位解码永远按 S2 布局、与该开关无关；sidecar 读档按绝对 `0..999` 校验，不改写、不因当前配置截断已有数量；可堆叠 payload 仅在与 descriptor 不一致时同步
-> - **数量编码 S2（当前实现，无版本标识）**：sidecar `extensionbags.items` 状态 JSON 不携带编码版本字段；数量位只有 S2 布局（高位段 `a`=bits22-24、低位段 `b`=bits25-31，`count=128a+b`，业务上限 999）一种，持久化与 descriptor 读写统一 `s2_read_count`/`s2_write_count`，运行时操作面统一经模式感知层 `effective_read_count`/`effective_write_count`/`effective_clamp`/`effective_view_count`（R-47 决策 b）；历史 sidecar 若携带 `encodingVersion` 字段，解析时宽容忽略（不报错、不迁移）；无 S1→S2 迁移代码，原版袋 `+0x10` 无迁移扫描；非可堆叠类别（宝石选项/袋容量/装备 marker）不参与数量位段改写。`/api/item/*` 的 `count` 字段为当前模式的运行时视图：启用态 S2 全量 `0..999`、关闭态低 7 位 `b`（`count mod 128`，`a` 保留、重开恢复完整值）；API 结构不变。详见 `docs/development/features/extension-bag/module-save-store.md` §6.4 与规则册 R-45..R-49
-> - `moveMergeEnabled` 控制背包内拖拽同类可堆叠物品时的自动合并，默认 `false`；变化即时安装或还原 native GOT hook，无需重启
-> - `autoSellEnabled` 自动出售全局开关，默认 `false`；变化即通知 native（进档后由存档内总开关共同决定扫描任务）
-> - `apiEnabled` API 全局开关，默认 `true`；`false` 时不启动 HTTP 服务与 native 缓存预取线程（`nativeSetApiEnabled(false)` → `frame_cache_stop()`），`GET/POST /api/config/*` 随之不可达。**`apiEnabled=false` 不影响 feature 初始化**——`ApiServer.bootstrap` 已把 feature 初始化（设置页/扩展背包/存档/自动出售等）与 HTTP 启动拆开，关闭仅停 HTTP 与预取线程。关闭后唯一恢复通道为**游戏内设置页第一项「API服务」开关**（走 `ModuleConfigUiBridge` JNI，不依赖 HTTP；false→true 经 `ApiServer.startFromConfig` 重启 HTTP）；由 HTTP 置 `false` 时延迟约 500ms 停止以先送回本响应
-> - `debugLogEnabled` 统一日志 debug 级别运行时开关，默认 `false`；变化即时经 `nativeQolLogSetDebugEnabled` 下发 native 门控，无需重启。info/warn/error 不受该开关影响（常开）。接入游戏内**设置页第 8 行「调试日志」**；日志格式与规则见 `docs/development/logging.md`
-> - `simpleModeEnabled` 简单模式，默认 `false`；开启后怪物最大生命减半、玩家侧打敌人的伤害 ×1.5、玩家侧受到的伤害 ×0.5。变化即时经 `nativeSetSimpleModeEnabled` 下发 native（热路径只读一个 C++ 原子量），无需重启。接入游戏内**设置页「简单模式」**；落点、阵营判定与真机验收数据见 `docs/development/features/simple-mode.md`
-> - `pushAllEnabled` 推怪（推动增强）全局开关，默认 `false`；开启后 patch 游戏 `CHAR_Move` 推动分支的两个 blocker 资格闸门（`CHAR_Move+0x168` 的 `bl CHAR_GetPartyIndex` 重定向到模块 wrapper → 怪物与召唤物可推；`CHAR_Move+0x180` 的站立检查 `cbz` 置 NOP → 战斗/行动中的单位也可推），使主控/队友移动可推开**怪物/队友/召唤物**，场景设施（NPC/商人）保持不可推。变化即时经 `nativeSetPushAllEnabled` 下发 native（安装/还原均做运行前指令字校验，fail-closed；开启时第二条闸门失败会回滚第一条），无需重启。接入游戏内**设置页第 2 页「推怪」**；闸门落点、回滚语义与验收状态见 `docs/development/features/push-all.md`
+配置唯一持久化来源是 native Host 常驻管理设施持有的外部 `config.json`。schema、Store、读写与管理 API 全部由 Host 常驻设施持有，与任何插件（含设置页）生命周期分离。Kotlin HTTP controller 只传递 raw body/response，不读取、解析、缓存或写配置。每个注册 plugin 对象含 `enable`、`features`、`selections`、`config` 四部分。
 
-#### 读取配置
+四个控制端点由 Host 常驻管理设施直接处理（`host/features/http_control.cpp`，装配期绑定为 resident route，先于 HTTP registry 接受态与 op 门控执行）；它们不属于任何普通插件的生命周期，settings 插件停用也不影响。`GET /api/config/list` 按实际已注册的 plugin ID 投影；未注册 namespace 和未知 root 不显示在响应中，也不会因此从磁盘删除。
+
+三条 `/api/config/*` 路由（list、set、receipt）的 native route metadata owner 字面量为 `settings`，与配置 namespace `core.settings` 不同。该 owner 标签不把 Host resident handler 转为插件 handler，也不要求 settings 插件 active。
+
+#### 磁盘 schema
+
+磁盘顶层结构为 `plugin_id → JSON object`，每个对象是四部分模型：
+
+```json
+{
+  "settings": {
+    "enable": true,
+    "features": { "page": true },
+    "selections": {},
+    "config": {}
+  },
+  "autosell": {
+    "enable": true,
+    "features": { "autosell.auto_sell": false },
+    "selections": {},
+    "config": { "slot0": { "rules": [] } }
+  }
+}
+```
+
+- `enable`（bool）：Host 独占的 lifecycle 期望状态。普通插件不可读写；显式 deactivate 写 `false`。
+- `features`（object）：当前注册 feature 的布尔值由注册元数据 default 补齐，已有值优先；历史或其他未注册 feature 键可继续保留在存储投影中，但不成为可写 feature 或 lifecycle 聚合成员。
+- `selections`（object）：choice feature 的稳定 value，键为 feature id。关闭时删除该键；没有键表示关闭。label 不持久化。启动 seed 遇到已注册 choice 的未知/非法 value 时删除该键并把 `features[id]` 修复为 `false`；缺 selection 也修复为关闭，不从 boolean 推导默认选项。未知 feature 的 selection 键保留但不会执行。
+- `config`（object）：插件业务自由键值，值可为任意合法 JSON。
+
+注册元数据（`feature_id`、`default`、`category`(`kGeneral`|`kGameplay`|`kTools`|`kHidden`|`kBasicOptimization`，后者数值为 4)、`type`(`kToggle`|`kEntry`)、`name`、`description`、`callback`、可选 `action_label`）由插件 descriptor 静态提供、**不持久化**；禁止零 feature 插件；`entry` 与 toggle 同样有布尔状态并参与运行判定。`FeatureDefinition` 在 `on_entry` 后追加 `const char* action_label = nullptr`；`QolFeatureCatalogItem` 在 `description` 后有同样的可选尾随字段，Host 将注册值复制到该 native catalog view。非空时该文案用于 entry 按钮，空值表示未提供显式文案。此字段不属于配置 schema，不写入 `config.json`，也不出现在 `GET /api/config/list` 的 JSON 投影中。旧平铺字段不是当前 schema；Host 仅按已实现的 owner 迁移规则导入受支持的 API、OP 与 listener 配置遗留值，其他未知 root 与未注册 plugin 原样保留在磁盘。
+
+choice 扩展注册类型为 `kChoice`，不改变既有 `kToggle=0`、`kEntry=1` 数值或行为。choice 必须 `default_enabled=0`、至少提供一个非空且唯一的稳定 `value`/显示 `label`、并提供必需 `on_choice` 回调；toggle/entry callback 不得混用。catalog 的 JSON 形式为 `type="choice"`，并带 `choices:[{"value":"...","label":"..."}]`。Host SDK ABI minor 为 30，choice read/write 函数仅追加在 `QolFeatureApi`、`QolFeatureControlApi` 的尾部，旧函数表前缀仍按 `struct_size` 检查。`read_choice` 将 UTF-8 value 原始字节写入 buffer，`out_size` 不含 NUL；关闭返回长度 0，`request_set_choice` 的空字符串或空指针表示关闭。二进制 stride 风险：`FeatureDefinition` 和 Host catalog 的 `QolFeatureCatalogItem` 都是嵌入式数组元素且没有单元素 size 字段；旧二进制插件 descriptor 与旧 catalog 消费者仍可能按旧 stride 访问，本扩展不宣称旧二进制数组兼容。
+
+#### lifecycle 语义
+
+- `want_run = enable && any(当前注册 feature=true)`；`enable=false` 优先。choice 的 bool 仅表示是否有 selection，其 stable value 存于 `selections[id]`。
+- 每次 feature/choice 值写入成功持久化后（包括重复值），Host 都根据更新后的全部已注册 feature 布尔值重算 `enable`：任一为 true 则写 `true`，全为 false 则写 `false`；toggle、entry 与 choice 均计入。choice 的 selection、bool 投影和派生 `enable` 在同一 Store 事务内持久化。
+- 持久化失败时 selection、feature bool 与派生 `enable` 都不进入内存投影、不增加 Host revision，也不派发运行时 effects；receipt 为 `persistence="failed"`。因此失败不会产生部分成功的状态。
+- 对普通插件，全部 feature=false 时 `want_run=false`，Host reconciler 会推进完整 deactivate；在 feature 写入路径上 `enable` 同时派生为 false。启动 seed 和显式 `desired`/lifecycle 写入不做归一化，故其后可能存在 `enable` 与 feature 聚合不一致，直到下一次 feature 值提交。
+- `enable=false` 时 feature 置 true、重复写入相同值均会按 feature 集合修复 `enable=true`；反之，全 false 时重复写入 false 会修复为 `enable=false`。依赖级联与激活失败不改 desired；常驻需求用 default true 的 hidden feature 表达。
+- entry invocation 不是 feature 值修改，不会改写 feature 或 `enable`。`core.api` 注册 General、默认开启的 `api.enabled` feature（Debug/Release 设置页均显示，Release 只过滤 Hidden 分类）；Kotlin listener adapter 仅在 runtime effect 的 actual、desired 均启用且配置有效时启动 listener，desired 关闭时立即停止 listener。category 与描述只影响设置页显示，不改变 listener/API 服务行为。`module.platform` 只注册 `debug.logging`；`module.security` 注册 Hidden、默认关闭的 `op.enabled`，Hidden 项在 Debug 显示、Release 过滤。OP feature 独立控制 endpoint 声明的 OP 授权；API 服务关闭不会改写 OP 值，API 服务开启也不会自动授权 OP。旧 `module.platform.features.api.enabled`、`core.api.features.core.api.http_registry` 与平铺 root `apiEnabled` 按 Host Store 的 API 迁移规则归一为 `core.api.features.api.enabled`；两个旧 namespace feature 同时存在时采用 AND，缺失按 true，root 字段仅在旧 `module.platform` feature 缺失时作为 fallback。已有新目标值（包括 false）优先。OP 只导入明确保存的旧 `module.platform.features.op.enabled`、root `opEnabled` 或 `core.settings.config.opEnabled` 值（false 保留），不从 API 状态推导。该 Host owner 的 `enable` 不控制常驻 Host 服务或管理路由。
+- 实际状态（actual）受依赖、版本、安装结果约束，与 desired（`enable`/feature 期望）分开报告。
+- `custom_recipe.recipes`（唯一可见开关，default `false`）级联启停该 owner 的 UIMix UI 子层与资源；级联不改 desired。原独立 `craft_ui` 插件与 hidden `craft_ui.custom_crafting` 已删除：UI 子层并入 `custom_recipe`，`craft_result` 内化为 owner 内部调用面（不再作为 capability 提供或被依赖）。Store 中旧 key 残留不参与注册投影或运行。
+- `item_count` 的数量解释归 Host 常驻 Adapter；`stack_limit` 的 999 数量策略通过其 `stack_limit.limit_999`（default `false`）feature 与资源 lifecycle 表达。本文不展开扩展数量读取接口。
+
+#### 读取配置投影
 
 `GET /api/config/list`
 
-**用途**：获取当前生效的模块配置。
+**用途**：读取 Host 实际注册 plugin 的配置投影。
 
-**返回格式**：
+**返回格式**：顶层键为已注册 `plugin_id`，值为 `{"enable":bool,"features":{...},"selections":{...},"config":{...}}`。键序与磁盘 schema 一致（`enable,features,selections,config`），`enable` 置于最前。`features`/`selections`/`config` 为持久值，`enable` 为 Host desired lifecycle 值。只读 projection，不含未知 root、未注册 plugin 或状态包装；对象成员保持存储 JSON 类型。
 
-```json
-{
-  "listenAddress": "0.0.0.0",
-  "listenPort": 8088,
-  "stackLimitIncrease": false,
-  "moveMergeEnabled": false,
-  "opEnabled": false,
-  "autoSellEnabled": false,
-  "simpleModeEnabled": false,
-  "pushAllEnabled": false,
-  "apiEnabled": true,
-  "debugLogEnabled": false
-}
-```
+native 未就绪时返回 HTTP 503 `{"ok":false,"error_code":3}`。
 
-#### 设置配置
+#### 提交单 key feature / choice / config / desired
 
 `POST /api/config/set`
 
-**用途**：设置模块配置。**只更新请求体中出现的字段**，未出现的字段保持不变；校验失败时整体不生效。
-成功时立即持久化到 config.json。
-
-**请求格式**：
+**请求格式**：请求体必须恰为四个成员（不接受 body 自报 caller）：
 
 ```json
-{ "listenAddress": "0.0.0.0", "listenPort": 9090, "stackLimitIncrease": true, "moveMergeEnabled": false, "debugLogEnabled": true }
+{ "plugin_id": "autosell", "field": "feature", "key": "autosell.auto_sell", "value": true }
 ```
+
+- `field="feature"`：`value` 必须为布尔，写入 `features[key]`；`key` 必须是该 plugin 已注册的 feature id，否则 404。成功持久化时，在同一 Store 事务内根据全部更新后注册 feature 值派生该 plugin 的 `enable`（任一 true→true，全 false→false；entry 也计入，重复值提交也重算）。
+- `field="choice"`：只用于已注册的 choice feature；`value` 为注册的稳定 option value 字符串，`null` 或空字符串表示关闭。未知 feature 返回 404，未注册 option 或把 choice 当普通 boolean `field="feature"` 提交返回 400。成功时单一 Store 事务同时更新/删除 `selections[key]`、写 `features[key]` bool 投影并重算 `enable`；关闭时删除 selection 键。choice 变化即使 bool 保持 true，也以一个 revision 经现有 runtime effects/reconciler 管道应用。
+- `field="config"`：`value` 为任意合法 JSON，写入 `config[key]`；`key` 为非空字符串。
+- `field="desired"` 且 `key="enable"`：`value` 必须为布尔，写入 desired `enable`。
+- 其他 `field`/类型组合（如 `field="enable"`）一律 400。
+
+成功返回 admission receipt（见下）；feature 或 choice 值及其派生 `enable` 在 Host 单一 Store transaction 中完成 durable write 与内存提交，不形成第二套 writer。任一持久化失败时事务不提交 selection、feature bool、`enable`、revision 或运行时 effects。
+
+#### 提交 desired lifecycle
+
+`POST /api/op/features/lifecycle`
+
+**请求格式**：恰为两个成员：
+
+```json
+{ "id": "world_teleport", "action": "activate" }
+```
+
+`action` 为 `activate`（写 `enable=true`）或 `deactivate`（写 `enable=false`）；其他值或成员数不符为 400。
+
+#### 回取异步 receipt
+
+`GET /api/config/receipt/{id}`
+
+`{id}` 为 `request_id`（十进制 uint64）。成功返回：
+
+```json
+{ "ok": true, "request_id": 12, "revision": 7, "admission": "admitted",
+  "persistence": "pending", "actual": "not_submitted", "error_code": 0 }
+```
+
+- `admission`：`admitted`（请求已入队）；若 admission 阶段即失败，`POST` 直接返回错误状态与错误体，不产生 receipt。
+- `persistence`：`pending`（worker 未完成）→ `persisted` 或 `failed`；`failed` 时 `error_code` 为 Store 错误码，且不会产生新的 Host revision（`revision` 保留当前已提交 revision）。
+- `actual`：仅表达命令提交态 `not_submitted`/`pending`，不表示 lifecycle 实际运行结果；实际状态查 `/api/system/features`（§7.7）。
+- `id` 非法（非十进制）→ 400；未知/已淘汰 receipt → 404。
+
+请求写入是异步的：`POST` 立即返回 receipt，需轮询 receipt 直到 `persistence` 不再是 `pending`。
+
+#### 错误响应
+
+所有四个端点共用错误映射：请求体/字段非法或未注册 plugin → 400，未注册 feature 或 receipt 不存在 → 404，native 未就绪 → 503，队列已满 → 429，内部失败 → 500；错误体为：
+
+```json
+{ "ok": false, "error_code": 1 }
+```
+
+`error_code` 取 `kQolErr*` 数值（`1` invalid argument、`2` not found、`3` not ready、`9` blocked、`10` busy）。成功响应体不含 `plugin_id`/`key`/`value` 回显，只有 receipt 对象。
+
+durable persistence 确认后的 runtime projection/effects 按 Host revision 串行处理。游戏资源 gate 仍经主线程命令；API listener 与 watermark 类效果由 revision 通知处理。`core.api.features.api.enabled=false` 会停止 HTTP listener，但不写入 `module.security.features.op.enabled`；恢复 API service 也不会开启 OP。`module.security.features.op.enabled=false` 时，dispatcher 对声明 OP 的 handler 独立 fail-closed 并返回 403；未声明 OP 的路由不受该值影响。上述 feature 写入不关闭游戏内 settings UI 的配置写入/恢复通道，路由 owner 的 lease 与操作自身校验保持不变。hard-I/O degraded 遵循 Host Store 默认读写语义并由状态/错误字段诊断；`ReadyUnpersisted` 表示当前进程可用但 durable persistence 尚未确认，不是 hard failure，也不能描述为已持久提交。
+
+### 7.7a 路由登记诊断 routes（P5）
+
+`GET /api/system/routes`
+
+**用途**：获取 native `core.api` 登记的冻结路由、API owner、OP 门控和 route lease 标记，
+并返回登记表自检结果。该端点只读取登记数据，不执行任何 Kotlin controller 业务。
+
+### 7.7 功能诊断 features（v0.8.0 起；P2 起追加 resources/requires/provides/degraded）
+
+`GET /api/system/features`
+
+**用途**：获取原生功能（feature）状态汇总，用于最小诊断。
 
 **返回格式**：
-
 ```json
-{
-  "ok": true,
-  "restart": true,
-  "listenAddress": "0.0.0.0",
-  "listenPort": 9090,
-  "stackLimitIncrease": true,
-  "moveMergeEnabled": false,
-  "opEnabled": false,
-  "autoSellEnabled": false,
-  "simpleModeEnabled": false,
-  "pushAllEnabled": false,
-  "apiEnabled": true,
-  "debugLogEnabled": true
-}
+{ "ok": true, "features": [
+  { "id": "core", "state": "enabled", "enabled": true, "error": null, "version": "0.1.0",
+    "resource_count": 0, "resources": [], "requires": [], "provides": [], "degraded": false },
+  { "id": "world_tuning", "state": "enabled", "enabled": true, "error": null, "version": "0.1.0",
+    "resource_count": 0,
+    "resources": [ { "id": "hook:CHAR_AddDamage", "state": "live" },
+                   { "id": "hook:CHAR_UpdateAttrFromMonster", "state": "live" } ],
+    "requires": [ { "id": "character.facts", "major": 1, "minor": 0 } ],
+    "provides": [], "degraded": false }
+] }
 ```
 
-**注意**：
-- `listenAddress` 非空必填；`listenPort` 合法范围 1-65535，越界返回 `{"ok":false,"error":"listenPort must be 1-65535"}`；body 非法返回 `{"error":"bad request"}`；持久化失败返回 `{"ok":false,"error":"config save failed"}`（内存不提交）
-- `restart` 字段：`listenAddress`/`listenPort` 有变化时为 `true`（并自动重启 HTTP 服务生效，延迟约 500ms 先让本响应送达）；仅改 `stackLimitIncrease`/`moveMergeEnabled`/`opEnabled`/`autoSellEnabled`/`apiEnabled`/`debugLogEnabled`/`simpleModeEnabled`/`pushAllEnabled` 时 `restart=false`
-- `apiEnabled=false` 时延迟约 500ms 停止 HTTP 服务（先让本响应送达），此后 `GET/POST /api/config/*` 不可达；重新开启须经游戏内设置页（HTTP 已不可达）
-- 重启后服务按新地址/端口监听，**旧端口的连接会断开**——改端口后请用新端口访问
-- **端口被占用（v0.5.22 修复）**：新端口绑定失败时自动**回退默认端口 8088** 重建服务，并同步把配置写回默认端口（config.json 同步修正，重启进程不会再次失败）；回退日志见 `inotia4-export.log`。`listenAddress` 非法时回退通配绑定（0.0.0.0，端口用配置值）
+**字段说明**：
+- `state`：状态机英文枚举名（`registered`/`resolving`/`blocked`/`unsupported`/`invalid`/`installed_disabled`/`enabled`/`deactivating`/`inactive`/`failed`）。
+- `enabled`：宿主按门禁判定的运行时启用态；开关关闭（含资源已装但门禁关）时为 `false`。
+- `error`：失败/阻断的静态错误文本，无错误为 `null`（资源安装失败时含失败资源 id）。
+- `resource_count`：infra 状态登记表计数（P2 恒 `0`）；资源明细以 `resources[]` 为准。
+- `resources`：该插件 `owner` 的资源声明明细，`state` 取资源登记表占用状态（`free`/`disabled`/`live`/`tombstone`）。
+- `requires` / `provides`：描述符声明的能力需求/提供，仅输出 `{id, major, minor}`（接口指针不外泄）。
+- 当前 native provider 例：`attribute_quality` 声明提供 `attribute.quality` 2.0、required `item.facts` 3.6；此处只反映 descriptor 版本声明，不表示能力当前可用或暴露接口指针。原生接口见 [`attribute_quality` 插件参考](plugins/attribute_quality.md)。
+- `degraded`：正交健康标记（非生命周期态，§3.2）；`optional_requires` 缺失/可选依赖失效时置 `true`，插件继续工作（通常 `state` 仍为 `enabled`）。
+
+**注意**：响应体由 native `nativeFeatureStatusJson()` 原样透传，Kotlin 侧不做字段加工；native 未就绪经 ControllerGuard 返回 503（`{"ok":false,"error":"not ready"}`）。
+---
+
+### 7.8 资源诊断 resources（v0.8.0 起，P3 落地）
+
+`GET /api/system/resources`
+
+**用途**：资源登记表全量导出，用于诊断资源占用/在途/隔离状态（ARCHITECTURE.md §9.1 P3）。
+
+**返回格式**：
+```json
+{ "ok": true, "resources": [
+  { "id": "hook:CHAR_AddDamage", "owner": "world_tuning", "mechanism": "entry_hook",
+    "policy": "private", "state": "live", "in_flight": 0, "isolated": false },
+  { "id": "hook:CHAR_UpdateAttrFromMonster", "owner": "world_tuning", "mechanism": "entry_hook",
+    "policy": "private", "state": "live", "in_flight": 0, "isolated": false }
+] }
+```
+
+**字段说明**：
+- `owner`：资源所有者插件 id（共享资源为资源层 owner）。
+- `mechanism`：`entry_hook`/`call_patch`/`ptr_slot`/`ownership`。
+- `policy`：`private`/`shared`。
+- `state`：占用状态 `free`/`disabled`/`live`/`tombstone`（`disabled` = 已装但门禁关闭的空转透传）。
+- `in_flight`：该资源当前在途回调数（跨帧等待归零的依据）。
+- `isolated`：进程级隔离标记；`true` 表示禁止重试直到进程重启（物理归还未完成或声明不可还原）。
+
+**注意**：响应体由 native `nativeSystemResourcesJson()` 原样透传，Kotlin 侧不做字段加工；native 未就绪经 ControllerGuard 返回 503（`{"ok":false,"error":"not ready"}`）。
+---
+
+### 7.9 命令票据 tickets（v0.8.0 P3 起；阶段 5 扩展为结果回取端点）
+
+`GET /api/system/tickets/{id}`
+
+**用途**：查询命令票据状态，并回取该命令的**操作结果**。所有返回票据的写端点（见 §7.10）由客户端轮询本端点取得该端点定义的 result；部分 owner 已改为操作差量，不一定与迁移前完整 state 响应相同（ARCHITECTURE.md §8.1）。
+
+**返回格式**：
+```json
+{ "ok": true, "ticket": 7, "state": "done", "result": {"ok":true,"player":{"leader_slot":1}}, "result_retained": true }
+```
+
+**字段说明**：
+- `ticket`：路径参数回显（`id` 为十进制票据号）。
+- `state`：`pending`（排队/执行中）/ `done`（成功）/ `failed`（命令执行失败）/ `cancelled`（已取消）/ `unknown`（票据不存在）/ `expired`（状态记录已被有界窗口淘汰，结果不可判定）。**`unknown`/`expired` 与 `failed` 语义不同，调用方必须区分**。
+- `result`：正常保留时为该写操作定义的完整结果 JSON；单结果超过上限时，返回合成摘要 `{"ok":true,"truncated":true,"reason":"result_limit_exceeded"}`（操作成功）或 `{"ok":false,"truncated":true,"reason":"result_limit_exceeded"}`（操作失败）。不返回被截断的原始前缀。若无结果或结果已被预算淘汰，则不出现该字段。
+- `result_retained`：`true` 表示 owner handler 生成的完整 result JSON 被票据保留；`false` 表示无结果、原 result 超单结果上限（此时摘要仍可能作为 `result` 返回）或原 result 已被总预算淘汰。若超限摘要本身随后被总预算淘汰，`result` 也不出现。
+
+**结果保留为明确尽力语义**（不承诺必然可取回）：单结果上限 **16 KiB（16,384 字节）**；保留结果总预算 **512 KiB（524,288 字节）**；终态票据状态窗口最近 1024 条。单结果超限时，票据仍按操作执行结果结算（成功 `done`、失败 `failed`），原始结果被丢弃并以对应 `ok` 值的完整合成摘要替代；不会返回截断前缀。总预算超限时从最旧开始淘汰结果文本但保留票据状态。**单结果上限待逐路由真机量测后另批定值**。客户端应在命令终态后及时轮询。
+
+**注意**：`id` 为 0 → `{"ok":false,"error":"invalid ticket"}`。响应体由 native `nativeTicketStateJson()` 原样透传，Kotlin 侧不做字段加工；native 未就绪经 ControllerGuard 返回 503（`{"ok":false,"error":"not ready"}`）。
+
+### 7.10 写端点的票据契约（阶段 5）
+
+带游戏内存写入的写端点按 ARCHITECTURE.md §7.1 迁移为 owner 命令：请求立即返回票据，操作在主线程执行，当前 result schema 经 §7.9 回取；是否返回完整 state 以本节实际形状为准。
+
+**响应**：
+```json
+{ "ok": true, "ticket": 12 }
+```
+
+**受影响端点**：逐条迁移时在本节登记（迁移前保持原同步响应；迁移后列出，附参数校验错误码不变说明）。已迁移：
+- `POST /api/op/features/lifecycle`（P3 起即为票据语义）。
+- `/api/debug/extension_bag/` 下 7 条 POST 调试端点（`enter_view`、`exit_view`、`unequip`、`select_bag`、`click_item`、`equip`、`item`；阶段 5 批 5-2 回补为主线程 owner command）。
+- 世界写 5 条（`routes.inc` 中 owner `core.world`）：`/api/world/movement/` 下 `move_to`、`walk_dir`、`stop_move`、`interact_with` 四个 POST，以及 `/api/op/movement/teleport`（op 门控，403 信封同旧）。字段范围校验仍在投递前执行且文本不变（`x/y required`、`direction 0-3 required`、`map_id/x/y required`；非法 body → 400 `bad request`）。`move_to`/`walk_dir`/`interact_with` 成功 result 为 `{"ok":true,"player":{"map_id":N,"x":N,"y":N}}`；这是命令结束时读取的当前位置（像素坐标右移 4 位转 tile），不承诺已到达目标。失败保留原错误体；`stop_move` 成功 result 为 `{"ok":true}`，teleport 保留原始 op JSON。`teleport` 为真实切图（owner 命令在逻辑相位内联执行）。
+- 存档备份写 3 条（owner `save_backup`）：`POST /api/system/backup/export`、`POST /api/system/backup/import`、`POST /api/system/backup/delete`。参数校验不变（`bad slot`/`bad checksum` → 400）；native 立即返回 `{"ok":true,"ticket":N}`，原 `BackupMeta` 响应经 §7.9 `result` 回取。Kotlin `SaveController` 内部轮询票据并保持对外同步 JSON 形状；`GET /api/system/backup/list` 仍同步。
+- `POST /api/system/save`、`POST /api/system/enter_slot`、`POST /api/system/create_slot`（owner `core.save`）。`enter_slot`/`create_slot` 为转场类写：结果在**游戏世界态提交后**结算；结算前票据保持 `pending`（最长约 2s，超限以 `result:{"ok":false,"error":"settlement timeout"}` 失败，不提前报告 done）；`save` 不涉转场，当帧结算。参数校验不变（`slot` ∉ [0,2] → 400 `slot required (0-2)`；非法/空 body → 400 `bad request`）。成功 result 分别为 `{"ok":true,"slot":S,"sidecar":"ensured"}`、`{"ok":true,"slot":S,"entered":true}`、`{"ok":true,"slot":S,"created":true}`；不返回 Player 快照。失败仍为原错误体，包括 sidecar 错误。
+- `POST /api/quest/quit_quest`（阶段 5 批 5-3；owner `quest`）。缺/负 `quest_id` → 400 `questId required`（投递前校验，与迁移前一致）；成功 `{"ok":true,"ticket":N}`，`result` 为 `{"ok":true,"state":<Player>}`；无任务 → 票据 `state=failed` 且 `result={"ok":false,"error":"quest not found"}`。
+- 对话写 2 条（阶段 5 批 5-7a 迁移；批 5-8a 起 owner 为 `core.ui_state`）：`/api/ui/dialog/select`、`/api/ui/start_interact`。`dialog/select` 缺 `action` 且 `index<0` → 400 `action or index required`（投递前校验，与迁移前一致）；非法 body → 400 `bad request`。原响应为**原始 op JSON**（如成功 `{"ok":true,"result":"dialog_shown"}`、无对话 `{"ok":false,"error":"no dialog"}`），经票据 `result` 回取。**同意页（Java 窗口）分支仍留在 Kotlin 传输层**（`UiActivityTracker` 平台检测，JVM-only）：该分支不经票据，直接返回 `{"ok":true,"result":"close_dispatched"}` 或 `agreement window unavailable` / `no such option in agreement`。
+- 面板写 2 条（阶段 5 批 5-8a 并入 `core.ui_state`）：`/api/ui/open_panel`、`/api/ui/close_panel`。`open_panel` 缺 `panel` → 400 `panel required`（投递前校验，与迁移前一致）。原响应为 `{"ok":true,"state":<gamestate JSON>}`（同迁移前 `attachUi` 键序），经票据 `result` 回取；失败为原 op 错误体。**注意**：以 API 打开游戏面板会使游戏帧计数暂停，同进程后续命令（含 `close_panel`）要等面板关闭或帧恢复后才能执行。
+- 回主菜单 1 条（阶段 5 ADR 0001 第 4 批迁入 `core.ui_state`；路径与 POST 方法不变）：`/api/ui/go_main_menu`。无 body；原响应为 `{"ok":true,"state":<Player 模型>}`（失败为原错误体，如 `not in game`），经票据 `result` 回取。命令在主线程**逻辑帧内联**执行状态机切换（同 `data_op_main_menu` 的面板守卫与扩展背包清理），以保证不阻塞命令排空。`core.save` 继续负责进档/建档。
+
+**物品与角色写端点（阶段 5 P4b；33 条票据化路由 + 1 条保留 501 占位）**：`routes.inc` 中 item 13 条、character 20 条，33 是 ticketed endpoint 数，并非结果 schema 改动数量。请求校验仍在投递前执行，错误码/错误体与原路由保持一致；校验通过后 POST 返回 §7.10 票据 ACK，终态通过 §7.9 回取。owner 为 `core.item` / `core.character`；OP 路由仍受 `op_gated` 403 门禁。core.item 的 JSON 数值 token 使用整数文法：小数/指数形式或超出 int32 的数字使整个 body 解析失败（400 `bad request`）；部分数值字段仍兼容数字字符串并沿用既有窄化。core.character 的数值 body 字段保留 Android `JSONObject` 转换语义，合法小数/指数及可转换数字字符串可经 Double 向零窄化；不要把 core.item 的词法限制套用到 character。两 owner 的数字 path 参数只接受最多 10 位 ASCII 十进制数字且不得超过 INT32_MAX；字段业务范围另行校验。
+
+> `core.item` 的 `slots`/`inventory` 差量来自操作前后快照。当前实现忽略操作前快照读取失败，仍会继续操作；若事后快照成功，此时差量比较以空快照为基线，数组可能包含更多已占用槽，而不仅是实际变化槽。操作后快照不可读时，result 返回 `inventory state unavailable` 错误。
+
+- `POST /api/item/inventory/use_item`（`core.item`，`kUseItem`）：缺失/负 `bag` 或 `slot` → 400 `bag/slot required`；非法 JSON → 400 `bad request`。成功 result 顺序为 `ok`、可选 `gained:[{bag,slot,category,count}]`、`slots:[{bag,slot,item:<Item|null>},…]`、可选 `player:{hp?,mp?}`。`slots` 强制包括源槽和获得物品槽，并补充实际变化槽；`player` 只在主控血量/魔力确实变化时出现。
+- `POST /api/item/inventory/accept_dice`（`core.item`，`kAcceptDice`）：无 body 字段校验。成功 result 顺序为 `base`、`applied`、`delta`、`player:{main_stats:[{attr,value},…],status_point}`；主属性只列本次变化项，status_point 为操作后值；失败为原 op 错体。
+- `POST /api/item/inventory/reject_dice`（`core.item`，`kRejectDice`）：无 body 字段校验；result 保持原 op JSON（成功 `{"ok":true}`），不附状态。
+- `POST /api/item/inventory/discard_item`（`core.item`，`kDiscardItem`）：缺失/负 `bag` 或 `slot` → 400 `bag/slot required`；非法 JSON → 400 `bad request`。成功 result 为 `{"ok":true,"slots":[{"bag":B,"slot":S,"item":null},…]}`，包括源槽与其他实际变化槽。
+- `POST /api/item/inventory/sell_item`（`core.item`，`kSellItem`）：缺失/负 `bag` 或 `slot` → 400 `bag/slot required`；非法 JSON → 400 `bad request`。成功 result 顺序为 `ok`、`price`、`slots:[{bag,slot,item:<Item|null>},…]`、`money`；失败为原 op 错体。
+- `POST /api/item/inventory/move_item`（`core.inventory`，`kMoveItem`）：字段为 `bag`、`slot`、`count`、`to_bag`、`to_slot`；范围校验失败 → 400 `bag/slot/count/to_bag/to_slot required (bag 0-10, 5=task bag excluded for extension)`；非法 JSON → 400 `bad request`。原版与扩展袋成功均返回 `{"ok":true,"slots":[{"bag":B,"slot":S,"item":<Item|null>},…]}`，包含请求源/有效目标槽及其他实际变化槽，重复槽去重；不附完整 Inventory/扩展状态。扩展袋失败仍透传原错误 JSON。
+- `POST /api/item/inventory/{role}/put_jewel`（`core.item`，`kPutJewel`）：缺失/负 `bag`、`slot` 或 `equip_slot` → 400 `bag/slot/equip_slot required`；非法 JSON → 400 `bad request`。成功 result 为 `{"ok":true,"equipment":{"role":R,"slot":E,"item":<Item|null>},"inventory":[{bag,slot,item:<Item|null>},…]}`。
+- `POST /api/item/inventory/{role}/enchant`（`core.item`，`kEnchant`）：缺失/负 `bag`、`slot` 或 `equip_slot` → 400 `bag/slot/equip_slot required`；非法 JSON → 400 `bad request`。成功 result 仅含 `equipment:{role,slot,item:<Item|null>}`，不附完整 Party 或背包。
+- `POST /api/item/inventory/{role}/equip_item`（`core.item`，`kEquipItem`）：`category>=0` 优先；否则须有非负 `bag` 与 `slot`，校验失败 → 400 `bag+slot or category required`；非法 JSON → 400 `bad request`。成功 result 为 `{"ok":true,"equipment":{"role":R,"slot":E,"item":<Item|null>},"inventory":[{bag,slot,item:<Item|null>},…]}`；装备槽由操作前后状态比较确定。category 找不到对应物品时票据为 `failed`，result=`{"ok":false,"error":"item not found"}`。
+- `POST /api/item/inventory/{role}/unequip_item`（`core.item`，`kUnequipItem`）：负/缺失 `slot` → 400 `slot required`；非法 JSON → 400 `bad request`。成功 result 为 `{"ok":true,"equipment":{"role":R,"slot":E,"item":null},"inventory":[{bag,slot,item:<Item|null>},…]}`。
+- `POST /api/item/shop/buy_item`（`core.item`，`kShopBuy`）：负/缺失 `slot` → 400 `slot required`；非法 JSON → 400 `bad request`。成功 result 形状/键序为 `{"ok":true,"price":N,"money":N,"slots":[{bag,slot,item:<Item|null>},…]}`。
+- `POST /api/op/inventory/add`（`core.item`，`kAddItem`）：`category` 必须非负，否则 400 `category required`；非法 JSON → 400 `bad request`。请求字段为 `category`、`count`（默认 1）、`socket`（默认 0）、`enhanceRemaining`（默认 0）、`rarity`（默认 -1）；其余可选值由 native 钳制。result 保持 `{"ok":true}`。
+- `POST /api/op/inventory/money`（`core.inventory`，`kSetMoney`）：负/缺失 `money` → 400 `money required`；非法 JSON → 400 `bad request`。result 保持 `{"ok":true}`。
+- `POST /api/character/grow/add_skill`（`core.character`，`kLearnAction`）：负/缺失 `action_id` → 400 `action_id required`；非法 JSON → 400 `bad request`。技能状态可读时 result 为 `{"ok":true,"skills":[{"action_id":A,"level":N}],"skill_points":N}`；未能读回时退化为 `{"ok":true}`。
+- `POST /api/character/grow/{role}/add_stat`（`core.character`，`kAddStat`）：`attrs` 非 object/缺失 → 400 `attrs required (object: strength/agility/vitality/intelligence/spirit 或 0-4 → 数量)`；未知 key → 400 `bad attr: $k (0-4 或 strength/agility/vitality/intelligence/spirit)`；非正 value → 400 `bad value for $k (must be positive)`；非整数 value（含小数部分，如 `1.5`）→ 400 `bad value for $k (must be integer)`；空对象 → 400 `attrs empty`；非法 JSON → 400 `bad request`。剩余能力点不足**不属 HTTP 层校验**：请求照常受理为 `{"ok":true,"ticket":N}`，终态 `failed` 且 result 为 `{"ok":false,"error":"no status point"}`，不产生属性变更。成功 result 保留 `applied:[{"attr":idx},…]`，且角色状态前后快照可读时附 `role:{role,main_stats:[{"attr":idx,"value":N},…],status_point:N}`。逐点首次失败即停止，ticket `failed` 且 result 保留首次原错误体；已执行点不回滚。
+- `POST /api/character/grow/reset_stat`（`core.character`，`kStatReset`）：无 body 字段校验；成功且状态可读时 result 为 `{"ok":true,"role":{"role":0,"main_stats":[N,N,N,N,N],"status_point":N}}`；读面不可用时为 `{"ok":true}`。
+- `POST /api/character/grow/reset_skill`（`core.character`，`kSkillReset`）：无 body 字段校验；成功且技能读面可用时 result 为 `{"ok":true,"skill_points":N}`（仅剩余技能点，重置后其余字段为默认不回传）；读面不可用时为 `{"ok":true}`。
+- `POST /api/character/combat/{role}/set_auto_attack`（`core.character`，`kSetAutoAttack`）：缺少 `on` → 400 `on required`；非法 JSON → 400 `bad request`。成功 result 为 `{"ok":true,"role":{"role":R,"auto_attack":B}}`，`B` 是请求值，不是读回状态。
+- `POST /api/character/combat/switch_player`（`core.character`，`kSwitchPlayer`）：`slot` 不在 0..2 → 400 `slot required (0-2)`；非法 JSON → 400 `bad request`。主控状态可读时 result 为 `{"ok":true,"player":{"leader_slot":R}}`；读面不可用时退化为 `{"ok":true}`。
+- `POST /api/character/combat/{role}/cast_skill`（`core.character`，`kCastSkill`）：负/缺失 `action_id` → 400 `action_id required`；非法 JSON → 400 `bad request`。技能状态可读时 result 为 `{"ok":true,"role":{"role":R,"active_skill_id":N}}`；读面不可用时为 `{"ok":true}`。
+- `POST /api/character/combat/{role}/attack_target`（`core.character`，`kAttackTarget`）：负/缺失 `target_slot` → 400 `target_slot required`；非法 JSON → 400 `bad request`。仅读面确实能确认目标与战斗状态时 result 附 `role:{role,target_slot,combat:true}`；当前读面不提供这两项，实际 fallback 为 `{"ok":true}`，只表示操作已受理。
+- `POST /api/character/combat/{role}/stop_combat`（`core.character`，`kStopCombat`）：无 body 字段校验；成功 result 为 `{"ok":true,"role":{"role":R,"combat":false}}`。
+- `POST /api/op/character/{role}/status-point`（`core.character`，`kSetStatusPoint`）：负/缺失 `points` → 400 `points required`；非法 JSON → 400 `bad request`。成功 result 保持 `{"ok":true}`。
+- `POST /api/op/character/{role}/hp`（`core.character`，`kSetHp`）：负/缺失 `hp` → 400 `hp required`；非法 JSON → 400 `bad request`。成功 result 保持 `{"ok":true}`。
+- `POST /api/op/character/{role}/mp`（`core.character`，`kSetMp`）：负/缺失 `mp` → 400 `mp required`；非法 JSON → 400 `bad request`。成功 result 保持 `{"ok":true}`。
+- `POST /api/op/character/{role}/experience`（`core.character`，`kSetExperience`）：负/缺失 `exp` → 400 `exp required`；非法 JSON → 400 `bad request`。成功 result 保持 `{"ok":true}`。
+- `POST /api/op/character/{role}/level`（`core.character`，`kSetLevel`）：缺 `level` → 400 `level required`；`force=false` 且等级不在 1..105 → 400 `level 1-105 (game max); force=true 跳过限制`；非法 JSON → 400 `bad request`。成功 result 保持 `{"ok":true}`。
+- `POST /api/op/character/{role}/set_attr`（`core.character`，`kSetAttr`）：`stats` 非 object/缺失 → 400 `stats required (object: 属性名/索引 → 值)`；未知 key → 400 `bad attr: $k (0-4 或 strength/agility/vitality/intelligence/spirit)`；value 不在 0..255 → 400 `bad value for $k (0-255)`；非整数 value（含小数部分，如 `1.5`）→ 400 `bad value for $k (must be integer)`；空对象 → 400 `stats empty`；非法 JSON → 400 `bad request`。成功 result 保持 `{"ok":true,"set":[{"attr":idx,"value":value},…]}`；首项失败即停止，ticket `failed` 且 result 包装为 `{"ok":false,"error":"set attr <idx> failed"}`，已执行项不回滚。
+- `POST /api/op/party/swap`（`core.character`，`kPartySwap`）：缺 `a` / `b` 或任一为负数 → 400 `a and b required`；非法 JSON → 400 `bad request`。成功 result 保持 `{"ok":true}`。
+- `POST /api/character/party/include`（`core.character`，`kPartyInclude`）：负/缺失 `mercenary_slot` → 400 `mercenary_slot required`；非法 JSON → 400 `bad request`。成功时 result 尽力为 `{"ok":true,"party":[{"slot":S,"member":<Role|null>},…]}`，只列变化槽；快照不可用时退化为 `{"ok":true}`。失败原 op 错体。
+- `POST /api/character/party/exclude`（`core.character`，`kPartyExclude`）：负/缺失 `mercenary_slot` → 400 `mercenary_slot required`；非法 JSON → 400 `bad request`。成功时 result 尽力返回实际变化的 party 槽差量；快照不可用时退化为 `{"ok":true}`。失败原 op 错体。
+- `POST /api/character/party/discharge`（`core.character`，`kPartyDischarge`）：负/缺失 `mercenary_slot` → 400 `mercenary_slot required`；非法 JSON → 400 `bad request`。成功时 result 尽力返回实际变化的 party 槽差量；快照不可用时退化为 `{"ok":true}`。失败原 op 错体。
+- `POST /api/character/party/withdraw`（`core.character`，`kPartyWithdraw`）：负/缺失 `mercenary_slot` 或 `equip_slot` → 400 `mercenarySlot/equip_slot required`；非法 JSON → 400 `bad request`。成功 result 总含目标佣兵装备槽清空摘要；item.state 前后快照可读时另含 `inventory` 槽差量，否则省略 `inventory`。失败原 op 错体。
+
+**未实现占位路由**（阶段 5 批 5-6e 将 owner 归位到领域插件；业务仍未实现，调用方不应依赖）：
+- `POST /api/op/quest/accept`、`POST /api/op/quest/complete`（owner `core.quest`）→ 501 `not implemented`
+- `POST /api/op/character/{role}/skill-point`、`POST /api/op/character/{role}/skill-level`（owner `core.character`）→ 501
+- `POST /api/op/combat/{role}/heal`、`POST /api/op/combat/{role}/rest`、`POST /api/op/combat/{role}/revive`、`POST /api/op/combat/{role}/hate`（owner `core.character`）→ 501
+- `POST /api/op/inventory/set-slot`（owner `core.inventory`）、`POST /api/op/inventory/set-equip`（owner `core.item`）→ 501
+- `POST /api/character/combat/{role}/set_skill_usage`（临时 owner `core.feature`）→ HTTP 501 `not implemented`；不解析请求体、不投递命令。`core.feature` 仅用于开发迁移期，端点实现并迁入领域 owner 后移除。
+- `POST /api/op/craft/mix-direct`（owner `core.craft`）→ 501
+- `GET /api/quest/{id}`（owner `core.quest`）→ 404 `not found`
+
+**处理器仍在 Kotlin 的路由**（owner 已归位、仅表示领域归属；实现仍为 Kotlin 传输适配，未迁 native owner）：
+- `GET /api/system/events`（owner `core.system`）：请求驱动有状态 diff（nativeGetEventsJson）。
+- `GET /api/ui/state`、`GET /api/ui/state/table` 的路由 owner 为 `core.ui_state`，由 Kotlin `NativeHttpQuery` 透传至 native `core.ui_state` query handlers。`android_agreement` 由 Kotlin `UiActivityTracker` 优先检测并返回，不进入 native screen；自定义 panel/dialog 在统一状态中分别映射为 `module_panel_<panel_id>` / `module_dialog_<type_id>` 并标注 `source=2`。
+
+**调用方迁移指引**：轮询 `GET /api/system/tickets/{id}`，在 `state` 非 `pending` 后按 §7.10 解析对应操作的 `result`。若 `result_retained=false` 且 `result.truncated=true`，这是单结果超限摘要，`state` 仍反映操作成功/失败；若 `result` 字段缺失，则没有可回取结果（无结果命令或结果文本已被总预算淘汰），不可把两者混为一类。
 ---
 
 ## 八、op（越权操作）— POST /api/op/*
 
-游戏内做不到的操作（改数据/强行操作）。**OP 全局开关（v0.5.47）**：默认关闭；`config.json` 中 `opEnabled=true` 或 `POST /api/config/set {"opEnabled":true}` 开启后，§8.1 各端点才可用；开关关闭时所有 OP 端点返回 **403 + `{"ok":false,"error":"op disabled"}`**。门禁在 OpApiService 统一入口（controller 无法绕过）。OP 端点与合法操作物理隔离。
+游戏内做不到的操作（改数据/强行操作）。**OP 授权门禁**：由 `module.security.features.op.enabled` 控制，Hidden、默认关闭；关闭时已进入 Host dispatcher 且标记 OP 的 handler 返回 **403 + `{"ok":false,"error":"op disabled"}`**。HTTP listener 的启停由 `core.api.features.api.enabled` 独立控制；listener 关闭时不会接收 HTTP 请求，也不会修改 OP 值。开启 API 不等于授权 OP，关闭 API 也不级联关闭或重置 OP。门禁由 dispatcher 根据 endpoint 元数据执行，Controller 校验仍在投递前完成；授权不会绕过路由 lease、owner 权限或操作自身校验。OP 端点与合法操作物理隔离。
 
 ### 8.1 已实现
 
@@ -1713,7 +1973,7 @@
 
 **请求格式**：`{ "hp": 8000 }`
 
-**返回格式**：`{"ok":true,"state":<Party 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步结果 `{"ok":true}` 经 §7.9 回取。
 
 **注意**：截断到 0..max_hp。
 
@@ -1723,7 +1983,7 @@
 
 **请求格式**：`{ "mp": 200 }`
 
-**返回格式**：`{"ok":true,"state":<Party 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步结果 `{"ok":true}` 经 §7.9 回取。
 
 **注意**：截断到 0..max_mp。
 
@@ -1733,7 +1993,7 @@
 
 **请求格式**：`{ "exp": 12000 }`
 
-**返回格式**：`{"ok":true,"state":<Party 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步结果 `{"ok":true}` 经 §7.9 回取。
 
 **注意**：CHAR_SetExperience 直接写经验，不触发升级结算。
 
@@ -1743,7 +2003,7 @@
 
 **请求格式**：`{ "level": 30 }` 或 `{ "level": 200, "force": true }`
 
-**返回格式**：`{"ok":true,"state":<Party 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步结果 `{"ok":true}` 经 §7.9 回取。
 
 **注意**：CHAR_SetLevel 完整升级结算（写等级+重算 nextExp+InitializeFromLevel+升级加点+回满血蓝）；降级→`level down not allowed`。
 - **默认校验 1-105**（游戏等级上限，EXP 表 105 级；超出报 `level 1-105`）
@@ -1755,7 +2015,9 @@
 
 **请求格式**：`{ "stats": { "strength": 10, "agility": 7 } }` 或 `{ "stats": { "0": 10, "3": 7 } }`（键可用主属性英文名 `strength`/`agility`/`vitality`/`intelligence`/`spirit` 或索引 0-4，**可只传部分**）
 
-**返回格式**：`{"ok":true,"set":[{"attr":1,"value":12},{"attr":4,"value":15}]}`
+**迁移前成功结果**：`{"ok":true,"set":[{"attr":1,"value":12},{"attr":4,"value":15}]}`
+
+**票据响应**（阶段 5 写面迁移）：HTTP 立即返回 `{"ok":true,"ticket":N}`；该 `set` 结果及失败包装体经 §7.9 回取，详见 §7.10。
 
 **注意**：v0.5.8 由 `/attr/{index}` 单值端点改版；CHAR_SetStatBase 直写基础属性（0..255，骰子同路径，持久化已验证）；总属性 = 基础+分配+加成+动态；非法键/越界值报 `bad attr`/`bad value`。
 
@@ -1765,9 +2027,9 @@
 
 **请求格式**：`{ "category": 1, "count": 5 }` 或 `{ "category": 1, "count": 1, "socket": 3, "enhanceRemaining": 5, "rarity": 4 }`
 
-**返回格式**：`{"ok":true,"state":<Inventory 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步结果 `{"ok":true}` 经 §7.9 回取。
 
-**注意**：ITEMSYSTEM_CreateItem + INVEN_SaveItem；`stackLimitIncrease=false` 时可堆叠上限 99，开启时上限 999；两种状态都使用固定 bit22-31 格式；背包满→`inventory full`。
+**注意**：ITEMSYSTEM_CreateItem + INVEN_SaveItem；`stack_limit.limit_999` feature 关闭时可堆叠上限 99，开启时上限 999；两种状态都使用固定 bit22-31 格式；背包满→`inventory full`。
 - `socket`/`enhanceRemaining` 可选（缺省 0；CreateItem 产物恒 0，缺省写 0 等价不写）：`socket`=`I_SOCKET` bits4-7 总孔数（0..15），`enhanceRemaining`=`I_ENCHANT` bits2-5 剩余强化次数（0..15，**写 0 会导致强化时提示耐久不足**），用于构造带孔位/强化耐久的测试装备以验证自动出售筛选；越界钳制到区间（负值按 0）。**已强化次数（bits6-10）/已镶嵌数（bits0-3）/强化 ID（bits11-15）由游戏维护，本接口不设置**（人工写入会造成游戏内不可能状态：实测已强化=2 且强化 ID=0 时 `ITEMSYSTEM_EnchantItem` 弹「与一般的强化卷轴不同」；首次强化游戏自写强化 ID、镶嵌自写已镶数）。只传 `{category,count}` 时行为不变。
 - `rarity` 可选（缺省 -1）：指定品质档位写入 `I_TYPE` bits2-5（raw grade，读改写保留 bits0-1 与 bits6-15 类别位），0..4 = 白/绿/蓝/黄/紫，用于验证自动出售「品质」筛选；-1 = 保留 CreateItem 的随机掷级。档位→raw 映射取 `{0,4,7,10,11}`，**待真机核实**，档位不符时调整 `game_inventory_basic.inc` 的 `kRarityRawForGroup` 表即可；越界钳制到 [-1,4]（负值视同 -1）。
 
@@ -1777,9 +2039,9 @@
 
 **请求格式**：`{ "money": 99999 }`（绝对值设置，非增量）
 
-**返回格式**：`{"ok":true,"state":<Inventory 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步结果 `{"ok":true}` 经 §7.9 回取。
 
-**注意**：nativeOpSetMoney 直写金币绝对值（v0.5.47 接线，D4）。
+**注意**：经 owner 命令直写金币绝对值；Kotlin 侧 JNI 直连入口已删除，统一走 HTTP dispatch。
 
 #### 设置属性点
 
@@ -1787,9 +2049,9 @@
 
 **请求格式**：`{ "points": 5 }`
 
-**返回格式**：`{"ok":true,"state":<Party 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步结果 `{"ok":true}` 经 §7.9 回取。
 
-**注意**：nativeOpSetStatusPoint 直写可分配属性点（v0.5.47 接线，D4）。
+**注意**：经 owner 命令直写可分配属性点；Kotlin 侧 JNI 直连入口已删除，统一走 HTTP dispatch。
 
 #### 队伍换位
 
@@ -1797,9 +2059,9 @@
 
 **请求格式**：`{ "a": 0, "b": 1 }`（两个队伍槽位）
 
-**返回格式**：`{"ok":true,"state":<Party 模型>}`
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原同步结果 `{"ok":true}` 经 §7.9 回取。
 
-**注意**：nativeOpPartySwap 交换两槽位角色（v0.5.47 接线，D4）。
+**注意**：经 owner 命令交换两槽位角色；Kotlin 侧 JNI 直连入口已删除，统一走 HTTP dispatch。
 
 #### 传送/切图
 
@@ -1809,12 +2071,31 @@
 
 **返回格式**：`{"ok":true,"state":<Map 模型>}`；落点被拒时 `{"ok":false,"error":"tile (x,y) out of map bounds WxH (force to override)"}` 或 `"tile (x,y) not walkable (force to override)"`。
 
-**注意**：nativeOpTeleportEx 传送至指定地图坐标（经 MAPCHANGE_Set + GAMESTATE_SetState(MAP_CHANGE) 官方切图状态机，在游戏主线程发起；旧的 fn_change_map 直调与 fn_set_position 同图瞬移因镜头体系断裂已废弃）。nativeOpTeleport（三参）保留，等价于 `force:false`。`map_id`/`x`/`y` 均必填。**坐标语义（全 API 坐标统一瓦片）**：`x`/`y` 为**瓦片索引**；`map_id>0` 传送至目标图，`map_id=0` 表示当前图（同图重入）。
+**注意**：经 owner 命令传送至指定地图坐标（经 MAPCHANGE_Set + GAMESTATE_SetState(MAP_CHANGE) 官方切图状态机，在游戏主线程发起；旧的 fn_change_map 直调与 fn_set_position 同图瞬移因镜头体系断裂已废弃）。`force` 缺省为 `false`。`map_id`/`x`/`y` 均必填。**坐标语义（全 API 坐标统一瓦片）**：`x`/`y` 为**瓦片索引**；`map_id>0` 传送至目标图，`map_id=0` 表示当前图（同图重入）。
 
 **落点校验**：默认校验落点，`force: true` 跳过。
 - 地界：目标图越出静态数据 `width`/`height` 直接拒绝（引擎不校验地界，越界会把角色放到地图数据之外，表现为角色不出现且不可操作，需重进档恢复）。
 - 阻挡：静态瓦片矩阵 `TILE_BLOCK_BIT`（bit3，与寻路同口径）置位时拒绝。
 - 目标图静态矩阵缺失时无法校验，放行。
+
+#### 功能生命周期
+
+`POST /api/op/features/lifecycle`
+
+**请求格式**：恰两个成员 `{ "id": "world_tuning", "action": "deactivate" }`；`action` 仅接受 `activate`/`deactivate`。
+
+**返回格式**：该端点由 Host 常驻 lifecycle 控制设施以 resident route 直接处理（见 §7.6），先于 HTTP registry 接受态与 op 门控执行。成功返回 receipt：
+
+```json
+{"ok":true,"request_id":N,"revision":R,"admission":"admitted","persistence":"pending","actual":"not_submitted","error_code":0}
+```
+
+按 `GET /api/config/receipt/{id}` 轮询至 `persistence` 为 `persisted`/`failed`。成员数/字段非法 → 400 `{"ok":false,"error_code":1}`；native 未就绪 → 503；队列满 → 429；内部失败 → 500。
+
+**注意**：`action` 写入 Host 独占的 desired `enable`（`activate`→`true`，`deactivate`→`false`），此显式写入不根据 feature 值归一化；实际 lifecycle 由 Host reconciler 在主线程帧步进推进，`api.enabled` 门禁不作用于该 resident 端点。**desired 与实际分离**：普通插件的 `want_run = enable && any(当前注册 feature=true)`；全 feature=false 时 `want_run=false` 并推进完整 deactivate，但只有一次 feature 值提交会同时派生 `enable=false`。启动 seed 与显式 lifecycle 写入可保留 `enable=true` 且全 feature=false 的状态，直到下一次 feature 提交。依赖级联/激活失败不改 `enable`。状态查询走 `GET /api/system/features`，资源占用/在途/隔离走 `GET /api/system/resources`。状态机（ARCHITECTURE.md §6.2）：
+
+- `deactivate`：`enabled`/`installed_disabled → deactivating`，调用插件自身 `deactivate` 清理、逆序还原资源（含物理 unhook、在途归零）→ `inactive`；资源状态可在 `GET /api/system/resources` 观察为 `free`；还原失败 → `failed` + 资源 `tombstone`/隔离；
+- `activate`：`inactive → resolving`，调用插件自身 `install` 初始化后按声明顺序安装资源 → 终态按 feature/desired 门禁 `enabled`/`installed_disabled`；安装失败 → `failed`（插件初始化失败不启动事务；安装中途失败逆序回滚已装子集）。
 
 ### 8.2 未实现
 
@@ -1837,6 +2118,8 @@
 ---
 
 ## 九、debug（调试）
+
+> **端点下线（D1-c0）**：ui-exp 实验端点 `/api/debug/exp/status`、`/api/debug/exp/1..5`、`/api/debug/exp/restore` 与其 native/Kotlin 实现、`custom`（商店返回键调试）面板面已整体删除，不再属于路由面。以下仅列当前有效路由。
 
 `GET /api/debug/ui`
 
@@ -1901,39 +2184,115 @@
 
 ---
 
-#### 扩展背包调试端点（v0.6.16 自 `/api/extension_bag/*` 迁入）
+#### 扩展背包调试端点（已删除）
+
+> **2026-10 `inventory.bag_source` 1.1 契约迁移后，以下 `/api/debug/extension_bag/*` 与
+> POST /api/extension_bag/set_bag_count 已从插件 descriptor 与路由表删除；扩展袋数据统一走
+> `/api/item/inventory*`（`space=2`）。本节仅保留迁移前记录。
 
 > 扩展背包**数据与移动**的正式操作面是 §4.1/§4.2 的原版背包 API（bag 6..10 并入）；以下端点仅服务**视图/选中**控制与内部状态诊断（`mode/selected/inspected/pending/recovery_action` 等），供开发期与控制面阶段验收使用，不构成发布操作面。编号约定与原型阶段声明见 §4.1。
+> 七条 POST 命令先在 HTTP 线程校验参数；缺失、非 int32 或越界字段返回 HTTP 400。合法请求返回 `ticket`，执行结果（包括业务错误）从该票据回取，不由 HTTP 受理响应表示操作成功。
 
-`GET /api/debug/extension_bag/status`
+`POST /api/debug/custom-ui/components`　body `{ "open": true|false, "fill_rgb565"?: 0..65535, "alpha"?: 0..100, "page"?: 0..6, "text_subpage"?: 0|1 }`
+
+**用途**：双面板 Debug Components 演示开关、右侧方框预览样式、左侧分类切换与文本按钮子页切换（仅 Debug 构建注册）。`open` 必填；可选 `fill_rgb565` 接受任意 0..65535 RGB565 整数，`alpha` 接受 0..100 整数，`page` 接受 0..6（当前分类：0 方框、1 文本按钮、2 箭头按钮、3 图标按钮、4 普通控件按钮（仅命中框诊断）、5 返回/导航、6 列表/主菜单专用），`text_subpage` 接受 0（纹理类）或 1（紧凑/平面）。样式、`page` 与 `text_subpage` 仅允许与 `open:true` 同发，例如 `{"open":true,"page":1,"text_subpage":1}`、`{"open":true,"fill_rgb565":63488,"alpha":100}` 或 `{"open":true,"page":1,"text_subpage":1,"fill_rgb565":63488}`；`open:false` 携带任一这些字段返回 HTTP 400。面板未打开时携带 `page`/`text_subpage` 会先排队打开，再在主线程打开后应用；已打开时只更新状态与切页，HTTP 线程不操作 UI。`text_subpage` 作用于文本按钮页：当前正在文本页时下一帧按子页重建；当前不是文本页时先保存，之后进入文本页时生效。左右面板外壳始终为黑色 RGB565 `0x0000`、透明度 60%，样式字段只影响右侧方框预览。首次打开默认分类 0、文本子页 0、`0x0000`/60；关闭后重开恢复分类与样式默认，文本子页在当前进程内保留，除非显式发送；已打开时重复 `open:true` 不带字段不重置当前样式、分类或子页。HTTP 线程仅解析并写入单个原子请求快照（open、样式、page、text_subpage 同一快照），scheduler 主线程负责打开、应用样式、切页与子页重建；多个请求按最后一个有效请求优先。合法请求返回 `{"ok":true,"queued":true}`，不会表示打开、切页或样式绘制已完成；格式/范围/重复字段错误返回 HTTP 400，Debug UI 停用返回 503。
+
+`POST /api/debug/custom-ui/scroll`　body `{ "open": true|false }`
+
+**用途**：独立原生滚动测试面板（owner `core.custom_ui`，仅 Debug 构建注册，Release 不提供面板）。24 行样例使用游戏 `ControlScroll` 的滚动、惯性、裁剪与原生事件树；轻触选中，高亮行附「选中」文字，底部显示原生 offset。`open:false` 或返回按钮关闭。HTTP 线程仅入队，主线程经共享 `ui_panels` 执行；最后一个请求优先。成功返回 `{"ok":true,"queued":true}`；非单字段布尔请求返回 400，插件停用返回 503；响应不表示面板已打开。
+
+`POST /api/debug/custom-ui/help`　body `{ "open": true|false }`
+
+**用途**：独立两栏帮助页样例（provider `debug_help`，owner `core.custom_ui`，仅 Debug 注册，Release 无该面板）。左栏装饰圆角容器内复用原生滚动列表，8 个选项提供选中高亮及「选中」文字；右栏圆角容器显示不同标题、说明和色块，仅绘制、不滚动。`open:false` 或返回按钮关闭；重开默认选中首项。HTTP 线程仅排队，所有 UI 操作在游戏主线程执行，最后一个请求优先。返回 `{"ok":true,"queued":true}` 不表示面板已经打开；仅接受单字段布尔 body（否则 400），插件停用为 503；Release 不注册该 native handler。
+
 
 **用途**：扩展背包内部状态全量读取（使能/注入/控件旗标、视图模式、全部物品、pending 事务与恢复动作预测）。
 
-**返回格式**：`{ "enabled": bool, "injected": bool, "extension_tab_button": bool, "inventory_frame_active": bool, "recovery_action": "none|complete|rollback", "state": { "mode": "original|module|exiting_module", "selected": -1|0..4, "items": [[{slot,category,count,payload(base64)}]], "pending": {...} } }`；非 world 态 `state:{}`。
+**返回格式**：`{ "enabled": bool, "injected": bool, "save_panel_hook": bool, "extension_tab_button": bool, "inventory_frame_active": bool, "recovery_action": "none|complete|rollback", "state": { "mode": "original|module|exiting_module", "selected": -1|0..4, "items": [[{slot,category,count,payload(base64)}]], "pending": {...} } }`；非 world 态 `state:{}`。
 
-`POST /api/debug/extension_bag/enter_view`　body `{ "bag": 6..10 }`
 
-**用途**：进入扩展逻辑袋视图（等价点击扩展 tab）。错误：`already in extension view` / `exit in progress` / `extension bag disabled` / `not in game`。
+**用途**：进入扩展逻辑袋视图（等价点击扩展 tab；要求背包面板已打开）。业务错误：`inventory panel not open` / `already in extension view` / `exit in progress` / `extension bag disabled` / `not in game` / `enter extension view failed`。
 
-`POST /api/debug/extension_bag/exit_view`　body 可省略
 
 **用途**：退回原版背包视图。错误：`not in extension view` / `exit in progress`。
 
-`POST /api/debug/extension_bag/select_bag`　body `{ "bag": 6..10 }`
+退出会直接恢复原版投影并清理扩展详情状态，不会触发同袋二次点击的袋信息面板路径；退出成功返回原版视图状态。会话未准入时按 `extension bag disabled` / `not in game` 返回业务错误。
 
-**用途**：扩展视图内切换逻辑袋。错误：`not in extension view` / `bag already selected`。
 
-`POST /api/debug/extension_bag/click_item`　body `{ "bag": 6..10, "slot": 0..15 }`
+**用途**：扩展视图内切换逻辑袋。业务错误：`not in extension view` / `bag already selected` / `select bag failed` / `extension bag disabled` / `not in game`。
 
-**用途**：选中扩展物品并返回信息（含完整 payload）；空槽 → `{"ok":true,"item":null}`。错误：`bag not selected` / `not in extension view`。
 
-`POST /api/debug/extension_bag/equip`　body `{ "index": 0..4, "bagType": N }`
+**用途**：选中扩展物品并返回信息（含完整 payload）；空槽 → `{"ok":true,"item":null}`。业务错误：`bag not selected` / `not in extension view` / `slot beyond derived capacity` / `extension bag disabled` / `not in game`。
 
-**用途**：开发期测试注入：设置扩展袋装备类型（`set_test_equipped`）。
 
-`POST /api/debug/extension_bag/item`　body `{ "index": 0..4, "slot": 0..15, "category": N, "count": N }`
+**用途**：开发期测试注入：设置扩展袋装备类型（`set_test_equipped`）。`index`/`bagType` 必填；缺失、非 int32、越界返回 400；会话未准入或当前袋内物品不适配新容量时，票据返回业务错误。
 
-**用途**：开发期测试注入：写入扩展袋测试物品（`set_item`）。
+
+**用途**：开发期测试注入：写入扩展袋测试物品（`set_item`）。四个字段均必填；缺失、非 int32、`index`/`slot`/`category`/`count` 越界返回 400；会话未准入或 slot 超出该袋派生容量时，票据返回业务错误。
+
+---
+
+### 九点一、当前 controller 补充路由
+
+以下端点已由 Kotlin controller 提供，补入冻结集合；业务响应仍以对应 controller/service
+实现为准。
+
+`GET /api/feature/autosell/config`
+
+`POST /api/feature/autosell/config`
+
+#### 自动出售配置（autosell）
+
+`GET /api/feature/autosell/config` 返回当前存档配置与运行状态：
+
+```json
+{"enabled":false,"rarity":0,"enhance":0,"socket":0,"gemTier":0,"gemRange":0,
+ "backpackTier":0,"badgeTier":0,"diceTier":0,"special":[],"sold":0,"failed":0,"lastScanFrame":-1,
+ "slot":-1,"loadedSlot":-1,"persisted":false,"hostInstalled":false}
+```
+
+- `sold`/`failed`/`lastScanFrame` 为进程内累计值，不按存档槽清零。
+- `slot`/`loadedSlot`/`persisted` 反映当前 slot-data session 与最近一次持久化状态；`hostInstalled` 反映主线程扫描宿主状态。
+
+`POST /api/feature/autosell/config` 请求体：
+
+```json
+{"enabled":true,"rarity":1,"enhance":0,"socket":0,"gemTier":0,"gemRange":0,
+ "backpackTier":0,"badgeTier":0,"diceTier":4,"special":["dice"]}
+```
+
+- `enabled` 必须为 JSON boolean；`rarity` 0..5、`enhance` 0..32、`socket` 0..16、`gemTier` 0..5、`gemRange` 0..5、`backpackTier` 0..4、`badgeTier` 0..4、`diceTier` 0..5，存在时必须为整数；`special` 必须为字符串数组，元素仅允许 `backpack`、`normalSeal`、`dice`。字段缺失时按 `false`/`0`/`[]` 处理。
+- `backpackTier`/`badgeTier`/`diceTier` 是新的权威分档字段；`special` 仅作旧客户端兼容，缺失 tier 时按 `backpack→4`、`normalSeal→1`、`dice→4` 回退。
+- 类型、范围或 `special` 元素非法返回 400；JSON 非法返回 400 `bad request`。
+- 当前无活动存档 session 时返回 409 `config rejected (no active save session)`，不修改运行时配置。
+- 成功时返回与 GET 相同的状态 JSON；配置立即应用到运行时扫描，并按当前存档 sidecar `autosell` v2 持久化。设置页/游戏内面板的修改走同一提交路径，面板在返回/关闭时提交。
+
+`GET /api/world/map/distance`
+
+`GET /api/system/tables/{table}/search`
+
+`GET /api/system/tables/text`
+
+`GET /api/debug/path`
+
+`GET /api/debug/item/raw`
+
+`POST /api/debug/settings-ui/inject`
+
+`GET /api/debug/settings-ui/status`
+
+`POST /api/debug/settings-ui/restore`
+
+`POST /api/debug/settings-ui/open-option`
+
+`POST /api/debug/settings-ui/open-panel`
+
+> 上述四条 settings-ui POST 端点与 `POST /api/debug/custom-ui/components` 同属调试端点：
+> HTTP 线程只把动作入队到游戏主线程帧任务，立即返回 `{"ok":true}`；UI/面板的 open/close/inject
+> 与快照一律在游戏线程执行，不返回同步业务结果。
+
+
+**用途**：卸下指定扩展逻辑袋。`bag` 必填；缺失或超出 6..10 返回 400 `bag required (6-10)`。业务错误：`bag not empty` / `no space` / `persist failed` / `unequip failed` / `bag not equipped` / `extension bag disabled` / `not in game`。
 
 ---
 

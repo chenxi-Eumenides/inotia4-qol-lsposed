@@ -2,45 +2,57 @@ package com.inotia4.qol.api.controller
 
 import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
-import com.inotia4.qol.service.ApiServices
+import com.inotia4.qol.service.info.NativeHttpCommand
 import com.inotia4.qol.util.ApiException
 import com.inotia4.qol.util.ControllerGuard
 import com.inotia4.qol.util.JsonUtil
+import com.inotia4.qol.util.withNativeRouteLease
 import com.yanzhenjie.andserver.annotation.PathVariable
 import com.yanzhenjie.andserver.annotation.PostMapping
 import com.yanzhenjie.andserver.annotation.RequestBody
 import com.yanzhenjie.andserver.annotation.RestController
+import com.yanzhenjie.andserver.http.HttpRequest
 import com.yanzhenjie.andserver.http.StatusCode
 
 // controller: 路由层，业务走 ApiServices。路径首段必须静态（AndServer 处理器约束，architecture §3）
 // OP 定稿端点（api-reference §8）：10 个已实现端点（6 个 v0.5.46 迁移自 CharacterController + 4 个 v0.5.47 接线）
 // + 11 个占位端点（结构已定稿，待权限机制与底层实现，占位返回 not implemented）
+//
+// 已实现端点经 NativeHttpCommand.post 由 native owner 处理，op 门禁在 Host dispatch 内完成，
+// 不在 Kotlin 层重复包 lease；11 个占位端点无 native handler，由 Kotlin 直接返回 501，
+// 故在返回 501 之前按 direct 路由获取 native route lease（OP 未开启 -> 403；OP 开启 -> 保留 501）。
 @RestController
 class OpController {
 
     private fun notImpl(): Nothing = throw ApiException(StatusCode.SC_NOT_IMPLEMENTED, "not implemented")
 
     @PostMapping("/api/op/quest/accept")
-    fun questAccept(): String = LogFile.op(LogDomain.OP, "POST /api/op/quest/accept", emptyMap<String, String>()) { notImpl() }
+    fun questAccept(request: HttpRequest): String = withNativeRouteLease(request) {
+        LogFile.op(LogDomain.OP, "POST /api/op/quest/accept", emptyMap<String, String>()) { notImpl() }
+    }
 
     @PostMapping("/api/op/quest/complete")
-    fun questComplete(): String = LogFile.op(LogDomain.OP, "POST /api/op/quest/complete", emptyMap<String, String>()) { notImpl() }
+    fun questComplete(request: HttpRequest): String = withNativeRouteLease(request) {
+        LogFile.op(LogDomain.OP, "POST /api/op/quest/complete", emptyMap<String, String>()) { notImpl() }
+    }
 
     @PostMapping("/api/op/character/{role}/status-point")
     fun statusPoint(@PathVariable("role") role: Int, @RequestBody body: String): String {
         val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
         val points = o.optInt("points", -1)
         if (points < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "points required")
-        return ControllerGuard.guard { ApiServices.op.setStatusPoint(role, points) }
+        return NativeHttpCommand.post("/api/op/character/$role/status-point", body)
     }
 
     @PostMapping("/api/op/character/{role}/skill-point")
-    fun skillPoint(@PathVariable("role") role: Int): String =
+    fun skillPoint(@PathVariable("role") role: Int, request: HttpRequest): String = withNativeRouteLease(request) {
         LogFile.op(LogDomain.OP, "POST /api/op/character/{role}/skill-point", mapOf("role" to "$role")) { notImpl() }
+    }
 
     @PostMapping("/api/op/character/{role}/skill-level")
-    fun skillLevel(@PathVariable("role") role: Int): String =
+    fun skillLevel(@PathVariable("role") role: Int, request: HttpRequest): String = withNativeRouteLease(request) {
         LogFile.op(LogDomain.OP, "POST /api/op/character/{role}/skill-level", mapOf("role" to "$role")) { notImpl() }
+    }
 
     @PostMapping("/api/op/party/swap")
     fun partySwap(@RequestBody body: String): String {
@@ -49,56 +61,65 @@ class OpController {
         val a = o.optInt("a", -1)
         val b = o.optInt("b", -1)
         if (a < 0 || b < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "a and b required")
-        return ControllerGuard.guard { ApiServices.op.partySwap(a, b) }
+        return NativeHttpCommand.post("/api/op/party/swap", body)
     }
 
     @PostMapping("/api/op/inventory/set-slot")
-    fun setSlot(): String = LogFile.op(LogDomain.OP, "POST /api/op/inventory/set-slot", emptyMap<String, String>()) { notImpl() }
+    fun setSlot(request: HttpRequest): String = withNativeRouteLease(request) {
+        LogFile.op(LogDomain.OP, "POST /api/op/inventory/set-slot", emptyMap<String, String>()) { notImpl() }
+    }
 
     @PostMapping("/api/op/inventory/set-equip")
-    fun setEquip(): String = LogFile.op(LogDomain.OP, "POST /api/op/inventory/set-equip", emptyMap<String, String>()) { notImpl() }
+    fun setEquip(request: HttpRequest): String = withNativeRouteLease(request) {
+        LogFile.op(LogDomain.OP, "POST /api/op/inventory/set-equip", emptyMap<String, String>()) { notImpl() }
+    }
 
     @PostMapping("/api/op/inventory/money")
     fun money(@RequestBody body: String): String {
         val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
         val m = o.optLong("money", -1)
         if (m < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "money required")
-        return ControllerGuard.guard { ApiServices.op.setMoney(m) }
+        return NativeHttpCommand.post("/api/op/inventory/money", body)
     }
 
     @PostMapping("/api/op/craft/mix-direct")
-    fun mixDirect(): String = LogFile.op(LogDomain.OP, "POST /api/op/craft/mix-direct", emptyMap<String, String>()) { notImpl() }
+    fun mixDirect(request: HttpRequest): String = withNativeRouteLease(request) {
+        LogFile.op(LogDomain.OP, "POST /api/op/craft/mix-direct", emptyMap<String, String>()) { notImpl() }
+    }
 
     @PostMapping("/api/op/combat/{role}/heal")
-    fun heal(@PathVariable("role") role: Int): String =
+    fun heal(@PathVariable("role") role: Int, request: HttpRequest): String = withNativeRouteLease(request) {
         LogFile.op(LogDomain.OP, "POST /api/op/combat/{role}/heal", mapOf("role" to "$role")) { notImpl() }
+    }
 
     @PostMapping("/api/op/combat/{role}/rest")
-    fun rest(@PathVariable("role") role: Int): String =
+    fun rest(@PathVariable("role") role: Int, request: HttpRequest): String = withNativeRouteLease(request) {
         LogFile.op(LogDomain.OP, "POST /api/op/combat/{role}/rest", mapOf("role" to "$role")) { notImpl() }
+    }
 
     @PostMapping("/api/op/combat/{role}/revive")
-    fun revive(@PathVariable("role") role: Int): String =
+    fun revive(@PathVariable("role") role: Int, request: HttpRequest): String = withNativeRouteLease(request) {
         LogFile.op(LogDomain.OP, "POST /api/op/combat/{role}/revive", mapOf("role" to "$role")) { notImpl() }
+    }
 
     @PostMapping("/api/op/combat/{role}/hate")
-    fun hate(@PathVariable("role") role: Int): String =
+    fun hate(@PathVariable("role") role: Int, request: HttpRequest): String = withNativeRouteLease(request) {
         LogFile.op(LogDomain.OP, "POST /api/op/combat/{role}/hate", mapOf("role" to "$role")) { notImpl() }
+    }
 
+    // owner：world_teleport（票据契约）；op 门禁由 dispatch 层按 op_gated 统一处理（403 信封同旧）。
+    // Kotlin 只做 body 语法校验与透传，map_id/x/y/force 的字段范围校验在 owner。
     @PostMapping("/api/op/movement/teleport")
     fun teleport(@RequestBody body: String): String {
         val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
-        if (!o.has("map_id") || !o.has("x") || !o.has("y")) {
-            throw ApiException(StatusCode.SC_BAD_REQUEST, "map_id/x/y required")
-        }
-        val mapId = o.optInt("map_id", -1)
-        val x = o.optInt("x", -1)
-        val y = o.optInt("y", -1)
-        if (mapId < 0 || x < 0 || y < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "map_id/x/y required")
-        // force=true 跳过落点瓦片阻挡校验（默认校验静态瓦片矩阵覆盖范围内的阻挡位）
-        val force = o.optBoolean("force", false)
-        return ControllerGuard.guard { ApiServices.op.teleport(mapId, x, y, force) }
+        return NativeHttpCommand.post("/api/op/movement/teleport", o.toString())
     }
+
+    // ---- P3 生命周期控制（/api/op/features/lifecycle）----
+    // body {id, action} 由 owner（core.api）解析并投递命令；op 门禁与 ticket 响应下沉 native dispatch。
+    @PostMapping("/api/op/features/lifecycle")
+    fun featureLifecycle(@RequestBody body: String): String =
+        ControllerGuard.guard { NativeHttpCommand.post("/api/op/features/lifecycle", body) }
 
     // ---- 已实现 OP 端点（v0.5.46 迁移自 CharacterController，路由全路径注解逐字保留） ----
 
@@ -107,7 +128,7 @@ class OpController {
         val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
         val hp = o.optInt("hp", -1)
         if (hp < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "hp required")
-        return ControllerGuard.guard { ApiServices.op.setHp(role, hp) }
+        return NativeHttpCommand.post("/api/op/character/$role/hp", body)
     }
 
     @PostMapping("/api/op/character/{role}/mp")
@@ -115,7 +136,7 @@ class OpController {
         val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
         val mp = o.optInt("mp", -1)
         if (mp < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "mp required")
-        return ControllerGuard.guard { ApiServices.op.setMp(role, mp) }
+        return NativeHttpCommand.post("/api/op/character/$role/mp", body)
     }
 
     @PostMapping("/api/op/character/{role}/experience")
@@ -123,7 +144,7 @@ class OpController {
         val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
         val exp = o.optLong("exp", -1)
         if (exp < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "exp required")
-        return ControllerGuard.guard { ApiServices.op.setExperience(role, exp) }
+        return NativeHttpCommand.post("/api/op/character/$role/experience", body)
     }
 
     @PostMapping("/api/op/character/{role}/level")
@@ -133,7 +154,7 @@ class OpController {
         val level = o.optInt("level", 0)
         val force = o.optBoolean("force", false)
         if (!force && (level < 1 || level > 105)) throw ApiException(StatusCode.SC_BAD_REQUEST, "level 1-105 (game max); force=true 跳过限制")
-        return ControllerGuard.guard { ApiServices.op.setLevel(role, level, force) }
+        return NativeHttpCommand.post("/api/op/character/$role/level", body)
     }
 
     @PostMapping("/api/op/character/{role}/set_attr")
@@ -156,7 +177,7 @@ class OpController {
             pairs.add(idx to v)
         }
         if (pairs.isEmpty()) throw ApiException(StatusCode.SC_BAD_REQUEST, "stats empty")
-        return ControllerGuard.guard { ApiServices.op.setAttr(role, pairs) }
+        return NativeHttpCommand.post("/api/op/character/$role/set_attr", body)
     }
 
     @PostMapping("/api/op/inventory/add")
@@ -171,6 +192,6 @@ class OpController {
         val enhanceRemaining = o.optInt("enhanceRemaining", 0)
         // rarity 可选（缺省 -1 保留随机）：品质档位 0..4 白绿蓝黄紫，钳制在 native 侧
         val rarity = o.optInt("rarity", -1)
-        return ControllerGuard.guard { ApiServices.op.addItem(category, count, socket, enhanceRemaining, rarity) }
+        return NativeHttpCommand.post("/api/op/inventory/add", body)
     }
 }

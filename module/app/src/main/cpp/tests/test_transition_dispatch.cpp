@@ -1,7 +1,7 @@
 // host 单测：状态转换派发纯逻辑 + 逻辑帧点枚举。
-// 只包含头文件纯逻辑（transition_detail / FramePointId），不链接运行期派发器。
-#include "core/native/frame_task.h"
-#include "core/native/transition_dispatch.h"
+// 只包含头文件纯逻辑（transition_detail / FramePoint），不链接运行期派发器。
+#include "infra/frame/transition_dispatch.h"
+#include "infra/scheduler.h"
 
 #include <cstdio>
 
@@ -15,9 +15,8 @@ static int g_fail = 0;
 
 static void test_frame_points() {
     // 多点位设计：新增逻辑帧点后，点位数量与编号必须稳定。
-    CHECK(kFramePointRenderPre == 0);
-    CHECK(kFramePointLogicPre == 1);
-    CHECK(kFramePointCount == 2);
+    CHECK(static_cast<int>(qol::infra::FramePoint::kRenderPre) == 0);
+    CHECK(static_cast<int>(qol::infra::FramePoint::kLogicPre) == 1);
 }
 
 static void test_transition_detail() {

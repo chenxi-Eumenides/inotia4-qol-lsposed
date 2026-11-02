@@ -1,13 +1,52 @@
 package com.inotia4.qol.api.controller
 
 import com.inotia4.qol.service.ApiServices
+import com.inotia4.qol.service.info.NativeHttpCommand
+import com.inotia4.qol.util.ApiException
 import com.inotia4.qol.util.ControllerGuard
+import com.inotia4.qol.util.JsonUtil
 import com.yanzhenjie.andserver.annotation.GetMapping
 import com.yanzhenjie.andserver.annotation.PathVariable
+import com.yanzhenjie.andserver.annotation.PostMapping
+import com.yanzhenjie.andserver.annotation.RequestBody
 import com.yanzhenjie.andserver.annotation.RestController
+import com.yanzhenjie.andserver.http.StatusCode
 
 @RestController
 class PartyController {
+
+    @PostMapping("/api/character/party/include")
+    fun include(@RequestBody body: String): String {
+        val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
+        val mercSlot = o.optInt("mercenary_slot", -1)
+        if (mercSlot < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "mercenary_slot required")
+        return NativeHttpCommand.post("/api/character/party/include", body)
+    }
+
+    @PostMapping("/api/character/party/exclude")
+    fun exclude(@RequestBody body: String): String {
+        val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
+        val mercSlot = o.optInt("mercenary_slot", -1)
+        if (mercSlot < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "mercenary_slot required")
+        return NativeHttpCommand.post("/api/character/party/exclude", body)
+    }
+
+    @PostMapping("/api/character/party/discharge")
+    fun discharge(@RequestBody body: String): String {
+        val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
+        val mercSlot = o.optInt("mercenary_slot", -1)
+        if (mercSlot < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "mercenary_slot required")
+        return NativeHttpCommand.post("/api/character/party/discharge", body)
+    }
+
+    @PostMapping("/api/character/party/withdraw")
+    fun withdraw(@RequestBody body: String): String {
+        val o = JsonUtil.parseBody(body) ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
+        val mercSlot = o.optInt("mercenary_slot", -1)
+        val equipSlot = o.optInt("equip_slot", -1)
+        if (mercSlot < 0 || equipSlot < 0) throw ApiException(StatusCode.SC_BAD_REQUEST, "mercenarySlot/equip_slot required")
+        return NativeHttpCommand.post("/api/character/party/withdraw", body)
+    }
 
     @GetMapping("/api/character/party")
     fun composite(): String = ControllerGuard.guard(ApiServices.info::party)

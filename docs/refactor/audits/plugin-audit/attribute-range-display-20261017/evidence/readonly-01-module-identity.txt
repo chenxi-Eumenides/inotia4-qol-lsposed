@@ -1,0 +1,4 @@
+$ adb -s 192.168.3.56:5555 logcat -d -s Inotia4Qol:V | grep -i "module identity" | tail -2
+10-17 03:16:27.284   504   631 I Inotia4Qol: 2026-10-17 03:16:27.283 f=0 I platform MainActivityStartupHook.kt:186 module identity: package=com.inotia4.qol versionCode=192 versionName=0.7.13 apk=/data/user/0/com.com2us.inotia4.normal.freefull.google.global.android.common/cache/lspatch/com.inotia4.qol/3147678684.apk sha256=02f8fa02377ab8e3d48cddd2bf782bafb027cb59eb187cb1e698be6347a19f13
+10-17 04:23:28.177  2566  2682 I Inotia4Qol: 2026-10-17 04:23:28.177 f=0 I platform MainActivityStartupHook.kt:186 module identity: package=com.inotia4.qol versionCode=192 versionName=0.7.13 apk=/data/user/0/com.com2us.inotia4.normal.freefull.google.global.android.common/cache/lspatch/com.inotia4.qol/538354339.apk sha256=be9690ae68dc5d83eb3d601d6fecc346127d4bfbf0e3a42e0dfb0904c527e725
+exit_code=0

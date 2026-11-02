@@ -4,30 +4,20 @@
 
 #include <string>
 
-#include "game_access.h"
-#include "game_cache.h"
-#include "game_character.h"
-#include "game_dialog.h"
-#include "game_inventory.h"
-#include "game_party.h"
-#include "game_quest.h"
-#include "api/native/game_save.h"
-#include "feature/save_backup/save_backup.h"
-#include "game_shop.h"
-#include "game_state.h"
+#include "game/access/game_access.h"
+#include "core/native/game_cache.h"
+#include "game/access/inventory_legacy_read.h"
+#include "plugins/save_backup/feature.h"
+#include "game/state/game_state.h"
 #include "game_system.h"
-#include "api/native/game_ui.h"
-#include "game_world.h"
-#include "game_tiles.h"
-#include "feature/patch/game_patch.h"
-#include "feature/ui/game_ui_exp.h"
-#include "feature/ui/game_ui_settings.h"
-#include "feature/ui/game_ui_savebackup.h"
-#include "feature/craft_ui/craft_ui_hooks.h"
-#include "feature/custom_recipe/custom_recipe_api.h"
-#include "feature/extension_bag/game_ui_virtbag.h"
+#include "game/read/game_tiles.h"
+#include "game/access/hive_iap.h"
+#include "plugins/extension_bag/game_ui_virtbag.h"
+#include "plugins/settings/panels/settings.h"
+#include "plugins/save_backup/ui/panel.h"
 
-#include "core/native/qol_log.h"
+#include "infra/log/qol_log.h"
+#include "contracts/http.h"
 
 // 统一日志：op_result 与 bridge 层沿用 MOVE_LOG 名称，接入 kApi 域。
 #define MOVE_LOG(...) QOL_LOG_INFO(QolDomain::kApi, __VA_ARGS__)
@@ -45,3 +35,9 @@ inline jstring op_result(JNIEnv* env, const char* op, const std::string& argstr,
     MOVE_LOG("[%s] args={%s} -> %s", op, argstr.c_str(), result.c_str());
     return env->NewStringUTF(result.c_str());
 }
+
+#if QOL_KERNEL_ONLY
+inline jstring kernel_only_result(JNIEnv* env) {
+    return env->NewStringUTF("{\"ok\":false,\"error\":\"kernel-only\"}");
+}
+#endif

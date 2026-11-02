@@ -23,6 +23,19 @@ val targetPackages = providers.gradleProperty("targetPackages").orElse(defaultTa
             .joinToString(",")
     }
 
+fun booleanProperty(name: String): Provider<Boolean> =
+    providers.gradleProperty(name).orElse("false").map { raw ->
+        raw.toBooleanStrictOrNull()
+            ?: error("$name must be true or false, got: $raw")
+    }
+
+val qolKernelOnly = booleanProperty("qolKernelOnly")
+val qolDeviceProbe = booleanProperty("qolDeviceProbe")
+
+if (qolDeviceProbe.get() && gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }) {
+    error("qolDeviceProbe is prohibited in release builds")
+}
+
 val generateXposedScope = tasks.register("generateXposedScope") {
     val scopeFile = layout.buildDirectory.file("generated/xposed-scope/META-INF/xposed/scope.list")
     inputs.property("targetPackages", targetPackages)
@@ -52,7 +65,6 @@ android {
 
     defaultConfig {
         applicationId = "com.inotia4.qol"
-        // 27 = LSPosed 官方最低（Android 8.1）；依赖 io.github.libxposed:api:101.0.1 自身要求 26。
         minSdk = 27
         targetSdk = 34
     versionCode = 193
@@ -61,6 +73,10 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags += "-std=c++17"
+                // FP 链回溯依赖未省略的帧指针；-O2 默认 -fomit-frame-pointer 会砍断链。
+                cppFlags += "-fno-omit-frame-pointer"
+                if (qolKernelOnly.get()) arguments += "-DQOL_KERNEL_ONLY=ON"
+                if (qolDeviceProbe.get()) arguments += "-DQOL_ENABLE_DEVICE_PROBE=ON"
             }
         }
         ndk {
@@ -68,6 +84,8 @@ android {
         }
 
         buildConfigField("String", "TARGET_PACKAGES", "\"${targetPackages.get()}\"")
+        buildConfigField("boolean", "KERNEL_ONLY", qolKernelOnly.get().toString())
+        buildConfigField("boolean", "DEVICE_PROBE", qolDeviceProbe.get().toString())
     }
 
     buildTypes {

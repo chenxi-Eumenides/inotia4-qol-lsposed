@@ -32,7 +32,7 @@
 
 - **`+0x38` 完整性校验值（FNV-1a 64，u64 小端）**：`basis=0xCBF29CE484222325`、`prime=0x100000001B3`；覆盖 `plain[0x00..0x38)` 与 `plain[0x40..len)`（`+0x38..+0x40` 自身不参与）：`h = basis; for b in 覆盖区: h = (h ^ b) * prime`；写入 `plain[0x38..0x40) = h`（小端）。反汇编证据：隐藏段 `0x40a4-0x410c`（basis/prime 立即数 + 两段循环 + `cmp x8,x9; b.ne FAIL`）。离线对拍：真机 slot2 样本 `stored == calc == 0x79eb9e70bc54b9bd`。真机 A/B：同槽导入（未改字节）通过；**只改 `+0x14` 未重算 `+0x38`** 被拒 → 进档 SIGSEGV；**补上重算后即可跨槽**（模块已据此支持跨槽迁移）。
 - **跨设备不可用**：wh4 用源设备密钥加密，导入端按字节写回后本机无法解密；游戏读档时会因此拒绝整份存档（见 §14）。因此模块导入时必须先按本机密钥校验容器，失败则**不写盘**（`development/features/save-backup.md` §5 第 7 步）。
-- 模块不解析其内部业务格式；在 `.qol_save`（v3，见 `../../development/features/save-backup.md` §3）中随存档整体备份/恢复，可解密时以明文入包，导入端**补目标槽 + 重算 `+0x38` 后整体重加密**（往返自检）。
+- 模块不解析其内部业务格式；在 `.qol.bak`（v3，旧 `.qol_save` 兼容，见 `../../development/features/save-backup.md` §3）中随存档整体备份/恢复，可解密时以明文入包，导入端**补目标槽 + 重算 `+0x38` 后整体重加密**（往返自检）。
 
 ## 2. 文件容器格式（加密 + 校验和）
 
@@ -103,6 +103,8 @@ monster 改版把块 3 的加载器**整体替换**为自写实现（libgame 无
 | +0x03 | u8 | bits[2:0]=**失败阶段码**，bits[5:3]=槽位号（失败路径 `UTIL_SetBitValue` 写入） |
 | +0x04/0x0c/0x14 | ptr×3 | 角色对象指针（`SAVESLOT_Initialize` 清零；失败时保持 null） |
 | +0x1c | i8 | 主控角色索引（hero_index） |
+
+> 模块侧备份面板不以运行期槽状态判定有效槽：按 `save{slot}.dat` 是否可读区分有效/损坏/空（`save_backup_slot_file_exists` + `save.facts.load_data`），避免面板打开期间槽结构尚未重载（导入后尤其明显）时把可读存档误报成损坏。导出元数据从存档明文块 2 第 0 条主角记录读取等级/职业，不依赖运行期槽结构。
 
 **失败阶段码**（`SAVE_LoadSaveSlot` 0x1298dc 逐级短路）：
 
@@ -259,7 +261,7 @@ ENCRYPT_Process2(就地加密) → FILE_Open → FILE_Write → FILE_Close
 - 拦截点：隐藏段的 wh4 读取函数 `sub_3f14`（`0x743f14`）用本机密钥调 `ENCRYPT_Process2(mode=1)` 解密外部 wh4；**双 8 位校验和不匹配 → 返回 -1 → 块 3 校验器 `0x7413b4` 返回 0**。导入的 wh4 由源设备密钥加密，在本机必然失败。
 - 缺失容忍：wh4 不存在时 `sub_3f14` 走 ENOENT 分支放行（返回 0），游戏会在下次成功读档后**自行重建**本机可用的同名 wh4（实测：重建版 md5 与导入版不同，且可正常再次进档）。
 - 模块对策：导入时按本机密钥逐个校验 wh4 容器，失败者不写盘（`development/features/save-backup.md` §5 第 7 步）；已真机验证"导入同一 bundle → 跳过 2 个 wh4 → `enter_slot(1)` 正常进入世界、角色与三人队伍完整"。
-- 变体/能力识别：模块用 `libgame.so` 校验值查离线表（生成脚本 `scripts/data/game_variant_table.py` → `data/native/game_variant_table.inc`），并以 `qol::game_feature_state()` 暴露"该构建是否具备个人仓库 / 内嵌写法 / 伴生文件机制"，供存档处理分支使用。
+- 变体/能力识别：模块用 `libgame.so` 校验值查离线表（生成脚本 `scripts/maintenance/build_game_variant_table.py` → `game/variants/game_variant_table.inc`），并以 `qol::game_feature_state()` 暴露"该构建是否具备个人仓库 / 内嵌写法 / 伴生文件机制"，供存档处理分支使用。
 
 ## 15. 2026-09-15 同意页返回键语义与退出收尾崩溃
 
@@ -285,4 +287,4 @@ ENCRYPT_Process2(就地加密) → FILE_Open → FILE_Write → FILE_Close
 - **角色对象释放只有一条路径**：`SAVESLOT_Initialize`（0x128958，28 B）只清 `+0x4/+0xc/+0x14` 三个角色指针、`+0x1c` 与 b2=1，**不释放对象**；`SAVESLOT_Unload`（0x128974，b2==2 时对三个指针逐个 `CHARSYSTEM_Free` 0xf3458 后转 `SAVESLOT_Initialize`）全 .so 只被 `SAVE_DestroySaveSlot`（0x128a08）调用（0x128a24），读档链自身不用它；全量复位只有 `GAME_Initialize` 里的 `CHARSYSTEM_Initialize`。`SaveSlot_Delete`（0x14c4e8）删档后正是 `CS_fsRemove` → `SAVE_DestroySaveSlot` → `SAVE_CreateSaveSlot` 的刷新惯用法。
 - **反复重载会累积并最终失败**：同一进程内于主菜单反复刷新槽区（`SAVE_DestroySaveSlot` + `SAVE_CreateSaveSlot`）实测约 20 余轮后三槽全部加载失败（`hero_level=0`，进档预检 `corrupt/character/7`，`/api/health` 仍 `ok`），进程重启即恢复；游戏自身每次打开存档面板都先做 `GAME_Initialize`，故不累积。⇒ 槽区重载不得在主菜单停留期内反复发生。
 - `SAVE_DestroySaveSlot` / `SAVESLOT_Unload` 在原版、9 个盗版大修版本、7 个 monster 版本中均导出且 VMA 相同（0x128a08 / 0x128974），模块按符号名解析即可跨变体使用。
-- 模块侧对策：`game_access.h` 的 `save_slots_reload()`（先释放再重载）/ `save_slots_refresh_if_stale()`（同一次主菜单停留内只重载一次，文件改动或离开主菜单后重新置脏）/ `save_slots_mark_stale()`（导入、删档、新建档等改动槽文件后置脏）。
+- 模块侧对策：`game/access/game_access.h` 的 `save_slots_reload()`（先释放再重载）/ `save_slots_refresh_if_stale()`（同一次主菜单停留内只重载一次，文件改动或离开主菜单后重新置脏）/ `save_slots_mark_stale()`（导入、删档、新建档等改动槽文件后置脏）。

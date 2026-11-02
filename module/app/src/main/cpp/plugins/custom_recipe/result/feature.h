@@ -1,0 +1,71 @@
+#pragma once
+
+#include "../../../contracts/bag.h"
+#include "../../../contracts/craft_commands.h"
+#include "../../../contracts/craft_facts.h"
+#include "../../../contracts/game_host.h"
+#include "../../../contracts/game_ports/custom_recipe_write_port.h"
+#include "../../../contracts/host_sdk.h"
+#include "../../../contracts/inventory_action.h"
+#include "../../../contracts/inventory_slot.h"
+#include "../../../contracts/ownership.h"
+#include "../../../contracts/item_facts.h"
+#include "../../../contracts/save_facts.h"
+#include "../model/result.h"
+
+namespace qol::contracts {
+struct PluginContext;
+}
+
+// 自定义合成配方结果层 feature（C2 Step 4）：结果判定/扣料/产物与 RECIPEBASE/MIXTUREBASE
+// 表注入所有权的实现。
+//
+// 边界（「界面归界面，结果归结果」，ADR-0005）：
+//   · provider 不读 UIMix/控件：界面状态（选中物品、三格内容、持有数）由调用方经
+//     result/ 的 Input 结构体携带；provider 只做判定与结果计算。
+//   · 扣料/产物/入包与 stuffList 需求写回属「写入执行」，同步留在本 feature。
+
+namespace qol::features::custom_recipe {
+
+void set_context(const contracts::PluginContext& ctx);
+void set_item_facts(const contracts::ItemFactsApi* facts);
+void set_craft_facts(const contracts::CraftFactsApi* facts);
+void set_save_facts(const contracts::SaveFactsApi* facts);
+void set_write_port(const contracts::QolCustomRecipeWritePort* port);
+// 扣料的句柄锚定入口与 handle→袋引用定位：descriptor 里均为 required，缺失时 execute 在
+// 前置阶段直接拒绝（原版入口只是回退口，不是缺失时的替代方案）。
+void set_inventory_action(const contracts::InventoryActionApi* api);
+void set_inventory_slot(const contracts::QolInventorySlotApi* api);
+// 注册袋源（扩展背包）物品的 handle→袋引用定位面；缺失时该类物品回退原版类别入口。
+void set_bag_source_registry(const contracts::QolBagSourceRegistryApi* api);
+const contracts::QolHostSdk* host_sdk();
+const contracts::QolGameHost* game_host();
+void log_message(int32_t level, const char* format, ...);
+
+// 内部 UI 子层使用的结果 API，不对外通过 capability 注册。
+const result::CraftResultApi& craft_result_api();
+
+// Game Adapter 的 typed 随机端口与表 ownership readiness。
+QolResult random_inclusive(int32_t lo, int32_t hi, int32_t* out);
+bool ownership_ready();
+
+// RECIPEBASE/MIXTUREBASE 表注入的行为所有权 ops。
+const qol::contracts::OwnershipOps& ownership_ops();
+
+// 门禁：镜像 descriptor feature `custom_recipe.recipes` 的运行态；由生命周期与
+// feature on_toggle 驱动。
+bool enabled();
+bool set_enabled(bool enabled);
+
+// 作废在途的三格合成待确认（弹窗取消 / 弹窗创建失败 / 需要放弃确认时）。
+// 仅插件内部使用：不写物品、不随机、不扣料、不保存，也不清空已填格。
+void cancel_pending_confirmation();
+
+// 注册「进档重建动态特殊装备配方」回调（幂等）。
+void register_dynamic_recipes();
+void unregister_dynamic_recipes();
+
+bool handle_write_stuff_need_command(const uint8_t* payload, uint32_t size);
+bool handle_set_stuff_item_command(const uint8_t* payload, uint32_t size);
+
+}  // namespace qol::features::custom_recipe

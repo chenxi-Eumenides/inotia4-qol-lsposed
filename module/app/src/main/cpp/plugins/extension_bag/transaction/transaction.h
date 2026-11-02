@@ -1,0 +1,39 @@
+#pragma once
+
+#include "plugins/extension_bag/model/bag_result.h"
+#include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
+
+bool move_original_to_extension_slot_locked(
+    ::qol::extension_bag::ReentryLock& lock, int src_bag, int src_slot, int dst_bag,
+    qol::contracts::QolItemHandle expected_item = qol::contracts::kInvalidItemHandle);
+bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, int src_bag,
+                                       int src_slot, int target_bag);
+bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
+                                        int requested_dst_slot = -1);
+bool extension_save_item_on_empty(void* item, int bag);
+bool serialize_item_payload_locked(
+    void* item, std::array<uint8_t, virtual_bag::kSerializedItemBuffer>* out, int* out_size);
+void* load_item_payload_locked(const uint8_t* payload, int payload_size, const char* context);
+void generate_transaction_id_locked(char* out);
+bool txn_record_pending_locked(virtual_bag::TransactionContext* txn);
+void txn_abort_locked(const virtual_bag::TransactionContext& txn,
+                      virtual_bag::TxnStage failed_at, const char* reason);
+void isolate_pending_locked(const char* reason, const char* detail);
+void isolate_ext2orig_failure_locked(const virtual_bag::TransactionContext& txn,
+                                    virtual_bag::TxnStage phase, const char* reason,
+                                    const char* detail);
+bool original_inventory_contains_payload_locked(const uint8_t* payload, int payload_size,
+                                                int target_bag);
+int original_inventory_payload_slot_locked(const uint8_t* payload, int payload_size,
+                                           int target_bag);
+int original_inventory_handle_slot_locked(qol::contracts::QolItemHandle expected,
+                                          int target_bag);
+void recover_pending_transaction_locked(::qol::extension_bag::ReentryLock& lock);
+bool apply_extension_material_to_slot_locked(::qol::extension_bag::ReentryLock& lock,
+                                              int src_bag, int src_slot, int dst_bag,
+                                              int dst_slot,
+                                              qol::contracts::QolItemHandle material_item,
+                                              qol::contracts::QolItemHandle target_item);
+bool remove_item_direct_unlocked(::qol::extension_bag::ReentryLock& lock, int bag, int slot,
+                                 void* expected_item, const char* context);

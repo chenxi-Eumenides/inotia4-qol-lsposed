@@ -1,0 +1,51 @@
+#pragma once
+
+#include <array>
+#include <cstdint>
+
+#include "contracts/game_host.h"
+
+// 游戏层：指令 patch 点登记（ARCHITECTURE.md §4.3）。机制实现不得在本层出现；
+// 本层只把「登记名 → 运行期地址 + 原指令字 + 替换字」交给 patch 层，
+// 使 VMA/偏移常量保持 game_symbols.h 单一来源。
+
+namespace qol::game {
+
+// 数量字段布局原语（Game Adapter 内部）：item+I_TYPE 的类别编码判定与 item+I_COUNT
+// 字段读写。偏移属 Game Adapter，插件只经 QolItemCountApi 读写不透明字段值。
+// g_base==0 或 item==nullptr 时 fail-closed 返回 kUnknown/false。
+contracts::QolItemCountEncoding item_count_encoding(const void* item);
+bool read_item_count_field(const void* item, uint32_t* out_value);
+bool write_item_count_field(void* item, uint32_t value);
+
+enum class PatchKind : uint8_t {
+    kBlRedirect = 0,          // BL 重定向到 claim.handler（wrapper 地址）
+    kWordReplace = 1,         // 单指令字替换（无透传执行体）
+    kBlRedirectToSymbol = 2,  // BL 重定向到站点声明的符号目标（无 handler）
+    kBranchRedirect = 3,      // B 尾调用重定向到 claim.handler（宿主分配近址 thunk）
+    kBranchRedirectWithReturn = 4,  // 入口尾部重定向，handler 后固定回写并跳回 epilogue
+};
+
+struct PatchSite {
+    uintptr_t addr = 0;              // 运行期地址（g_base + VMA + 偏移）
+    uint32_t expected_word = 0;      // 精确白名单的主 expected 字
+    uint32_t replacement_word = 0;   // kWordReplace 的替换字；BL 类为 0
+    uintptr_t redirect_target = 0;   // kBlRedirectToSymbol：BL 目标绝对地址（其余为 0）
+    PatchKind kind = PatchKind::kBlRedirect;
+    uint32_t alternate_expected_word = 0;  // branch-return 原语的既有备用 expected 字
+    uintptr_t return_addr = 0;
+    uint32_t tail_word = 0;
+    std::array<uint32_t, 2> word_replace_alternates{};  // 固定容量精确白名单；0 表示未登记
+    std::array<uint32_t, 2> word_replace_alternate_replacements{};  // 与备用原字同索引；0 沿用默认替换字
+};
+
+// 按登记名解析 patch 点；未登记或 g_base==0 → false。
+bool patch_site(const char* name, PatchSite* out);
+
+// 测试用：以 name 覆盖解析结果（host 测试构造未登记的 kind，如 B 站点）；同名覆盖旧值，
+// 容量耗尽返回 false。生产路径不调用。
+bool patch_site_override_for_test(const char* name, const PatchSite& site);
+// 测试用：清除全部覆盖。
+void patch_site_clear_overrides_for_test();
+
+}  // namespace qol::game

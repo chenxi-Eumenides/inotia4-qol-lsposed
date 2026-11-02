@@ -1,0 +1,2637 @@
+#include "ui_components.h"
+
+#include "../../contracts/ui_theme.h"
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include "panels/stack.h"
+#include "ui_adapter_check.h"
+#include "ui_geometry.h"
+#include "ui_shapes.h"
+
+namespace qol::features::core_ui {
+namespace {
+
+enum class ComponentKind : uint8_t {
+    kPanel,
+    kButton,
+    kLabel,
+    kToggle,
+    kSelect,
+    kScrollView,
+    kScrollList,
+    kHelpPage,
+    kNativeToggle,
+    kTextButton,
+    kNavButton,
+    kArrowButton,
+    kFlatTextButton,
+    kIconButton,
+};
+
+struct Component;
+struct ScrollRow {
+    contracts::QolUiHandle native = nullptr;
+    Component* list = nullptr;
+    uint32_t index = 0;
+};
+
+struct Component {
+    contracts::QolUiHandle native = nullptr;
+    contracts::QolUiHandle original_menu_button = nullptr;
+    ComponentKind kind = ComponentKind::kPanel;
+    UiRect rect{};
+    std::string text;
+    uint32_t style = 0;
+    int32_t value = 0;
+    int32_t selected = 0;
+    int32_t content_extent = 0;
+    int32_t offset = 0;
+    int32_t page_size = 0;
+    contracts::QolUiClickFn on_click = nullptr;
+    contracts::QolUiChangedFn on_changed = nullptr;
+    contracts::QolUiScrollFn on_scroll = nullptr;
+    void* user = nullptr;
+    std::vector<std::string> options;
+    Component* parent = nullptr;
+    std::vector<std::unique_ptr<Component>> children;
+    std::vector<ScrollRow> rows;
+    contracts::QolUiListItemDrawFn draw_item = nullptr;
+    contracts::QolUiListSelectFn on_select = nullptr;
+    std::vector<contracts::UiHelpOption> help_options;
+    UiRect left_viewport{}, right_viewport{};
+    contracts::QolUiHandle help_list = nullptr;
+    QolResult draw_result = contracts::ok();
+    bool pending_destroy = false;
+    bool native_deleted = false;
+    bool main_menu_text_button = false;
+    // 锚定在游戏控件树上：native 生命周期归游戏（面板拆除时连同子树销毁），
+    // unbind 时不得 delete_control（会命中已释放或被复用的地址）。
+    bool native_externally_owned = false;
+    bool enabled = true;
+    bool active = false;
+    bool active_state_set = false;
+    bool selection_enabled = true;
+    uint32_t appearance = 0;
+    uint32_t font_size = 0;
+    uint32_t direction = contracts::kUiArrowLeft;
+    int32_t image_unit = 0;
+    int32_t image_loc = 0;
+    int32_t draw_type = 1;
+    bool show_background = true;
+    std::string fallback_text;
+    UiRect paint_local{};
+};
+
+const contracts::QolUiAdapter* g_adapter = nullptr;
+std::unordered_map<contracts::QolUiHandle, Component*> g_components;
+std::vector<std::unique_ptr<Component>> g_roots;
+uint32_t g_callback_depth = 0;
+bool g_unbind_pending = false;
+
+struct CallbackScope {
+    CallbackScope() { ++g_callback_depth; }
+    ~CallbackScope() { --g_callback_depth; }
+};
+
+QolResult destroy(contracts::QolUiHandle handle);
+QolResult text_button_draw(contracts::QolUiHandle handle);
+QolResult draw_control_text(contracts::QolUiHandle control, const char* text, int32_t x_offset,
+                            int32_t y_offset, uint32_t color, int32_t align, int32_t font);
+void text_button_execute(void* user);
+bool native_list_ready();
+bool valid_utf8(const char* text);
+bool main_menu_adapter_ready();
+bool on_main_thread();
+QolResult require_list(contracts::QolUiHandle handle, Component** out);
+void request_host_back();
+
+constexpr const char* kInvalidArgument = "invalid argument";
+constexpr const char* kNotReady = "ui primitive not ready";
+constexpr const char* kNotFound = "ui component not found";
+constexpr const char* kUnsupported = "ui component unsupported";
+constexpr int32_t kFrameImageUnit = 0x0f;
+constexpr int64_t kNativeTextButtonMinimumWidth = 204;
+constexpr int64_t kNativeTextButtonMinimumHeight = 48;
+
+QolResult invalid_argument() {
+    return contracts::error(kQolErrInvalidArgument, kInvalidArgument, 16);
+}
+
+QolResult not_ready() {
+    return contracts::error(kQolErrNotReady, kNotReady, 22);
+}
+
+QolResult not_found() {
+    return contracts::error(kQolErrNotFound, kNotFound, 20);
+}
+
+void main_menu_text_button_draw_proc(void* handle) {
+    if (handle != nullptr) (void)text_button_draw(handle);
+}
+
+QolResult unsupported() {
+    return contracts::error(kQolErrUnsupported, kUnsupported, 26);
+}
+
+Component* find_component(contracts::QolUiHandle handle) {
+    const auto it = g_components.find(handle);
+    return it == g_components.end() ? nullptr : it->second;
+}
+
+bool adapter_ready() {
+    return ui_adapter_ready(g_adapter);
+}
+
+bool paint_adapter_ready() {
+    constexpr size_t end = offsetof(contracts::QolUiAdapter, draw_native_text_button) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->draw_native_text_button);
+    return adapter_ready() && g_adapter->minor >= 21 && g_adapter->size >= end &&
+        g_adapter->layout_native_text_button && g_adapter->draw_native_text_button;
+}
+
+bool on_main_thread() {
+    return ui_adapter_on_main_thread(g_adapter);
+}
+
+QolResult require_component(contracts::QolUiHandle handle, Component** out) {
+    if (handle == nullptr || out == nullptr) return invalid_argument();
+    *out = find_component(handle);
+    return *out == nullptr ? not_found() : contracts::ok();
+}
+
+QolResult create_component(ComponentKind kind, uint32_t native_kind, UiRect rect,
+                           contracts::QolUiHandle parent, const char* text, uint32_t style,
+                           contracts::QolUiClickFn on_click, void* click_user,
+                           contracts::QolUiDrawFn draw_proc, contracts::QolUiHandle* out,
+                           Component* borrowed_row_owner = nullptr,
+                           bool allow_foreign_native_parent = false) {
+    if (out == nullptr) return invalid_argument();
+    *out = nullptr;
+    if (g_callback_depth != 0 || g_unbind_pending) return not_ready();
+    if (!adapter_ready() || g_adapter->create_control == nullptr || g_adapter->set_rect == nullptr ||
+        g_adapter->delete_control == nullptr) {
+        return not_ready();
+    }
+    if ((kind == ComponentKind::kPanel && parent != nullptr) ||
+        (kind != ComponentKind::kPanel && parent == nullptr)) {
+        return invalid_argument();
+    }
+    Component* parent_component = parent == nullptr ? nullptr : find_component(parent);
+    if (parent_component == nullptr && borrowed_row_owner != nullptr) {
+        parent_component = borrowed_row_owner;
+    }
+    // allow_foreign_native_parent：允许 parent 是未注册进 g_components 的裸原生控件
+    // （如 settings 页自建 g_root）。此时 parent_component 保持空，组件挂 g_roots，native
+    // 仍以传入 parent 为父；仅 nav 需要该借用语义，其它组件保持 not_found。
+    if (parent != nullptr && parent_component == nullptr && !allow_foreign_native_parent) {
+        return not_found();
+    }
+    if (parent_component != nullptr && parent_component->kind == ComponentKind::kScrollList &&
+        (borrowed_row_owner == nullptr ||
+         (kind != ComponentKind::kTextButton && kind != ComponentKind::kArrowButton))) {
+        return unsupported();  // 列表行只允许文本按钮和箭头按钮作为独立子控件。
+    }
+
+    contracts::QolUiHandle native = nullptr;
+    const QolResult create_result = g_adapter->create_control(native_kind, parent, &native);
+    if (!contracts::succeeded(create_result)) {
+        if (native != nullptr && g_adapter->delete_control != nullptr) {
+            const QolResult cleanup = g_adapter->delete_control(native);
+            return contracts::succeeded(cleanup) ? create_result : cleanup;
+        }
+        return create_result;
+    }
+    if (native == nullptr) return not_ready();
+    std::unique_ptr<Component> component(new Component());
+    component->native = native;
+    component->kind = kind;
+    component->rect = rect;
+    component->text = text == nullptr ? "" : text;
+    component->style = style;
+    component->on_click = on_click;
+    component->user = click_user;
+    const auto cleanup_native = [native, &component, parent_component](QolResult failure) {
+        if (g_adapter->delete_control == nullptr) return not_ready();
+        const QolResult cleanup = g_adapter->delete_control(native);
+        if (contracts::succeeded(cleanup)) return failure;
+        return cleanup;
+    };
+    Component* component_ptr = component.get();
+
+    QolResult result = g_adapter->set_rect(native, rect);
+    if (!contracts::succeeded(result)) return cleanup_native(result);
+    if (g_adapter->set_text != nullptr && text != nullptr) {
+        result = g_adapter->set_text(native, component->text.c_str());
+        if (!contracts::succeeded(result)) return cleanup_native(result);
+    }
+    if (draw_proc != nullptr) {
+        if (g_adapter->set_draw_proc == nullptr) return cleanup_native(not_ready());
+        result = g_adapter->set_draw_proc(native, draw_proc);
+        if (!contracts::succeeded(result)) return cleanup_native(result);
+    }
+    if (on_click != nullptr) {
+        if (g_adapter->set_click_proc == nullptr) return cleanup_native(not_ready());
+        result = g_adapter->set_click_proc(native, on_click, click_user);
+        if (!contracts::succeeded(result)) return cleanup_native(result);
+    }
+
+    if (parent_component != nullptr) {
+        component->parent = parent_component;
+        parent_component->children.push_back(std::move(component));
+    } else {
+        component->parent = nullptr;
+        g_roots.push_back(std::move(component));
+    }
+    g_components.emplace(native, component_ptr);
+    *out = native;
+    return contracts::ok();
+}
+
+QolResult panel_create(const contracts::UiPanelDesc* desc, contracts::QolUiHandle parent,
+                       contracts::QolUiHandle* out) {
+    if (desc == nullptr) return invalid_argument();
+    return create_component(ComponentKind::kPanel, 0, desc->rect, parent, nullptr, desc->flags,
+                            nullptr, nullptr, nullptr, out);
+}
+
+QolResult button_create(const contracts::UiButtonDesc* desc, contracts::QolUiHandle parent,
+                        contracts::QolUiHandle* out) {
+    if (desc == nullptr) return invalid_argument();
+    return create_component(ComponentKind::kButton, 1, desc->rect, parent, desc->text, desc->style,
+                            desc->on_click, desc->user, nullptr, out);
+}
+
+QolResult label_create(const contracts::UiLabelDesc* desc, contracts::QolUiHandle parent,
+                       contracts::QolUiHandle* out) {
+    if (desc == nullptr) return invalid_argument();
+    return create_component(ComponentKind::kLabel, 2, desc->rect, parent, desc->text, desc->color,
+                            nullptr, nullptr, nullptr, out);
+}
+
+QolResult toggle_create(const contracts::UiToggleDesc* desc, contracts::QolUiHandle parent,
+                        contracts::QolUiHandle* out) {
+    if (desc == nullptr) return invalid_argument();
+    const QolResult result = create_component(ComponentKind::kToggle, 1, desc->rect, parent,
+                                              desc->text, desc->style, nullptr, nullptr, nullptr, out);
+    if (!contracts::succeeded(result)) return result;
+    Component* component = find_component(*out);
+    component->value = desc->value;
+    component->on_changed = desc->on_changed;
+    component->user = desc->user;
+    return contracts::ok();
+}
+
+QolResult select_create(const contracts::UiSelectDesc* desc, contracts::QolUiHandle parent,
+                        contracts::QolUiHandle* out) {
+    if (desc == nullptr || (desc->option_count > 0 && desc->options == nullptr) ||
+        desc->selected < 0 ||
+        (desc->option_count > 0 && static_cast<uint32_t>(desc->selected) >= desc->option_count)) {
+        return invalid_argument();
+    }
+    const char* text = desc->option_count == 0 ? "" : desc->options[desc->selected];
+    if (text == nullptr) return invalid_argument();
+    const QolResult result = create_component(ComponentKind::kSelect, 1, desc->rect, parent, text,
+                                              desc->style, nullptr, nullptr, nullptr, out);
+    if (!contracts::succeeded(result)) return result;
+    Component* component = find_component(*out);
+    component->selected = desc->selected;
+    component->on_changed = desc->on_changed;
+    component->user = desc->user;
+    component->options.reserve(desc->option_count);
+    for (uint32_t i = 0; i < desc->option_count; ++i) {
+        if (desc->options[i] == nullptr) return invalid_argument();
+        component->options.emplace_back(desc->options[i]);
+    }
+    return contracts::ok();
+}
+
+QolResult scroll_view_create(const contracts::UiScrollViewDesc* desc, contracts::QolUiHandle parent,
+                             contracts::QolUiHandle* out) {
+    if (desc == nullptr || desc->content_extent < 0 || desc->page_size < 0) return invalid_argument();
+    const QolResult result = create_component(ComponentKind::kScrollView, 1, desc->viewport, parent,
+                                              nullptr, desc->flags, nullptr, nullptr, nullptr, out);
+    if (!contracts::succeeded(result)) return result;
+    Component* component = find_component(*out);
+    component->content_extent = desc->content_extent;
+    component->page_size = desc->page_size;
+    component->offset = desc->offset;
+    component->on_scroll = desc->on_scroll;
+    component->user = desc->user;
+    return contracts::ok();
+}
+
+QolResult set_rect(contracts::QolUiHandle handle, UiRect rect) {
+    Component* component = nullptr;
+    const QolResult lookup = require_component(handle, &component);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (component->kind == ComponentKind::kScrollList ||
+        component->kind == ComponentKind::kHelpPage) return unsupported();
+    if (!adapter_ready() || g_adapter->set_rect == nullptr) return not_ready();
+    const QolResult result = g_adapter->set_rect(component->native, rect);
+    if (contracts::succeeded(result)) component->rect = rect;
+    return result;
+}
+
+QolResult set_text(contracts::QolUiHandle handle, const char* text, ComponentKind expected) {
+    if (text == nullptr) return invalid_argument();
+    Component* component = nullptr;
+    const QolResult lookup = require_component(handle, &component);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (component->kind == ComponentKind::kTextButton && expected == ComponentKind::kButton) {
+        if (!valid_utf8(text)) return invalid_argument();
+        component->text = text;
+        return contracts::ok();
+    }
+    if (component->kind != expected) return unsupported();
+    if (!adapter_ready() || g_adapter->set_text == nullptr) return not_ready();
+    const QolResult result = g_adapter->set_text(component->native, text);
+    if (contracts::succeeded(result)) component->text = text;
+    return result;
+}
+
+QolResult button_set_text(contracts::QolUiHandle handle, const char* text) {
+    return set_text(handle, text, ComponentKind::kButton);
+}
+
+QolResult label_set_text(contracts::QolUiHandle handle, const char* text) {
+    return set_text(handle, text, ComponentKind::kLabel);
+}
+
+QolResult toggle_set_value(contracts::QolUiHandle handle, int32_t value) {
+    Component* component = nullptr;
+    const QolResult lookup = require_component(handle, &component);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (component->kind != ComponentKind::kToggle) return unsupported();
+    component->value = value;
+    return contracts::ok();
+}
+
+QolResult select_set_selected(contracts::QolUiHandle handle, int32_t selected) {
+    Component* component = nullptr;
+    const QolResult lookup = require_component(handle, &component);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (component->kind != ComponentKind::kSelect) return unsupported();
+    if (selected < 0 || static_cast<size_t>(selected) >= component->options.size()) {
+        return invalid_argument();
+    }
+    component->selected = selected;
+    return contracts::ok();
+}
+
+QolResult scroll_set_offset(contracts::QolUiHandle handle, int32_t offset) {
+    Component* component = nullptr;
+    const QolResult lookup = require_component(handle, &component);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (component->kind == ComponentKind::kScrollList) {
+        if (!native_list_ready() || component->pending_destroy || component->native_deleted ||
+            g_adapter->scroll_set_offset == nullptr) return not_ready();
+        return g_adapter->scroll_set_offset(handle, offset);
+    }
+    if (component->kind != ComponentKind::kScrollView) return unsupported();
+    const int32_t max_offset = component->content_extent > component->page_size
+        ? component->content_extent - component->page_size : 0;
+    if (offset < 0 || offset > max_offset) return invalid_argument();
+    component->offset = offset;
+    return contracts::ok();
+}
+
+bool hit_component(Component* component, int64_t x, int64_t y) {
+    if (g_adapter == nullptr || g_adapter->hit_test == nullptr) return false;
+    return g_adapter->hit_test(component->native, x, y,
+                               UiRect{0, 0, component->rect.w, component->rect.h}) > 0;
+}
+
+Component* find_hit(Component* root, int64_t x, int64_t y) {
+    for (auto it = root->children.rbegin(); it != root->children.rend(); ++it) {
+        Component* child = it->get();
+        if (!hit_component(child, x, y)) continue;
+        Component* nested = find_hit(child, x, y);
+        return nested == nullptr ? child : nested;
+    }
+    return hit_component(root, x, y) ? root : nullptr;
+}
+
+QolResult dispatch_touch(contracts::QolUiHandle root_handle, uint32_t phase, int64_t x, int64_t y) {
+    Component* root = nullptr;
+    const QolResult lookup = require_component(root_handle, &root);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (!adapter_ready() || g_adapter->hit_test == nullptr) return not_ready();
+    Component* target = find_hit(root, x, y);
+    if (target == nullptr) return contracts::ok();
+    if (phase != 1) return contracts::ok();
+
+    switch (target->kind) {
+        case ComponentKind::kButton:
+            if (target->on_click != nullptr) target->on_click(target->user);
+            break;
+        case ComponentKind::kToggle:
+            target->value = target->value == 0 ? 1 : 0;
+            if (target->on_changed != nullptr) target->on_changed(target->user, target->value);
+            break;
+        case ComponentKind::kSelect:
+            if (!target->options.empty()) {
+                target->selected = (target->selected + 1) % static_cast<int32_t>(target->options.size());
+                if (target->on_changed != nullptr) {
+                    target->on_changed(target->user, target->selected);
+                }
+            }
+            break;
+        case ComponentKind::kScrollView:
+            if (target->on_scroll != nullptr) target->on_scroll(target->user, target->offset);
+            break;
+        case ComponentKind::kScrollList:
+        case ComponentKind::kHelpPage:
+        case ComponentKind::kNativeToggle:
+            return unsupported();
+        case ComponentKind::kTextButton:
+        case ComponentKind::kNavButton:
+        case ComponentKind::kArrowButton:
+        case ComponentKind::kFlatTextButton:
+        case ComponentKind::kIconButton:
+            break;
+        case ComponentKind::kPanel:
+        case ComponentKind::kLabel:
+            break;
+    }
+    return contracts::ok();
+}
+
+void erase_component(Component* component) {
+    g_components.erase(component->native);
+    for (auto& child : component->children) erase_component(child.get());
+}
+
+QolResult discard_new_component(Component* component) {
+    if (component == nullptr || g_adapter == nullptr || g_adapter->delete_control == nullptr) {
+        return not_ready();
+    }
+    if (component->main_menu_text_button) {
+        if (!main_menu_adapter_ready() ||
+            !contracts::succeeded(g_adapter->main_menu_text_button_invalidate_binding(
+                component->native, component))) return not_ready();
+    }
+    const QolResult deleted = g_adapter->delete_control(component->native);
+    if (!contracts::succeeded(deleted)) return deleted;
+    Component* parent = component->parent;
+    erase_component(component);
+    if (parent == nullptr) {
+        const auto it = std::find_if(g_roots.begin(), g_roots.end(),
+            [component](const std::unique_ptr<Component>& root) { return root.get() == component; });
+        if (it != g_roots.end()) g_roots.erase(it);
+        return contracts::ok();
+    }
+    const auto it = std::find_if(parent->children.begin(), parent->children.end(),
+        [component](const std::unique_ptr<Component>& child) { return child.get() == component; });
+    if (it != parent->children.end()) parent->children.erase(it);
+    return contracts::ok();
+}
+
+QolResult forget_native(contracts::QolUiHandle handle) {
+    if (handle == nullptr) return invalid_argument();
+    Component* component = find_component(handle);
+    if (component == nullptr) return not_found();
+    // native 已由外部（游戏控件树）销毁：只摘除组件记录，绝不调用 delete_control。
+    // 保留记录会让 unbind/destroy 稍后再次删除同一个地址（已释放或被新控件复用）。
+    component->native_deleted = true;
+    Component* parent = component->parent;
+    erase_component(component);
+    if (parent == nullptr) {
+        const auto it = std::find_if(g_roots.begin(), g_roots.end(),
+            [component](const std::unique_ptr<Component>& root) {
+                return root.get() == component;
+            });
+        if (it != g_roots.end()) g_roots.erase(it);
+        return contracts::ok();
+    }
+    const auto it = std::find_if(parent->children.begin(), parent->children.end(),
+        [component](const std::unique_ptr<Component>& child) {
+            return child.get() == component;
+        });
+    if (it != parent->children.end()) parent->children.erase(it);
+    return contracts::ok();
+}
+
+bool native_list_ready() {
+    return g_adapter != nullptr && g_adapter->major == contracts::kUiAdapterMajor &&
+        g_adapter->minor >= kUiAdapterBaseMinor && g_adapter->is_main_thread != nullptr &&
+        g_adapter->is_main_thread() != 0 && g_adapter->delete_control != nullptr;
+}
+
+bool main_menu_adapter_ready() {
+    constexpr size_t kMenuAdapterSize =
+        offsetof(contracts::QolUiAdapter, main_menu_text_button_invalidate_binding) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->main_menu_text_button_invalidate_binding);
+    return g_adapter != nullptr && g_adapter->major == contracts::kUiAdapterMajor &&
+        g_adapter->minor >= 20 && g_adapter->size >= kMenuAdapterSize;
+}
+
+QolResult delete_owned_lists(Component* component) {
+    // 组件拥有的独立 native 按钮（含导航按钮）：destroy 时删除本控件一次。
+    if (component->kind == ComponentKind::kTextButton ||
+        component->kind == ComponentKind::kNavButton ||
+        component->kind == ComponentKind::kArrowButton ||
+        component->kind == ComponentKind::kFlatTextButton ||
+        component->kind == ComponentKind::kIconButton) {
+        if (component->native_deleted) return contracts::ok();
+        if (!native_list_ready()) return not_ready();
+        if (component->main_menu_text_button) {
+            if (!main_menu_adapter_ready()) return not_ready();
+            int32_t is_live = 0;
+            const QolResult identity = g_adapter->main_menu_text_button_is_live == nullptr
+                ? not_ready() : g_adapter->main_menu_text_button_is_live(
+                    component->original_menu_button, component->native, &text_button_execute,
+                    component, &is_live);
+            if (!contracts::succeeded(identity)) return identity;
+            if (is_live == 0) {
+                // Only a conclusive absence permits dropping the owner without native deletion.
+                if (g_adapter->main_menu_text_button_invalidate_binding == nullptr ||
+                    !contracts::succeeded(g_adapter->main_menu_text_button_invalidate_binding(
+                        component->native, component))) return not_ready();
+                component->native_deleted = true;
+                return contracts::ok();
+            }
+            if (is_live != 1) return not_ready();
+            // The adapter proved both current native liveness and this component's click owner.
+        }
+        const QolResult result = g_adapter->delete_control(component->native);
+        if (contracts::succeeded(result)) component->native_deleted = true;
+        return result;
+    }
+    if (component->kind == ComponentKind::kScrollList ||
+        component->kind == ComponentKind::kHelpPage) {
+        if (component->native_deleted) return contracts::ok();
+        if (!native_list_ready()) return not_ready();
+        // owned page/list 仅删除根一次；Adapter 先撤销绑定，再递归释放所有子控件。
+        const QolResult result = g_adapter->delete_control(component->native);
+        if (contracts::succeeded(result)) component->native_deleted = true;
+        return result;
+    }
+    for (auto& child : component->children) {
+        const QolResult result = delete_owned_lists(child.get());
+        if (!contracts::succeeded(result)) return result;
+    }
+    return contracts::ok();
+}
+
+QolResult destroy(contracts::QolUiHandle handle) {
+    Component* component = nullptr;
+    const QolResult lookup = require_component(handle, &component);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (g_callback_depth != 0) {
+        component->pending_destroy = true;
+        return contracts::ok();
+    }
+    if (component->kind == ComponentKind::kNativeToggle) {
+        if (!native_list_ready()) return not_ready();
+        const QolResult native_delete = g_adapter->delete_control(component->native);
+        if (!contracts::succeeded(native_delete)) return native_delete;
+    }
+    const QolResult deleted = delete_owned_lists(component);
+    if (!contracts::succeeded(deleted)) return deleted;
+    Component* parent = component->parent;
+    erase_component(component);
+    if (parent == nullptr) {
+        const auto it = std::find_if(g_roots.begin(), g_roots.end(),
+                                     [component](const std::unique_ptr<Component>& root) {
+                                         return root.get() == component;
+                                     });
+        if (it != g_roots.end()) g_roots.erase(it);
+        return contracts::ok();
+    }
+    const auto it = std::find_if(parent->children.begin(), parent->children.end(),
+                                 [component](const std::unique_ptr<Component>& child) {
+                                     return child.get() == component;
+                                 });
+    if (it != parent->children.end()) parent->children.erase(it);
+    return contracts::ok();
+}
+
+QolResult flush_pending_destroy() {
+    std::vector<contracts::QolUiHandle> pending;
+    for (const auto& entry : g_components) {
+        if (entry.second->pending_destroy) pending.push_back(entry.first);
+    }
+    for (auto handle : pending) {
+        if (find_component(handle) == nullptr) continue;
+        const QolResult result = destroy(handle);
+        if (!contracts::succeeded(result)) return result;
+    }
+    return contracts::ok();
+}
+
+void scroll_row_execute(void* user) {
+    auto* row = static_cast<ScrollRow*>(user);
+    if (row == nullptr || row->list->pending_destroy || row->list->native_deleted) return;
+    CallbackScope scope;
+    Component* list = row->list;
+    if (list->selection_enabled) {
+        list->selected = static_cast<int32_t>(row->index);
+        if (list->on_select != nullptr) list->on_select(list->user, row->index);
+    }
+}
+
+void native_toggle_execute(void* user) {
+    auto* toggle = static_cast<Component*>(user);
+    if (toggle == nullptr || toggle->pending_destroy || toggle->native_deleted ||
+        !toggle->enabled || toggle->on_changed == nullptr) return;
+    CallbackScope scope;
+    toggle->on_changed(toggle->user, toggle->value == 0 ? 1 : 0);
+}
+
+void text_button_execute(void* user) {
+    auto* button = static_cast<Component*>(user);
+    if (button == nullptr || button->pending_destroy || button->native_deleted ||
+        !button->enabled || button->on_click == nullptr) return;
+    CallbackScope scope;
+    button->on_click(button->user);
+}
+
+// 自适应导航按钮：点击一律延迟请求弹面板栈顶（帧安全点执行，栈顶仅一层即退出本页）；
+// on_click 仅作消费者附加通知，在 back 请求之后调用。
+void nav_button_execute(void* user) {
+    auto* button = static_cast<Component*>(user);
+    if (button == nullptr || button->pending_destroy || button->native_deleted ||
+        !button->enabled) return;
+    CallbackScope scope;
+    request_host_back();
+    if (button->on_click != nullptr) button->on_click(button->user);
+}
+
+bool valid_utf8(const char* text) {
+    if (text == nullptr) return false;
+    const size_t size = std::strlen(text);
+    for (size_t pos = 0; pos < size;) {
+        const unsigned char lead = static_cast<unsigned char>(text[pos]);
+        const size_t length = lead < 0x80 ? 1 : (lead & 0xe0) == 0xc0 ? 2 :
+                              (lead & 0xf0) == 0xe0 ? 3 : (lead & 0xf8) == 0xf0 ? 4 : 0;
+        if (length == 0 || pos + length > size || (length == 2 && lead < 0xc2) ||
+            (length == 4 && lead > 0xf4)) return false;
+        for (size_t i = 1; i < length; ++i) {
+            if ((static_cast<unsigned char>(text[pos + i]) & 0xc0) != 0x80) return false;
+        }
+        if (length == 3 && ((lead == 0xe0 &&
+             static_cast<unsigned char>(text[pos + 1]) < 0xa0) ||
+            (lead == 0xed && static_cast<unsigned char>(text[pos + 1]) >= 0xa0))) return false;
+        if (length == 4 && ((lead == 0xf0 &&
+             static_cast<unsigned char>(text[pos + 1]) < 0x90) ||
+            (lead == 0xf4 && static_cast<unsigned char>(text[pos + 1]) > 0x8f))) return false;
+        pos += length;
+    }
+    return true;
+}
+
+QolResult text_button_create_impl(const contracts::UiButtonDesc* desc,
+                                  contracts::QolUiHandle parent,
+                                  contracts::QolUiHandle* out,
+                                  bool allow_native_parent, bool draw_from_native_tree,
+                                  int64_t minimum_width = kNativeTextButtonMinimumWidth) {
+    if (out == nullptr) return invalid_argument();
+    *out = nullptr;
+    if (desc == nullptr || !valid_utf8(desc->text) || desc->on_click == nullptr ||
+        desc->rect.w < minimum_width ||
+        desc->rect.h < kNativeTextButtonMinimumHeight || !rect_within_int32(desc->rect) ||
+        (desc->style != contracts::kUiTextButtonFontDefault &&
+         desc->style != contracts::kUiTextButtonFontLarger)) {
+        return invalid_argument();
+    }
+    constexpr size_t kTextButtonAdapterSize =
+        offsetof(contracts::QolUiAdapter, draw_native_text_button_label) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->draw_native_text_button_label);
+    if (g_adapter == nullptr || g_adapter->minor < 20 ||
+        g_adapter->size < kTextButtonAdapterSize ||
+        g_adapter->draw_native_text_button_background == nullptr ||
+        g_adapter->set_button_enabled == nullptr ||
+        g_adapter->draw_native_text_button_label == nullptr) return not_ready();
+    Component* borrowed_row_owner = nullptr;
+    if (find_component(parent) == nullptr) {
+        for (const auto& entry : g_components) {
+            Component* candidate = entry.second;
+            if (candidate->kind != ComponentKind::kScrollList) continue;
+            for (const ScrollRow& row : candidate->rows) {
+                if (row.native == parent) {
+                    borrowed_row_owner = candidate;
+                    break;
+                }
+            }
+            if (borrowed_row_owner != nullptr) break;
+        }
+    }
+    const QolResult created = create_component(ComponentKind::kTextButton, 1, desc->rect,
+        parent, nullptr, desc->style, nullptr, nullptr,
+        draw_from_native_tree ? &main_menu_text_button_draw_proc : nullptr,
+        out, borrowed_row_owner, allow_native_parent);
+    if (!contracts::succeeded(created)) return created;
+    Component* button = find_component(*out);
+    if (button == nullptr || g_adapter->set_click_proc == nullptr) {
+        if (button != nullptr) {
+            const QolResult cleanup = discard_new_component(button);
+            if (!contracts::succeeded(cleanup)) return cleanup;
+        } else if (g_adapter->delete_control != nullptr) {
+            const QolResult cleanup = g_adapter->delete_control(*out);
+            if (!contracts::succeeded(cleanup)) return cleanup;
+        }
+        *out = nullptr;
+        return not_ready();
+    }
+    button->text = desc->text;
+    button->main_menu_text_button = draw_from_native_tree;
+    button->on_click = desc->on_click;
+    button->user = desc->user;
+    QolResult bound = contracts::ok();
+    if (borrowed_row_owner != nullptr) {
+        if (g_adapter->button_set_scroll == nullptr) bound = not_ready();
+        else bound = g_adapter->button_set_scroll(button->native, borrowed_row_owner->native);
+    }
+    if (contracts::succeeded(bound)) {
+        if (g_adapter->set_click_proc == nullptr) bound = not_ready();
+        else bound = g_adapter->set_click_proc(button->native, &text_button_execute, button);
+    }
+    if (!contracts::succeeded(bound)) {
+        const QolResult cleanup = discard_new_component(button);
+        *out = nullptr;
+        return contracts::succeeded(cleanup) ? bound : cleanup;
+    }
+    return contracts::ok();
+}
+
+QolResult text_button_create(const contracts::UiButtonDesc* desc,
+                             contracts::QolUiHandle parent, contracts::QolUiHandle* out) {
+    return text_button_create_impl(desc, parent, out, false, false);
+}
+
+QolResult main_menu_text_button_create(const contracts::UiMainMenuTextButtonDesc* desc,
+                                      contracts::QolUiHandle* out_original,
+                                      contracts::QolUiHandle* out_replacement) {
+    if (out_original == nullptr || out_replacement == nullptr || out_original == out_replacement) {
+        return invalid_argument();
+    }
+    *out_original = nullptr;
+    *out_replacement = nullptr;
+    if (desc == nullptr || desc->on_click == nullptr || !valid_utf8(desc->text) ||
+        (desc->style != contracts::kUiTextButtonFontDefault &&
+         desc->style != contracts::kUiTextButtonFontLarger)) return invalid_argument();
+    if (!on_main_thread() || !main_menu_adapter_ready() ||
+        g_adapter->main_menu_more_games_snapshot == nullptr ||
+        g_adapter->main_menu_text_button_is_live == nullptr ||
+        g_adapter->main_menu_text_button_invalidate_binding == nullptr) return not_ready();
+
+    contracts::QolUiHandle parent = nullptr;
+    UiRect rect{};
+    QolResult result = g_adapter->main_menu_more_games_snapshot(out_original, &parent, &rect);
+    if (!contracts::succeeded(result)) return result;
+    if (*out_original == nullptr || parent == nullptr) {
+        *out_original = nullptr;
+        return not_ready();
+    }
+
+    const contracts::UiButtonDesc button_desc{rect, desc->text, desc->style,
+                                               desc->on_click, desc->user};
+    result = text_button_create_impl(&button_desc, parent, out_replacement, true, true);
+    if (!contracts::succeeded(result)) {
+        *out_original = nullptr;
+        return result;
+    }
+    Component* button = find_component(*out_replacement);
+    if (button == nullptr) {
+        (void)destroy(*out_replacement);
+        *out_original = nullptr;
+        *out_replacement = nullptr;
+        return not_ready();
+    }
+    button->original_menu_button = *out_original;
+    return result;
+}
+
+QolResult main_menu_text_button_is_live(contracts::QolUiHandle handle, uint8_t* out_live) {
+    if (out_live == nullptr) return invalid_argument();
+    *out_live = 0;
+    Component* button = nullptr;
+    const QolResult lookup = require_component(handle, &button);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (!button->main_menu_text_button) return unsupported();
+    if (!main_menu_adapter_ready() || g_adapter->main_menu_text_button_is_live == nullptr) {
+        return not_ready();
+    }
+    int32_t live = 0;
+    const QolResult result = g_adapter->main_menu_text_button_is_live(
+        button->original_menu_button, button->native, &text_button_execute, button, &live);
+    if (contracts::succeeded(result)) *out_live = live != 0 ? 1 : 0;
+    return result;
+}
+
+QolResult text_button_set_enabled(contracts::QolUiHandle handle, uint8_t enabled) {
+    if (enabled > 1) return invalid_argument();
+    Component* component = nullptr;
+    const QolResult lookup = require_component(handle, &component);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (component->kind != ComponentKind::kTextButton &&
+        component->kind != ComponentKind::kFlatTextButton) return unsupported();
+    if (g_adapter->set_button_enabled == nullptr) return not_ready();
+    const QolResult result = g_adapter->set_button_enabled(handle, enabled);
+    if (!contracts::succeeded(result)) return result;
+    component->enabled = enabled != 0;
+    return contracts::ok();
+}
+
+QolResult flat_text_button_create(const contracts::UiButtonDesc* desc,
+                                  contracts::QolUiHandle parent,
+                                  contracts::QolUiHandle* out) {
+    if (out == nullptr || desc == nullptr || !valid_utf8(desc->text) ||
+        desc->on_click == nullptr || desc->rect.w < 80 || desc->rect.h < 42 ||
+        !rect_within_int32(desc->rect) ||
+        (desc->style != contracts::kUiTextButtonFontDefault &&
+         desc->style != contracts::kUiTextButtonFontLarger)) return invalid_argument();
+    const QolResult result = create_component(ComponentKind::kFlatTextButton, 1, desc->rect,
+        parent, nullptr, desc->style, nullptr, nullptr, nullptr, out);
+    if (!contracts::succeeded(result)) return result;
+    Component* button = find_component(*out);
+    button->text = desc->text;
+    button->on_click = desc->on_click;
+    button->user = desc->user;
+    if (g_adapter->set_click_proc == nullptr) {
+        const QolResult cleanup = destroy(*out);
+        *out = nullptr;
+        return contracts::succeeded(cleanup) ? not_ready() : cleanup;
+    }
+    const QolResult bound = g_adapter->set_click_proc(button->native, &text_button_execute, button);
+    if (!contracts::succeeded(bound)) {
+        const QolResult cleanup = destroy(button->native);
+        *out = nullptr;
+        return contracts::succeeded(cleanup) ? bound : cleanup;
+    }
+    return contracts::ok();
+}
+
+QolResult flat_text_button_draw(Component* button) {
+    if (!on_main_thread() || button == nullptr || !g_adapter->control_absolute_origin ||
+        !g_adapter->control_pressed || !g_adapter->fill_rect) return not_ready();
+    int64_t x = 0, y = 0;
+    int32_t pressed = 0;
+    QolResult result = g_adapter->control_absolute_origin(button->native, &x, &y);
+    if (contracts::succeeded(result)) result = g_adapter->control_pressed(button->native, &pressed);
+    if (!contracts::succeeded(result)) return result;
+    const UiRect rect{x, y, button->rect.w, button->rect.h};
+    const bool selected = button->active_state_set && button->active;
+    const uint32_t fill = pressed ? 0xFF474139u : selected ? 0xFF383430u : 0xFF24201Cu;
+    const uint32_t border = pressed ? contracts::ui_theme::kTextNormal :
+        selected ? contracts::ui_theme::kTextGold : 0xFF706C64u;
+    result = g_adapter->fill_rect(rect, fill);
+    if (!contracts::succeeded(result)) return result;
+    constexpr int64_t edge = 2;
+    const UiRect edges[] = {
+        {rect.x, rect.y, rect.w, edge}, {rect.x, rect.y + rect.h - edge, rect.w, edge},
+        {rect.x, rect.y, edge, rect.h}, {rect.x + rect.w - edge, rect.y, edge, rect.h}};
+    for (UiRect edge_rect : edges) {
+        result = g_adapter->fill_rect(edge_rect, border);
+        if (!contracts::succeeded(result)) return result;
+    }
+    const uint32_t text_color = !button->enabled ? contracts::ui_theme::kTextDisabled :
+        pressed ? contracts::ui_theme::kTextNormal : selected ? contracts::ui_theme::kTextGold :
+            contracts::ui_theme::kTextNormal;
+    const int32_t font = button->style == contracts::kUiTextButtonFontLarger ? 1 : 0;
+    const int32_t font_height = font == 1 ? 26 : 22;
+    return draw_control_text(button->native, button->text.c_str(),
+        static_cast<int32_t>(button->rect.w / 2),
+        static_cast<int32_t>((button->rect.h - font_height) / 2), text_color, 2, font);
+}
+
+QolResult text_button_draw(contracts::QolUiHandle handle) {
+    if (!on_main_thread()) return not_ready();
+    Component* button = nullptr;
+    const QolResult lookup = require_component(handle, &button);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (button->kind == ComponentKind::kFlatTextButton) return flat_text_button_draw(button);
+    if (button->kind != ComponentKind::kTextButton &&
+        button->kind != ComponentKind::kFlatTextButton) return unsupported();
+    if (g_adapter->draw_native_text_button_background == nullptr ||
+        g_adapter->control_absolute_origin == nullptr ||
+        g_adapter->control_pressed == nullptr ||
+        g_adapter->draw_native_text_button_label == nullptr) return not_ready();
+
+    int32_t pressed = 0;
+    int64_t x = 0;
+    int64_t y = 0;
+    QolResult result = g_adapter->control_pressed(handle, &pressed);
+    if (!contracts::succeeded(result)) return result;
+    result = g_adapter->control_absolute_origin(handle, &x, &y);
+    if (!contracts::succeeded(result)) return result;
+    UiRect draw_rect{x, y, button->rect.w, button->rect.h};
+    if (button->appearance != 0) {
+        if (!paint_adapter_ready()) return not_ready();
+        if (button->main_menu_text_button) {
+            draw_rect = {x + button->paint_local.x, y + button->paint_local.y,
+                button->paint_local.w, button->paint_local.h};
+        }
+        const contracts::UiTextButtonPaintDesc desc{draw_rect, button->appearance,
+            button->style, button->font_size};
+        const uint32_t color = !button->enabled ? contracts::ui_theme::kTextDisabled :
+            button->active_state_set
+                ? (pressed ? contracts::ui_theme::kTextNormal : button->active
+                    ? contracts::ui_theme::kTextGold : contracts::ui_theme::kTextDisabled)
+                : (pressed ? contracts::ui_theme::kTextNormal : contracts::ui_theme::kTextGold);
+        if (button->active_state_set) {
+            contracts::UiTextButtonPaintLayout layout{};
+            result = g_adapter->layout_native_text_button(&desc, &layout);
+            if (!contracts::succeeded(result)) return result;
+            // Split the active-state paint so the dim overlay only affects the button base,
+            // never its label. The actual press state still selects the native pressed art.
+            result = g_adapter->draw_native_text_button(&desc, " ", color,
+                button->enabled && pressed ? 1 : 0);
+            if (!contracts::succeeded(result)) return result;
+            if (!button->active && g_adapter->draw_control_alpha_overlay != nullptr) {
+                result = g_adapter->draw_control_alpha_overlay(handle,
+                    {draw_rect.x - x, draw_rect.y - y, draw_rect.w, draw_rect.h},
+                    0xFF000000u, 28);
+                if (!contracts::succeeded(result)) return result;
+            }
+            return g_adapter->draw_native_text_button_label(draw_rect,
+                button->text.c_str(), color, static_cast<int32_t>(button->style));
+        }
+        result = g_adapter->draw_native_text_button(&desc, button->text.c_str(), color,
+            button->enabled && pressed ? 1 : 0);
+        return result;
+    }
+    if (button->main_menu_text_button) {
+        // Use the decorated compact-button aspect for painting only. The native
+        // menu rect and its touch bounds remain unchanged.
+        const int64_t height = std::min(draw_rect.h, draw_rect.w * 48 / 220);
+        draw_rect.y += (draw_rect.h - height) / 2;
+        draw_rect.h = height;
+    }
+    result = g_adapter->draw_native_text_button_background(
+        draw_rect, pressed != 0 ? 1 : 0);
+    if (!contracts::succeeded(result)) return result;
+
+    if (button->active_state_set && !button->active &&
+        g_adapter->draw_control_alpha_overlay != nullptr) {
+        result = g_adapter->draw_control_alpha_overlay(handle,
+            {0, 0, button->rect.w, button->rect.h}, 0xFF000000u, 28);
+        if (!contracts::succeeded(result)) return result;
+    }
+
+    const uint32_t color = !button->enabled ? contracts::ui_theme::kTextDisabled
+        : button->active_state_set
+            ? (pressed != 0 ? contracts::ui_theme::kTextNormal : button->active
+                ? contracts::ui_theme::kTextGold : contracts::ui_theme::kTextDisabled)
+            : (pressed != 0 ? contracts::ui_theme::kTextNormal : contracts::ui_theme::kTextGold);
+    return g_adapter->draw_native_text_button_label(
+        draw_rect, button->text.c_str(), color,
+        static_cast<int32_t>(button->style));
+}
+
+QolResult text_button_set_active(contracts::QolUiHandle handle, uint8_t active) {
+    if (active > 1) return invalid_argument();
+    Component* button = nullptr;
+    const QolResult lookup = require_component(handle, &button);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (button->kind != ComponentKind::kTextButton &&
+        button->kind != ComponentKind::kFlatTextButton) return unsupported();
+    button->active = active != 0;
+    button->active_state_set = true;
+    return contracts::ok();
+}
+
+QolResult arrow_button_create(const contracts::UiArrowButtonDesc* desc,
+                              contracts::QolUiHandle parent, contracts::QolUiHandle* out) {
+    if (out == nullptr || desc == nullptr || desc->rect.w <= 0 || desc->rect.h <= 0 ||
+        desc->direction > contracts::kUiArrowRight || desc->enabled > 1 || desc->on_click == nullptr ||
+        !rect_within_int32(desc->rect)) return invalid_argument();
+    constexpr size_t kScaledDrawEnd = offsetof(contracts::QolUiAdapter, draw_part_scaled) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->draw_part_scaled);
+    if (!on_main_thread() || g_adapter->minor < 24 || g_adapter->size < kScaledDrawEnd ||
+        !g_adapter->draw_part_scaled || !g_adapter->image_loc_size ||
+        !g_adapter->image_group || !g_adapter->image_loc ||
+        !g_adapter->image_unit_load || !g_adapter->control_pressed ||
+        !g_adapter->control_absolute_origin || !g_adapter->set_button_enabled) return not_ready();
+    (void)g_adapter->image_unit_load(0x59);
+    // 列表行是原生句柄而非注册组件；必须借用所属 scroll list 作为 owner，
+    // 否则箭头会成为根组件，列表销毁后残留并在原生句柄复用后误认新行。
+    Component* borrowed_row_owner = nullptr;
+    if (find_component(parent) == nullptr) {
+        for (const auto& entry : g_components) {
+            Component* candidate = entry.second;
+            if (candidate->kind != ComponentKind::kScrollList) continue;
+            for (const ScrollRow& row : candidate->rows) {
+                if (row.native == parent) {
+                    borrowed_row_owner = candidate;
+                    break;
+                }
+            }
+            if (borrowed_row_owner != nullptr) break;
+        }
+    }
+    const QolResult created = create_component(ComponentKind::kArrowButton, 1, desc->rect,
+        parent, nullptr, 0, nullptr, nullptr, nullptr, out, borrowed_row_owner, false);
+    if (!contracts::succeeded(created)) return created;
+    Component* button = find_component(*out);
+    button->direction = desc->direction;
+    button->on_click = desc->on_click;
+    button->user = desc->user;
+    button->enabled = desc->enabled != 0;
+    QolResult result = g_adapter->set_button_enabled(*out, desc->enabled);
+    if (contracts::succeeded(result)) result = g_adapter->set_click_proc
+        ? g_adapter->set_click_proc(*out, &text_button_execute, button) : not_ready();
+    if (!contracts::succeeded(result)) {
+        const QolResult cleanup = destroy(*out);
+        *out = nullptr;
+        return contracts::succeeded(cleanup) ? result : cleanup;
+    }
+    return contracts::ok();
+}
+
+QolResult arrow_button_set_enabled(contracts::QolUiHandle handle, uint8_t enabled) {
+    if (enabled > 1) return invalid_argument();
+    Component* button = nullptr;
+    const QolResult lookup = require_component(handle, &button);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (button->kind != ComponentKind::kArrowButton || !g_adapter->set_button_enabled) return unsupported();
+    const QolResult result = g_adapter->set_button_enabled(handle, enabled);
+    if (contracts::succeeded(result)) button->enabled = enabled != 0;
+    return result;
+}
+
+QolResult arrow_button_draw(contracts::QolUiHandle handle) {
+    if (!on_main_thread()) return not_ready();
+    Component* button = nullptr;
+    const QolResult lookup = require_component(handle, &button);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (button->kind != ComponentKind::kArrowButton) return unsupported();
+    constexpr size_t kScaledDrawEnd = offsetof(contracts::QolUiAdapter, draw_part_scaled) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->draw_part_scaled);
+    if (g_adapter->minor < 24 || g_adapter->size < kScaledDrawEnd ||
+        !g_adapter->draw_part_scaled || !g_adapter->image_loc_size) return not_ready();
+    contracts::QolUiHandle group = nullptr, loc = nullptr;
+    const int32_t loc_id = (button->direction == contracts::kUiArrowLeft ? 0x09 : 0x0b);
+    QolResult result = g_adapter->image_group(0x59, &group);
+    if (contracts::succeeded(result)) result = g_adapter->image_loc(0x59, loc_id, &loc);
+    if (!contracts::succeeded(result)) return result;
+    int32_t pressed = 0;
+    int64_t x = 0, y = 0;
+    result = g_adapter->control_pressed(handle, &pressed);
+    if (contracts::succeeded(result)) result = g_adapter->control_absolute_origin(handle, &x, &y);
+    if (!contracts::succeeded(result)) return result;
+    // Options atlas pairs normal/pressed locs; flip 1 mirrors the native directional arrow.
+    if (pressed && button->enabled) {
+        result = g_adapter->image_loc(0x59, loc_id + 1, &loc);
+        if (!contracts::succeeded(result)) return result;
+    }
+    int32_t width = 0, height = 0;
+    result = g_adapter->image_loc_size(0x59, loc_id + ((pressed && button->enabled) ? 1 : 0),
+                                       &width, &height);
+    if (!contracts::succeeded(result) || width <= 0 || height <= 0) return not_ready();
+    const int64_t scale_x = button->rect.w * 100 / width;
+    const int64_t scale_y = button->rect.h * 100 / height;
+    const int64_t scale = std::min(scale_x, scale_y);
+    if (scale < 1 || scale > 400) return invalid_argument();
+    const int64_t drawn_width = static_cast<int64_t>(width) * scale / 100;
+    const int64_t drawn_height = static_cast<int64_t>(height) * scale / 100;
+    const int64_t draw_x = x + (button->rect.w - drawn_width) / 2;
+    const int64_t draw_y = y + (button->rect.h - drawn_height) / 2;
+    if (draw_x < INT32_MIN || draw_x > INT32_MAX || draw_y < INT32_MIN ||
+        draw_y > INT32_MAX) return invalid_argument();
+    // loc 0x09/0x0b are direction-specific assets; adjacent locs provide their pressed state.
+    result = g_adapter->draw_part_scaled(group, static_cast<int32_t>(draw_x),
+        static_cast<int32_t>(draw_y), loc, 1, 0, static_cast<int32_t>(scale));
+    if (contracts::succeeded(result) && !button->enabled &&
+        g_adapter->draw_control_alpha_overlay != nullptr) {
+        result = g_adapter->draw_control_alpha_overlay(handle,
+            {0, 0, button->rect.w, button->rect.h}, 0xFF000000u, 35);
+    }
+    return result;
+}
+
+QolResult icon_button_create(const contracts::UiIconButtonDesc* desc,
+                             contracts::QolUiHandle parent, contracts::QolUiHandle* out) {
+    if (out == nullptr || desc == nullptr || desc->rect.w <= 0 || desc->rect.h <= 0 ||
+        desc->image_unit <= 0 || desc->image_loc < 0 || desc->draw_type < 0 ||
+        desc->draw_type > 2 || desc->enabled > 1 || desc->show_background > 1 ||
+        desc->on_click == nullptr || !rect_within_int32(desc->rect) ||
+        (desc->fallback_text != nullptr && !valid_utf8(desc->fallback_text))) {
+        return invalid_argument();
+    }
+    constexpr size_t kScaledDrawEnd = offsetof(contracts::QolUiAdapter, draw_part_scaled) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->draw_part_scaled);
+    if (!on_main_thread() || g_adapter->minor < 24 || g_adapter->size < kScaledDrawEnd ||
+        !g_adapter->draw_part_scaled || !g_adapter->image_loc_size || !g_adapter->image_group ||
+        !g_adapter->image_loc || !g_adapter->image_unit_load || !g_adapter->set_button_enabled ||
+        !g_adapter->control_absolute_origin || !g_adapter->control_pressed) return not_ready();
+    (void)g_adapter->image_unit_load(desc->image_unit);
+    const QolResult created = create_component(ComponentKind::kIconButton, 1, desc->rect,
+        parent, nullptr, 0, nullptr, nullptr, nullptr, out, nullptr, true);
+    if (!contracts::succeeded(created)) return created;
+    Component* button = find_component(*out);
+    button->image_unit = desc->image_unit;
+    button->image_loc = desc->image_loc;
+    button->draw_type = desc->draw_type;
+    button->show_background = desc->show_background != 0;
+    button->fallback_text = desc->fallback_text == nullptr ? "" : desc->fallback_text;
+    button->on_click = desc->on_click;
+    button->user = desc->user;
+    button->enabled = desc->enabled != 0;
+    QolResult result = g_adapter->set_button_enabled(*out, desc->enabled);
+    if (contracts::succeeded(result)) result = g_adapter->set_click_proc
+        ? g_adapter->set_click_proc(button->native, &text_button_execute, button) : not_ready();
+    if (!contracts::succeeded(result)) {
+        const QolResult cleanup = destroy(button->native);
+        *out = nullptr;
+        return contracts::succeeded(cleanup) ? result : cleanup;
+    }
+    return contracts::ok();
+}
+
+QolResult icon_button_set_enabled(contracts::QolUiHandle handle, uint8_t enabled) {
+    if (enabled > 1) return invalid_argument();
+    Component* button = nullptr;
+    const QolResult lookup = require_component(handle, &button);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (button->kind != ComponentKind::kIconButton || !g_adapter->set_button_enabled)
+        return unsupported();
+    const QolResult result = g_adapter->set_button_enabled(handle, enabled);
+    if (contracts::succeeded(result)) button->enabled = enabled != 0;
+    return result;
+}
+
+QolResult icon_button_draw(contracts::QolUiHandle handle) {
+    if (!on_main_thread()) return not_ready();
+    Component* button = nullptr;
+    const QolResult lookup = require_component(handle, &button);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (button->kind != ComponentKind::kIconButton) return unsupported();
+    int64_t x = 0, y = 0;
+    int32_t pressed = 0;
+    QolResult result = g_adapter->control_absolute_origin(handle, &x, &y);
+    if (contracts::succeeded(result)) result = g_adapter->control_pressed(handle, &pressed);
+    if (!contracts::succeeded(result)) return result;
+    if (button->show_background && !g_adapter->fill_rect) return not_ready();
+    const UiRect rect{x, y, button->rect.w, button->rect.h};
+    const uint32_t fill = pressed ? 0xFF474139u : 0xFF241C18u;
+    const uint32_t border = pressed ? contracts::ui_theme::kTextNormal :
+        button->enabled ? contracts::ui_theme::kTextGold : contracts::ui_theme::kTextDisabled;
+    if (button->show_background) {
+        result = g_adapter->fill_rect(rect, fill);
+        if (!contracts::succeeded(result)) return result;
+        const UiRect borders[] = {
+            {rect.x, rect.y, rect.w, 2}, {rect.x, rect.y + rect.h - 2, rect.w, 2},
+            {rect.x, rect.y, 2, rect.h}, {rect.x + rect.w - 2, rect.y, 2, rect.h}};
+        for (UiRect edge : borders) {
+            result = g_adapter->fill_rect(edge, border);
+            if (!contracts::succeeded(result)) return result;
+        }
+    }
+
+    bool icon_drawn = false;
+    contracts::QolUiHandle group = nullptr, loc = nullptr;
+    int32_t width = 0, height = 0;
+    if (g_adapter->image_group && g_adapter->image_loc && g_adapter->image_loc_size &&
+        g_adapter->draw_part_scaled &&
+        contracts::succeeded(g_adapter->image_group(button->image_unit, &group)) &&
+        contracts::succeeded(g_adapter->image_loc(button->image_unit, button->image_loc, &loc)) &&
+        contracts::succeeded(g_adapter->image_loc_size(button->image_unit, button->image_loc,
+                                                       &width, &height)) &&
+        width > 0 && height > 0) {
+        const int64_t scale = std::min(button->rect.w * 100 / width,
+                                       button->rect.h * 100 / height);
+        if (scale > 0 && scale <= 400) {
+            const int64_t draw_width = static_cast<int64_t>(width) * scale / 100;
+            const int64_t draw_height = static_cast<int64_t>(height) * scale / 100;
+            const int64_t draw_x = x + (button->rect.w - draw_width) / 2;
+            const int64_t draw_y = y + (button->rect.h - draw_height) / 2;
+            if (draw_x >= INT32_MIN && draw_x <= INT32_MAX && draw_y >= INT32_MIN &&
+                draw_y <= INT32_MAX) {
+                icon_drawn = contracts::succeeded(g_adapter->draw_part_scaled(group,
+                    static_cast<int32_t>(draw_x), static_cast<int32_t>(draw_y), loc,
+                    button->draw_type, 0, static_cast<int32_t>(scale)));
+            }
+        }
+    }
+    if (!button->enabled && g_adapter->draw_control_alpha_overlay != nullptr) {
+        result = g_adapter->draw_control_alpha_overlay(handle,
+            {0, 0, button->rect.w, button->rect.h}, 0xFF000000u, 32);
+        if (!contracts::succeeded(result)) return result;
+    }
+    if (!icon_drawn && !button->fallback_text.empty()) {
+        const uint32_t color = button->enabled ? contracts::ui_theme::kTextGold :
+            contracts::ui_theme::kTextDisabled;
+        return draw_control_text(handle, button->fallback_text.c_str(),
+            static_cast<int32_t>(button->rect.w / 2),
+            static_cast<int32_t>((button->rect.h - 22) / 2), color, 2, 0);
+    }
+    return contracts::ok();
+}
+
+// ===== 锚定控件（minor 20）=====
+// 控件挂在游戏控件树上，native 生命周期归游戏：每帧重新解析活根、证明句柄身份，
+// 失效时只注销记录（不删除 native）再重建。身份证明来自 adapter 的 click 绑定表：
+// 控件必须仍是本模块经 set_click_proc 绑定、且 ExecuteProc 仍指向 adapter trampoline。
+
+bool identity_adapter_ready() {
+    constexpr size_t end = offsetof(contracts::QolUiAdapter, click_binding_is_current) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->click_binding_is_current);
+    return adapter_ready() && g_adapter->minor >= 25 && g_adapter->size >= end &&
+        g_adapter->click_binding_is_current != nullptr;
+}
+
+bool anchored_adapter_ready() {
+    return adapter_ready() && identity_adapter_ready() && g_adapter->find_root != nullptr &&
+        g_adapter->child_count != nullptr && g_adapter->child_at != nullptr &&
+        g_adapter->set_control_show != nullptr && g_adapter->set_rect != nullptr &&
+        g_adapter->get_rect != nullptr && g_adapter->set_draw_proc != nullptr;
+}
+
+// 纯指针比对：不解引用 child，句柄失效时也安全。count 上限防异常结构导致长循环。
+bool control_in_child_list(contracts::QolUiHandle parent, contracts::QolUiHandle child) {
+    if (parent == nullptr || child == nullptr) return false;
+    uint32_t count = 0;
+    if (!contracts::succeeded(g_adapter->child_count(parent, &count)) || count > 4096) return false;
+    for (uint32_t i = 0; i < count; ++i) {
+        contracts::QolUiHandle candidate = nullptr;
+        if (!contracts::succeeded(g_adapter->child_at(parent, i, &candidate))) return false;
+        if (candidate == child) return true;
+    }
+    return false;
+}
+
+// 入口类控件只由组件自己的 draw 绘制齿轮：清空原生 ControlButton 的 DrawProc，
+// 避免游戏绘制阶段再画一次按钮底图。
+void anchored_noop_draw(void*) {}
+
+// 注销记录但不删除 native；state 清空。不返回错误：记录不存在也视为已完成。
+void release_anchored_state(contracts::QolUiAnchoredButton* state) {
+    if (state->mounted && state->handle != nullptr) (void)forget_native(state->handle);
+    state->handle = nullptr;
+    state->parent = nullptr;
+    state->mounted = 0;
+}
+
+// 句柄是否仍是 root 子链表中的本模块控件。NotReady 表示无法证明，调用方不得改动控件。
+QolResult anchored_handle_is_current(const contracts::QolUiAnchoredButton* state,
+                                     int32_t* out_current) {
+    *out_current = 0;
+    Component* component = find_component(state->handle);
+    if (component == nullptr) return contracts::ok();
+    int32_t live = 0;
+    const QolResult proof = g_adapter->click_binding_is_current(
+        state->handle, &text_button_execute, component, &live);
+    if (!contracts::succeeded(proof)) return proof;
+    *out_current = live != 0 ? 1 : 0;
+    return contracts::ok();
+}
+
+QolResult anchored_button_ensure(contracts::QolUiAnchoredButton* state,
+                                 const contracts::UiAnchoredButtonDesc* desc,
+                                 contracts::QolUiAnchorLayoutFn layout, void* user,
+                                 uint8_t* out_created) {
+    if (state == nullptr || desc == nullptr || layout == nullptr) return invalid_argument();
+    if (out_created != nullptr) *out_created = 0;
+    if (!anchored_adapter_ready()) return not_ready();
+    contracts::QolUiHandle parent = nullptr;
+    if (!contracts::succeeded(g_adapter->find_root(static_cast<contracts::QolUiRootKind>(desc->root_kind),
+                                            &parent)) ||
+        parent == nullptr) {
+        // 挂载根不存在：游戏已销毁该面板/子树，只丢记录，不触碰 native。
+        release_anchored_state(state);
+        return contracts::ok();
+    }
+    if (state->mounted && state->handle != nullptr) {
+        int32_t current = 0;
+        if (!control_in_child_list(parent, state->handle)) {
+            release_anchored_state(state);
+        } else {
+            const QolResult proof = anchored_handle_is_current(state, &current);
+            if (!contracts::succeeded(proof)) return proof;
+            if (current == 0) release_anchored_state(state);
+        }
+    }
+    contracts::UiRect rect{};
+    const QolResult laid_out = layout(parent, &rect, user);
+    if (!contracts::succeeded(laid_out)) return laid_out;
+    if (rect.w <= 0 || rect.h <= 0) return invalid_argument();
+    if (!state->mounted || state->handle == nullptr) {
+        contracts::UiIconButtonDesc button = desc->button;
+        button.rect = rect;
+        contracts::QolUiHandle created = nullptr;
+        const QolResult create_result = icon_button_create(&button, parent, &created);
+        if (!contracts::succeeded(create_result)) return create_result;
+        if (created == nullptr) return not_ready();
+        (void)g_adapter->set_draw_proc(created, &anchored_noop_draw);
+        if (Component* anchored = find_component(created); anchored != nullptr) {
+            anchored->native_externally_owned = true;
+        }
+        state->handle = created;
+        state->parent = parent;
+        state->root_kind = desc->root_kind;
+        state->mounted = 1;
+        (void)g_adapter->set_control_show(created, 1);
+        if (out_created != nullptr) *out_created = 1;
+        return contracts::ok();
+    }
+    contracts::UiRect current{};
+    if (!contracts::succeeded(g_adapter->get_rect(state->handle, &current)) ||
+        current.x != rect.x || current.y != rect.y || current.w != rect.w ||
+        current.h != rect.h) {
+        const QolResult moved = g_adapter->set_rect(state->handle, rect);
+        if (!contracts::succeeded(moved)) return moved;
+    }
+    (void)g_adapter->set_control_show(state->handle, 1);
+    (void)icon_button_set_enabled(state->handle, 1);
+    state->parent = parent;
+    return contracts::ok();
+}
+
+QolResult anchored_button_set_visible(contracts::QolUiAnchoredButton* state, uint8_t visible) {
+    if (state == nullptr || visible > 1) return invalid_argument();
+    if (!state->mounted || state->handle == nullptr) return contracts::ok();
+    if (!anchored_adapter_ready()) return not_ready();
+    contracts::QolUiHandle parent = nullptr;
+    if (!contracts::succeeded(g_adapter->find_root(static_cast<contracts::QolUiRootKind>(state->root_kind),
+                                            &parent)) ||
+        parent == nullptr || !control_in_child_list(parent, state->handle)) {
+        release_anchored_state(state);
+        return contracts::ok();
+    }
+    int32_t current = 0;
+    const QolResult proof = anchored_handle_is_current(state, &current);
+    if (!contracts::succeeded(proof)) return proof;
+    if (current == 0) {
+        release_anchored_state(state);
+        return contracts::ok();
+    }
+    return g_adapter->set_control_show(state->handle, visible);
+}
+
+QolResult anchored_button_release(contracts::QolUiAnchoredButton* state) {
+    if (state == nullptr) return invalid_argument();
+    release_anchored_state(state);
+    return contracts::ok();
+}
+
+QolResult anchored_button_draw(const contracts::QolUiAnchoredButton* state) {
+    if (state == nullptr) return invalid_argument();
+    if (!state->mounted || state->handle == nullptr) return contracts::ok();
+    return icon_button_draw(state->handle);
+}
+
+// ===== 任意原生控件的锚定（minor 21）=====
+// 与 anchored_button 同一套存活判定；身份快照改为 type/user_type/data + CO_CONTROL_PROC。
+// 适用于多控件、自定义事件 proc 或自带 data 的游戏树挂载（如扩展背包页签）。
+
+bool anchored_control_adapter_ready() {
+    constexpr size_t end = offsetof(contracts::QolUiAdapter, control_proc_matches) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->control_proc_matches);
+    return anchored_adapter_ready() && g_adapter->minor >= 26 && g_adapter->size >= end &&
+        g_adapter->control_proc_matches != nullptr && g_adapter->control_type != nullptr &&
+        g_adapter->control_user_type != nullptr && g_adapter->control_data != nullptr;
+}
+
+bool capture_anchor_identity(contracts::QolUiHandle handle,
+                             contracts::QolUiControlProcFn expected_proc,
+                             contracts::QolUiAnchoredControl* out) {
+    if (handle == nullptr || out == nullptr) return false;
+    int32_t type = -1;
+    int32_t user_type = -1;
+    void* data = nullptr;
+    if (!contracts::succeeded(g_adapter->control_type(handle, &type)) ||
+        !contracts::succeeded(g_adapter->control_user_type(handle, &user_type))) {
+        return false;
+    }
+    if (!contracts::succeeded(g_adapter->control_data(handle, &data))) data = nullptr;
+    if (expected_proc != nullptr) {
+        int32_t matches = 0;
+        if (!contracts::succeeded(
+                g_adapter->control_proc_matches(handle, expected_proc, &matches)) ||
+            matches == 0) {
+            return false;
+        }
+    }
+    out->type = type;
+    out->user_type = user_type;
+    out->control_data = data;
+    out->expected_proc = reinterpret_cast<void*>(expected_proc);
+    return true;
+}
+
+void release_anchored_control_state(contracts::QolUiAnchoredControl* state) {
+    state->handle = nullptr;
+    state->parent = nullptr;
+    state->control_data = nullptr;
+    state->expected_proc = nullptr;
+    state->type = 0;
+    state->user_type = 0;
+    state->mounted = 0;
+}
+
+QolResult anchored_control_probe(const contracts::QolUiAnchoredControl* state,
+                                 int32_t* out_current) {
+    *out_current = 0;
+    contracts::QolUiAnchoredControl now{};
+    if (!capture_anchor_identity(
+            state->handle, reinterpret_cast<contracts::QolUiControlProcFn>(state->expected_proc),
+            &now)) {
+        return contracts::ok();
+    }
+    *out_current = now.type == state->type && now.user_type == state->user_type &&
+            now.control_data == state->control_data
+        ? 1
+        : 0;
+    return contracts::ok();
+}
+
+QolResult anchored_control_ensure(contracts::QolUiAnchoredControl* state,
+                                  const contracts::UiAnchoredControlDesc* desc,
+                                  uint8_t* out_created) {
+    if (state == nullptr || desc == nullptr || desc->layout == nullptr ||
+        desc->create == nullptr) {
+        return invalid_argument();
+    }
+    if (out_created != nullptr) *out_created = 0;
+    if (!anchored_control_adapter_ready()) return not_ready();
+    contracts::QolUiHandle parent = nullptr;
+    if (!contracts::succeeded(g_adapter->find_root(
+            static_cast<contracts::QolUiRootKind>(desc->root_kind), &parent)) ||
+        parent == nullptr) {
+        release_anchored_control_state(state);
+        return contracts::ok();
+    }
+    if (state->mounted && state->handle != nullptr) {
+        if (!control_in_child_list(parent, state->handle)) {
+            release_anchored_control_state(state);
+        } else {
+            int32_t current = 0;
+            const QolResult probe = anchored_control_probe(state, &current);
+            if (!contracts::succeeded(probe)) return probe;
+            if (current == 0) release_anchored_control_state(state);
+        }
+    }
+    contracts::UiRect rect{};
+    const QolResult laid_out = desc->layout(parent, &rect, desc->user);
+    if (!contracts::succeeded(laid_out)) return laid_out;
+    if (rect.w <= 0 || rect.h <= 0) return invalid_argument();
+    if (!state->mounted || state->handle == nullptr) {
+        contracts::QolUiHandle created = nullptr;
+        const QolResult create_result = desc->create(parent, rect, desc->user, &created);
+        if (!contracts::succeeded(create_result)) return create_result;
+        if (created == nullptr) return not_ready();
+        contracts::QolUiAnchoredControl identity{};
+        if (!capture_anchor_identity(created, desc->expected_proc, &identity)) {
+            // 身份无法建立时不能保留不可验证的句柄；控件刚创建、归属明确，可安全删除。
+            if (g_adapter->delete_control != nullptr) (void)g_adapter->delete_control(created);
+            return not_ready();
+        }
+        *state = identity;
+        state->handle = created;
+        state->parent = parent;
+        state->root_kind = desc->root_kind;
+        state->mounted = 1;
+        (void)g_adapter->set_control_show(created, 1);
+        if (out_created != nullptr) *out_created = 1;
+        return contracts::ok();
+    }
+    contracts::UiRect current{};
+    if (!contracts::succeeded(g_adapter->get_rect(state->handle, &current)) ||
+        current.x != rect.x || current.y != rect.y || current.w != rect.w ||
+        current.h != rect.h) {
+        const QolResult moved = g_adapter->set_rect(state->handle, rect);
+        if (!contracts::succeeded(moved)) return moved;
+    }
+    (void)g_adapter->set_control_show(state->handle, 1);
+    state->parent = parent;
+    return contracts::ok();
+}
+
+QolResult anchored_control_set_visible(contracts::QolUiAnchoredControl* state, uint8_t visible) {
+    if (state == nullptr || visible > 1) return invalid_argument();
+    if (!state->mounted || state->handle == nullptr) return contracts::ok();
+    if (!anchored_control_adapter_ready()) return not_ready();
+    contracts::QolUiHandle parent = nullptr;
+    if (!contracts::succeeded(g_adapter->find_root(
+            static_cast<contracts::QolUiRootKind>(state->root_kind), &parent)) ||
+        parent == nullptr || !control_in_child_list(parent, state->handle)) {
+        release_anchored_control_state(state);
+        return contracts::ok();
+    }
+    int32_t current = 0;
+    const QolResult probe = anchored_control_probe(state, &current);
+    if (!contracts::succeeded(probe)) return probe;
+    if (current == 0) {
+        release_anchored_control_state(state);
+        return contracts::ok();
+    }
+    return g_adapter->set_control_show(state->handle, visible);
+}
+
+QolResult anchored_control_release(contracts::QolUiAnchoredControl* state) {
+    if (state == nullptr) return invalid_argument();
+    release_anchored_control_state(state);
+    return contracts::ok();
+}
+
+QolResult anchored_control_detach(contracts::QolUiAnchoredControl* state,
+                                  contracts::QolUiHandle* out_handle, uint8_t* out_live) {
+    if (state == nullptr || out_handle == nullptr || out_live == nullptr) {
+        return invalid_argument();
+    }
+    *out_handle = nullptr;
+    *out_live = 0;
+    if (!state->mounted || state->handle == nullptr) {
+        release_anchored_control_state(state);
+        return contracts::ok();
+    }
+    if (!anchored_control_adapter_ready()) return not_ready();
+    contracts::QolUiHandle parent = nullptr;
+    if (contracts::succeeded(g_adapter->find_root(
+            static_cast<contracts::QolUiRootKind>(state->root_kind), &parent)) &&
+        parent != nullptr && control_in_child_list(parent, state->handle)) {
+        int32_t current = 0;
+        const QolResult probe = anchored_control_probe(state, &current);
+        if (!contracts::succeeded(probe)) return probe;
+        if (current != 0) {
+            *out_handle = state->handle;
+            *out_live = 1;
+        }
+    }
+    release_anchored_control_state(state);
+    return contracts::ok();
+}
+
+QolResult explicit_text_button_create(const contracts::UiButtonDesc* desc,
+                                      contracts::QolUiHandle parent,
+                                      contracts::QolUiHandle* out, uint32_t appearance,
+                                      int64_t minimum_width = kNativeTextButtonMinimumWidth) {
+    if (out == nullptr) return invalid_argument();
+    *out = nullptr;
+    if (desc == nullptr) return invalid_argument();
+    if (!paint_adapter_ready()) return not_ready();
+    const contracts::UiTextButtonPaintDesc paint{desc->rect, appearance, desc->style, 0};
+    contracts::UiTextButtonPaintLayout layout{};
+    auto result = g_adapter->layout_native_text_button(&paint, &layout);
+    if (!contracts::succeeded(result)) return result;
+    result = text_button_create_impl(desc, parent, out, false, false, minimum_width);
+    if (contracts::succeeded(result)) find_component(*out)->appearance = appearance;
+    return result;
+}
+
+QolResult capsule_text_button_create(const contracts::UiButtonDesc* desc,
+                                     contracts::QolUiHandle parent, contracts::QolUiHandle* out) {
+    return explicit_text_button_create(desc, parent, out, contracts::kUiTextButtonCapsule);
+}
+
+QolResult decorated_text_button_create(const contracts::UiButtonDesc* desc,
+                                       contracts::QolUiHandle parent, contracts::QolUiHandle* out) {
+    return explicit_text_button_create(desc, parent, out, contracts::kUiTextButtonDecorated);
+}
+
+QolResult compact_capsule_text_button_create(const contracts::UiButtonDesc* desc,
+                                             contracts::QolUiHandle parent,
+                                             contracts::QolUiHandle* out) {
+    constexpr int64_t kCompactMinimumWidth = 140;
+    if (desc == nullptr || desc->rect.h < kNativeTextButtonMinimumHeight ||
+        desc->rect.w < kCompactMinimumWidth) return invalid_argument();
+    return explicit_text_button_create(desc, parent, out, contracts::kUiTextButtonCapsule,
+                                       kCompactMinimumWidth);
+}
+
+QolResult main_menu_decorated_button_create(const contracts::UiMainMenuDecoratedButtonDesc* desc,
+                                            contracts::QolUiHandle* original,
+                                            contracts::QolUiHandle* replacement) {
+    if (!original || !replacement || original == replacement) return invalid_argument();
+    *original = *replacement = nullptr;
+    if (!desc || !valid_utf8(desc->text) || !desc->on_click || desc->font_style > 1 ||
+        desc->width == 0 || desc->height == 0) return invalid_argument();
+    constexpr size_t end = offsetof(contracts::QolUiAdapter, main_menu_replacement_rect_available) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->main_menu_replacement_rect_available);
+    if (!paint_adapter_ready() || !main_menu_adapter_ready() || g_adapter->size < end ||
+        !g_adapter->main_menu_replacement_rect_available || !g_adapter->control_absolute_origin ||
+        !g_adapter->main_menu_more_games_snapshot) return not_ready();
+    contracts::QolUiHandle source = nullptr, parent = nullptr;
+    UiRect rect{};
+    auto result = g_adapter->main_menu_more_games_snapshot(&source, &parent, &rect);
+    if (!contracts::succeeded(result)) return result;
+    if (!source || !parent || !rect_within_int32(rect)) return not_ready();
+    int64_t px = 0, py = 0;
+    result = g_adapter->control_absolute_origin(parent, &px, &py);
+    if (!contracts::succeeded(result)) return result;
+    const int64_t width = static_cast<int64_t>(desc->width);
+    const int64_t height = static_cast<int64_t>(desc->height);
+    if (width > INT32_MAX || height > INT32_MAX) return invalid_argument();
+    contracts::UiTextButtonPaintDesc paint{
+        {px + rect.x + (rect.w - width) / 2, py + rect.y + (rect.h - height) / 2, width, height},
+        contracts::kUiTextButtonDecorated, desc->font_style, desc->font_size};
+    if (!rect_within_int32(paint.visual_rect)) return invalid_argument();
+    contracts::UiTextButtonPaintLayout layout{};
+    result = g_adapter->layout_native_text_button(&paint, &layout);
+    if (!contracts::succeeded(result)) return result;
+    // 绘制几何仍须可用；命中区仍等于原生 snapshot rect——按压 halo 会越出可见主体，属绘制，
+    // 不参与点击与碰撞判定。
+    if (!rect_within_int32(layout.normal_bounds) || !rect_within_int32(layout.pressed_bounds)) {
+        return not_ready();
+    }
+    uint8_t available = 0;
+    result = g_adapter->main_menu_replacement_rect_available(source, rect, &available);
+    if (!contracts::succeeded(result)) return result;
+    if (!available) return not_ready();
+    const contracts::UiButtonDesc button{rect, desc->text, desc->font_style, desc->on_click, desc->user};
+    result = text_button_create_impl(&button, parent, replacement, true, true);
+    if (!contracts::succeeded(result)) return result;
+    Component* created = find_component(*replacement);
+    created->original_menu_button = source;
+    created->appearance = contracts::kUiTextButtonDecorated;
+    created->font_size = desc->font_size;
+    // 绘制范围独立于控件 rect：paint_local 以控件绝对原点为基准，负 y 合法（放大的
+    // 可见框从原生 rect 上沿之上开始），绘制不因命中区恢复而截断。
+    created->paint_local = {paint.visual_rect.x - (px + rect.x),
+        paint.visual_rect.y - (py + rect.y), paint.visual_rect.w, paint.visual_rect.h};
+    *original = source;
+    return contracts::ok();
+}
+
+QolResult nav_button_create(const contracts::UiNavButtonDesc* desc,
+                            contracts::QolUiHandle parent, contracts::QolUiHandle* out) {
+    if (out == nullptr) return invalid_argument();
+    *out = nullptr;
+    if (desc == nullptr || desc->rect.w <= 0 || desc->rect.h <= 0 ||
+        !rect_within_int32(desc->rect) ||
+        (desc->mode != contracts::kUiNavButtonAuto &&
+         desc->mode != contracts::kUiNavButtonForceClose &&
+         desc->mode != contracts::kUiNavButtonForceBack)) {
+        return invalid_argument();
+    }
+    constexpr size_t kNavButtonAdapterSize =
+        offsetof(contracts::QolUiAdapter, draw_native_close_button) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->draw_native_close_button);
+    if (g_adapter == nullptr || g_adapter->minor < 20 ||
+        g_adapter->size < kNavButtonAdapterSize ||
+        g_adapter->draw_native_close_button == nullptr ||
+        g_adapter->draw_back_button == nullptr || g_adapter->set_button_enabled == nullptr) {
+        return not_ready();
+    }
+    // 返回箭头分支画共享 option 图集（unit 0x59），只有 load_option_images 会确保其加载。
+    // 与 back_button_create 同规格：借入，任何路径都不卸载。
+    if (g_adapter->load_option_images != nullptr) {
+        (void)g_adapter->load_option_images();
+    }
+    // 允许 parent 为裸原生父节点（settings 页自建 g_root）：组件挂 g_roots，native 以 parent 为父。
+    const QolResult created = create_component(ComponentKind::kNavButton, 1, desc->rect, parent,
+                                               nullptr, desc->mode, nullptr, nullptr, nullptr,
+                                               out, nullptr, true);
+    if (!contracts::succeeded(created)) return created;
+    Component* button = find_component(*out);
+    if (button == nullptr || g_adapter->set_click_proc == nullptr) {
+        if (button != nullptr) {
+            const QolResult cleanup = destroy(*out);
+            if (!contracts::succeeded(cleanup)) return cleanup;
+        }
+        *out = nullptr;
+        return not_ready();
+    }
+    button->on_click = desc->on_click;
+    button->user = desc->user;
+    const QolResult bound = g_adapter->set_click_proc(button->native, &nav_button_execute,
+                                                      button);
+    if (!contracts::succeeded(bound)) {
+        const QolResult cleanup = destroy(button->native);
+        *out = nullptr;
+        return contracts::succeeded(cleanup) ? bound : cleanup;
+    }
+    return contracts::ok();
+}
+
+QolResult nav_button_set_enabled(contracts::QolUiHandle handle, uint8_t enabled) {
+    if (enabled > 1) return invalid_argument();
+    Component* component = nullptr;
+    const QolResult lookup = require_component(handle, &component);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (component->kind != ComponentKind::kNavButton) return unsupported();
+    if (g_adapter->set_button_enabled == nullptr) return not_ready();
+    const QolResult result = g_adapter->set_button_enabled(handle, enabled);
+    if (!contracts::succeeded(result)) return result;
+    component->enabled = enabled != 0;
+    return contracts::ok();
+}
+
+QolResult nav_button_draw(contracts::QolUiHandle handle) {
+    if (!on_main_thread()) return not_ready();
+    Component* button = nullptr;
+    const QolResult lookup = require_component(handle, &button);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (button->kind != ComponentKind::kNavButton) return unsupported();
+    if (g_adapter->draw_native_close_button == nullptr || g_adapter->draw_back_button == nullptr ||
+        g_adapter->control_pressed == nullptr ||
+        g_adapter->control_absolute_origin == nullptr) {
+        return not_ready();
+    }
+    int32_t pressed = 0;
+    QolResult result = g_adapter->control_pressed(handle, &pressed);
+    if (!contracts::succeeded(result)) return result;
+    bool show_back;
+    if (button->style == contracts::kUiNavButtonForceBack) show_back = true;
+    else if (button->style == contracts::kUiNavButtonForceClose) show_back = false;
+    else show_back = ui_panels_depth() > 1;
+    if (show_back) {
+        // 返回箭头沿用原版绘制路径（unit 0x59 loc 3 常态 / loc 2 按下叠加），按控件位置绘制。
+        return g_adapter->draw_back_button(handle, pressed != 0 ? 1 : 0);
+    }
+    int64_t x = 0;
+    int64_t y = 0;
+    result = g_adapter->control_absolute_origin(handle, &x, &y);
+    if (!contracts::succeeded(result)) return result;
+    return g_adapter->draw_native_close_button({x, y, button->rect.w, button->rect.h},
+                                               pressed != 0 ? 1 : 0);
+}
+
+QolResult scroll_list_get_row(contracts::QolUiHandle handle, uint32_t index,
+                              contracts::QolUiHandle* out) {
+    if (out == nullptr) return invalid_argument();
+    *out = nullptr;
+    Component* list = nullptr;
+    const QolResult lookup = require_list(handle, &list);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (index >= list->rows.size()) return invalid_argument();
+    *out = list->rows[index].native;
+    return contracts::ok();
+}
+
+QolResult scroll_list_set_selection_enabled(contracts::QolUiHandle handle, uint8_t enabled) {
+    Component* list = nullptr;
+    const QolResult lookup = require_list(handle, &list);
+    if (!contracts::succeeded(lookup)) return lookup;
+    list->selection_enabled = enabled != 0;
+    if (!list->selection_enabled) list->selected = -1;
+    return contracts::ok();
+}
+
+QolResult scroll_row_button_create(contracts::QolUiHandle handle, uint32_t index, UiRect rect,
+                                   contracts::QolUiClickFn on_click, void* user,
+                                   contracts::QolUiHandle* out) {
+    if (out == nullptr || on_click == nullptr || rect.w <= 0 || rect.h <= 0) {
+        return invalid_argument();
+    }
+    *out = nullptr;
+    Component* list = nullptr;
+    const QolResult lookup = require_list(handle, &list);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (index >= list->rows.size()) return invalid_argument();
+    if (g_callback_depth != 0 || g_adapter->create_control == nullptr ||
+        g_adapter->set_rect == nullptr || g_adapter->set_click_proc == nullptr ||
+        g_adapter->button_set_scroll == nullptr) return not_ready();
+
+    contracts::QolUiHandle native = nullptr;
+    QolResult result = g_adapter->create_control(1, list->rows[index].native, &native);
+    if (!contracts::succeeded(result)) return result;
+    if (native == nullptr) return not_ready();
+    result = g_adapter->set_rect(native, rect);
+    if (contracts::succeeded(result)) result = g_adapter->set_click_proc(native, on_click, user);
+    if (contracts::succeeded(result)) result = g_adapter->button_set_scroll(native, list->native);
+    if (!contracts::succeeded(result)) {
+        if (g_adapter->delete_control != nullptr) (void)g_adapter->delete_control(native);
+        return result;
+    }
+    *out = native;
+    return contracts::ok();
+}
+
+QolResult native_toggle_create(const contracts::UiNativeToggleDesc* desc,
+                               contracts::QolUiHandle parent,
+                               contracts::QolUiHandle* out) {
+    if (desc == nullptr || out == nullptr || parent == nullptr || desc->rect.w <= 0 ||
+        desc->rect.h <= 0 || desc->on_changed == nullptr) return invalid_argument();
+    *out = nullptr;
+    if (g_callback_depth != 0 || !native_list_ready() || g_adapter->create_control == nullptr ||
+        g_adapter->set_rect == nullptr || g_adapter->set_click_proc == nullptr ||
+        g_adapter->control_absolute_origin == nullptr || g_adapter->draw_native_toggle == nullptr ||
+        g_adapter->control_pressed == nullptr) return not_ready();
+
+    Component* owner = find_component(parent);
+    Component* list_owner = nullptr;
+    contracts::QolUiHandle native_parent = parent;
+    if (owner != nullptr && owner->kind == ComponentKind::kScrollList) return unsupported();
+    if (owner == nullptr) {
+        for (const auto& entry : g_components) {
+            Component* candidate = entry.second;
+            if (candidate->kind != ComponentKind::kScrollList) continue;
+            for (const auto& row : candidate->rows) {
+                if (row.native == parent) {
+                    list_owner = candidate;
+                    break;
+                }
+            }
+            if (list_owner != nullptr) break;
+        }
+        if (list_owner == nullptr) return not_found();
+    } else return unsupported();
+
+    contracts::QolUiHandle native = nullptr;
+    QolResult result = g_adapter->create_control(1, native_parent, &native);
+    if (!contracts::succeeded(result)) return result;
+    if (native == nullptr) return not_ready();
+    std::unique_ptr<Component> component(new Component());
+    component->native = native;
+    component->kind = ComponentKind::kNativeToggle;
+    component->rect = desc->rect;
+    component->value = desc->value != 0 ? 1 : 0;
+    component->enabled = desc->enabled != 0;
+    component->on_changed = desc->on_changed;
+    component->user = desc->user;
+    Component* raw = component.get();
+    result = g_adapter->set_rect(native, desc->rect);
+    if (contracts::succeeded(result)) {
+        result = g_adapter->set_click_proc(native, &native_toggle_execute, raw);
+    }
+    if (contracts::succeeded(result) && list_owner->kind == ComponentKind::kScrollList) {
+        if (g_adapter->button_set_scroll == nullptr) result = not_ready();
+        else result = g_adapter->button_set_scroll(native, list_owner->native);
+    }
+    if (!contracts::succeeded(result)) {
+        (void)g_adapter->delete_control(native);
+        return result;
+    }
+    raw->parent = list_owner;
+    list_owner->children.push_back(std::move(component));
+    g_components.emplace(native, raw);
+    *out = native;
+    return contracts::ok();
+}
+
+QolResult native_toggle_set_value(contracts::QolUiHandle handle, int32_t value) {
+    Component* component = nullptr;
+    const QolResult lookup = require_component(handle, &component);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (component->kind != ComponentKind::kNativeToggle) return unsupported();
+    component->value = value != 0 ? 1 : 0;
+    return contracts::ok();
+}
+
+QolResult native_toggle_get_value(contracts::QolUiHandle handle, int32_t* out) {
+    if (out == nullptr) return invalid_argument();
+    Component* component = nullptr;
+    const QolResult lookup = require_component(handle, &component);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (component->kind != ComponentKind::kNativeToggle) return unsupported();
+    *out = component->value;
+    return contracts::ok();
+}
+
+QolResult native_toggle_set_enabled(contracts::QolUiHandle handle, uint8_t enabled) {
+    Component* component = nullptr;
+    const QolResult lookup = require_component(handle, &component);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (component->kind != ComponentKind::kNativeToggle) return unsupported();
+    component->enabled = enabled != 0;
+    return contracts::ok();
+}
+
+QolResult native_toggle_draw(contracts::QolUiHandle handle) {
+    if (!on_main_thread()) return not_ready();
+    Component* component = nullptr;
+    const QolResult lookup = require_component(handle, &component);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (component->kind != ComponentKind::kNativeToggle) return unsupported();
+    int64_t x = 0;
+    int64_t y = 0;
+    int32_t pressed = 0;
+    QolResult result = g_adapter->control_absolute_origin(handle, &x, &y);
+    if (!contracts::succeeded(result)) return result;
+    result = g_adapter->control_pressed(handle, &pressed);
+    if (!contracts::succeeded(result)) return result;
+    return g_adapter->draw_native_toggle({x, y, component->rect.w, component->rect.h},
+                                         component->value, pressed != 0 ? 1 : 0);
+}
+
+void scroll_content_draw(contracts::QolUiHandle handle, int64_t) {
+    Component* list = find_component(handle);
+    if (list == nullptr || list->pending_destroy || list->draw_item == nullptr) return;
+    CallbackScope scope;
+    // 原生已完成内容平移及 clip；直接回调消费者自绘每一行，不经原生 draw_control，
+    // 以免原生按钮绘制读取/写入内联文本缓冲。
+    for (const auto& row : list->rows) {
+        if (list->pending_destroy) break;
+        list->draw_item(list->user, row.index, row.native,
+                        list->selected == static_cast<int32_t>(row.index) ? 1 : 0);
+    }
+}
+
+QolResult scroll_list_create(const contracts::UiScrollListDesc* desc,
+                            contracts::QolUiHandle parent, contracts::QolUiHandle* out) {
+    if (out == nullptr) return invalid_argument();
+    *out = nullptr;
+    if (desc == nullptr || parent == nullptr || desc->viewport.w <= 0 || desc->viewport.h <= 0 ||
+        desc->item_height <= 0 || desc->item_count > 1024 || desc->initial_selected < -1 ||
+        (desc->initial_selected >= 0 &&
+         static_cast<uint32_t>(desc->initial_selected) >= desc->item_count) ||
+        (desc->item_count != 0 && desc->draw_item == nullptr) ||
+        desc->item_count > static_cast<uint32_t>(INT32_MAX / desc->item_height) ||
+        desc->viewport.x < INT32_MIN || desc->viewport.y < INT32_MIN ||
+        desc->viewport.w > INT32_MAX || desc->viewport.h > INT32_MAX ||
+        desc->viewport.x > INT32_MAX - desc->viewport.w ||
+        desc->viewport.y > INT32_MAX - desc->viewport.h) return invalid_argument();
+    if (g_callback_depth != 0 || !native_list_ready() || g_adapter->scroll_create == nullptr ||
+        g_adapter->scroll_set_target == nullptr || g_adapter->button_set_scroll == nullptr ||
+        g_adapter->create_control == nullptr || g_adapter->set_rect == nullptr ||
+        g_adapter->set_click_proc == nullptr) return not_ready();
+    Component* parent_component = find_component(parent);
+    for (Component* ancestor = parent_component; ancestor != nullptr; ancestor = ancestor->parent) {
+        if (ancestor->kind == ComponentKind::kScrollList) return unsupported();
+    }
+    auto component = std::make_unique<Component>();
+    component->kind = ComponentKind::kScrollList;
+    component->rect = desc->viewport;
+    component->selected = desc->initial_selected;
+    component->draw_item = desc->draw_item;
+    component->on_select = desc->on_select;
+    component->user = desc->user;
+    component->rows.resize(desc->item_count);
+    const int64_t extent = static_cast<int64_t>(desc->item_count) * desc->item_height;
+    const contracts::UiNativeScrollDesc native_desc{
+        desc->viewport, extent, desc->item_height, 12, static_cast<uint8_t>(desc->viewport.h >= 4)};
+    QolResult result = g_adapter->scroll_create(parent, &native_desc, &scroll_content_draw,
+                                               &component->native);
+    if (!contracts::succeeded(result)) return result;
+    if (component->native == nullptr) return not_ready();
+    Component* list = component.get();
+    list->parent = parent_component;
+    g_components.emplace(list->native, list);
+    if (parent_component != nullptr) parent_component->children.push_back(std::move(component));
+    else g_roots.push_back(std::move(component));  // 借用 native parent，只拥有列表子树。
+    const auto fail = [list](QolResult failure) {
+        list->pending_destroy = true;
+        const QolResult cleanup = destroy(list->native);
+        return contracts::succeeded(cleanup) ? failure : cleanup;
+    };
+    contracts::QolUiHandle group = nullptr;
+    result = g_adapter->create_control(3, list->native, &group);
+    if (!contracts::succeeded(result)) return fail(result);
+    if (group == nullptr) return fail(not_ready());
+    result = g_adapter->set_rect(group, {0, 0, desc->viewport.w, extent});
+    if (!contracts::succeeded(result)) return fail(result);
+    result = g_adapter->scroll_set_target(list->native, group);
+    if (!contracts::succeeded(result)) return fail(result);
+    for (uint32_t i = 0; i < desc->item_count; ++i) {
+        ScrollRow& row = list->rows[i];
+        row.list = list;
+        row.index = i;
+        result = g_adapter->create_control(1, group, &row.native);
+        if (!contracts::succeeded(result)) return fail(result);
+        if (row.native == nullptr) return fail(not_ready());
+        result = g_adapter->set_rect(row.native,
+            {0, static_cast<int64_t>(i) * desc->item_height, desc->viewport.w, desc->item_height});
+        if (!contracts::succeeded(result)) return fail(result);
+        // 行控件只承担触摸命中与 ExecuteProc；绘制由消费者 draw_item 自绘，不写内联文本。
+        result = g_adapter->set_click_proc(row.native, &scroll_row_execute, &row);
+        if (!contracts::succeeded(result)) return fail(result);
+        result = g_adapter->button_set_scroll(row.native, list->native);
+        if (!contracts::succeeded(result)) return fail(result);
+    }
+    *out = list->native;
+    return contracts::ok();
+}
+
+QolResult require_list(contracts::QolUiHandle handle, Component** out) {
+    const QolResult lookup = require_component(handle, out);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if ((*out)->kind != ComponentKind::kScrollList) return unsupported();
+    if ((*out)->native_deleted || (*out)->pending_destroy) return not_ready();
+    return native_list_ready() ? contracts::ok() : not_ready();
+}
+
+QolResult scroll_list_process(contracts::QolUiHandle handle) {
+    if (!native_list_ready() || g_callback_depth != 0) return not_ready();
+    const QolResult pending = flush_pending_destroy();
+    if (!contracts::succeeded(pending)) return pending;
+    Component* list = nullptr;
+    const QolResult lookup = require_list(handle, &list);
+    if (!contracts::succeeded(lookup)) return lookup;
+    return g_adapter->scroll_process == nullptr ? not_ready() : g_adapter->scroll_process(handle);
+}
+
+QolResult scroll_list_draw(contracts::QolUiHandle handle) {
+    Component* list = nullptr;
+    const QolResult lookup = require_list(handle, &list);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (g_callback_depth != 0 || g_adapter->scroll_draw == nullptr) return not_ready();
+    list->draw_result = contracts::ok();
+    CallbackScope scope;
+    const QolResult result = g_adapter->scroll_draw(handle);
+    return contracts::succeeded(result) ? list->draw_result : result;
+}
+
+QolResult scroll_list_get_offset(contracts::QolUiHandle handle, int64_t* out) {
+    if (out == nullptr) return invalid_argument();
+    *out = 0;
+    Component* list = nullptr;
+    const QolResult lookup = require_list(handle, &list);
+    if (!contracts::succeeded(lookup)) return lookup;
+    return g_adapter->scroll_get_offset == nullptr ? not_ready() :
+        g_adapter->scroll_get_offset(handle, out);
+}
+
+bool native_event_safe(const Component* component) {
+    if (component->pending_destroy || component->native_deleted) return false;
+    if (component->kind == ComponentKind::kToggle || component->kind == ComponentKind::kSelect ||
+        component->kind == ComponentKind::kScrollView ||
+        (component->kind == ComponentKind::kButton && component->on_click == nullptr)) return false;
+    for (const auto& child : component->children) {
+        if (!native_event_safe(child.get())) return false;
+    }
+    return true;
+}
+
+QolResult dispatch_native_event(contracts::QolUiHandle root, uint64_t event, uint64_t param,
+                                uint64_t param2, uint32_t* consumed) {
+    if (root == nullptr || consumed == nullptr) return invalid_argument();
+    *consumed = 0;
+    if (!native_list_ready() || g_callback_depth != 0 || g_adapter->control_tree_event == nullptr) {
+        return not_ready();
+    }
+    const Component* component = find_component(root);
+    if (component != nullptr && !native_event_safe(component)) return unsupported();
+    CallbackScope scope;
+    return g_adapter->control_tree_event(root, event, param, param2, consumed);
+}
+
+struct ContainerOrnamentPlan {
+    contracts::QolUiHandle group = nullptr;
+    contracts::QolUiHandle parts[4]{};
+    int32_t widths[4]{};
+    int32_t heights[4]{};
+    int32_t xs[4]{};
+    int32_t ys[4]{};
+};
+
+bool valid_container_rect(UiRect rect, bool ornamented) {
+    const int64_t min_position = ornamented ? static_cast<int64_t>(INT32_MIN) + 2 : INT32_MIN;
+    return rect.w >= 48 && rect.h >= 48 && rect.x >= min_position && rect.x <= INT32_MAX &&
+        rect.y >= min_position && rect.y <= INT32_MAX && rect.w <= INT32_MAX &&
+        rect.h <= INT32_MAX && rect.x <= static_cast<int64_t>(INT32_MAX) - rect.w &&
+        rect.y <= static_cast<int64_t>(INT32_MAX) - rect.h;
+}
+
+QolResult prepare_container_ornaments(ContainerOrnamentPlan* plan) {
+    if (plan == nullptr || !adapter_ready() || g_adapter->image_group == nullptr ||
+        g_adapter->image_loc == nullptr || g_adapter->image_loc_size == nullptr ||
+        g_adapter->draw_part == nullptr) return not_ready();
+
+    ContainerOrnamentPlan prepared{};
+    QolResult result = g_adapter->image_group(kFrameImageUnit, &prepared.group);
+    if (!contracts::succeeded(result)) return result;
+
+    constexpr int32_t kLocations[] = {0x30, 0x31, 0x35, 0x36};
+    for (size_t i = 0; i < 4; ++i) {
+        result = g_adapter->image_loc(kFrameImageUnit, kLocations[i], &prepared.parts[i]);
+        if (!contracts::succeeded(result)) return result;
+        result = g_adapter->image_loc_size(kFrameImageUnit, kLocations[i],
+                                           &prepared.widths[i], &prepared.heights[i]);
+        if (!contracts::succeeded(result)) return result;
+        if (prepared.widths[i] <= 0 || prepared.heights[i] <= 0) return not_ready();
+    }
+
+    *plan = prepared;
+    return contracts::ok();
+}
+
+QolResult position_container_ornaments(UiRect rect, ContainerOrnamentPlan* plan) {
+    if (plan == nullptr) return invalid_argument();
+    const int64_t positions_x[] = {rect.x - 2, rect.x + rect.w - plan->widths[1], rect.x - 2,
+                                   rect.x + rect.w - plan->widths[3]};
+    const int64_t positions_y[] = {rect.y - 2, rect.y - 2,
+                                   rect.y + rect.h - plan->heights[2],
+                                   rect.y + rect.h - plan->heights[3]};
+    for (size_t i = 0; i < 4; ++i) {
+        if (positions_x[i] < INT32_MIN || positions_x[i] > INT32_MAX ||
+            positions_y[i] < INT32_MIN || positions_y[i] > INT32_MAX) {
+            return invalid_argument();
+        }
+        plan->xs[i] = static_cast<int32_t>(positions_x[i]);
+        plan->ys[i] = static_cast<int32_t>(positions_y[i]);
+    }
+    return contracts::ok();
+}
+
+QolResult draw_container_ornament_parts(const ContainerOrnamentPlan& plan) {
+    for (size_t i = 0; i < 4; ++i) {
+        const QolResult result = g_adapter->draw_part(
+            plan.group, plan.xs[i], plan.ys[i], plan.parts[i], 0, 1);
+        if (!contracts::succeeded(result)) return result;
+    }
+    return contracts::ok();
+}
+
+QolResult draw_container_styled(const contracts::UiContainerStyleDesc* desc) {
+    if (desc == nullptr || desc->fill_rgb565 > 0xffffu || desc->alpha > 100u ||
+        desc->ornamented > 1 || !valid_container_rect(desc->rect, desc->ornamented != 0)) {
+        return invalid_argument();
+    }
+    constexpr size_t kDrawContainerFrameEnd =
+        offsetof(contracts::QolUiAdapter, draw_container_frame) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->draw_container_frame);
+    if (!adapter_ready() || g_adapter->minor < contracts::kUiAdapterMinor ||
+        g_adapter->size < kDrawContainerFrameEnd ||
+        g_adapter->draw_container_frame == nullptr) return not_ready();
+
+    ContainerOrnamentPlan ornaments{};
+    if (desc->ornamented != 0) {
+        QolResult prepared = prepare_container_ornaments(&ornaments);
+        if (contracts::succeeded(prepared)) {
+            prepared = position_container_ornaments(desc->rect, &ornaments);
+        }
+        if (!contracts::succeeded(prepared)) return prepared;
+    }
+    QolResult result = g_adapter->draw_container_frame(desc->rect, desc->fill_rgb565,
+                                                       desc->alpha);
+    if (!contracts::succeeded(result) || desc->ornamented == 0) return result;
+    return draw_container_ornament_parts(ornaments);
+}
+
+// 不经控件 data 的文本绘制原语：按控件绝对原点绘制传入字符串，颜色沿用控件文本口径。
+QolResult draw_control_text(contracts::QolUiHandle control, const char* text, int32_t x_offset,
+                            int32_t y_offset, uint32_t color, int32_t align, int32_t font) {
+    if (control == nullptr || text == nullptr) return invalid_argument();
+    if (!adapter_ready() || g_adapter->control_absolute_origin == nullptr ||
+        g_adapter->set_font_color_rgb == nullptr || g_adapter->draw_string_with_font == nullptr) {
+        return not_ready();
+    }
+    int64_t x = 0;
+    int64_t y = 0;
+    const QolResult origin = g_adapter->control_absolute_origin(control, &x, &y);
+    if (!contracts::succeeded(origin)) return origin;
+    const int64_t draw_x = x + x_offset;
+    const int64_t draw_y = y + y_offset;
+    if (draw_x < INT32_MIN || draw_x > INT32_MAX || draw_y < INT32_MIN || draw_y > INT32_MAX) {
+        return invalid_argument();
+    }
+    const QolResult color_result = g_adapter->set_font_color_rgb(
+        static_cast<int32_t>(color & 0xff), static_cast<int32_t>((color >> 8) & 0xff),
+        static_cast<int32_t>((color >> 16) & 0xff));
+    if (!contracts::succeeded(color_result)) return color_result;
+    return g_adapter->draw_string_with_font(text, static_cast<int32_t>(draw_x),
+                                            static_cast<int32_t>(draw_y), align, font);
+}
+
+// 可缩放开关：矩形轨道 + 左右滑块，全部用 ABGR 实色矩形自绘，不依赖原生控件或共享图集。
+// 颜色取统一 token；开=亮金轨 + 右滑块，关=暗轨 + 左滑块。尺寸不足以容纳滑块时只画轨道。
+QolResult switch_draw(UiRect rect, int32_t value) {
+    if (!rect_within_int32(rect)) return invalid_argument();
+    if (!on_main_thread() || g_adapter->fill_rect == nullptr) return not_ready();
+    const bool on = value != 0;
+    const int64_t thickness = rect.h >= 16 ? 2 : 1;
+    const uint32_t track = on ? contracts::ui_theme::kSwitchTrackOn
+                              : contracts::ui_theme::kSwitchTrackOff;
+    const uint32_t border = on ? contracts::ui_theme::kFrameGold
+                               : contracts::ui_theme::kTextDisabled;
+    QolResult result = g_adapter->fill_rect(rect, track);
+    if (!contracts::succeeded(result)) return result;
+    const UiRect edges[4] = {
+        {rect.x, rect.y, rect.w, thickness},
+        {rect.x, rect.y + rect.h - thickness, rect.w, thickness},
+        {rect.x, rect.y, thickness, rect.h},
+        {rect.x + rect.w - thickness, rect.y, thickness, rect.h},
+    };
+    for (const UiRect& edge : edges) {
+        result = g_adapter->fill_rect(edge, border);
+        if (!contracts::succeeded(result)) return result;
+    }
+    const int64_t inset = thickness + 2;
+    const int64_t thumb = rect.h - inset * 2;
+    if (thumb >= 4 && rect.w >= thumb + inset * 2 + 4) {
+        const UiRect knob{on ? rect.x + rect.w - inset - thumb : rect.x + inset,
+                          rect.y + inset, thumb, thumb};
+        result = g_adapter->fill_rect(
+            knob, on ? contracts::ui_theme::kSwitchThumbOn : contracts::ui_theme::kSwitchThumbOff);
+        if (!contracts::succeeded(result)) return result;
+    }
+    return contracts::ok();
+}
+
+// 形状绘制实现在 ui_shapes.cpp：此处只保留与槽位签名一致的薄委托。
+QolResult draw_rect_shape(const contracts::UiShapeDesc* desc) {
+    return ui_shape_draw_rect(g_adapter, desc);
+}
+
+QolResult draw_rounded_rect_shape(const contracts::UiShapeDesc* desc) {
+    return ui_shape_draw_rounded_rect(g_adapter, desc);
+}
+
+QolResult draw_circle_shape(const contracts::UiShapeDesc* desc) {
+    return ui_shape_draw_circle(g_adapter, desc);
+}
+
+// 命中只按 rect 自身判断，不触碰父行其它区域；按下（phase 1）即翻转，与组件 kToggle 一致。
+QolResult switch_touch(UiRect rect, uint32_t phase, int64_t x, int64_t y, int32_t* inout_value) {
+    if (inout_value == nullptr) return invalid_argument();
+    if (!rect_within_int32(rect)) return invalid_argument();
+    if (!on_main_thread()) return not_ready();
+    if (phase != 1) return contracts::ok();
+    const bool inside = x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h;
+    if (inside) *inout_value = *inout_value == 0 ? 1 : 0;
+    return contracts::ok();
+}
+
+UiRect help_column_frame(UiRect viewport, bool left) {
+    return {viewport.x - 8, viewport.y - 8, viewport.w + (left ? 32 : 16), viewport.h + 16};
+}
+
+bool help_viewport_valid(UiRect viewport, UiRect panel, bool left) {
+    // 先限范围，避免 int64 极值在扩框/加坐标时溢出。
+    if (viewport.x < 8 || viewport.y < 8 || viewport.w < (left ? 16 : 32) ||
+        viewport.h < 32 || viewport.x > panel.w || viewport.y > panel.h ||
+        viewport.w > panel.w || viewport.h > panel.h) return false;
+    const UiRect frame = help_column_frame(viewport, left);
+    return frame.x + frame.w <= panel.w && frame.y + frame.h <= panel.h;
+}
+
+void help_item_draw(void* user, uint32_t index, contracts::QolUiHandle row, uint8_t selected) {
+    auto* page = static_cast<Component*>(user);
+    if (!page->pending_destroy && page->draw_item != nullptr) {
+        page->draw_item(page->user, index, row, selected);
+    }
+}
+
+void help_select(void* user, uint32_t index) {
+    auto* page = static_cast<Component*>(user);
+    if (!page->pending_destroy) page->selected = static_cast<int32_t>(index);
+}
+
+QolResult help_page_create(const contracts::UiHelpPageDesc* desc,
+                          contracts::QolUiHandle parent, contracts::QolUiHandle* out) {
+    if (out == nullptr) return invalid_argument();
+    *out = nullptr;
+    if (desc == nullptr || desc->panel_rect.w < 48 || desc->panel_rect.h < 48 ||
+        desc->panel_rect.w > INT32_MAX || desc->panel_rect.h > INT32_MAX ||
+        desc->panel_rect.x < INT32_MIN || desc->panel_rect.y < INT32_MIN ||
+        desc->panel_rect.x > INT32_MAX - desc->panel_rect.w ||
+        desc->panel_rect.y > INT32_MAX - desc->panel_rect.h ||
+        desc->item_height <= 0 || desc->option_count > 1024 ||
+        desc->option_count > static_cast<uint32_t>(INT32_MAX / desc->item_height) ||
+        desc->initial_selected < -1 || (desc->initial_selected >= 0 &&
+        static_cast<uint32_t>(desc->initial_selected) >= desc->option_count) ||
+        (desc->option_count != 0 && (desc->options == nullptr || desc->draw_item == nullptr)) ||
+        !help_viewport_valid(desc->left_viewport, desc->panel_rect, true) ||
+        !help_viewport_valid(desc->right_viewport, desc->panel_rect, false)) return invalid_argument();
+    const UiRect left = help_column_frame(desc->left_viewport, true);
+    const UiRect right = help_column_frame(desc->right_viewport, false);
+    if (left.x + left.w > right.x) return invalid_argument();
+    for (uint32_t i = 0; i < desc->option_count; ++i) {
+        if (desc->options[i].draw_detail == nullptr) return invalid_argument();
+    }
+    if (!native_list_ready() || g_callback_depth != 0 || g_adapter->create_control == nullptr ||
+        g_adapter->set_rect == nullptr || g_adapter->control_absolute_origin == nullptr) {
+        return not_ready();
+    }
+    Component* parent_component = find_component(parent);
+    for (auto* ancestor = parent_component; ancestor != nullptr; ancestor = ancestor->parent) {
+        if (ancestor->kind == ComponentKind::kScrollList ||
+            ancestor->kind == ComponentKind::kHelpPage) return unsupported();
+    }
+    auto component = std::make_unique<Component>();
+    component->kind = ComponentKind::kHelpPage;
+    component->rect = desc->panel_rect;
+    component->left_viewport = desc->left_viewport;
+    component->right_viewport = desc->right_viewport;
+    component->selected = desc->initial_selected;
+    component->draw_item = desc->draw_item;
+    component->user = desc->user;
+    if (desc->option_count != 0) {
+        component->help_options.assign(desc->options, desc->options + desc->option_count);
+    }
+    QolResult result = g_adapter->create_control(parent == nullptr ? 0 : 3, parent, &component->native);
+    if (!contracts::succeeded(result)) return result;
+    if (component->native == nullptr) return not_ready();
+    Component* page = component.get();
+    page->parent = parent_component;
+    g_components.emplace(page->native, page);
+    if (parent_component != nullptr) parent_component->children.push_back(std::move(component));
+    else g_roots.push_back(std::move(component));  // parent 可借用；只拥有 page 子树。
+    const auto fail = [page](QolResult failure) {
+        page->pending_destroy = true;
+        const QolResult cleanup = destroy(page->native);
+        return contracts::succeeded(cleanup) ? failure : cleanup;
+    };
+    result = g_adapter->set_rect(page->native, desc->panel_rect);
+    if (!contracts::succeeded(result)) return fail(result);
+    const contracts::UiScrollListDesc list_desc{desc->left_viewport, desc->item_height,
+        desc->option_count, desc->initial_selected, &help_item_draw, &help_select, page};
+    result = scroll_list_create(&list_desc, page->native, &page->help_list);
+    if (!contracts::succeeded(result)) return fail(result);
+    *out = page->native;
+    return contracts::ok();
+}
+
+QolResult require_help_page(contracts::QolUiHandle handle, Component** out) {
+    if (!native_list_ready()) return not_ready();
+    const QolResult lookup = require_component(handle, out);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if ((*out)->kind != ComponentKind::kHelpPage) return unsupported();
+    return (*out)->pending_destroy || (*out)->native_deleted ? not_ready() : contracts::ok();
+}
+
+QolResult help_page_process(contracts::QolUiHandle handle) {
+    if (!native_list_ready() || g_callback_depth != 0) return not_ready();
+    const QolResult pending = flush_pending_destroy();
+    if (!contracts::succeeded(pending)) return pending;
+    Component* page = nullptr;
+    const QolResult lookup = require_help_page(handle, &page);
+    if (!contracts::succeeded(lookup)) return lookup;
+    return scroll_list_process(page->help_list);
+}
+
+QolResult help_page_draw(contracts::QolUiHandle handle) {
+    Component* page = nullptr;
+    QolResult result = require_help_page(handle, &page);
+    if (!contracts::succeeded(result)) return result;
+    if (g_callback_depth != 0) return not_ready();
+    int64_t x = 0, y = 0;
+    result = g_adapter->control_absolute_origin(handle, &x, &y);
+    if (!contracts::succeeded(result)) return result;
+    if (x < static_cast<int64_t>(INT32_MIN) + 2 || y < static_cast<int64_t>(INT32_MIN) + 2 ||
+        x > INT32_MAX - page->rect.w || y > INT32_MAX - page->rect.h) return invalid_argument();
+    auto absolute = [x, y](UiRect rect) { rect.x += x; rect.y += y; return rect; };
+    const auto draw_help_frame = [](UiRect rect, uint8_t ornamented) {
+        const contracts::UiContainerStyleDesc style{rect, 0x0000u, 60u, ornamented};
+        return draw_container_styled(&style);
+    };
+    // Full-screen help pages can use the two column frames as their only visible panels.
+    if (page->rect.x != 0 || page->rect.y != 0 || page->rect.w < 960 || page->rect.h < 640) {
+        result = draw_help_frame(absolute({0, 0, page->rect.w, page->rect.h}), 0);
+        if (!contracts::succeeded(result)) return result;
+    }
+    result = draw_help_frame(absolute(help_column_frame(page->left_viewport, true)), 1);
+    if (!contracts::succeeded(result)) return result;
+    result = draw_help_frame(absolute(help_column_frame(page->right_viewport, false)), 1);
+    if (!contracts::succeeded(result)) return result;
+    result = scroll_list_draw(page->help_list);
+    if (!contracts::succeeded(result)) return result;
+    // ControlScroll_Draw 已复原整屏裁剪，右栏不处于左列表 clip 内。
+    if (!page->pending_destroy && page->selected >= 0) {
+        const auto option = page->help_options[static_cast<size_t>(page->selected)];
+        CallbackScope scope;
+        option.draw_detail(option.user, absolute(page->right_viewport));
+    }
+    return contracts::ok();
+}
+
+QolResult help_page_set_selected(contracts::QolUiHandle handle, int32_t index) {
+    Component* page = nullptr;
+    const QolResult lookup = require_help_page(handle, &page);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (index < -1 || (index >= 0 && static_cast<size_t>(index) >= page->help_options.size())) {
+        return invalid_argument();
+    }
+    if (g_callback_depth != 0) return not_ready();
+    Component* list = nullptr;
+    const QolResult found = require_list(page->help_list, &list);
+    if (!contracts::succeeded(found)) return found;
+    page->selected = index;
+    list->selected = index;
+    return contracts::ok();
+}
+
+QolResult help_page_get_selected(contracts::QolUiHandle handle, int32_t* out) {
+    if (out == nullptr) return invalid_argument();
+    *out = -1;
+    Component* page = nullptr;
+    const QolResult lookup = require_help_page(handle, &page);
+    if (contracts::succeeded(lookup)) *out = page->selected;
+    return lookup;
+}
+
+void request_host_back() { ui_panels_request_back(); }
+
+void back_button_activated(void*) { request_host_back(); }
+
+QolResult back_button_create(contracts::QolUiHandle parent, UiRect rect,
+                             contracts::QolUiHandle* out) {
+    if (out == nullptr) return invalid_argument();
+    *out = nullptr;
+    if (g_callback_depth != 0) return not_ready();
+    if (!adapter_ready()) return not_ready();
+    // 共享图集 0x59 由助手确保加载并借用，页面不再各自加载；任何路径都不卸载。
+    if (g_adapter->load_option_images != nullptr) {
+        (void)g_adapter->load_option_images();
+    }
+    // 组件树（手工分派）：创建组件按钮，激活由 back_button_touch 命中。不绑定点击，
+    // 避免 dispatch_touch 按下即触发与 back_button_touch 抬起触发重复。
+    if (parent != nullptr && find_component(parent) != nullptr) {
+        const contracts::UiButtonDesc desc{rect, "返回", 0, nullptr, nullptr};
+        return button_create(&desc, parent, out);
+    }
+    // 原生事件树：创建原生控件并绑定 ExecuteProc → 宿主 back（释放落于按钮内才触发）。
+    if (g_adapter->create_control == nullptr || g_adapter->set_rect == nullptr ||
+        g_adapter->set_click_proc == nullptr) {
+        return not_ready();
+    }
+    contracts::QolUiHandle native = nullptr;
+    QolResult result = g_adapter->create_control(1, parent, &native);
+    if (!contracts::succeeded(result) || native == nullptr) return not_ready();
+    const auto fail = [native](QolResult failure) {
+        if (g_adapter->delete_control != nullptr) (void)g_adapter->delete_control(native);
+        return failure;
+    };
+    result = g_adapter->set_rect(native, rect);
+    if (!contracts::succeeded(result)) return fail(result);
+    if (g_adapter->set_text != nullptr) {
+        result = g_adapter->set_text(native, "返回");
+        if (!contracts::succeeded(result)) return fail(result);
+    }
+    result = g_adapter->set_click_proc(native, &back_button_activated, nullptr);
+    if (!contracts::succeeded(result)) return fail(result);
+    *out = native;
+    return contracts::ok();
+}
+
+QolResult back_button_draw(contracts::QolUiHandle button) {
+    if (button == nullptr) return invalid_argument();
+    if (!adapter_ready()) return not_ready();
+    uint8_t pressed = 0;
+    UiRect rect{};
+    Component* component = find_component(button);
+    if (component != nullptr) {
+        pressed = component->value != 0 ? 1 : 0;
+        rect = component->rect;
+    } else {
+        if (g_adapter->control_pressed != nullptr) {
+            int32_t value = 0;
+            if (contracts::succeeded(g_adapter->control_pressed(button, &value))) {
+                pressed = value != 0 ? 1 : 0;
+            }
+        }
+        if (g_adapter->get_rect == nullptr ||
+            !contracts::succeeded(g_adapter->get_rect(button, &rect))) {
+            return not_ready();
+        }
+    }
+    if (g_adapter->draw_back_button != nullptr &&
+        contracts::succeeded(g_adapter->draw_back_button(button, pressed))) {
+        return contracts::ok();
+    }
+    if (g_adapter->draw_custom_button == nullptr) return not_ready();
+    return g_adapter->draw_custom_button(button, {0, 0, rect.w, rect.h}, 0xFF241C18u, 0xFF00B4D7u,
+                                         2, "返回", 0xFFCB9EE2u, 8, 0x18);
+}
+
+QolResult back_button_touch(contracts::QolUiHandle button, uint32_t phase, int64_t x, int64_t y) {
+    if (button == nullptr) return invalid_argument();
+    if (!adapter_ready() || g_adapter->hit_test == nullptr) return not_ready();
+    Component* component = find_component(button);
+    if (component == nullptr || component->kind != ComponentKind::kButton) {
+        // 原生事件树按钮由 ExecuteProc 处理，不经手工命中入口。
+        return unsupported();
+    }
+    if (phase != 1 && phase != 2) return contracts::ok();
+    const bool inside =
+        g_adapter->hit_test(button, x, y, {0, 0, component->rect.w, component->rect.h}) > 0;
+    if (phase == 1) {
+        if (inside) component->value = 1;
+        return contracts::ok();
+    }
+    const bool pressed = component->value != 0;
+    component->value = 0;
+    if (pressed && inside) request_host_back();
+    return contracts::ok();
+}
+
+QolResult back_request() {
+    request_host_back();
+    return contracts::ok();
+}
+
+const contracts::QolUiComponents kUiComponents{
+    sizeof(contracts::QolUiComponents),
+    contracts::kUiContractMajor,
+    contracts::kUiContractMinor,
+    &panel_create,
+    &button_create,
+    &label_create,
+    &toggle_create,
+    &select_create,
+    &scroll_view_create,
+    &set_rect,
+    &button_set_text,
+    &label_set_text,
+    &toggle_set_value,
+    &select_set_selected,
+    &scroll_set_offset,
+    &dispatch_touch,
+    &destroy,
+    &scroll_list_create,
+    &scroll_list_process,
+    &scroll_list_draw,
+    &scroll_list_get_offset,
+    &dispatch_native_event,
+    &help_page_create,
+    &help_page_process,
+    &help_page_draw,
+    &help_page_set_selected,
+    &help_page_get_selected,
+    &back_button_create,
+    &back_button_draw,
+    &back_button_touch,
+    &back_request,
+    &draw_control_text,
+    &switch_draw,
+    &switch_touch,
+    &native_toggle_create,
+    &native_toggle_set_value,
+    &native_toggle_get_value,
+    &native_toggle_set_enabled,
+    &native_toggle_draw,
+    &scroll_list_get_row,
+    &scroll_list_set_selection_enabled,
+    &scroll_row_button_create,
+    &text_button_create,
+    &text_button_set_enabled,
+    &text_button_draw,
+    &nav_button_create,
+    &nav_button_set_enabled,
+    &nav_button_draw,
+    &main_menu_text_button_create,
+    &main_menu_text_button_is_live,
+    &capsule_text_button_create,
+    &decorated_text_button_create,
+    &main_menu_decorated_button_create,
+    &text_button_set_active,
+    &arrow_button_create,
+    &arrow_button_set_enabled,
+    &arrow_button_draw,
+    &flat_text_button_create,
+    &icon_button_create,
+    &icon_button_set_enabled,
+    &icon_button_draw,
+    &compact_capsule_text_button_create,
+    &forget_native,
+    // Minor 20 tail: 锚定在游戏控件树上的图标按钮。
+    &anchored_button_ensure,
+    &anchored_button_set_visible,
+    &anchored_button_release,
+    &anchored_button_draw,
+    // Minor 21 tail: 任意原生控件的锚定。
+    &anchored_control_ensure,
+    &anchored_control_set_visible,
+    &anchored_control_release,
+    &anchored_control_detach,
+    // Minor 22 tail: rectilinear shape rasterizers backed by fill_rect_alpha.
+    &draw_rect_shape,
+    &draw_rounded_rect_shape,
+    &draw_circle_shape,
+    // Minor 23 tail: independently styled native-textured container.
+    &draw_container_styled,
+};
+
+}  // namespace
+
+bool ui_components_bind(const contracts::QolUiAdapter* adapter) {
+    constexpr size_t kBaseAdapterSize = offsetof(contracts::QolUiAdapter, item_proc_source_control) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->item_proc_source_control);
+    if (adapter == nullptr || adapter->size < kBaseAdapterSize ||
+        adapter->major != contracts::kUiAdapterMajor || adapter->minor < kUiAdapterBaseMinor) {
+        return false;
+    }
+    if (g_unbind_pending) {
+        ui_components_unbind();
+        if (g_unbind_pending) return false;
+    }
+    g_adapter = adapter;
+    ui_panels_set_callback_probe(&ui_components_in_callback);
+    return true;
+}
+
+void ui_components_unbind() {
+    // owned 列表必须先归还 native 控件，再清空回调上下文。
+    if (g_callback_depth != 0) {
+        g_unbind_pending = true;
+        return;
+    }
+    for (const auto& root : g_roots) {
+        // 锚定在游戏控件树上的组件不删除 native：控件生命周期归游戏，且父树可能已在
+        // 游戏侧销毁，delete_control 会命中已释放或被复用的地址。
+        if (root->native_externally_owned) continue;
+        if (!contracts::succeeded(delete_owned_lists(root.get()))) {
+            // Keep the adapter and every callback owner alive; the next bind retries cleanup and
+            // fails closed if the native tree is still unknown.
+            g_unbind_pending = true;
+            return;
+        }
+    }
+    ui_panels_set_callback_probe(nullptr);
+    g_adapter = nullptr;
+    g_components.clear();
+    g_roots.clear();
+    g_unbind_pending = false;
+}
+
+const contracts::QolUiComponents* ui_components_api() { return &kUiComponents; }
+
+bool ui_components_in_callback() { return g_callback_depth != 0; }
+
+// ui_components.h 声明的适配表访问器：返回 ui_components_bind 注入的宿主 UI 表。
+// 定义归组件插件自身（debug 面板等组件消费者需要），不再由页面侧提供。
+const contracts::QolUiAdapter* ui_adapter() { return g_adapter; }
+
+
+}  // namespace qol::features::core_ui

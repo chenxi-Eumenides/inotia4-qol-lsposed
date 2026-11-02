@@ -1,0 +1,618 @@
+#include "game/access/ui_native_text_button.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <limits>
+#include <string>
+
+#include "game/access/game_access.h"
+#include "game/adapter_ports/game_host_port.h"
+
+namespace qol::game {
+namespace {
+
+constexpr int32_t kTextButtonImageUnit = 0x12;
+constexpr int32_t kTextButtonImageLoc = 0x01;
+constexpr int32_t kNativeToggleOnLoc = 0x0f;
+constexpr int32_t kToggleBodyOffsetX = 13;
+constexpr int32_t kToggleBodyOffsetY = 13;
+// Visible toggle body target for the sliced capsule. Slice dest widths are
+// src * percent / 100 and must all be integers; with the search restricted to even
+// percents and the crop height fixed at 77, percent 70 is the only candidate whose
+// height error stays within the 1.0 bound, and integer slice widths at 70% require
+// cap and center source widths to be multiples of 10. The drawn width therefore only
+// takes 7-logical-px steps: (2*100 + center) * 0.7 = 189 or 196 for this crop.
+// 212 targets the 189 step: a 216 target would leave the best even-percent
+// candidate (68%) at error 1.93 > 1.0 and abort the draw.
+constexpr int32_t kToggleBodyWidth = 212;
+constexpr int32_t kToggleBodyHeight = 61;
+// Half of the 7-logical-px width reduction (3.5, floored): target_x moves right by
+// this so the narrower capsule stays centered in the rect and the label stays
+// within 1 logical px of the capsule center.
+constexpr int32_t kToggleBodyCenterShiftX = 3;
+// UI_006.png.jpg loc 0x01 gray capsule body; excludes transparent padding and side flourishes.
+constexpr int32_t kTextButtonBodyOffsetX = 33;
+constexpr int32_t kTextButtonBodyOffsetY = 22;
+constexpr int32_t kTextButtonBodyWidth = 405;
+constexpr int32_t kTextButtonBodyHeight = 77;
+constexpr int32_t kTextButtonBodyCapWidth = 100;
+// Preferred plain-fill patch between the rounded caps. It is kept intact whenever its
+// scale fits; a narrower centered crop is considered only when the native target needs it.
+constexpr int32_t kTextButtonBodyCenterWidth = 70;
+constexpr int32_t kMaxScalePercent = 400;
+constexpr int32_t kNativeDrawMode = 1;
+
+struct ImageLayer {
+    int32_t source_x;
+    int32_t source_y;
+    int32_t width;
+    int32_t height;
+    int32_t offset_x;
+    int32_t offset_y;
+};
+
+struct ButtonGeometry {
+    void* group = nullptr;
+    ImageLayer layer{};
+    int32_t percent = 0;
+    int32_t image_x = 0;
+    int32_t image_y = 0;
+    int32_t draw_width = 0;
+    int32_t cap_width = 0;
+    int32_t cap_draw_width = 0;
+    int32_t center_source_x = 0;
+    int32_t center_source_width = 0;
+    int32_t center_draw_width = 0;
+    bool horizontal_slice = false;
+    int32_t stretch_height = 0;
+};
+
+struct PressGeometry {
+    void* group = nullptr;
+    ImageLayer layer{};
+    int32_t percent = 0;
+    int32_t x = 0;
+    int32_t y = 0;
+    int32_t width = 0;
+};
+
+bool read_layer(void* location, ImageLayer* out) {
+    if (location == nullptr || out == nullptr || !game_memory_accessible(location, 0x18, 'r')) {
+        return false;
+    }
+    const auto* bytes = static_cast<const uint8_t*>(location);
+    std::memcpy(&out->source_x, bytes + IMAGE_LOC_SOURCE_X, sizeof(out->source_x));
+    std::memcpy(&out->source_y, bytes + IMAGE_LOC_SOURCE_Y, sizeof(out->source_y));
+    std::memcpy(&out->width, bytes + IMAGE_LOC_SOURCE_WIDTH, sizeof(out->width));
+    std::memcpy(&out->height, bytes + IMAGE_LOC_SOURCE_HEIGHT, sizeof(out->height));
+    std::memcpy(&out->offset_x, bytes + IMAGE_LOC_OFFSET_X, sizeof(out->offset_x));
+    std::memcpy(&out->offset_y, bytes + IMAGE_LOC_OFFSET_Y, sizeof(out->offset_y));
+    return out->width > 0 && out->height > 0;
+}
+
+bool rect_fits_int32(UiRect rect) {
+    const int64_t max = std::numeric_limits<int32_t>::max();
+    if (rect.x < std::numeric_limits<int32_t>::min() || rect.x > max ||
+        rect.y < std::numeric_limits<int32_t>::min() || rect.y > max || rect.w <= 0 ||
+        rect.h <= 0 || rect.w > max || rect.h > max) return false;
+    return rect.x <= max - rect.w && rect.y <= max - rect.h;
+}
+
+int64_t scale_round(int64_t value, int32_t percent) {
+    return (value * percent + 50) / 100;
+}
+
+bool load_text_button_layer(void** out_group, ImageLayer* out_layer) {
+    if (out_group == nullptr || out_layer == nullptr || fn_imgsys_unit_load == nullptr ||
+        fn_imgsys_get_group == nullptr || fn_imgsys_get_loc == nullptr) return false;
+    // Unit 0x12 is game-owned and shared. Ensure it is loaded; never unload it here.
+    fn_imgsys_unit_load(kTextButtonImageUnit);
+    *out_group = fn_imgsys_get_group(kTextButtonImageUnit);
+    return *out_group != nullptr && game_memory_accessible(*out_group, sizeof(void*), 'r') &&
+        read_layer(fn_imgsys_get_loc(kTextButtonImageUnit, kTextButtonImageLoc), out_layer);
+}
+
+bool load_native_toggle_layer(ImageLayer* out_layer) {
+    if (out_layer == nullptr || fn_get_group_title_img_type == nullptr ||
+        fn_imgsys_unit_load == nullptr || fn_imgsys_get_group == nullptr ||
+        fn_imgsys_get_loc == nullptr) return false;
+    const int32_t unit = fn_get_group_title_img_type();
+    if (unit <= 0) return false;
+    fn_imgsys_unit_load(unit);
+    void* group = fn_imgsys_get_group(unit);
+    if (group == nullptr || !game_memory_accessible(group, sizeof(void*), 'r')) return false;
+    return read_layer(fn_imgsys_get_loc(unit, kNativeToggleOnLoc), out_layer);
+}
+
+bool text_button_geometry(UiRect rect, const ImageLayer& layer, int32_t* out_percent,
+                          int32_t* out_x, int32_t* out_y) {
+    if (out_percent == nullptr || out_x == nullptr || out_y == nullptr ||
+        !rect_fits_int32(rect)) return false;
+    const int64_t width_percent = rect.w * 100 / layer.width;
+    const int64_t height_percent = rect.h * 100 / layer.height;
+    const int64_t percent = width_percent < height_percent ? width_percent : height_percent;
+    if (percent < 1 || percent > kMaxScalePercent) return false;
+    const int64_t drawn_width = static_cast<int64_t>(layer.width) * percent / 100;
+    const int64_t drawn_height = static_cast<int64_t>(layer.height) * percent / 100;
+    const int64_t x = rect.x + (rect.w - drawn_width) / 2;
+    const int64_t y = rect.y + (rect.h - drawn_height) / 2;
+    if (x < std::numeric_limits<int32_t>::min() || x > std::numeric_limits<int32_t>::max() ||
+        y < std::numeric_limits<int32_t>::min() || y > std::numeric_limits<int32_t>::max()) {
+        return false;
+    }
+    *out_percent = static_cast<int32_t>(percent);
+    *out_x = static_cast<int32_t>(x);
+    *out_y = static_cast<int32_t>(y);
+    return true;
+}
+
+bool load_text_button_geometry(UiRect rect, ButtonGeometry* out, bool force_capsule = false) {
+    if (out == nullptr || !rect_fits_int32(rect) || !game_host_is_main_thread() ||
+        fn_sgl_draw_texture_part_ex == nullptr) return false;
+    ButtonGeometry geometry{};
+    if (!load_text_button_layer(&geometry.group, &geometry.layer)) return false;
+    const int64_t width_percent = rect.w * 100 / geometry.layer.width;
+    const int64_t height_percent = rect.h * 100 / geometry.layer.height;
+    if (!force_capsule && (height_percent <= width_percent ||
+        (rect.w >= geometry.layer.width && rect.h >= geometry.layer.height))) {
+        int32_t draw_x = 0;
+        int32_t draw_y = 0;
+        if (!text_button_geometry(rect, geometry.layer, &geometry.percent, &draw_x, &draw_y)) {
+            return false;
+        }
+        geometry.image_x = draw_x;
+        geometry.image_y = draw_y;
+        geometry.draw_width = geometry.layer.width * geometry.percent / 100;
+        *out = geometry;
+        return true;
+    }
+
+    // Match the native toggle's actual source bounds, then crop the UI_006 pill to its opaque body.
+    // Horizontal slicing preserves the rounded ends while shrinking only its plain center fill.
+    geometry.horizontal_slice = true;
+    ImageLayer toggle_layer{};
+    if (!load_native_toggle_layer(&toggle_layer)) return false;
+    const int64_t toggle_width_percent = rect.w * 100 / toggle_layer.width;
+    const int64_t toggle_height_percent = rect.h * 100 / toggle_layer.height;
+    const int64_t toggle_percent = toggle_width_percent < toggle_height_percent
+        ? toggle_width_percent : toggle_height_percent;
+    if (toggle_percent < 1 || toggle_percent > kMaxScalePercent) return false;
+    const int64_t toggle_draw_width = static_cast<int64_t>(toggle_layer.width) *
+        toggle_percent / 100;
+    const int64_t toggle_draw_height = static_cast<int64_t>(toggle_layer.height) *
+        toggle_percent / 100;
+    const int64_t toggle_x = rect.x + (rect.w - toggle_draw_width) / 2;
+    const int64_t toggle_y = rect.y + (rect.h - toggle_draw_height) / 2;
+    const int64_t target_x = toggle_x + scale_round(
+        static_cast<int64_t>(toggle_layer.offset_x) + kToggleBodyOffsetX, toggle_percent) +
+        kToggleBodyCenterShiftX;
+    const int64_t target_y = toggle_y + scale_round(
+        static_cast<int64_t>(toggle_layer.offset_y) + kToggleBodyOffsetY, toggle_percent);
+    const double target_width_exact =
+        static_cast<double>(kToggleBodyWidth) * toggle_percent / 100.0;
+    const double target_height_exact =
+        static_cast<double>(kToggleBodyHeight) * toggle_percent / 100.0;
+    const int64_t target_width = scale_round(kToggleBodyWidth, toggle_percent);
+    const int64_t target_height = scale_round(kToggleBodyHeight, toggle_percent);
+    if (target_x < rect.x || target_y < rect.y || target_x + target_width > rect.x + rect.w ||
+        target_y + target_height > rect.y + rect.h || target_width <= 0 || target_height <= 0 ||
+        target_x < INT32_MIN || target_x > INT32_MAX || target_y < INT32_MIN ||
+        target_y > INT32_MAX) return false;
+
+    // Include the full capsule contour plus neighboring black texels for filtered edge sampling.
+    geometry.layer.source_x += kTextButtonBodyOffsetX;
+    geometry.layer.source_y += kTextButtonBodyOffsetY;
+    geometry.layer.width = kTextButtonBodyWidth;
+    geometry.layer.height = kTextButtonBodyHeight;
+    double best_error = std::numeric_limits<double>::max();
+    int32_t body_percent = 0;
+    int32_t body_center_width = kTextButtonBodyCenterWidth;
+    for (int32_t candidate = 2; candidate <= kMaxScalePercent; candidate += 2) {
+        const double candidate_width =
+            static_cast<double>(kTextButtonBodyCapWidth * 2 + kTextButtonBodyCenterWidth) *
+            candidate / 100.0;
+        const double candidate_height =
+            static_cast<double>(geometry.layer.height) * candidate / 100.0;
+        const double width_error = std::abs(candidate_width - target_width_exact);
+        const double height_error = std::abs(candidate_height - target_height_exact);
+        const double error = width_error > height_error ? width_error : height_error;
+        if (error < best_error) {
+            best_error = error;
+            body_percent = candidate;
+        }
+    }
+    if (best_error > 1.0 || body_percent == 0) {
+        // Retain full-size rounded caps and search narrower crops of the known plain center.
+        // Every crop starts at the cap edge, so the three source slices stay a contiguous
+        // half-open run and no column is dropped or double-drawn. This handles target sizes
+        // whose cap+center model cannot fit within the existing 1 px tolerance at 70 px fill;
+        // the tolerance itself is unchanged.
+        best_error = std::numeric_limits<double>::max();
+        body_percent = 0;
+        for (int32_t candidate = 1; candidate <= kMaxScalePercent; ++candidate) {
+            const double candidate_height =
+                static_cast<double>(geometry.layer.height) * candidate / 100.0;
+            const double height_error = std::abs(candidate_height - target_height_exact);
+            for (int32_t center_width = 1;
+                 center_width <= kTextButtonBodyCenterWidth; ++center_width) {
+                const double candidate_width =
+                    static_cast<double>(kTextButtonBodyCapWidth * 2 + center_width) *
+                    candidate / 100.0;
+                const double width_error = std::abs(candidate_width - target_width_exact);
+                const double error = width_error > height_error ? width_error : height_error;
+                if (error < best_error) {
+                    best_error = error;
+                    body_percent = candidate;
+                    body_center_width = center_width;
+                }
+            }
+        }
+    }
+    if (best_error > 1.0 || body_percent == 0) return false;
+    geometry.percent = body_percent;
+    geometry.cap_width = kTextButtonBodyCapWidth;
+    geometry.cap_draw_width = geometry.cap_width * geometry.percent / 100;
+    geometry.center_source_width = body_center_width;
+    geometry.center_source_x = geometry.cap_width;
+    geometry.center_draw_width = geometry.center_source_width * geometry.percent / 100;
+    geometry.draw_width = geometry.cap_draw_width * 2 + geometry.center_draw_width;
+    geometry.image_x = static_cast<int32_t>(target_x);
+    geometry.image_y = static_cast<int32_t>(target_y);
+    *out = geometry;
+    return true;
+}
+
+bool valid_utf8(const char* text) {
+    if (text == nullptr) return false;
+    const size_t size = std::strlen(text);
+    for (size_t pos = 0; pos < size;) {
+        const auto lead = static_cast<uint8_t>(text[pos]);
+        const size_t length = lead < 0x80 ? 1 : (lead & 0xe0) == 0xc0 ? 2 :
+                              (lead & 0xf0) == 0xe0 ? 3 : (lead & 0xf8) == 0xf0 ? 4 : 0;
+        if (length == 0 || pos + length > size || (length == 2 && lead < 0xc2) ||
+            (length == 4 && lead > 0xf4)) return false;
+        for (size_t i = 1; i < length; ++i) {
+            if ((static_cast<uint8_t>(text[pos + i]) & 0xc0) != 0x80) return false;
+        }
+        if (length == 3 && ((lead == 0xe0 && static_cast<uint8_t>(text[pos + 1]) < 0xa0) ||
+                            (lead == 0xed && static_cast<uint8_t>(text[pos + 1]) >= 0xa0))) {
+            return false;
+        }
+        if (length == 4 && ((lead == 0xf0 && static_cast<uint8_t>(text[pos + 1]) < 0x90) ||
+                            (lead == 0xf4 && static_cast<uint8_t>(text[pos + 1]) > 0x8f))) {
+            return false;
+        }
+        pos += length;
+    }
+    return true;
+}
+
+bool load_press_geometry(const ButtonGeometry& button, PressGeometry* out) {
+    if (fn_get_group_title_img_type == nullptr) return false;
+    const int32_t unit = fn_get_group_title_img_type();
+    if (unit <= 0) return false;
+    fn_imgsys_unit_load(unit);
+    out->group = fn_imgsys_get_group(unit);
+    if (out->group == nullptr || !game_memory_accessible(out->group, sizeof(void*), 'r') ||
+        !read_layer(fn_imgsys_get_loc(unit, 0x7), &out->layer)) return false;
+    // Title loc 7 has an orange halo and an inset white rim. White RGB pixels
+    // in its center have zero alpha; they are transparent, not a visible dash.
+    if (out->layer.width != 262 || out->layer.height != 103) return false;
+    // Monster v31 alpha > 128: the normal capsule is 75 px tall inside its
+    // 77 px guarded crop; loc 7's visible body is [21,241)x[21,82), 220x61.
+    // Match body to body, leaving the pressed halo outside that visible contour.
+    // Rounding the canvas scale down to tens shrinks both contour and halo.
+    constexpr int32_t kNormalVisibleHeight = 75;
+    constexpr int32_t kPressedBodyHeight = 61;
+    constexpr int32_t kPressedBodyInset = 21;
+    out->percent = (kNormalVisibleHeight * button.percent + button.stretch_height * 100 +
+        kPressedBodyHeight / 2) /
+        kPressedBodyHeight;
+    constexpr int32_t kMaxPressedScalePercent =
+        (kNormalVisibleHeight * kMaxScalePercent + kPressedBodyHeight / 2) / kPressedBodyHeight;
+    if (out->percent < 2 || out->percent > kMaxPressedScalePercent) return false;
+    const int64_t body_width = button.horizontal_slice ? button.draw_width :
+        scale_round(kTextButtonBodyWidth, button.percent);
+    const int64_t body_height = scale_round(kNormalVisibleHeight, button.percent) +
+        button.stretch_height;
+    const int64_t body_x = button.image_x + (button.horizontal_slice ? 0 :
+        scale_round(kTextButtonBodyOffsetX, button.percent));
+    const int64_t body_y = button.image_y + (button.horizontal_slice ? 0 :
+        scale_round(kTextButtonBodyOffsetY, button.percent));
+    const int64_t width = body_width + 2 * scale_round(kPressedBodyInset, out->percent);
+    const int64_t height = scale_round(out->layer.height, out->percent);
+    const int64_t x = body_x + (body_width - width) / 2;
+    const int64_t y = body_y + (body_height - height) / 2;
+    if (width > INT32_MAX || x < INT32_MIN || y < INT32_MIN ||
+        x > INT32_MAX - width || y > INT32_MAX - height) return false;
+    out->width = static_cast<int32_t>(width);
+    out->x = static_cast<int32_t>(x);
+    out->y = static_cast<int32_t>(y);
+    return out->width > 2 * (50 * out->percent / 100);
+}
+
+void draw_press_geometry(const PressGeometry& press) {
+    const auto draw = [&press](int32_t x, int32_t y, int32_t sx, int32_t sy,
+                               int32_t width, int32_t height) {
+        fn_sgl_draw_texture_part_ex(press.group, x, y, press.layer.source_x + sx,
+            press.layer.source_y + sy, width, height, 0, 0, kNativeDrawMode, 0,
+            press.percent, 0);
+    };
+    const int32_t cap = 50 * press.percent / 100;
+    draw(press.x, press.y, 0, 0, 50, 103);
+    draw(press.x + press.width - cap, press.y, 212, 0, 50, 103);
+    // Tile the center's horizontally uniform RGBA rows, not the edge's alpha
+    // ramp. Top/bottom retain the white rim; no new fill color or clip is used.
+    for (int32_t band = 0; band < 3; ++band) {
+        const int32_t sy = band == 0 ? 0 : band == 1 ? 40 : 60;
+        const int32_t height = band == 0 ? 40 : band == 1 ? 20 : 43;
+        const int32_t sx = band == 1 ? 100 : 50;
+        const int32_t available = band == 1 ? 20 : 160;
+        // Join destination bands using their actual integer extents. Independent
+        // floors of 40%, 20%, and 60% could otherwise leave a one-pixel gap.
+        const int32_t y = press.y + (band == 2 ?
+            40 * press.percent / 100 + 20 * press.percent / 100 :
+            sy * press.percent / 100);
+        int32_t x = press.x + cap;
+        const int32_t end = press.x + press.width - cap;
+        while (x < end) {
+            const int32_t source_width = std::min(available,
+                ((end - x) * 100 + press.percent - 1) / press.percent);
+            const int32_t drawn_width = source_width * press.percent / 100;
+            if (drawn_width == 0) break;
+            draw(x, y, sx, sy, source_width, height);
+            x += drawn_width;
+        }
+    }
+}
+
+bool button_label_within_width(const char* text, int64_t max_width, int32_t font_height,
+                               std::string* out) {
+    if (text == nullptr || out == nullptr || max_width < font_height || font_height <= 0) {
+        return false;
+    }
+    out->clear();
+    const size_t size = std::strlen(text);
+    size_t pos = 0;
+    int64_t used = 0;
+    bool truncated = false;
+    while (pos < size) {
+        const uint8_t lead = static_cast<uint8_t>(text[pos]);
+        const size_t length = lead < 0x80 ? 1 : (lead & 0xe0) == 0xc0 ? 2 :
+                              (lead & 0xf0) == 0xe0 ? 3 : 4;
+        if (used + font_height > max_width - font_height) {
+            truncated = true;
+            break;
+        }
+        out->append(text, pos, length);
+        pos += length;
+        used += font_height;
+    }
+    if (truncated) out->append("…");
+    return !out->empty();
+}
+
+int32_t explicit_font(const contracts::UiTextButtonPaintDesc& desc) {
+    if (desc.font_style > contracts::kUiTextButtonFontLarger) return -1;
+    switch (desc.font_size) {
+        case 0: return static_cast<int32_t>(desc.font_style);
+        case 14: return 4;
+        case 20: return 0;
+        case 24: return 1;
+        case 28: return 3;
+        case 38: return 2;
+        default: return -1;
+    }
+}
+
+bool explicit_geometry(const contracts::UiTextButtonPaintDesc& desc, ButtonGeometry* out) {
+    const UiRect rect{desc.visual_rect.x, desc.visual_rect.y, desc.visual_rect.w, desc.visual_rect.h};
+    if (desc.appearance == contracts::kUiTextButtonCapsule) {
+        return load_text_button_geometry(rect, out, true);
+    }
+    if (desc.appearance != contracts::kUiTextButtonDecorated || !rect_fits_int32(rect) ||
+        !game_host_is_main_thread() || fn_sgl_draw_texture_part_ex == nullptr) return false;
+    ButtonGeometry geometry{};
+    if (!load_text_button_layer(&geometry.group, &geometry.layer)) return false;
+    const int64_t percent = std::min((rect.w * 100 + geometry.layer.width / 2) /
+        geometry.layer.width, rect.h * 100 / geometry.layer.height);
+    if (percent < 1 || percent > kMaxScalePercent) return false;
+    geometry.percent = static_cast<int32_t>(percent);
+    geometry.draw_width = geometry.layer.width * geometry.percent / 100;
+    const int64_t natural_height = geometry.layer.height * percent / 100;
+    const int64_t extra = rect.h - natural_height;
+    geometry.stretch_height = extra > 1 ? static_cast<int32_t>(extra) : 0;
+    geometry.image_x = static_cast<int32_t>(rect.x + (rect.w - geometry.draw_width) / 2);
+    geometry.image_y = static_cast<int32_t>(rect.y +
+        (rect.h - natural_height - geometry.stretch_height) / 2);
+    *out = geometry;
+    return true;
+}
+
+void draw_explicit_background(const ButtonGeometry& geometry) {
+    const auto draw = [&geometry](int32_t x, int32_t y, int32_t sx, int32_t sy,
+                                  int32_t width, int32_t height) {
+        fn_sgl_draw_texture_part_ex(geometry.group, x, y,
+            geometry.layer.source_x + sx, geometry.layer.source_y + sy, width, height,
+            geometry.layer.offset_x, geometry.layer.offset_y, kNativeDrawMode, 0,
+            geometry.percent, 0);
+    };
+    if (geometry.horizontal_slice) {
+        draw(geometry.image_x, geometry.image_y, 0, 0, geometry.cap_width, geometry.layer.height);
+        draw(geometry.image_x + geometry.cap_draw_width, geometry.image_y,
+            geometry.center_source_x, 0, geometry.center_source_width, geometry.layer.height);
+        draw(geometry.image_x + geometry.cap_draw_width + geometry.center_draw_width,
+            geometry.image_y, geometry.layer.width - geometry.cap_width, 0,
+            geometry.cap_width, geometry.layer.height);
+    } else if (geometry.stretch_height == 0) {
+        draw(geometry.image_x, geometry.image_y, 0, 0, geometry.layer.width, geometry.layer.height);
+    } else {
+        // Keep the side flourishes at their native aspect. Extend only the pill's
+        // straight waist; its original upper/lower contours and shading are retained.
+        const int32_t p = geometry.percent;
+        draw(geometry.image_x, geometry.image_y + geometry.stretch_height / 2,
+            0, 0, 33, geometry.layer.height);
+        draw(geometry.image_x + 438 * p / 100,
+            geometry.image_y + geometry.stretch_height / 2, 438, 0,
+            geometry.layer.width - 438, geometry.layer.height);
+        const int32_t x = geometry.image_x + 33 * p / 100;
+        const int32_t y = geometry.image_y + 22 * p / 100;
+        const int32_t upper = 37 * p / 100;
+        draw(x, y, 33, 22, 405, 37);
+        int32_t filled = 0;
+        while (filled < geometry.stretch_height) {
+            const int32_t source_height = std::min(10,
+                ((geometry.stretch_height - filled) * 100 + p - 1) / p);
+            const int32_t height = source_height * p / 100;
+            if (height == 0) break;
+            draw(x, y + upper + filled, 33, 55, 405, source_height);
+            filled += height;
+        }
+        draw(x, y + upper + geometry.stretch_height, 33, 59, 405, 40);
+    }
+}
+
+::QolResult explicit_preflight(const contracts::UiTextButtonPaintDesc& desc,
+                               ButtonGeometry* geometry, PressGeometry* press,
+                               contracts::UiTextButtonPaintLayout* layout, int32_t* font) {
+    if (!rect_fits_int32({desc.visual_rect.x, desc.visual_rect.y, desc.visual_rect.w,
+                         desc.visual_rect.h}) || desc.font_style > 1 ||
+        (desc.appearance != contracts::kUiTextButtonCapsule &&
+         desc.appearance != contracts::kUiTextButtonDecorated)) {
+        return contracts::error(kQolErrInvalidArgument, "invalid text button", 19);
+    }
+    *font = explicit_font(desc);
+    if (*font < 0) return contracts::error(kQolErrUnsupported, "unsupported font size", 21);
+    if (!explicit_geometry(desc, geometry) || !load_press_geometry(*geometry, press) ||
+        fn_grpx_get_font_height == nullptr || fn_grpx_set_font_color_rgb == nullptr ||
+        fn_grpx_draw_string_with_font == nullptr) {
+        return contracts::error(kQolErrNotReady, "text button not ready", 21);
+    }
+    const int64_t font_height = fn_grpx_get_font_height(static_cast<uint32_t>(*font));
+    const int64_t image_height = geometry->layer.height * geometry->percent / 100 +
+        geometry->stretch_height;
+    layout->normal_bounds = {geometry->image_x, geometry->image_y,
+        geometry->draw_width, image_height};
+    layout->pressed_bounds = {press->x, press->y, press->width,
+        scale_round(press->layer.height, press->percent)};
+    const int64_t body_x = geometry->image_x + (geometry->horizontal_slice ? 0 :
+        scale_round(kTextButtonBodyOffsetX, geometry->percent));
+    const int64_t body_y = geometry->image_y + (geometry->horizontal_slice ? 0 :
+        scale_round(kTextButtonBodyOffsetY, geometry->percent));
+    const int64_t body_width = geometry->horizontal_slice ? geometry->draw_width :
+        scale_round(kTextButtonBodyWidth, geometry->percent);
+    const int64_t body_height = scale_round(75, geometry->percent) + geometry->stretch_height;
+    layout->label_bounds = {body_x + body_width * 11 / 100, body_y + body_height * 18 / 100,
+        body_width * 78 / 100, body_height * 68 / 100};
+    if (font_height <= 0 || layout->label_bounds.h < font_height ||
+        layout->label_bounds.w < font_height) {
+        return contracts::error(kQolErrNotReady, "font does not fit", 17);
+    }
+    return contracts::ok();
+}
+
+}  // namespace
+
+::QolResult ui_layout_native_text_button(const contracts::UiTextButtonPaintDesc& desc,
+                                        contracts::UiTextButtonPaintLayout* out) {
+    if (out == nullptr) return contracts::error(kQolErrInvalidArgument, "null layout", 11);
+    *out = {};
+    ButtonGeometry geometry{};
+    PressGeometry press{};
+    int32_t font = 0;
+    return explicit_preflight(desc, &geometry, &press, out, &font);
+}
+
+::QolResult ui_draw_native_text_button(const contracts::UiTextButtonPaintDesc& desc,
+                                      const char* text, uint32_t color, uint8_t pressed) {
+    if (pressed > 1 || !valid_utf8(text)) {
+        return contracts::error(kQolErrInvalidArgument, "invalid label", 13);
+    }
+    ButtonGeometry geometry{};
+    PressGeometry press{};
+    contracts::UiTextButtonPaintLayout layout{};
+    int32_t font = 0;
+    const auto result = explicit_preflight(desc, &geometry, &press, &layout, &font);
+    if (!contracts::succeeded(result)) return result;
+    const int32_t height = static_cast<int32_t>(fn_grpx_get_font_height(font));
+    std::string label;
+    if (!button_label_within_width(text, layout.label_bounds.w, height, &label)) {
+        return contracts::error(kQolErrInvalidArgument, "label does not fit", 18);
+    }
+    draw_explicit_background(geometry);
+    if (pressed != 0) draw_press_geometry(press);
+    fn_grpx_set_font_color_rgb(color & 0xff, (color >> 8) & 0xff, (color >> 16) & 0xff);
+    fn_grpx_draw_string_with_font(label.data(),
+        static_cast<int32_t>(layout.label_bounds.x + layout.label_bounds.w / 2),
+        static_cast<int32_t>(layout.label_bounds.y + (layout.label_bounds.h - height) / 2), 2, font);
+    return contracts::ok();
+}
+
+bool ui_draw_native_text_button_background(UiRect rect, uint8_t pressed) {
+    if (pressed > 1) return false;
+    ButtonGeometry geometry{};
+    if (!load_text_button_geometry(rect, &geometry)) return false;
+    PressGeometry press{};
+    if (pressed != 0 && !load_press_geometry(geometry, &press)) return false;
+    const auto draw_slice = [&geometry](int32_t x, int32_t source_x, int32_t source_width) {
+        fn_sgl_draw_texture_part_ex(geometry.group, x, geometry.image_y,
+            geometry.layer.source_x + source_x, geometry.layer.source_y, source_width,
+            geometry.layer.height, geometry.layer.offset_x, geometry.layer.offset_y,
+            kNativeDrawMode, 0, geometry.percent, 0);
+    };
+    if (!geometry.horizontal_slice) {
+        draw_slice(geometry.image_x, 0, geometry.layer.width);
+        if (pressed != 0) draw_press_geometry(press);
+        return true;
+    }
+    const int32_t left_width = geometry.cap_draw_width;
+    const int32_t center_width = geometry.center_draw_width;
+    draw_slice(geometry.image_x, 0, geometry.cap_width);
+    draw_slice(geometry.image_x + left_width, geometry.center_source_x,
+               geometry.center_source_width);
+    draw_slice(geometry.image_x + left_width + center_width,
+                geometry.layer.width - geometry.cap_width, geometry.cap_width);
+    if (pressed != 0) draw_press_geometry(press);
+    return true;
+}
+
+bool ui_draw_native_text_button_label(UiRect rect, const char* text, uint32_t color, int32_t font) {
+    if (!rect_fits_int32(rect) || !valid_utf8(text) || !game_host_is_main_thread() || font < 0 ||
+        fn_grpx_get_font_height == nullptr || fn_grpx_set_font_color_rgb == nullptr ||
+        fn_grpx_draw_string_with_font == nullptr) return false;
+    const uint64_t measured_height = fn_grpx_get_font_height(static_cast<uint32_t>(font));
+    if (measured_height == 0 || measured_height > static_cast<uint64_t>(INT32_MAX)) return false;
+
+    ButtonGeometry geometry{};
+    if (!load_text_button_geometry(rect, &geometry)) return false;
+    const int32_t font_height = static_cast<int32_t>(measured_height);
+    const int64_t image_height = scale_round(geometry.layer.height, geometry.percent);
+    const int64_t content_left = geometry.image_x + geometry.draw_width * 11 / 100;
+    const int64_t content_right = geometry.image_x + geometry.draw_width * 89 / 100;
+    const int64_t content_top = geometry.image_y + image_height * 18 / 100;
+    const int64_t content_bottom = geometry.image_y + image_height * 86 / 100;
+    if (content_right <= content_left || content_bottom - content_top < font_height ||
+        content_left < INT32_MIN || content_right > INT32_MAX || content_top < INT32_MIN ||
+        content_bottom > INT32_MAX) return false;
+
+    std::string label;
+    if (!button_label_within_width(text, content_right - content_left, font_height, &label)) {
+        return false;
+    }
+    const int64_t text_x = rect.x + rect.w / 2;
+    const int64_t text_y = content_top + (content_bottom - content_top - font_height) / 2;
+    if (text_x < INT32_MIN || text_x > INT32_MAX || text_y < INT32_MIN || text_y > INT32_MAX) {
+        return false;
+    }
+
+    fn_grpx_set_font_color_rgb(static_cast<int32_t>(color & 0xff),
+                               static_cast<int32_t>((color >> 8) & 0xff),
+                               static_cast<int32_t>((color >> 16) & 0xff));
+    fn_grpx_draw_string_with_font(label.data(), static_cast<int32_t>(text_x),
+                                  static_cast<int32_t>(text_y), 2, font);
+    return true;
+}
+
+}  // namespace qol::game

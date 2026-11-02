@@ -1,0 +1,36 @@
+#pragma once
+
+// 特殊装备解锁纯规则（无游戏依赖，host 可测）：原版装备判定链「跳过 bit4」后的重放判定，
+// 以及装备详情出售按钮门禁决策。游戏值由 game/access 提供，本层只做组合判定。
+
+namespace qol::features::special_equip {
+
+struct EquipReplayInputs {
+    bool is_real_equip;
+    bool can_change_equip;
+    int character_level;
+    int required_item_level;
+};
+
+struct SellGateInputs {
+    int desc_type;
+    bool menu_char_present;
+    bool can_change_equip_resolved;
+    bool can_change_equip;
+};
+
+// 原版 CHAR_CanEquipItem 判定链在「原版已返回 0」后跳过 ② 的重放：
+//   ① ITEM_IsRealEquip(item)                             is_real_equip
+//   ③ CHAR_CanChangeEquip(ch)                           can_change_equip
+//   ④ ch[C_LEVEL] >= ITEM_GetEquipLevel(item)           char_level >= item_level
+// 返回真精确等价于「原版只因 ②（+7 bit4）拒绝」。
+bool equip_replay_allows(const EquipReplayInputs& in);
+
+// 原版 CHAR_CanUnequipItem 跳过 ①（+7 bit4）后的检查：② CHAR_CanChangeEquip(ch)。
+bool unequip_replay_allows(bool can_change_equip);
+
+// 出售门禁决策：desc_type 仅 0/1/2 为已知值；未知值及菜单角色或装备操作原语缺失时拦截。
+// 已知的 1/2 放行，0（装备详情）按角色装备操作权限决定是否拦截。
+bool sell_gate_decides_block(const SellGateInputs& in);
+
+}  // namespace qol::features::special_equip

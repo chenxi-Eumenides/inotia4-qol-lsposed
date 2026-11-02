@@ -1,6 +1,95 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(gamebridge)
 
+option(QOL_KERNEL_ONLY "Build Loader and Game Adapter without business plugins" OFF)
+option(QOL_ENABLE_DEVICE_PROBE "Build the Debug-only device probe plugins" OFF)
+
+if(QOL_ENABLE_DEVICE_PROBE AND CMAKE_BUILD_TYPE MATCHES "^[Rr][Ee][Ll][Ee][Aa][Ss][Ee]$")
+    message(FATAL_ERROR "QOL_ENABLE_DEVICE_PROBE is prohibited in Release builds")
+endif()
+
+set(QOL_BRIDGE_PLUGIN_SOURCES
+    plugins/save_backup/bundle.cpp
+    plugins/save_backup/feature.cpp
+    plugins/extension_bag/runtime/state.cpp
+    plugins/extension_bag/runtime/session.cpp
+    plugins/extension_bag/runtime/state_load.cpp
+    plugins/extension_bag/runtime/response.cpp
+    plugins/extension_bag/core/native_tab_layout.cpp
+    plugins/extension_bag/core/host_adapter.cpp
+    plugins/extension_bag/core/item_display_hook.cpp
+    plugins/extension_bag/core/move_merge.cpp
+    plugins/extension_bag/core/tabs_ui.cpp
+    plugins/extension_bag/core/orchestrator.cpp
+    plugins/extension_bag/public/projection.cpp
+    plugins/extension_bag/public/bridge.cpp
+    plugins/extension_bag/core/bind.cpp
+    plugins/extension_bag/api/api_impl.cpp
+    plugins/extension_bag/api/bag_source.cpp
+    plugins/extension_bag/usecases/move.cpp
+    plugins/extension_bag/usecases/set_bag_count.cpp
+    plugins/extension_bag/assembly/claims.cpp
+    plugins/extension_bag/core/observation.cpp
+    plugins/extension_bag/core/tabs.cpp
+    plugins/extension_bag/core/drag_session.cpp
+    plugins/extension_bag/core/input.cpp
+    plugins/extension_bag/core/render.cpp
+    plugins/extension_bag/core/projection.cpp
+    plugins/extension_bag/core/lifecycle.cpp
+    plugins/extension_bag/core/ownership.cpp
+    plugins/extension_bag/transaction/ext_orig.cpp
+    plugins/extension_bag/transaction/ext_ext.cpp
+    plugins/extension_bag/ui/equip.cpp
+    plugins/extension_bag/ui/equip_hooks.cpp
+    plugins/extension_bag/ui/detail_hooks.cpp
+    plugins/extension_bag/ui/detail_actions.cpp
+    plugins/extension_bag/ui/store_tabs.cpp
+    plugins/extension_bag/ui/store_projection.cpp
+    plugins/extension_bag/ui/store_trade.cpp
+    plugins/extension_bag/ui/mix.cpp
+    plugins/extension_bag/api/port_state.cpp
+    plugins/extension_bag/api/handles.cpp
+    plugins/extension_bag/persistence/persistence.cpp
+    plugins/extension_bag/core/geometry.cpp
+    plugins/attribute_quality/rules.cpp
+    plugins/attribute_quality/feature.cpp
+    plugins/attribute_quality/plugin.cpp
+    plugins/attribute_range_display/feature.cpp
+    plugins/attribute_range_display/plugin.cpp
+    plugins/world_teleport/feature.cpp
+    plugins/world_teleport/rules.cpp
+    plugins/autosell/rules.cpp
+    plugins/autosell/config.cpp
+    plugins/autosell/view.cpp
+    plugins/autosell/scan.cpp
+    plugins/autosell/plugin.cpp
+    plugins/autosell/store.cpp
+    plugins/core.quest/feature.cpp
+    plugins/core.quest/plugin.cpp
+    plugins/special_equip/rules.cpp
+    plugins/special_equip/feature.cpp
+    plugins/special_equip/plugin.cpp
+    plugins/custom_recipe/model/catalog.cpp
+    plugins/custom_recipe/model/rules.cpp
+    plugins/custom_recipe/table/table.cpp
+    plugins/custom_recipe/result/feature.cpp
+    plugins/custom_recipe/plugin.cpp
+    plugins/core.craft/plugin.cpp
+    plugins/push_all/rules.cpp
+    plugins/push_all/feature.cpp
+    plugins/push_all/plugin.cpp
+    plugins/stack_limit/plugin.cpp
+    plugins/save_backup/plugin.cpp
+    plugins/world_teleport/plugin.cpp
+    plugins/core.custom_ui/feature.cpp
+    plugins/core.ui_state/plugin.cpp
+    plugins/core.custom_ui/plugin.cpp
+    plugins/core.custom_ui/ui_components.cpp
+    plugins/core.custom_ui/panels/stack.cpp
+    plugins/save_backup/ui/panel.cpp
+    plugins/extension_bag/plugin.cpp
+)
+
 add_library(gamebridge SHARED
     bridge/native/gamebridge.cpp
     bridge/native/gamebridge_data.cpp
@@ -8,163 +97,321 @@ add_library(gamebridge SHARED
     bridge/native/gamebridge_ui.cpp
     bridge/native/gamebridge_domain_operations.cpp
     bridge/native/gamebridge_settings.cpp
-    bridge/native/gamebridge_extension_bag.cpp
-    game_access.cpp
-    data/native/symbol_resolver.cpp
-    core/native/game_json.cpp
-    core/native/game_ops_common.cpp
-    core/native/grid_geometry.cpp
-    game_state.cpp
-    core/native/game_nav.cpp
+    game/access/game_access.cpp
+    game/access/item_handle_registry.cpp
+    game/symbols/symbol_resolver.cpp
+    game/json/game_json.cpp
+    game/ops/game_ops_common.cpp
+    game/ops/item_dice.cpp
+    game/ops/item_money.cpp
+    game/ops/item_inventory_state_write.cpp
+    game/ops/character_state_read.cpp
+    game/ops/character_write.cpp
+    game/state/game_state.cpp
+    game/nav/game_nav.cpp
+    game/input/eight_way_access.cpp
+    game/input/eight_way_state.cpp
+    game/input/eight_way_move.cpp
+    game/input/eight_way_draw.cpp
+    game/adapter_ports/movement_input_port.cpp
     core/native/game_cache.cpp
     core/native/module_save.cpp
-    api/native/game_world.cpp
-    api/native/game_quest.cpp
-    api/native/game_ui.cpp
-    game_dialog.cpp
-    api/native/game_shop.cpp
-    api/native/game_save.cpp
-    api/native/game_save_preflight.cpp
-    feature/save_backup/save_backup_bundle.cpp
-    feature/save_backup/save_backup.cpp
+    game/access/world_read.cpp
+    game/access/save_preflight.cpp
     game_system.cpp
-    data/native/game_tiles.cpp
-    api/native/game_character.cpp
-    api/native/game_party.cpp
-    api/native/game_inventory.cpp
-    feature/patch/game_patch.cpp
-    feature/patch/native_inventory_hook.cpp
-    feature/patch/inventory_find_item_poc.cpp
-    feature/patch/inventory_hook_stage4.cpp
-    feature/ui/game_ui_exp.cpp
-    feature/ui/game_ui_kit.cpp
-    feature/ui/game_ui_components.cpp
-    feature/ui/game_ui_settings.cpp
-    feature/ui/game_ui_savebackup.cpp
-    feature/ui/native_choice.cpp
-    feature/extension_bag/game_ui_virtbag.cpp
-    feature/extension_bag/extension_bag_port.cpp
-    feature/extension_bag/extension_bag_persistence.cpp
-    feature/extension_bag/extension_bag_geometry.cpp
-    feature/extension_bag/extension_bag_api.cpp
-    feature/attribute_range/attribute_range.cpp
-    feature/attribute_range/game_ui_attr_range.cpp
-    feature/world_teleport/world_teleport.cpp
-    feature/world_teleport/world_teleport_rules.cpp
+    game/state/system_events.cpp
+    game/read/game_tiles.cpp
+    game/access/inventory.cpp
+    game/access/inventory_legacy_read.cpp
+    game/access/hive_iap.cpp
+    game/access/ui_kit.cpp
+    game/access/ui_confirmation.cpp
+    game/access/ui_components.cpp
+    game/access/ui_native_toggle.cpp
+    game/access/ui_native_text_button.cpp
+    game/access/ui_native_close_button.cpp
+    game/access/attr_range_ui.cpp
+)
+
+target_compile_definitions(gamebridge PRIVATE
+    QOL_KERNEL_ONLY=$<BOOL:${QOL_KERNEL_ONLY}>
+    QOL_ENABLE_DEVICE_PROBE=$<BOOL:${QOL_ENABLE_DEVICE_PROBE}>
 )
 
 find_library(log-lib log)
 target_include_directories(gamebridge PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/api/native
-    ${CMAKE_CURRENT_SOURCE_DIR}/core/native
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/native
+    ${CMAKE_CURRENT_SOURCE_DIR}/contracts
+    ${CMAKE_CURRENT_SOURCE_DIR}/plugins/extension_bag
+    ${CMAKE_CURRENT_SOURCE_DIR}/game/read
+    ${CMAKE_CURRENT_SOURCE_DIR}/game/symbols
 )
-target_link_libraries(gamebridge ${log-lib} dl)
+add_subdirectory(plugins)
+if(NOT QOL_KERNEL_ONLY)
+    target_sources(gamebridge PRIVATE ${QOL_BRIDGE_PLUGIN_SOURCES})
+    target_sources(gamebridge PRIVATE bridge/native/gamebridge_core_data.cpp)
+    target_sources(gamebridge PRIVATE host/item_inventory_state_write_port.cpp)
+    target_sources(gamebridge PRIVATE host/character_state_port.cpp)
+endif()
+target_link_libraries(gamebridge PRIVATE ${log-lib} dl)
 
 # 自动出售阶段 A：core 基础设施 + 数据层下沉（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    core/native/call_patch.cpp
-    core/native/near_code_alloc.cpp
-    core/native/frame_task.cpp
-    core/native/frame_host.cpp
-    core/native/save_enter.cpp
-    core/native/save_exit.cpp
+    patch/call_patch.cpp
+    patch/native_hook.cpp
+    patch/save_enter.cpp
+    patch/save_exit.cpp
     core/native/inventory_trade.cpp
-    data/native/item_class.cpp
+    game/read/item_class.cpp
 )
 
-# 自动出售阶段 B：规则/视图/扫描/宿主 + JNI 薄层（末尾追加，不改上方既有行）
+# 自动出售阶段 B：规则/视图/扫描/宿主 + JNI 薄层（P4-B3 迁移至 plugins/autosell）
 target_sources(gamebridge PRIVATE
-    feature/autosell/autosell_rules.cpp
-    feature/autosell/autosell_config.cpp
-    feature/autosell/autosell_view.cpp
-    feature/autosell/autosell_scan.cpp
     bridge/native/gamebridge_autosell.cpp
 )
 
-# 自动出售按存档配置 sidecar（末尾追加，不改上方既有行）
-target_sources(gamebridge PRIVATE
-    feature/autosell/autosell_store.cpp
-)
-
-# 自动出售 UI 原型：背包页入口按钮 + 只读占位面板（末尾追加，不改上方既有行）
-target_sources(gamebridge PRIVATE
-    feature/ui/game_ui_autosell.cpp
-)
-
-# 合成器宝石合成操作优化（gem-craft-optimization 阶段1，末尾追加，不改上方既有行）
-target_sources(gamebridge PRIVATE
-)
+# 历史迁移记录（原空 target_sources 块已清理，各批条目均已迁入下沉插件、由插件 target 编译）：
+# 自动出售按存档配置 sidecar（P4-B3 → plugins/autosell）；自动出售 UI 背包页入口按钮 +
+# 配置面板（D1-b3 → plugins/autosell/ui）；合成器宝石合成优化（gem-craft-optimization 阶段1）；
+# 自定义合成配方（custom-craft-recipe：目录/规则/表注入/结果层 provider）；
+# 库存行为域声明式化（B2a-1，wrapper 业务体归 core.item/hooks + usecases）；
+# core.ui 出口面与 save_backup 游戏内面板（D1-b2）；extension_bag 声明式资源
+# （D2a-3b-1 / D2c-2b-2，29 条 claim，features/patch 已删除）。
 
 # 状态转换派发（go_main_menu/enter_slot/create_slot 跨线程收敛到逻辑帧点，末尾追加）
 target_sources(gamebridge PRIVATE
-    core/native/transition_dispatch.cpp
+    infra/frame/transition_dispatch.cpp
 )
 
-# 任务完成度进档重算（quest-resync，末尾追加，不改上方既有行）
+# 任务完成度进档重算（quest 插件迁移：零资源常驻 + infra/scheduler 帧节拍；旧 quest_resync 删除）
 target_sources(gamebridge PRIVATE
-    feature/quest/quest_resync.cpp
+    game/access/quest.cpp
 )
 
-# 简单模式：伤害倍率 + 怪物最大生命减半 + 阵营判定（末尾追加，不改上方既有行）
+# P4 阶段 B1：special_equip 迁移为插件（game/access/item_class 收口 ITEMCLASS/GOT 读取，
+# 入口 hook 声明式化 + 出售门禁谓词过渡依赖；末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    feature/simple_mode/simple_mode_rules.cpp
-    feature/simple_mode/simple_mode.cpp
-    bridge/native/gamebridge_simple_mode.cpp
-)
-
-# 特殊装备解锁：CHAR_CanEquipItem / CHAR_CanUnequipItem 双点包裹，
-# 放行 ITEMDATABASE +7 bit4（NPC 专属保护）对非特殊 NPC 的约束。
-# **常开，无配置开关**：游戏无获取途径，关闭只会让已持有该装备的角色无法穿脱（末尾追加，不改上方既有行）
-target_sources(gamebridge PRIVATE
-    feature/special_equip/special_equip.cpp
+    game/access/item_class.cpp
 )
 
 # 统一日志系统 P0 基础设施（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    core/native/qol_log.cpp
+    infra/log/qol_log.cpp
+    infra/log/qol_crash.cpp
     bridge/native/gamebridge_log.cpp
 )
 
 # libgame.so 变体对照表运行时查表（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    core/native/game_variant.cpp
+    game/variants/game_variant.cpp
 )
 
 # 功能抽象层：构建能力 → 功能可用性（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    core/native/game_feature.cpp
+    game/feature/game_feature.cpp
 )
 
-# 自定义合成配方（custom-craft-recipe：目录/规则/表注入/UI hook，末尾追加，不改上方既有行）
+# 角色属性面板战斗属性行标签中文化（character-info-zh-labels；作用域标记归入 character_panel_i18n 插件）
 target_sources(gamebridge PRIVATE
-    feature/custom_recipe/custom_recipe_catalog.cpp
-    feature/custom_recipe/custom_recipe_rules.cpp
-    feature/custom_recipe/custom_recipe_table.cpp
-    feature/custom_recipe/custom_recipe_api.cpp
-    feature/craft_ui/craft_ui_hooks.cpp
+    hooks/dispatch.cpp
 )
 
-# 角色属性面板战斗属性行标签中文化（character-info-zh-labels，末尾追加，不改上方既有行）
+# 合成器界面子层（并入 custom_recipe 单 owner）：UIMix 控件写入收口 game/access/craft +
+# 12 条入口 hook 声明；「界面归界面、结果归结果」（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    feature/ui/game_ui_charinfo_zh.cpp
-    feature/ui/module_text.cpp
-)
-
-# 合成器界面能力层（craft_ui）：UIMix 控件读写与界面动作的唯一实现处。
-# 宝石合成与自定义配方共用；「界面归界面、结果归结果」（末尾追加，不改上方既有行）
-target_sources(gamebridge PRIVATE
-    feature/craft_ui/craft_ui.cpp
+    game/access/craft.cpp
 )
 
 # 模块替换 PopupState enter 回调后的 UI 态反查表（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    core/native/popup_enter_alias.cpp
+    infra/popup_enter_alias.cpp
 )
 
-# 推怪（推动增强）全局开关：CHAR_Move 推动分支双闸门 patch（末尾追加，不改上方既有行）
+# 推怪（推动增强）全局开关：JNI 薄层（插件实现已迁 plugins/push_all，末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
-    feature/push_all/push_all.cpp
-    bridge/native/gamebridge_push_all.cpp
+)
+
+# P1 最小骨架：infra 运行时（命令队列/事件/能力/状态）+ game 时钟适配（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    infra/command_queue.cpp
+    infra/runtime.cpp
+    infra/events.cpp
+    infra/capabilities.cpp
+    infra/status.cpp
+    game/clock.cpp
+)
+
+# Adapter ports are part of the kernel and remain available in kernel-only builds;
+# host ABI tables reference them even when all business plugins are omitted.
+target_sources(gamebridge PRIVATE
+    game/adapter_ports/character_port.cpp
+    game/adapter_ports/craft_port.cpp
+    game/adapter_ports/craft_lottery_port.cpp
+    game/adapter_ports/recipe_table_port.cpp
+    game/adapter_ports/custom_map_resource_port.cpp
+    game/adapter_ports/choice_port.cpp
+    game/adapter_ports/world_action_port.cpp
+    game/adapter_ports/item_port.cpp
+    game/access/item_sell_quote.cpp
+    game/adapter_ports/quest_port.cpp
+    game/adapter_ports/save_port.cpp
+    game/adapter_ports/save_call_port.cpp
+    game/adapter_ports/world_port.cpp
+    game/adapter_ports/extension_bag_write_port.cpp
+    game/adapter_ports/move_merge_port.cpp
+    game/adapter_ports/game_host_port.cpp
+    game/adapter_ports/character_extras_port.cpp
+    game/adapter_ports/inventory_extras_port.cpp
+    game/adapter_ports/item_extras_port.cpp
+    game/adapter_ports/system_port.cpp
+    game/adapter_ports/character_http_port.cpp
+    game/adapter_ports/save_write_port.cpp
+    game/adapter_ports/world_write_port.cpp
+    game/adapter_ports/choice_write_port.cpp
+    game/adapter_ports/ui_write_port.cpp
+    game/adapter_ports/character_write_ops_port.cpp
+    game/adapter_ports/item_count_facade.cpp
+    game/adapter_ports/lifecycle_participant_facade.cpp
+    game/adapter_ports/item_dice_write_port.cpp
+    game/adapter_ports/item_money_write_port.cpp
+)
+
+# L2：插件 ABI 表的 host/game adapter（固定宽度契约转发至内部实现）。
+target_sources(gamebridge PRIVATE
+    host/host_sdk.cpp
+    host/module_health.cpp
+    host/config_namespace.cpp
+    host/config_platform_bridge.cpp
+    host/core_settings_config_store.cpp
+    host/core_settings_config_service.cpp
+    host/features/controller.cpp
+    host/features/reconciler.cpp
+    host/features/production.cpp
+    host/features/platform.cpp
+    host/features/http_control.cpp
+    host/owner_identity.cpp
+    host/save_route.cpp
+    game/access/save_file_evidence.cpp
+    game/access/save_transaction.cpp
+    game/adapter_ports/save_transaction_port.cpp
+    host/lifecycle_participants.cpp
+    host/http_endpoint_binder.cpp
+    host/http_registry.cpp
+    host/http_dispatch.cpp
+    host/game_host.cpp
+    host/item_count_facade.cpp
+    host/ui_adapter.cpp
+)
+
+# P1 最小诊断接口：功能状态 JSON（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    host/status_json.cpp
+    bridge/native/gamebridge_config_store.cpp
+    bridge/native/gamebridge_status.cpp
+    bridge/native/gamebridge_dispatch.cpp
+    bridge/native/gamebridge_static_data.cpp
+)
+
+# P1 诊断：游戏变体 JSON（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    host/variant_json.cpp
+    bridge/native/gamebridge_variant.cpp
+)
+
+# P2 纵向样板基础层：hooks 资源登记/安装引擎 + infra 配置与命令端口（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    hooks/registry.cpp
+    hooks/install.cpp
+    infra/config.cpp
+    infra/commands.cpp
+)
+
+# P2 纵向样板插件：simple_mode（入口 hook 声明 + 配置门禁 + 状态 + 命令端口）。
+# game/access 收口符号解析与角色读写；host 插件注册表声明式安装资源（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    game/access/symbols.cpp
+    game/access/char.cpp
+    host/plugin_registry.cpp
+    host/assembly.cpp
+)
+
+# P3 Lane A：资源事务引擎（运行期记录/在途计数/隔离/物理释放/帧步进事务，末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    hooks/transaction.cpp
+)
+
+# P4 阶段 A1：patch/ 机制层 + push_all 迁移（指令 patch 占用声明/原字校验/回滚，末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    game/access/patches.cpp
+    patch/claims.cpp
+    patch/instr_patch.cpp
+)
+
+# D2a-3a：extension_bag 指针槽站点解析（UIEquip 事件 proc GOT，末尾追加）
+target_sources(gamebridge PRIVATE
+    game/access/ui_equip.cpp
+)
+
+# P4 阶段 A2a：infra/scheduler 形式化 + 帧源声明式 core 资源（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    infra/scheduler.cpp
+    host/frame_source.cpp
+)
+
+# P3 Lane B：生命周期 JNI 薄层（控制端点经命令端口投递，末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+)
+
+# B2a-2/P1-B1：宿主仅保留 Hive 兼容 patch；S2 12 条与 6 条 clamp 归 stack_limit 999
+# 原子组。末尾追加，不改上方既有行
+target_sources(gamebridge PRIVATE
+    host/core_patches.cpp
+)
+
+# B4-1：infra/store MSAV 容器层（冻结核心件；零行为改动，不切换消费者）
+target_sources(gamebridge PRIVATE
+    infra/store.cpp
+    infra/slot_operation_gate.cpp
+    infra/snapshot_handle.cpp
+)
+
+# B4-2：infra/store JNI 薄层（Kotlin ModuleSaveStore 委托 native；native 成为
+# saves/ 唯一文件读写者）
+target_sources(gamebridge PRIVATE
+    bridge/native/gamebridge_store.cpp
+)
+
+# B4-5：save_backup 本体迁移为插件（零资源常驻 + 存档域原语收口 game/access/save）
+target_sources(gamebridge PRIVATE
+    game/access/save.cpp
+    game/access/shop.cpp
+    game/access/ui_state.cpp
+)
+
+# C1：world_teleport 迁移为插件（零资源常驻 + 世界/地图访问收口 game/access/world）
+target_sources(gamebridge PRIVATE
+    game/access/world.cpp
+)
+
+# B2a-3：指针槽声明式机制（kPtrSlot）+ save_backup 删档 PtrHook 迁移（末尾追加，不改上方既有行）
+target_sources(gamebridge PRIVATE
+    game/access/ptr_slots.cpp
+    patch/ptr_slot.cpp
+)
+
+# D1-a2：PopupState state 表注入机制（hooks/popup_state 原语 + game/access 条目访问收口；
+# 本 lane 只落机制，生产注入点转换在 D1-b/D1-c）
+target_sources(gamebridge PRIVATE
+    game/access/popup_state.cpp
+    hooks/popup_state.cpp
+)
+
+# D1-b1：native_choice 迁移为插件（provider `ui_choice`）+ 选择框语义收口 game/access/ui_choice
+target_sources(gamebridge PRIVATE
+    game/access/ui_choice.cpp
+)
+
+# D1-b0：面板注册表（纯数据面，零 game 依赖）+ PopupState 按名定位入口
+target_sources(gamebridge PRIVATE
+    infra/panels.cpp
 )

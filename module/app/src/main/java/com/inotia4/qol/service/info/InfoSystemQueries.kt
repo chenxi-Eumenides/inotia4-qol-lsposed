@@ -5,24 +5,22 @@ import com.inotia4.qol.util.JsonUtil
 
 /** Thin system/debug query endpoints kept out of the aggregate information service. */
 internal object InfoSystemQueries {
+    // system 快照查询已迁 owner（core.system）：Kotlin 只做 nativeHttpDispatch 透传，
+    // 成功响应（含快照重排/名称注入/info 拼装）完全由 native owner 生成。
+    fun snapshot(): String = NativeHttpQuery.get("/api/system/snapshot")
+    fun game(): String = NativeHttpQuery.get("/api/system/game")
+    fun gameInfo(): String = NativeHttpQuery.get("/api/system/info")
+    fun gameFrame(): String = NativeHttpQuery.get("/api/system/game_frame")
+    fun uiState(): String = NativeHttpQuery.get("/api/ui/state")
+    fun uiStateTable(): String = NativeHttpQuery.get("/api/ui/state/table")
+
     fun debugUi(): String = NativeBridge.nativeGetDebugUiJson()
     fun debugPath(tx: Int, ty: Int): String = NativeBridge.nativeDebugPathJson(tx, ty)
     fun debugItemRaw(bag: Int, slot: Int): String = NativeBridge.nativeDebugItemRawJson(bag, slot)
-    fun exp1BtnBehavior(): String = NativeBridge.nativeExp1BtnBehavior()
-    fun exp2AddControl(): String = NativeBridge.nativeExp2AddControl()
-    fun exp3CustomDialog(text: String): String = NativeBridge.nativeExp3CustomDialog(text)
-    fun exp4TextAppearance(): String = NativeBridge.nativeExp4TextAppearance()
-    fun exp5NewPanel(): String = NativeBridge.nativeExp5NewPanel()
-    fun expRestoreAll(): String = NativeBridge.nativeExpRestoreAll()
-    fun expStatus(): String = NativeBridge.nativeExpStatus()
-    fun settingsUiInject(): String = NativeBridge.nativeSettingsUiInject()
     fun settingsUiStatus(): String = NativeBridge.nativeSettingsUiStatus()
-    fun settingsUiRestore(): String = NativeBridge.nativeSettingsUiRestore()
-    fun settingsUiOpenOption(): String = NativeBridge.nativeSettingsUiOpenOption()
-    fun settingsUiOpenPanel(): String = NativeBridge.nativeSettingsUiOpenPanel()
-    fun extensionBagStatusJson(): String = NativeBridge.nativeExtensionBagStatusJson()
-    fun extensionBagTestEquip(index: Int, bagType: Int): String = NativeBridge.nativeExtensionBagTestEquip(index, bagType)
-    fun extensionBagTestItem(index: Int, slot: Int, category: Int, count: Int): String =
-        NativeBridge.nativeExtensionBagTestItem(index, slot, category, count)
-    fun health(): String = JsonUtil.wrap("ok" to true)
+    fun health(): String = JsonUtil.wrap(
+        "ok" to true,
+        "ready" to NativeBridge.ready,
+        "variant" to JsonUtil.parseObj(NativeBridge.nativeGetVariantJson())
+    )
 }

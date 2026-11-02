@@ -1,0 +1,1202 @@
+--------- beginning of main
+10-18 14:46:40.073 31068 31186 I Inotia4Qol: 2026-10-18 14:46:40.073 f=1637 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:40.070   952   952 W Binder:952_4: type=1400 audit(0.0:57422468): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:40.090 31910 31910 D ProcessState: Binder ioctl to enable oneway spam detection failed: Invalid argument
+10-18 14:46:40.086   952   952 W Binder:952_4: type=1400 audit(0.0:57422469): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:su:s0 tclass=process permissive=0
+10-18 14:46:40.099 31910 31911 D hw-ProcessState: Binder ioctl to enable oneway spam detection failed: Invalid argument
+10-18 14:46:40.126 31068 31186 I Inotia4Qol: 2026-10-18 14:46:40.126 f=1638 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:40.129 31910 31911 E ion     : ioctl c0044901 failed with code -1: Invalid argument
+10-18 14:46:40.183 31068 31186 I Inotia4Qol: 2026-10-18 14:46:40.183 f=1639 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:40.236 31068 31186 I Inotia4Qol: 2026-10-18 14:46:40.236 f=1640 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:40.288 31068 31186 I Inotia4Qol: 2026-10-18 14:46:40.287 f=1641 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:40.333 31910 31910 E IMGSRV  : :2631: GrallocUnregisterBuffer: Cannot free a locked buffer (ID=108967882)
+10-18 14:46:40.333 31910 31910 E IMGMapper: freeBuffer:64 Failed to unregister native handle
+10-18 14:46:40.333 31910 31910 E Gralloc4: freeBuffer(0xb400007798267770) failed with 2
+10-18 14:46:40.351 31068 31186 I Inotia4Qol: 2026-10-18 14:46:40.351 f=1642 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:40.409 31068 31186 I Inotia4Qol: 2026-10-18 14:46:40.409 f=1643 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:40.462 31068 31186 I Inotia4Qol: 2026-10-18 14:46:40.462 f=1644 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:40.520 31068 31186 I Inotia4Qol: 2026-10-18 14:46:40.520 f=1645 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:40.572 31068 31186 I Inotia4Qol: 2026-10-18 14:46:40.571 f=1646 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:40.623 31068 31186 I Inotia4Qol: 2026-10-18 14:46:40.623 f=1647 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:40.679 31068 31186 I Inotia4Qol: 2026-10-18 14:46:40.679 f=1648 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:40.738 31068 31186 I Inotia4Qol: 2026-10-18 14:46:40.738 f=1649 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:40.796 31068 31186 I Inotia4Qol: 2026-10-18 14:46:40.796 f=1650 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:40.807   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:16.972288,dur:1060.55,max:138.68,min:43.59  
+10-18 14:46:40.848 31068 31186 I Inotia4Qol: 2026-10-18 14:46:40.848 f=1651 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:40.928 19982 19982 I WifiHAL : Get link layer stats
+10-18 14:46:40.928 19982 19982 I WifiHAL : GetLinkStatsCommand::create
+10-18 14:46:40.928 19982 19982 D android.hardware.wifi@1.0-service-lazy: WifiRequest::create vendor command to iface 31, vendor_id=0x1a11, subcmd=0x1200, res=0
+10-18 14:46:40.928 19982 19982 I android.hardware.wifi@1.0-service-lazy: WifiCommand::requestResponse err=-14
+10-18 14:46:40.928 19982 19982 I WifiHAL : wifi_get_link_stats: result=-1
+10-18 14:46:40.929 19814 19926 E WifiVendorHal: getWifiLinkLayerStats_1_5_Internal(l.1191) failed {.code = ERROR_UNKNOWN, .description = unknown}
+10-18 14:46:40.846   952   952 W Binder:952_4: type=1400 audit(0.0:57422484): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:40.970 19814 19814 W Binder:19814_B: type=1400 audit(0.0:57422485): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:gmscore_app:s0:c512,c768 tclass=process permissive=0
+10-18 14:46:40.974 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57422486): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:gmscore_app:s0:c512,c768 tclass=process permissive=0
+10-18 14:46:40.982   952   952 W Binder:952_4: type=1400 audit(0.0:57422487): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:41.042   952   952 W Binder:952_4: type=1400 audit(0.0:57422488): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:41.894   952   952 W Binder:952_4: type=1400 audit(0.0:57422506): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:41.954   952   952 W Binder:952_4: type=1400 audit(0.0:57422507): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:42.014   952   952 W Binder:952_4: type=1400 audit(0.0:57422508): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:42.074   952   952 W Binder:952_4: type=1400 audit(0.0:57422509): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:42.130   952   952 W Binder:952_4: type=1400 audit(0.0:57422510): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:42.930   952   952 W Binder:952_4: type=1400 audit(0.0:57422533): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:42.982   952   952 W Binder:952_4: type=1400 audit(0.0:57422534): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:43.034   952   952 W Binder:952_4: type=1400 audit(0.0:57422535): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:43.090   952   952 W Binder:952_4: type=1400 audit(0.0:57422536): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:43.142   952   952 W Binder:952_4: type=1400 audit(0.0:57422537): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:40.942 19814 19926 D WifiDataStall: tx tput in kbps: 159000
+10-18 14:46:40.942 19814 19926 D WifiDataStall: rx tput in kbps: 159000
+10-18 14:46:40.942 19814 19926 V WifiConfigManager: Updating scan detail cache freq=5240 BSSID=e4:4e:12:af:53:7a RSSI=-64 for "chy&zqs_5G"WPA_PSK
+10-18 14:46:40.943 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:46:40.943 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:46:40.943 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -64 Nss: 1 Mode: 5 symDur: 3600 snrDb 10 bitPerTone: 3330 rate: 216 throughput: 167
+10-18 14:46:40.943 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:46:40.943 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:46:40.943 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -64 Nss: 1 Mode: 5 symDur: 3600 snrDb 10 bitPerTone: 3330 rate: 216 throughput: 167
+10-18 14:46:40.944 19814 19926 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1832793812 SSID: "chy&zqs_5G", BSSID: e4:4e:12:af:53:7a, MAC: 9a:90:18:9e:98:88, Security type: 4, Supplicant state: COMPLETED, Wi-Fi standard: 5, RSSI: -64, Link speed: 390Mbps, Tx Link speed: 390Mbps, Max Supported Tx Link speed: 433Mbps, Rx Link speed: 292Mbps, Max Supported Rx Link speed: 433Mbps, Frequency: 5240MHz, Net ID: 3, Metered hint: false, score: 60, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1
+10-18 14:46:40.944 19814 19926 D WifiScoreCard: txRate: 34 txSpeed: 390
+10-18 14:46:40.944 19814 19926 D WifiScoreCard: network update SIGNAL_POLL "chy&zqs_5G" ID: 74066996 RSSI -64 txSpeed 390
+10-18 14:46:40.947 19814 19926 D WifiClientModeImpl[wlan0]:  L2ConnectedState screen=on 4 0 "chy&zqs_5G" e4:4e:12:af:53:7a rssi=-64 f=5240 sc=60 link=390 tx=33.9, 0.0, 0.0  rx=16.7 bcn=0 [on:0 tx:0 rx:0 period:3019] from screen [on:0 period:162407368] score=60
+10-18 14:46:40.983 31068 31186 I Inotia4Qol: 2026-10-18 14:46:40.983 f=1652 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:41.043 31068 31186 I Inotia4Qol: 2026-10-18 14:46:41.043 f=1653 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:41.105 31068 31186 I Inotia4Qol: 2026-10-18 14:46:41.105 f=1654 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:41.168 31068 31186 I Inotia4Qol: 2026-10-18 14:46:41.168 f=1655 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:41.225 31068 31186 I Inotia4Qol: 2026-10-18 14:46:41.225 f=1656 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:41.277 31068 31186 I Inotia4Qol: 2026-10-18 14:46:41.277 f=1657 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:41.327 31068 31186 I Inotia4Qol: 2026-10-18 14:46:41.327 f=1658 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:41.377 31068 31186 I Inotia4Qol: 2026-10-18 14:46:41.377 f=1659 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:41.430 31068 31186 I Inotia4Qol: 2026-10-18 14:46:41.430 f=1660 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:41.483 31068 31186 I Inotia4Qol: 2026-10-18 14:46:41.483 f=1661 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:41.543 31068 31186 I Inotia4Qol: 2026-10-18 14:46:41.543 f=1662 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:41.603 31068 31186 I Inotia4Qol: 2026-10-18 14:46:41.603 f=1663 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:41.654 31068 31186 I Inotia4Qol: 2026-10-18 14:46:41.654 f=1664 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:41.706 31068 31186 I Inotia4Qol: 2026-10-18 14:46:41.706 f=1665 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:41.760 31068 31186 I Inotia4Qol: 2026-10-18 14:46:41.760 f=1666 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:41.894 31068 31186 I Inotia4Qol: 2026-10-18 14:46:41.894 f=1667 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:41.911   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:15.402131,dur:1103.74,max:145.30,min:47.54  
+10-18 14:46:41.953 31068 31186 I Inotia4Qol: 2026-10-18 14:46:41.953 f=1668 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:42.014 31068 31186 I Inotia4Qol: 2026-10-18 14:46:42.014 f=1669 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:42.074 31068 31186 I Inotia4Qol: 2026-10-18 14:46:42.074 f=1670 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:42.132 31068 31186 I Inotia4Qol: 2026-10-18 14:46:42.132 f=1671 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:42.182 31068 31186 I Inotia4Qol: 2026-10-18 14:46:42.182 f=1672 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:42.237 31068 31186 I Inotia4Qol: 2026-10-18 14:46:42.237 f=1673 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:42.294 31068 31186 I Inotia4Qol: 2026-10-18 14:46:42.294 f=1674 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:42.348 31068 31186 I Inotia4Qol: 2026-10-18 14:46:42.348 f=1675 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:42.402 31068 31186 I Inotia4Qol: 2026-10-18 14:46:42.402 f=1676 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:42.463 31068 31186 I Inotia4Qol: 2026-10-18 14:46:42.463 f=1677 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:42.521 31068 31186 I Inotia4Qol: 2026-10-18 14:46:42.521 f=1678 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:42.572 31068 31186 I Inotia4Qol: 2026-10-18 14:46:42.572 f=1679 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:42.626 31068 31186 I Inotia4Qol: 2026-10-18 14:46:42.626 f=1680 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:42.685 31068 31186 I Inotia4Qol: 2026-10-18 14:46:42.685 f=1681 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:42.816 31068 31186 I Inotia4Qol: 2026-10-18 14:46:42.816 f=1682 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:42.871 31068 31186 I Inotia4Qol: 2026-10-18 14:46:42.871 f=1683 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:42.931 31068 31186 I Inotia4Qol: 2026-10-18 14:46:42.931 f=1684 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:42.942   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:16.498201,dur:1030.42,max:127.34,min:47.36  
+10-18 14:46:42.983 31068 31186 I Inotia4Qol: 2026-10-18 14:46:42.983 f=1685 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:43.035 31068 31186 I Inotia4Qol: 2026-10-18 14:46:43.035 f=1686 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:43.093 31068 31186 I Inotia4Qol: 2026-10-18 14:46:43.093 f=1687 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:43.145 31068 31186 I Inotia4Qol: 2026-10-18 14:46:43.145 f=1688 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:43.198 31068 31186 I Inotia4Qol: 2026-10-18 14:46:43.198 f=1689 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:43.262 31068 31186 I Inotia4Qol: 2026-10-18 14:46:43.262 f=1690 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:43.320 31068 31186 I Inotia4Qol: 2026-10-18 14:46:43.320 f=1691 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:43.372 31068 31186 I Inotia4Qol: 2026-10-18 14:46:43.372 f=1692 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:43.430 31068 31186 I Inotia4Qol: 2026-10-18 14:46:43.430 f=1693 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:43.485 31068 31186 I Inotia4Qol: 2026-10-18 14:46:43.485 f=1694 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:43.546 31068 31186 I Inotia4Qol: 2026-10-18 14:46:43.546 f=1695 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:43.608 31068 31186 I Inotia4Qol: 2026-10-18 14:46:43.608 f=1696 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:43.748 31068 31186 I Inotia4Qol: 2026-10-18 14:46:43.748 f=1697 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:43.808 31068 31186 I Inotia4Qol: 2026-10-18 14:46:43.808 f=1698 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:43.866 31068 31186 I Inotia4Qol: 2026-10-18 14:46:43.866 f=1699 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:43.922 31068 31186 I Inotia4Qol: 2026-10-18 14:46:43.922 f=1700 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:43.948 19982 19982 I WifiHAL : Get link layer stats
+10-18 14:46:43.948 19982 19982 I WifiHAL : GetLinkStatsCommand::create
+10-18 14:46:43.948 19982 19982 D android.hardware.wifi@1.0-service-lazy: WifiRequest::create vendor command to iface 31, vendor_id=0x1a11, subcmd=0x1200, res=0
+10-18 14:46:43.948 19982 19982 I android.hardware.wifi@1.0-service-lazy: WifiCommand::requestResponse err=-14
+10-18 14:46:43.948 19982 19982 I WifiHAL : wifi_get_link_stats: result=-1
+10-18 14:46:43.949 19814 19926 E WifiVendorHal: getWifiLinkLayerStats_1_5_Internal(l.1191) failed {.code = ERROR_UNKNOWN, .description = unknown}
+10-18 14:46:43.961 19814 19926 D WifiClientModeImpl[wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-65 TxLinkspeed=390 freq=5240 RxLinkSpeed=292
+10-18 14:46:43.962 19814 19926 D WifiDataStall: tx tput in kbps: 167000
+10-18 14:46:43.962 19814 19926 D WifiDataStall: rx tput in kbps: 167000
+10-18 14:46:43.962 19814 19926 V WifiConfigManager: Updating scan detail cache freq=5240 BSSID=e4:4e:12:af:53:7a RSSI=-64 for "chy&zqs_5G"WPA_PSK
+10-18 14:46:43.962 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:46:43.962 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:46:43.962 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -65 Nss: 1 Mode: 5 symDur: 3600 snrDb 9 bitPerTone: 3161 rate: 205 throughput: 159
+10-18 14:46:43.962 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:46:43.962 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:46:43.962 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -65 Nss: 1 Mode: 5 symDur: 3600 snrDb 9 bitPerTone: 3161 rate: 205 throughput: 159
+10-18 14:46:43.964 19814 19926 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1832793812 SSID: "chy&zqs_5G", BSSID: e4:4e:12:af:53:7a, MAC: 9a:90:18:9e:98:88, Security type: 4, Supplicant state: COMPLETED, Wi-Fi standard: 5, RSSI: -65, Link speed: 390Mbps, Tx Link speed: 390Mbps, Max Supported Tx Link speed: 433Mbps, Rx Link speed: 292Mbps, Max Supported Rx Link speed: 433Mbps, Frequency: 5240MHz, Net ID: 3, Metered hint: false, score: 60, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1
+10-18 14:46:43.964 19814 19926 D WifiScoreCard: txRate: 15 txSpeed: 390
+10-18 14:46:43.964 19814 19926 D WifiScoreCard: network update SIGNAL_POLL "chy&zqs_5G" ID: 74066996 RSSI -65 txSpeed 390
+10-18 14:46:43.966 19814 19926 D WifiClientModeImpl[wlan0]:  L2ConnectedState screen=on 4 0 "chy&zqs_5G" e4:4e:12:af:53:7a rssi=-65 f=5240 sc=60 link=390 tx=14.3, 0.0, 0.0  rx=7.2 bcn=0 [on:0 tx:0 rx:0 period:3018] from screen [on:0 period:162410387] score=60
+10-18 14:46:43.984 31068 31186 I Inotia4Qol: 2026-10-18 14:46:43.984 f=1701 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:43.982   952   952 W Binder:952_4: type=1400 audit(0.0:57422554): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:44.003   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:16.018661,dur:1061.26,max:143.56,min:47.73  
+10-18 14:46:44.043 31068 31186 I Inotia4Qol: 2026-10-18 14:46:44.043 f=1702 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:44.042   952   952 W Binder:952_4: type=1400 audit(0.0:57422555): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:44.095 31068 31186 I Inotia4Qol: 2026-10-18 14:46:44.095 f=1703 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:44.094   952   952 W Binder:952_4: type=1400 audit(0.0:57422556): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:44.148 31068 31186 I Inotia4Qol: 2026-10-18 14:46:44.148 f=1704 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:44.146   952   952 W Binder:952_4: type=1400 audit(0.0:57422557): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:44.205 31068 31186 I Inotia4Qol: 2026-10-18 14:46:44.205 f=1705 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:44.202   952   952 W Binder:952_4: type=1400 audit(0.0:57422558): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:44.254 31068 31186 I Inotia4Qol: 2026-10-18 14:46:44.254 f=1706 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:44.306 31068 31186 I Inotia4Qol: 2026-10-18 14:46:44.306 f=1707 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:44.360 31068 31186 I Inotia4Qol: 2026-10-18 14:46:44.360 f=1708 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:44.412 31068 31186 I Inotia4Qol: 2026-10-18 14:46:44.412 f=1709 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:44.468 31068 31186 I Inotia4Qol: 2026-10-18 14:46:44.468 f=1710 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:44.521 31068 31186 I Inotia4Qol: 2026-10-18 14:46:44.521 f=1711 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:44.647 31068 31186 I Inotia4Qol: 2026-10-18 14:46:44.647 f=1712 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:44.704 31068 31186 I Inotia4Qol: 2026-10-18 14:46:44.704 f=1713 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:44.754 31068 31186 I Inotia4Qol: 2026-10-18 14:46:44.754 f=1714 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:44.807 31068 31186 I Inotia4Qol: 2026-10-18 14:46:44.807 f=1715 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:44.856 31068 31186 I Inotia4Qol: 2026-10-18 14:46:44.856 f=1716 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:44.905 31068 31186 I Inotia4Qol: 2026-10-18 14:46:44.905 f=1717 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:44.956 31068 31186 I Inotia4Qol: 2026-10-18 14:46:44.956 f=1718 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:45.008 31068 31186 I Inotia4Qol: 2026-10-18 14:46:45.008 f=1719 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:45.006   952   952 W Binder:952_4: type=1400 audit(0.0:57422572): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:45.026   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:17.597626,dur:1022.87,max:132.55,min:35.50  
+10-18 14:46:45.059 31068 31186 I Inotia4Qol: 2026-10-18 14:46:45.059 f=1720 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:45.058   952   952 W Binder:952_4: type=1400 audit(0.0:57422573): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:45.108 31068 31186 I Inotia4Qol: 2026-10-18 14:46:45.108 f=1721 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:45.106   952   952 W Binder:952_4: type=1400 audit(0.0:57422574): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:45.159 31068 31186 I Inotia4Qol: 2026-10-18 14:46:45.159 f=1722 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:45.158   952   952 W Binder:952_4: type=1400 audit(0.0:57422575): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:45.212 31068 31186 I Inotia4Qol: 2026-10-18 14:46:45.212 f=1723 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:45.210   952   952 W Binder:952_4: type=1400 audit(0.0:57422576): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:45.262 31068 31186 I Inotia4Qol: 2026-10-18 14:46:45.262 f=1724 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:45.312 31068 31186 I Inotia4Qol: 2026-10-18 14:46:45.312 f=1725 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:45.363 31068 31186 I Inotia4Qol: 2026-10-18 14:46:45.363 f=1726 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:45.491 31068 31186 I Inotia4Qol: 2026-10-18 14:46:45.491 f=1727 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:45.550 31068 31186 I Inotia4Qol: 2026-10-18 14:46:45.550 f=1728 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:45.608 31068 31186 I Inotia4Qol: 2026-10-18 14:46:45.608 f=1729 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:45.663 31068 31186 I Inotia4Qol: 2026-10-18 14:46:45.663 f=1730 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:45.719 31068 31186 I Inotia4Qol: 2026-10-18 14:46:45.719 f=1731 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:45.769 31068 31186 I Inotia4Qol: 2026-10-18 14:46:45.769 f=1732 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:45.820 31068 31186 I Inotia4Qol: 2026-10-18 14:46:45.820 f=1733 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:45.872 31068 31186 I Inotia4Qol: 2026-10-18 14:46:45.872 f=1734 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:45.922 31068 31186 I Inotia4Qol: 2026-10-18 14:46:45.922 f=1735 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:45.973 31068 31186 I Inotia4Qol: 2026-10-18 14:46:45.973 f=1736 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:45.995   934   994 I libPowerHal: perfUserScnCheckAll
+10-18 14:46:45.995   934   994 I libPowerHal: perfScnDumpAll cmd:0
+10-18 14:46:45.995   934   994 I libPowerHal: ========================
+10-18 14:46:45.995   934   994 I libPowerHal: ========================
+10-18 14:46:46.023 31068 31186 I Inotia4Qol: 2026-10-18 14:46:46.023 f=1737 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:46.022   952   952 W Binder:952_4: type=1400 audit(0.0:57422594): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:46.043   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:17.700674,dur:1016.91,max:132.06,min:42.33  
+10-18 14:46:46.075 31068 31186 I Inotia4Qol: 2026-10-18 14:46:46.074 f=1738 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:46.074   952   952 W Binder:952_4: type=1400 audit(0.0:57422595): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:46.128 31068 31186 I Inotia4Qol: 2026-10-18 14:46:46.128 f=1739 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:46.126   952   952 W Binder:952_4: type=1400 audit(0.0:57422596): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:46.179 31068 31186 I Inotia4Qol: 2026-10-18 14:46:46.179 f=1740 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:46.178   952   952 W Binder:952_4: type=1400 audit(0.0:57422597): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:46.228 31068 31186 I Inotia4Qol: 2026-10-18 14:46:46.228 f=1741 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:46.226   952   952 W Binder:952_4: type=1400 audit(0.0:57422598): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:46.355 31068 31186 I Inotia4Qol: 2026-10-18 14:46:46.354 f=1742 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:46.414 31068 31186 I Inotia4Qol: 2026-10-18 14:46:46.414 f=1743 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:46.472 31068 31186 I Inotia4Qol: 2026-10-18 14:46:46.472 f=1744 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:46.528 31068 31186 I Inotia4Qol: 2026-10-18 14:46:46.528 f=1745 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:46.585 31068 31186 I Inotia4Qol: 2026-10-18 14:46:46.585 f=1746 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:46.636 31068 31186 I Inotia4Qol: 2026-10-18 14:46:46.636 f=1747 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:46.683 31068 31186 I Inotia4Qol: 2026-10-18 14:46:46.683 f=1748 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:46.737 31068 31186 I Inotia4Qol: 2026-10-18 14:46:46.737 f=1749 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:46.786 31068 31186 I Inotia4Qol: 2026-10-18 14:46:46.786 f=1750 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:46.838 31068 31186 I Inotia4Qol: 2026-10-18 14:46:46.837 f=1751 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:46.896 31068 31186 I Inotia4Qol: 2026-10-18 14:46:46.896 f=1752 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:46.951 31068 31186 I Inotia4Qol: 2026-10-18 14:46:46.951 f=1753 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:46.965 19982 19982 I WifiHAL : Get link layer stats
+10-18 14:46:46.965 19982 19982 I WifiHAL : GetLinkStatsCommand::create
+10-18 14:46:46.965 19982 19982 D android.hardware.wifi@1.0-service-lazy: WifiRequest::create vendor command to iface 31, vendor_id=0x1a11, subcmd=0x1200, res=0
+10-18 14:46:46.965 19982 19982 I android.hardware.wifi@1.0-service-lazy: WifiCommand::requestResponse err=-14
+10-18 14:46:46.965 19982 19982 I WifiHAL : wifi_get_link_stats: result=-1
+10-18 14:46:46.966 19814 19926 E WifiVendorHal: getWifiLinkLayerStats_1_5_Internal(l.1191) failed {.code = ERROR_UNKNOWN, .description = unknown}
+10-18 14:46:46.978 19814 19926 D WifiClientModeImpl[wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-65 TxLinkspeed=390 freq=5240 RxLinkSpeed=292
+10-18 14:46:46.979 19814 19926 D WifiDataStall: tx tput in kbps: 159000
+10-18 14:46:46.979 19814 19926 D WifiDataStall: rx tput in kbps: 159000
+10-18 14:46:46.979 19814 19926 V WifiConfigManager: Updating scan detail cache freq=5240 BSSID=e4:4e:12:af:53:7a RSSI=-64 for "chy&zqs_5G"WPA_PSK
+10-18 14:46:46.979 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:46:46.979 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:46:46.979 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -65 Nss: 1 Mode: 5 symDur: 3600 snrDb 9 bitPerTone: 3161 rate: 205 throughput: 159
+10-18 14:46:46.979 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:46:46.979 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:46:46.979 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -65 Nss: 1 Mode: 5 symDur: 3600 snrDb 9 bitPerTone: 3161 rate: 205 throughput: 159
+10-18 14:46:46.981 19814 19926 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1832793812 SSID: "chy&zqs_5G", BSSID: e4:4e:12:af:53:7a, MAC: 9a:90:18:9e:98:88, Security type: 4, Supplicant state: COMPLETED, Wi-Fi standard: 5, RSSI: -65, Link speed: 390Mbps, Tx Link speed: 390Mbps, Max Supported Tx Link speed: 433Mbps, Rx Link speed: 292Mbps, Max Supported Rx Link speed: 433Mbps, Frequency: 5240MHz, Net ID: 3, Metered hint: false, score: 60, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1
+10-18 14:46:46.981 19814 19926 D WifiScoreCard: txRate: 28 txSpeed: 390
+10-18 14:46:46.981 19814 19926 D WifiScoreCard: network update SIGNAL_POLL "chy&zqs_5G" ID: 74066996 RSSI -65 txSpeed 390
+10-18 14:46:46.983 19814 19926 D WifiClientModeImpl[wlan0]:  L2ConnectedState screen=on 4 0 "chy&zqs_5G" e4:4e:12:af:53:7a rssi=-65 f=5240 sc=60 link=390 tx=27.7, 0.0, 0.0  rx=11.2 bcn=0 [on:0 tx:0 rx:0 period:3016] from screen [on:0 period:162413403] score=60
+10-18 14:46:46.993  1182  1182 I thermal_repeater: [recvMdThermalInfo] ret=5, strLen=127, ERROR
+10-18 14:46:47.002 31068 31186 I Inotia4Qol: 2026-10-18 14:46:47.002 f=1754 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:47.050 31068 31186 I Inotia4Qol: 2026-10-18 14:46:47.050 f=1755 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:47.050   952   952 W Binder:952_4: type=1400 audit(0.0:57422612): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:47.059   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:17.707323,dur:1016.53,max:116.30,min:42.67  
+10-18 14:46:47.101 31068 31186 I Inotia4Qol: 2026-10-18 14:46:47.101 f=1756 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:47.098   952   952 W Binder:952_4: type=1400 audit(0.0:57422613): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:47.229 31068 31186 I Inotia4Qol: 2026-10-18 14:46:47.229 f=1757 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:47.226   952   952 W Binder:952_4: type=1400 audit(0.0:57422614): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:47.287 31068 31186 I Inotia4Qol: 2026-10-18 14:46:47.287 f=1758 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:47.286   952   952 W Binder:952_4: type=1400 audit(0.0:57422615): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:47.340 31068 31186 I Inotia4Qol: 2026-10-18 14:46:47.340 f=1759 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:47.338   952   952 W Binder:952_4: type=1400 audit(0.0:57422616): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:47.400 31068 31186 I Inotia4Qol: 2026-10-18 14:46:47.400 f=1760 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:47.452 31068 31186 I Inotia4Qol: 2026-10-18 14:46:47.452 f=1761 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:47.509 31068 31186 I Inotia4Qol: 2026-10-18 14:46:47.509 f=1762 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:47.558 31068 31186 I Inotia4Qol: 2026-10-18 14:46:47.558 f=1763 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:47.611 31068 31186 I Inotia4Qol: 2026-10-18 14:46:47.611 f=1764 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:47.662 31068 31186 I Inotia4Qol: 2026-10-18 14:46:47.662 f=1765 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:47.714 31068 31186 I Inotia4Qol: 2026-10-18 14:46:47.714 f=1766 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:47.765 31068 31186 I Inotia4Qol: 2026-10-18 14:46:47.765 f=1767 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:47.816 31068 31186 I Inotia4Qol: 2026-10-18 14:46:47.816 f=1768 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:47.865 31068 31186 I Inotia4Qol: 2026-10-18 14:46:47.865 f=1769 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:47.916 31068 31186 I Inotia4Qol: 2026-10-18 14:46:47.916 f=1770 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:47.968 31068 31186 I Inotia4Qol: 2026-10-18 14:46:47.968 f=1771 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:48.095 31068 31186 I Inotia4Qol: 2026-10-18 14:46:48.095 f=1772 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:48.094   952   952 W Binder:952_4: type=1400 audit(0.0:57422633): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:48.111   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:16.156137,dur:1052.23,max:129.25,min:45.91  
+10-18 14:46:48.153 31068 31186 I Inotia4Qol: 2026-10-18 14:46:48.153 f=1773 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:48.154   952   952 W Binder:952_4: type=1400 audit(0.0:57422634): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:48.212 31068 31186 I Inotia4Qol: 2026-10-18 14:46:48.212 f=1774 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:48.210   952   952 W Binder:952_4: type=1400 audit(0.0:57422635): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:48.267 31068 31186 I Inotia4Qol: 2026-10-18 14:46:48.267 f=1775 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:48.266   952   952 W Binder:952_4: type=1400 audit(0.0:57422636): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:48.324 31068 31186 I Inotia4Qol: 2026-10-18 14:46:48.324 f=1776 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:48.322   952   952 W Binder:952_4: type=1400 audit(0.0:57422637): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:48.373 31068 31186 I Inotia4Qol: 2026-10-18 14:46:48.373 f=1777 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:48.424 31068 31186 I Inotia4Qol: 2026-10-18 14:46:48.424 f=1778 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:48.474 31068 31186 I Inotia4Qol: 2026-10-18 14:46:48.474 f=1779 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:48.524 31068 31186 I Inotia4Qol: 2026-10-18 14:46:48.524 f=1780 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:48.576 31068 31186 I Inotia4Qol: 2026-10-18 14:46:48.576 f=1781 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:48.626 31068 31186 I Inotia4Qol: 2026-10-18 14:46:48.626 f=1782 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:48.677 31068 31186 I Inotia4Qol: 2026-10-18 14:46:48.677 f=1783 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:48.728 31068 31186 I Inotia4Qol: 2026-10-18 14:46:48.727 f=1784 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:48.780 31068 31186 I Inotia4Qol: 2026-10-18 14:46:48.780 f=1785 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:48.829 31068 31186 I Inotia4Qol: 2026-10-18 14:46:48.829 f=1786 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:48.957 31068 31186 I Inotia4Qol: 2026-10-18 14:46:48.957 f=1787 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:49.017 31068 31186 I Inotia4Qol: 2026-10-18 14:46:49.017 f=1788 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:49.076 31068 31186 I Inotia4Qol: 2026-10-18 14:46:49.075 f=1789 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:49.130 31068 31186 I Inotia4Qol: 2026-10-18 14:46:49.129 f=1790 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:49.130   952   952 W Binder:952_4: type=1400 audit(0.0:57422651): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:49.144   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:17.428610,dur:1032.78,max:127.63,min:44.41  
+10-18 14:46:49.186 31068 31186 I Inotia4Qol: 2026-10-18 14:46:49.186 f=1791 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:49.186   952   952 W Binder:952_4: type=1400 audit(0.0:57422652): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:49.237 31068 31186 I Inotia4Qol: 2026-10-18 14:46:49.237 f=1792 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:49.234   952   952 W Binder:952_4: type=1400 audit(0.0:57422653): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:49.288 31068 31186 I Inotia4Qol: 2026-10-18 14:46:49.288 f=1793 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:49.286   952   952 W Binder:952_4: type=1400 audit(0.0:57422654): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:49.338 31068 31186 I Inotia4Qol: 2026-10-18 14:46:49.338 f=1794 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:49.338   952   952 W Binder:952_4: type=1400 audit(0.0:57422655): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:49.388 31068 31186 I Inotia4Qol: 2026-10-18 14:46:49.388 f=1795 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:49.438 31068 31186 I Inotia4Qol: 2026-10-18 14:46:49.438 f=1796 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:49.473   932   932 I android.hardware.lights-service.mediatek: Lights id 3 return -6.
+--------- beginning of system
+10-18 14:46:49.474 19814 19814 W ActivityManager: Receiver with filter android.content.IntentFilter@d411f2c already registered for pid 19814, callerPackage is android
+10-18 14:46:49.491 31068 31186 I Inotia4Qol: 2026-10-18 14:46:49.491 f=1797 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:49.505 29170 29178 W om.getsurfboar: Reducing the number of considered missed Gc histogram windows from 167 to 100
+10-18 14:46:49.545 31068 31186 I Inotia4Qol: 2026-10-18 14:46:49.545 f=1798 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:49.602 31068 31186 I Inotia4Qol: 2026-10-18 14:46:49.602 f=1799 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:49.654 31068 31186 I Inotia4Qol: 2026-10-18 14:46:49.654 f=1800 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:49.702 31068 31186 I Inotia4Qol: 2026-10-18 14:46:49.702 f=1801 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:49.832 31068 31186 I Inotia4Qol: 2026-10-18 14:46:49.832 f=1802 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:49.890 31068 31186 I Inotia4Qol: 2026-10-18 14:46:49.890 f=1803 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:49.940 31068 31186 I Inotia4Qol: 2026-10-18 14:46:49.940 f=1804 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:49.984 19982 19982 I WifiHAL : Get link layer stats
+10-18 14:46:49.984 19982 19982 I WifiHAL : GetLinkStatsCommand::create
+10-18 14:46:49.984 19982 19982 D android.hardware.wifi@1.0-service-lazy: WifiRequest::create vendor command to iface 31, vendor_id=0x1a11, subcmd=0x1200, res=0
+10-18 14:46:49.984 19982 19982 I android.hardware.wifi@1.0-service-lazy: WifiCommand::requestResponse err=-14
+10-18 14:46:49.984 19982 19982 I WifiHAL : wifi_get_link_stats: result=-1
+10-18 14:46:49.985 19814 19926 E WifiVendorHal: getWifiLinkLayerStats_1_5_Internal(l.1191) failed {.code = ERROR_UNKNOWN, .description = unknown}
+10-18 14:46:49.991 19814 19926 D WifiClientModeImpl[wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-65 TxLinkspeed=390 freq=5240 RxLinkSpeed=292
+10-18 14:46:49.992 31068 31186 I Inotia4Qol: 2026-10-18 14:46:49.992 f=1805 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:49.992 19814 19926 D WifiDataStall: tx tput in kbps: 159000
+10-18 14:46:49.992 19814 19926 D WifiDataStall: rx tput in kbps: 159000
+10-18 14:46:49.992 19814 19926 V WifiConfigManager: Updating scan detail cache freq=5240 BSSID=e4:4e:12:af:53:7a RSSI=-64 for "chy&zqs_5G"WPA_PSK
+10-18 14:46:49.993 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:46:49.993 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:46:49.993 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -65 Nss: 1 Mode: 5 symDur: 3600 snrDb 9 bitPerTone: 3161 rate: 205 throughput: 159
+10-18 14:46:49.993 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:46:49.993 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:46:49.993 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -65 Nss: 1 Mode: 5 symDur: 3600 snrDb 9 bitPerTone: 3161 rate: 205 throughput: 159
+10-18 14:46:49.995 19814 19926 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1832793812 SSID: "chy&zqs_5G", BSSID: e4:4e:12:af:53:7a, MAC: 9a:90:18:9e:98:88, Security type: 4, Supplicant state: COMPLETED, Wi-Fi standard: 5, RSSI: -65, Link speed: 390Mbps, Tx Link speed: 390Mbps, Max Supported Tx Link speed: 433Mbps, Rx Link speed: 292Mbps, Max Supported Rx Link speed: 433Mbps, Frequency: 5240MHz, Net ID: 3, Metered hint: false, score: 60, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1
+10-18 14:46:49.995 19814 19926 D WifiScoreCard: txRate: 11 txSpeed: 390
+10-18 14:46:49.995 19814 19926 D WifiScoreCard: network update SIGNAL_POLL "chy&zqs_5G" ID: 74066996 RSSI -65 txSpeed 390
+10-18 14:46:49.997 19814 19926 D WifiClientModeImpl[wlan0]:  L2ConnectedState screen=on 4 0 "chy&zqs_5G" e4:4e:12:af:53:7a rssi=-65 f=5240 sc=60 link=390 tx=11.0, 0.0, 0.0  rx=4.9 bcn=0 [on:0 tx:0 rx:0 period:3014] from screen [on:0 period:162416418] score=60
+10-18 14:46:50.048 31068 31186 I Inotia4Qol: 2026-10-18 14:46:50.048 f=1806 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:50.101 31068 31186 I Inotia4Qol: 2026-10-18 14:46:50.101 f=1807 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:50.149 31068 31186 I Inotia4Qol: 2026-10-18 14:46:50.149 f=1808 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:50.150   952   952 W Binder:952_2: type=1400 audit(0.0:57422688): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:50.160   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:18.705961,dur:1015.72,max:130.10,min:9.99  
+10-18 14:46:50.201 31068 31186 I Inotia4Qol: 2026-10-18 14:46:50.200 f=1809 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:50.198   952   952 W Binder:952_2: type=1400 audit(0.0:57422689): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:50.254 31068 31186 I Inotia4Qol: 2026-10-18 14:46:50.254 f=1810 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:50.254   952   952 W Binder:952_2: type=1400 audit(0.0:57422690): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:50.305 31068 31186 I Inotia4Qol: 2026-10-18 14:46:50.305 f=1811 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:50.302   952   952 W Binder:952_2: type=1400 audit(0.0:57422691): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:50.360 31068 31186 I Inotia4Qol: 2026-10-18 14:46:50.360 f=1812 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:50.358   952   952 W Binder:952_2: type=1400 audit(0.0:57422692): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:50.416 31068 31186 I Inotia4Qol: 2026-10-18 14:46:50.416 f=1813 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:50.468 31068 31186 I Inotia4Qol: 2026-10-18 14:46:50.468 f=1814 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:50.519 31068 31186 I Inotia4Qol: 2026-10-18 14:46:50.519 f=1815 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:50.569 31068 31186 I Inotia4Qol: 2026-10-18 14:46:50.569 f=1816 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:50.696 31068 31186 I Inotia4Qol: 2026-10-18 14:46:50.696 f=1817 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:50.752 31068 31186 I Inotia4Qol: 2026-10-18 14:46:50.752 f=1818 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:50.803 31068 31186 I Inotia4Qol: 2026-10-18 14:46:50.803 f=1819 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:50.856 31068 31186 I Inotia4Qol: 2026-10-18 14:46:50.856 f=1820 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:50.913 31068 31186 I Inotia4Qol: 2026-10-18 14:46:50.913 f=1821 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:50.962 31068 31186 I Inotia4Qol: 2026-10-18 14:46:50.962 f=1822 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:51.015 31068 31186 I Inotia4Qol: 2026-10-18 14:46:51.015 f=1823 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:51.070 31068 31186 I Inotia4Qol: 2026-10-18 14:46:51.070 f=1824 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:51.127 31068 31186 I Inotia4Qol: 2026-10-18 14:46:51.126 f=1825 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:51.178 31068 31186 I Inotia4Qol: 2026-10-18 14:46:51.178 f=1826 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:51.178   952   952 W Binder:952_2: type=1400 audit(0.0:57422706): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:51.189   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:17.488234,dur:1029.26,max:129.17,min:42.58  
+10-18 14:46:51.231 31068 31186 I Inotia4Qol: 2026-10-18 14:46:51.231 f=1827 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:51.230   952   952 W Binder:952_2: type=1400 audit(0.0:57422707): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:51.281 31068 31186 I Inotia4Qol: 2026-10-18 14:46:51.281 f=1828 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:51.282   952   952 W Binder:952_2: type=1400 audit(0.0:57422708): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:51.331 31068 31186 I Inotia4Qol: 2026-10-18 14:46:51.331 f=1829 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:51.330   952   952 W Binder:952_2: type=1400 audit(0.0:57422709): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:51.380 31068 31186 I Inotia4Qol: 2026-10-18 14:46:51.380 f=1830 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:51.378   952   952 W Binder:952_2: type=1400 audit(0.0:57422710): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:51.431 31068 31186 I Inotia4Qol: 2026-10-18 14:46:51.431 f=1831 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:51.559 31068 31186 I Inotia4Qol: 2026-10-18 14:46:51.559 f=1832 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:51.620 31068 31186 I Inotia4Qol: 2026-10-18 14:46:51.620 f=1833 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:51.679 31068 31186 I Inotia4Qol: 2026-10-18 14:46:51.679 f=1834 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:51.739 31068 31186 I Inotia4Qol: 2026-10-18 14:46:51.739 f=1835 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:51.790 31068 31186 I Inotia4Qol: 2026-10-18 14:46:51.790 f=1836 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:51.839 31068 31186 I Inotia4Qol: 2026-10-18 14:46:51.839 f=1837 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:51.891 31068 31186 I Inotia4Qol: 2026-10-18 14:46:51.891 f=1838 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:51.939 31068 31186 I Inotia4Qol: 2026-10-18 14:46:51.939 f=1839 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:51.992 31068 31186 I Inotia4Qol: 2026-10-18 14:46:51.992 f=1840 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:52.041 31068 31186 I Inotia4Qol: 2026-10-18 14:46:52.041 f=1841 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:52.074 31068 31917 I Inotia4Qol: 2026-10-18 14:46:52.073 f=1842 I api UiActions.kt:22 endpoint=POST /api/ui/dialog/select params={action=cancel,index=-1} result={ok:true} dur=23ms
+10-18 14:46:52.093 31068 31186 I Inotia4Qol: 2026-10-18 14:46:52.093 f=1842 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:52.097 31068 31186 V FINDOK  : UIPopupMsg_ButtonCancelExe
+10-18 14:46:52.143 31068 31186 I Inotia4Qol: 2026-10-18 14:46:52.143 f=1843 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:52.197 31068 31186 I Inotia4Qol: 2026-10-18 14:46:52.197 f=1844 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:52.194   952   952 W Binder:952_2: type=1400 audit(0.0:57422728): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:52.210   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:17.629202,dur:1021.03,max:128.23,min:44.55  
+10-18 14:46:52.247 31068 31186 I Inotia4Qol: 2026-10-18 14:46:52.247 f=1845 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:52.246   952   952 W Binder:952_2: type=1400 audit(0.0:57422729): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:52.259 19814 19926 V WifiConnectivityManager: periodicScanTimerHandler
+10-18 14:46:52.259   932   932 I android.hardware.lights-service.mediatek: Lights id 2 return -6.
+10-18 14:46:52.260 19814 19926 D WifiNetworkSelector: Current connected network: 3
+10-18 14:46:52.260 19814 19926 V WifiConnectivityManager: No partial scan because firmware roaming is supported.
+10-18 14:46:52.262 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57422730): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:gmscore_app:s0:c512,c768 tclass=process permissive=0
+10-18 14:46:52.266 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57422731): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:gmscore_app:s0:c512,c768 tclass=process permissive=0
+10-18 14:46:52.266 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57422732): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:gmscore_app:s0:c512,c768 tclass=process permissive=0
+10-18 14:46:52.301 31068 31186 I Inotia4Qol: 2026-10-18 14:46:52.301 f=1846 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:52.319 20489 31021 I NetworkScheduler.Stats: Task com.google.android.gms/com.google.android.gms.auth.account.be.accountstate.GcmTaskService started execution. cause:4 exec_start_elapsed_seconds: 2993988 [CONTEXT service_id=218 ]
+10-18 14:46:52.324 20489 31021 I NetworkScheduler.Stats: Task com.google.android.gms/com.google.android.gms.auth.account.be.accountstate.GcmTaskService finished executing. cause:4 result: 2 elapsed_millis: 28 uptime_millis: 28 exec_start_elapsed_seconds: 2993988 [CONTEXT service_id=218 ]
+10-18 14:46:52.390 20489 29770 I NetworkScheduler.Stats: Task com.google.android.gms/com.google.android.gms.auth.account.be.legacy.AuthCronService started execution. cause:5 exec_start_elapsed_seconds: 2993988 [CONTEXT service_id=218 ]
+10-18 14:46:52.428 20489 29557 I NetworkScheduler.Stats: Task com.google.android.gms/com.google.android.gms.clearcut.uploader.QosUploaderService started execution. cause:5 exec_start_elapsed_seconds: 2993988 [CONTEXT service_id=218 ]
+10-18 14:46:52.446 31068 31186 I Inotia4Qol: 2026-10-18 14:46:52.446 f=1847 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:52.508 31068 31186 I Inotia4Qol: 2026-10-18 14:46:52.508 f=1848 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:52.531 20489 31021 I NetworkScheduler.Stats: Task com.google.android.gms/com.google.android.gms.clearcut.uploader.QosUploaderService finished executing. cause:5 result: 1 elapsed_millis: 129 uptime_millis: 129 exec_start_elapsed_seconds: 2993988 [CONTEXT service_id=218 ]
+10-18 14:46:52.574 31068 31186 I Inotia4Qol: 2026-10-18 14:46:52.574 f=1849 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:52.606 20489 31921 I NetworkScheduler.Stats: Task com.google.android.gms/com.google.android.gms.gass.chimera.SchedulePeriodicTasksService started execution. cause:5 exec_start_elapsed_seconds: 2993988 [CONTEXT service_id=218 ]
+10-18 14:46:52.629 31068 31186 I Inotia4Qol: 2026-10-18 14:46:52.629 f=1850 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:52.683 31068 31186 I Inotia4Qol: 2026-10-18 14:46:52.683 f=1851 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:52.736 31068 31186 I Inotia4Qol: 2026-10-18 14:46:52.736 f=1852 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:52.787 31068 31186 I Inotia4Qol: 2026-10-18 14:46:52.787 f=1853 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:52.840 31068 31186 I Inotia4Qol: 2026-10-18 14:46:52.840 f=1854 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:52.890 31068 31186 I Inotia4Qol: 2026-10-18 14:46:52.890 f=1855 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:52.939 31068 31186 I Inotia4Qol: 2026-10-18 14:46:52.939 f=1856 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:52.988 31068 31186 I Inotia4Qol: 2026-10-18 14:46:52.988 f=1857 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:52.997 19982 19982 I WifiHAL : Get link layer stats
+10-18 14:46:52.997 19982 19982 I WifiHAL : GetLinkStatsCommand::create
+10-18 14:46:52.997 19982 19982 D android.hardware.wifi@1.0-service-lazy: WifiRequest::create vendor command to iface 31, vendor_id=0x1a11, subcmd=0x1200, res=0
+10-18 14:46:52.997 19982 19982 I android.hardware.wifi@1.0-service-lazy: WifiCommand::requestResponse err=-14
+10-18 14:46:52.997 19982 19982 I WifiHAL : wifi_get_link_stats: result=-1
+10-18 14:46:52.998 19814 19926 E WifiVendorHal: getWifiLinkLayerStats_1_5_Internal(l.1191) failed {.code = ERROR_UNKNOWN, .description = unknown}
+10-18 14:46:53.010 19814 19926 D WifiClientModeImpl[wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-65 TxLinkspeed=351 freq=5240 RxLinkSpeed=292
+10-18 14:46:53.011 19814 19926 D WifiDataStall: tx tput in kbps: 159000
+10-18 14:46:53.011 19814 19926 D WifiDataStall: rx tput in kbps: 159000
+10-18 14:46:53.011 19814 19926 V WifiConfigManager: Updating scan detail cache freq=5240 BSSID=e4:4e:12:af:53:7a RSSI=-64 for "chy&zqs_5G"WPA_PSK
+10-18 14:46:53.012 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:46:53.012 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:46:53.012 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -65 Nss: 1 Mode: 5 symDur: 3600 snrDb 9 bitPerTone: 3161 rate: 205 throughput: 159
+10-18 14:46:53.012 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:46:53.012 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:46:53.012 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -65 Nss: 1 Mode: 5 symDur: 3600 snrDb 9 bitPerTone: 3161 rate: 205 throughput: 159
+10-18 14:46:53.013 19814 19926 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1832793812 SSID: "chy&zqs_5G", BSSID: e4:4e:12:af:53:7a, MAC: 9a:90:18:9e:98:88, Security type: 4, Supplicant state: COMPLETED, Wi-Fi standard: 5, RSSI: -65, Link speed: 351Mbps, Tx Link speed: 351Mbps, Max Supported Tx Link speed: 433Mbps, Rx Link speed: 292Mbps, Max Supported Rx Link speed: 433Mbps, Frequency: 5240MHz, Net ID: 3, Metered hint: false, score: 60, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1
+10-18 14:46:53.013 19814 19926 D WifiScoreCard: txRate: 10 txSpeed: 351
+10-18 14:46:53.013 19814 19926 D WifiScoreCard: network update SIGNAL_POLL "chy&zqs_5G" ID: 74066996 RSSI -65 txSpeed 351
+10-18 14:46:53.015 19814 19926 D WifiClientModeImpl[wlan0]:  L2ConnectedState screen=on 4 0 "chy&zqs_5G" e4:4e:12:af:53:7a rssi=-65 f=5240 sc=60 link=351 tx=9.9, 0.0, 0.0  rx=9.8 bcn=0 [on:0 tx:0 rx:0 period:3017] from screen [on:0 period:162419436] score=60
+10-18 14:46:53.041 31068 31186 I Inotia4Qol: 2026-10-18 14:46:53.041 f=1858 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:53.090 31068 31186 I Inotia4Qol: 2026-10-18 14:46:53.090 f=1859 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:53.142 31068 31186 I Inotia4Qol: 2026-10-18 14:46:53.142 f=1860 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:53.193 31068 31186 I Inotia4Qol: 2026-10-18 14:46:53.193 f=1861 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:53.320 31068 31186 I Inotia4Qol: 2026-10-18 14:46:53.320 f=1862 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:53.318   952   952 W Binder:952_2: type=1400 audit(0.0:57422862): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:53.325   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:16.145702,dur:1114.85,max:148.62,min:44.23  
+10-18 14:46:53.378 31068 31186 I Inotia4Qol: 2026-10-18 14:46:53.378 f=1863 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:53.378   952   952 W Binder:952_2: type=1400 audit(0.0:57422863): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:53.429 31068 31186 I Inotia4Qol: 2026-10-18 14:46:53.429 f=1864 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:53.426   952   952 W Binder:952_2: type=1400 audit(0.0:57422864): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:53.482 31068 31186 I Inotia4Qol: 2026-10-18 14:46:53.482 f=1865 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:53.482   952   952 W Binder:952_2: type=1400 audit(0.0:57422865): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:53.538 31068 31186 I Inotia4Qol: 2026-10-18 14:46:53.538 f=1866 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:53.538   952   952 W Binder:952_2: type=1400 audit(0.0:57422866): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:53.587 31068 31186 I Inotia4Qol: 2026-10-18 14:46:53.587 f=1867 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:53.595   961   977 D ccci_mdinit: (1):monitor_time_update_thread round:100450 ########
+10-18 14:46:53.638 31068 31186 I Inotia4Qol: 2026-10-18 14:46:53.638 f=1868 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:53.689 31068 31186 I Inotia4Qol: 2026-10-18 14:46:53.689 f=1869 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:53.741 31068 31186 I Inotia4Qol: 2026-10-18 14:46:53.741 f=1870 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:53.791 31068 31186 I Inotia4Qol: 2026-10-18 14:46:53.791 f=1871 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:53.844 31068 31186 I Inotia4Qol: 2026-10-18 14:46:53.844 f=1872 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:53.892 31068 31186 I Inotia4Qol: 2026-10-18 14:46:53.892 f=1873 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:53.943 31068 31186 I Inotia4Qol: 2026-10-18 14:46:53.943 f=1874 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:53.995 31068 31186 I Inotia4Qol: 2026-10-18 14:46:53.995 f=1875 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:54.049 31068 31186 I Inotia4Qol: 2026-10-18 14:46:54.049 f=1876 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:54.175 31068 31186 I Inotia4Qol: 2026-10-18 14:46:54.175 f=1877 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:54.233 31068 31186 I Inotia4Qol: 2026-10-18 14:46:54.233 f=1878 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:54.291 31068 31186 I Inotia4Qol: 2026-10-18 14:46:54.291 f=1879 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:54.343 31068 31186 I Inotia4Qol: 2026-10-18 14:46:54.343 f=1880 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:54.342   952   952 W Binder:952_2: type=1400 audit(0.0:57422884): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:54.358   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:17.433159,dur:1032.52,max:140.13,min:46.22  
+10-18 14:46:54.396 31068 31186 I Inotia4Qol: 2026-10-18 14:46:54.396 f=1881 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:54.394   952   952 W Binder:952_2: type=1400 audit(0.0:57422885): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:54.452 31068 31186 I Inotia4Qol: 2026-10-18 14:46:54.452 f=1882 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:54.450   952   952 W Binder:952_2: type=1400 audit(0.0:57422886): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:54.504 31068 31186 I Inotia4Qol: 2026-10-18 14:46:54.504 f=1883 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:54.502   952   952 W Binder:952_2: type=1400 audit(0.0:57422887): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:54.555 31068 31186 I Inotia4Qol: 2026-10-18 14:46:54.555 f=1884 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:54.554   952   952 W Binder:952_2: type=1400 audit(0.0:57422888): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:54.606 31068 31186 I Inotia4Qol: 2026-10-18 14:46:54.606 f=1885 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:54.655 31068 31186 I Inotia4Qol: 2026-10-18 14:46:54.655 f=1886 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:54.708 31068 31186 I Inotia4Qol: 2026-10-18 14:46:54.708 f=1887 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:54.759 31068 31186 I Inotia4Qol: 2026-10-18 14:46:54.759 f=1888 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:54.811 31068 31186 I Inotia4Qol: 2026-10-18 14:46:54.811 f=1889 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:54.863 31068 31186 I Inotia4Qol: 2026-10-18 14:46:54.863 f=1890 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:54.914 31068 31186 I Inotia4Qol: 2026-10-18 14:46:54.914 f=1891 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:55.040 31068 31186 I Inotia4Qol: 2026-10-18 14:46:55.040 f=1892 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:55.097 31068 31186 I Inotia4Qol: 2026-10-18 14:46:55.097 f=1893 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:55.160 31068 31186 I Inotia4Qol: 2026-10-18 14:46:55.160 f=1894 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:55.216 31068 31186 I Inotia4Qol: 2026-10-18 14:46:55.216 f=1895 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:55.267 31068 31186 I Inotia4Qol: 2026-10-18 14:46:55.267 f=1896 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:55.318 31068 31186 I Inotia4Qol: 2026-10-18 14:46:55.318 f=1897 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:55.368 31068 31186 I Inotia4Qol: 2026-10-18 14:46:55.368 f=1898 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:55.366   952   952 W Binder:952_2: type=1400 audit(0.0:57422902): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:55.375   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:17.690252,dur:1017.51,max:132.52,min:46.34  
+10-18 14:46:55.418 31068 31186 I Inotia4Qol: 2026-10-18 14:46:55.418 f=1899 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:55.418   952   952 W Binder:952_2: type=1400 audit(0.0:57422903): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:55.468 31068 31186 I Inotia4Qol: 2026-10-18 14:46:55.468 f=1900 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:55.466   952   952 W Binder:952_2: type=1400 audit(0.0:57422904): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:55.520 31068 31186 I Inotia4Qol: 2026-10-18 14:46:55.520 f=1901 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:55.518   952   952 W Binder:952_2: type=1400 audit(0.0:57422905): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:55.574 31068 31186 I Inotia4Qol: 2026-10-18 14:46:55.573 f=1902 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:55.574   952   952 W Binder:952_2: type=1400 audit(0.0:57422906): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:55.623 31068 31186 I Inotia4Qol: 2026-10-18 14:46:55.623 f=1903 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:55.675 31068 31186 I Inotia4Qol: 2026-10-18 14:46:55.675 f=1904 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:55.725 31068 31186 I Inotia4Qol: 2026-10-18 14:46:55.725 f=1905 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:55.777 31068 31186 I Inotia4Qol: 2026-10-18 14:46:55.777 f=1906 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:55.902 31068 31186 I Inotia4Qol: 2026-10-18 14:46:55.902 f=1907 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:55.961 31068 31186 I Inotia4Qol: 2026-10-18 14:46:55.961 f=1908 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:56.015 31068 31186 I Inotia4Qol: 2026-10-18 14:46:56.015 f=1909 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:56.016 19982 19982 I WifiHAL : Get link layer stats
+10-18 14:46:56.016 19982 19982 I WifiHAL : GetLinkStatsCommand::create
+10-18 14:46:56.016 19982 19982 D android.hardware.wifi@1.0-service-lazy: WifiRequest::create vendor command to iface 31, vendor_id=0x1a11, subcmd=0x1200, res=0
+10-18 14:46:56.016 19982 19982 I android.hardware.wifi@1.0-service-lazy: WifiCommand::requestResponse err=-14
+10-18 14:46:56.016 19982 19982 I WifiHAL : wifi_get_link_stats: result=-1
+10-18 14:46:56.018 19814 19926 E WifiVendorHal: getWifiLinkLayerStats_1_5_Internal(l.1191) failed {.code = ERROR_UNKNOWN, .description = unknown}
+10-18 14:46:56.024 19814 19926 D WifiClientModeImpl[wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-65 TxLinkspeed=390 freq=5240 RxLinkSpeed=6
+10-18 14:46:56.025 19814 19926 D WifiDataStall: tx tput in kbps: 159000
+10-18 14:46:56.025 19814 19926 D WifiDataStall: rx tput in kbps: 159000
+10-18 14:46:56.025 19814 19926 V WifiConfigManager: Updating scan detail cache freq=5240 BSSID=e4:4e:12:af:53:7a RSSI=-64 for "chy&zqs_5G"WPA_PSK
+10-18 14:46:56.026 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:46:56.026 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:46:56.026 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -65 Nss: 1 Mode: 5 symDur: 3600 snrDb 9 bitPerTone: 3161 rate: 205 throughput: 159
+10-18 14:46:56.026 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:46:56.026 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:46:56.026 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -65 Nss: 1 Mode: 5 symDur: 3600 snrDb 9 bitPerTone: 3161 rate: 205 throughput: 159
+10-18 14:46:56.029 19814 19926 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1832793812 SSID: "chy&zqs_5G", BSSID: e4:4e:12:af:53:7a, MAC: 9a:90:18:9e:98:88, Security type: 4, Supplicant state: COMPLETED, Wi-Fi standard: 5, RSSI: -65, Link speed: 390Mbps, Tx Link speed: 390Mbps, Max Supported Tx Link speed: 433Mbps, Rx Link speed: 6Mbps, Max Supported Rx Link speed: 433Mbps, Frequency: 5240MHz, Net ID: 3, Metered hint: false, score: 60, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1
+10-18 14:46:56.029 19814 19926 D WifiScoreCard: txRate: 8 txSpeed: 390
+10-18 14:46:56.029 19814 19926 D WifiScoreCard: network update SIGNAL_POLL "chy&zqs_5G" ID: 74066996 RSSI -65 txSpeed 390
+10-18 14:46:56.032 19814 19926 D WifiClientModeImpl[wlan0]:  L2ConnectedState screen=on 4 0 "chy&zqs_5G" e4:4e:12:af:53:7a rssi=-65 f=5240 sc=60 link=390 tx=7.2, 0.0, 0.0  rx=7.2 bcn=0 [on:0 tx:0 rx:0 period:3015] from screen [on:0 period:162422452] score=60
+10-18 14:46:56.072 31068 31186 I Inotia4Qol: 2026-10-18 14:46:56.072 f=1910 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:56.122 31068 31186 I Inotia4Qol: 2026-10-18 14:46:56.122 f=1911 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:56.133 19814 19838 I system_server: Background young concurrent copying GC freed 120470(5014KB) AllocSpace objects, 0(0B) LOS objects, 19% free, 21MB/26MB, paused 267us,182us total 101.565ms
+10-18 14:46:56.173 31068 31186 I Inotia4Qol: 2026-10-18 14:46:56.173 f=1912 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:56.222 31068 31186 I Inotia4Qol: 2026-10-18 14:46:56.221 f=1913 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:56.272 31068 31186 I Inotia4Qol: 2026-10-18 14:46:56.272 f=1914 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:56.324 31068 31186 I Inotia4Qol: 2026-10-18 14:46:56.323 f=1915 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:56.375 31068 31186 I Inotia4Qol: 2026-10-18 14:46:56.375 f=1916 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:56.374   952   952 W Binder:952_2: type=1400 audit(0.0:57422924): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:56.393   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:17.688042,dur:1017.64,max:129.28,min:46.03  
+10-18 14:46:56.427 31068 31186 I Inotia4Qol: 2026-10-18 14:46:56.427 f=1917 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:56.426   952   952 W Binder:952_2: type=1400 audit(0.0:57422925): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:56.479 31068 31186 I Inotia4Qol: 2026-10-18 14:46:56.479 f=1918 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:56.478   952   952 W Binder:952_2: type=1400 audit(0.0:57422926): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:56.530 31068 31186 I Inotia4Qol: 2026-10-18 14:46:56.530 f=1919 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:56.530   952   952 W Binder:952_2: type=1400 audit(0.0:57422927): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:56.580 31068 31186 I Inotia4Qol: 2026-10-18 14:46:56.580 f=1920 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:56.578   952   952 W Binder:952_2: type=1400 audit(0.0:57422928): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:56.630 31068 31186 I Inotia4Qol: 2026-10-18 14:46:56.630 f=1921 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:56.762 31068 31186 I Inotia4Qol: 2026-10-18 14:46:56.762 f=1922 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:56.817 31068 31186 I Inotia4Qol: 2026-10-18 14:46:56.817 f=1923 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:56.880 31068 31186 I Inotia4Qol: 2026-10-18 14:46:56.880 f=1924 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:56.934 31068 31186 I Inotia4Qol: 2026-10-18 14:46:56.934 f=1925 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:56.987 31068 31186 I Inotia4Qol: 2026-10-18 14:46:56.987 f=1926 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:56.996  1182  1182 I thermal_repeater: [recvMdThermalInfo] ret=5, strLen=127, ERROR
+10-18 14:46:57.036 31068 31186 I Inotia4Qol: 2026-10-18 14:46:57.036 f=1927 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:57.089 31068 31186 I Inotia4Qol: 2026-10-18 14:46:57.089 f=1928 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:57.139 31068 31186 I Inotia4Qol: 2026-10-18 14:46:57.139 f=1929 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:57.194 31068 31186 I Inotia4Qol: 2026-10-18 14:46:57.194 f=1930 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:57.250 31068 31186 I Inotia4Qol: 2026-10-18 14:46:57.250 f=1931 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:57.302 31068 31186 I Inotia4Qol: 2026-10-18 14:46:57.302 f=1932 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:57.352 31068 31186 I Inotia4Qol: 2026-10-18 14:46:57.352 f=1933 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:57.403 31068 31186 I Inotia4Qol: 2026-10-18 14:46:57.403 f=1934 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:57.402   952   952 W Binder:952_2: type=1400 audit(0.0:57422947): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:57.411   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:17.684032,dur:1017.87,max:130.06,min:45.90  
+10-18 14:46:57.454 31068 31186 I Inotia4Qol: 2026-10-18 14:46:57.454 f=1935 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:57.454   952   952 W Binder:952_2: type=1400 audit(0.0:57422948): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:57.504 31068 31186 I Inotia4Qol: 2026-10-18 14:46:57.504 f=1936 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:57.502   952   952 W Binder:952_2: type=1400 audit(0.0:57422949): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:57.631 31068 31186 I Inotia4Qol: 2026-10-18 14:46:57.631 f=1937 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:57.630   952   952 W Binder:952_2: type=1400 audit(0.0:57422950): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:57.689 31068 31186 I Inotia4Qol: 2026-10-18 14:46:57.689 f=1938 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:57.690   952   952 W Binder:952_2: type=1400 audit(0.0:57422951): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:57.744 31068 31186 I Inotia4Qol: 2026-10-18 14:46:57.744 f=1939 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:57.802 31068 31186 I Inotia4Qol: 2026-10-18 14:46:57.802 f=1940 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:57.851 31068 31186 I Inotia4Qol: 2026-10-18 14:46:57.851 f=1941 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:57.904 31068 31186 I Inotia4Qol: 2026-10-18 14:46:57.904 f=1942 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:57.952 31068 31186 I Inotia4Qol: 2026-10-18 14:46:57.952 f=1943 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:58.003 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.003 f=1944 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:58.054 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.054 f=1945 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:58.103 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.103 f=1946 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:58.156 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.156 f=1947 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:58.210 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.210 f=1948 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:58.272 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.272 f=1949 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:58.330 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.330 f=1950 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:58.380 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.380 f=1951 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:58.435 31932 31932 D ProcessState: Binder ioctl to enable oneway spam detection failed: Invalid argument
+10-18 14:46:58.434 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57422969): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:su:s0 tclass=process permissive=0
+10-18 14:46:58.438   932   932 I android.hardware.lights-service.mediatek: Lights id 2 return -6.
+10-18 14:46:58.507 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.507 f=1952 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:58.506   952   952 W Binder:952_4: type=1400 audit(0.0:57422970): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:58.524   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:16.167702,dur:1113.33,max:132.74,min:47.36  
+10-18 14:46:58.541 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.541 f=1953 I extension_bag extension_bag exit seq=97 ms=2993554788 phase=event_enter event=0x17 param=0x7957927698 param2=0x0 x=972 y=200 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:46:58.541 31068 31186 D Inotia4Qol: 2026-10-18 14:46:58.541 f=1953 D extension_bag extension_bag touch bounds event=0x17 x=972 y=200 grid=761,160 323x323 grid_hit=1 tab_origin=1220,134 mode=1 selected=0 overlay=1 root=0x793910ace0 root_gen=4 state_gen=4
+10-18 14:46:58.541 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.541 f=1953 I extension_bag extension_bag p5 session begin token=127 source=0/2 generation=4
+10-18 14:46:58.566 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.566 f=1953 I extension_bag extension_bag exit seq=98 ms=2993554814 phase=delegate_pre_orig event=0x17 param=0x7957927698 param2=0x0 x=972 y=200 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:46:58.566 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.566 f=1953 I extension_bag extension_bag orig_event pre event=0x17 session_projected=1 source=0/2 inven_valid=0 digest=0x14650fb0739d0383 nonnull=0
+10-18 14:46:58.577 31068 31186 D Inotia4Qol: 2026-10-18 14:46:58.577 f=1953 D extension_bag extension_bag extension desc hook resolve skip index=0 code=3
+10-18 14:46:58.594 31068 31186 D Inotia4Qol: 2026-10-18 14:46:58.594 f=1953 D extension_bag extension_bag extension desc hook installed index=1 id=3 button=0x793910f868 data=0x793910f960 execute_slot=0x793910f980 original=0x79572cb240
+10-18 14:46:58.598 31068 31186 D Inotia4Qol: 2026-10-18 14:46:58.598 f=1953 D extension_bag extension_bag extension desc hook resolve skip index=3 code=3
+10-18 14:46:58.601 31068 31186 D Inotia4Qol: 2026-10-18 14:46:58.601 f=1953 D extension_bag extension_bag extension desc hook resolve skip index=4 code=3
+10-18 14:46:58.605 31068 31186 D Inotia4Qol: 2026-10-18 14:46:58.605 f=1953 D extension_bag extension_bag extension desc hook resolve skip index=5 code=3
+10-18 14:46:58.609 31068 31186 D Inotia4Qol: 2026-10-18 14:46:58.608 f=1953 D extension_bag extension_bag extension desc hook resolve skip index=6 code=3
+10-18 14:46:58.626 31068 31186 D Inotia4Qol: 2026-10-18 14:46:58.626 f=1953 D extension_bag extension_bag extension desc hook installed index=7 id=4 button=0x793910f6f8 data=0x793910f7f0 execute_slot=0x793910f810 original=0x79572cb31c
+10-18 14:46:58.635 31068 31186 D Inotia4Qol: 2026-10-18 14:46:58.635 f=1953 D extension_bag extension_bag extension desc hook resolve skip index=8 reason=duplicate_execute_slot execute=0x793910f810
+10-18 14:46:58.639 31068 31186 D Inotia4Qol: 2026-10-18 14:46:58.639 f=1953 D extension_bag extension_bag extension desc hook resolve skip index=9 code=3
+10-18 14:46:58.642 31068 31186 D Inotia4Qol: 2026-10-18 14:46:58.642 f=1953 D extension_bag extension_bag extension desc hook resolve skip index=10 code=3
+10-18 14:46:58.643 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.643 f=1953 I extension_bag extension_bag extension desc item captured bag=0 slot=2 item=0x793902cc60
+10-18 14:46:58.643 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.643 f=1953 I extension_bag extension_bag orig_event post event=0x17 session_projected=1 source=0/2 inven_valid=0 digest=0x14650fb0739d0383 nonnull=0
+10-18 14:46:58.667 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.667 f=1953 I extension_bag extension_bag exit seq=99 ms=2993554915 phase=delegate_post_orig event=0x17 param=0x7957927698 param2=0x0 x=972 y=200 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:46:58.712 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.712 f=1953 I extension_bag extension_bag exit seq=100 ms=2993554961 phase=event_enter event=0xffffffff80000001 param=0x148 param2=0x64 x=-1 y=-1 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:46:58.737 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.737 f=1953 I extension_bag extension_bag exit seq=101 ms=2993554985 phase=delegate_pre_orig event=0xffffffff80000001 param=0x148 param2=0x64 x=0 y=0 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:46:58.737 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.737 f=1953 I extension_bag extension_bag orig_event pre event=0xffffffff80000001 session_projected=1 source=0/2 inven_valid=0 digest=0x14650fb0739d0383 nonnull=0
+10-18 14:46:58.737 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.737 f=1953 I extension_bag extension_bag orig_event post event=0xffffffff80000001 session_projected=1 source=0/2 inven_valid=0 digest=0x14650fb0739d0383 nonnull=0
+10-18 14:46:58.761 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.761 f=1953 I extension_bag extension_bag exit seq=102 ms=2993555010 phase=delegate_post_orig event=0xffffffff80000001 param=0x148 param2=0x64 x=0 y=0 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:46:58.796 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.796 f=1953 I extension_bag extension_bag exit seq=103 ms=2993555045 phase=event_enter event=0xffffffff80000004 param=0x1 param2=0x1480064 x=-1 y=-1 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:46:58.821 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.821 f=1953 I extension_bag extension_bag exit seq=104 ms=2993555069 phase=delegate_pre_orig event=0xffffffff80000004 param=0x1 param2=0x1480064 x=0 y=0 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:46:58.821 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.821 f=1953 I extension_bag extension_bag orig_event pre event=0xffffffff80000004 session_projected=1 source=0/2 inven_valid=0 digest=0x14650fb0739d0383 nonnull=0
+10-18 14:46:58.821 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.821 f=1953 I extension_bag extension_bag orig_event post event=0xffffffff80000004 session_projected=1 source=0/2 inven_valid=0 digest=0x14650fb0739d0383 nonnull=0
+10-18 14:46:58.846 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.846 f=1953 I extension_bag extension_bag exit seq=105 ms=2993555094 phase=delegate_post_orig event=0xffffffff80000004 param=0x1 param2=0x1480064 x=0 y=0 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:46:58.880 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.880 f=1953 I extension_bag extension_bag exit seq=106 ms=2993555129 phase=event_release event=0x18 param=0x7957927698 param2=0x0 x=972 y=200 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:46:58.881 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.881 f=1953 I extension_bag extension_bag p5 session cancel reason=release-intercepted-without-target token=127 phase=5 transition=0
+10-18 14:46:58.881 31068 31186 D Inotia4Qol: 2026-10-18 14:46:58.881 f=1953 D extension_bag extension_bag projected release intercepted event=0x18 source=-1/-1 target_original=-1 routed=0
+10-18 14:46:58.881 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.881 f=1953 I extension_bag extension_bag release_cleanup ctl=0x7939109ec0 flags_cleared
+10-18 14:46:58.905 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.905 f=1953 I extension_bag extension_bag exit seq=107 ms=2993555154 phase=event_enter event=0xffffffff80000003 param=0x148 param2=0x64 x=-1 y=-1 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:46:58.930 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.930 f=1953 I extension_bag extension_bag exit seq=108 ms=2993555178 phase=delegate_pre_orig event=0xffffffff80000003 param=0x148 param2=0x64 x=0 y=0 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:46:58.930 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.930 f=1953 I extension_bag extension_bag orig_event pre event=0xffffffff80000003 session_projected=0 source=-1/-1 inven_valid=0 digest=0x14650fb0739d0383 nonnull=0
+10-18 14:46:58.930 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.930 f=1953 I extension_bag extension_bag orig_event post event=0xffffffff80000003 session_projected=0 source=-1/-1 inven_valid=0 digest=0x14650fb0739d0383 nonnull=0
+10-18 14:46:58.954 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.954 f=1953 I extension_bag extension_bag exit seq=109 ms=2993555203 phase=delegate_post_orig event=0xffffffff80000003 param=0x148 param2=0x64 x=0 y=0 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:46:58.989 31068 31186 I Inotia4Qol: 2026-10-18 14:46:58.989 f=1953 I extension_bag extension_bag exit seq=110 ms=2993555237 phase=event_enter event=0xffffffff80000006 param=0x1 param2=0x1480064 x=-1 y=-1 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:46:59.013 31068 31186 I Inotia4Qol: 2026-10-18 14:46:59.013 f=1953 I extension_bag extension_bag exit seq=111 ms=2993555262 phase=delegate_pre_orig event=0xffffffff80000006 param=0x1 param2=0x1480064 x=0 y=0 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:46:59.013 31068 31186 I Inotia4Qol: 2026-10-18 14:46:59.013 f=1953 I extension_bag extension_bag orig_event pre event=0xffffffff80000006 session_projected=0 source=-1/-1 inven_valid=0 digest=0x14650fb0739d0383 nonnull=0
+10-18 14:46:59.013 31068 31186 I Inotia4Qol: 2026-10-18 14:46:59.013 f=1953 I extension_bag extension_bag orig_event post event=0xffffffff80000006 session_projected=0 source=-1/-1 inven_valid=0 digest=0x14650fb0739d0383 nonnull=0
+10-18 14:46:59.032 19982 19982 I WifiHAL : Get link layer stats
+10-18 14:46:59.032 19982 19982 I WifiHAL : GetLinkStatsCommand::create
+10-18 14:46:59.032 19982 19982 D android.hardware.wifi@1.0-service-lazy: WifiRequest::create vendor command to iface 31, vendor_id=0x1a11, subcmd=0x1200, res=0
+10-18 14:46:59.032 19982 19982 I android.hardware.wifi@1.0-service-lazy: WifiCommand::requestResponse err=-14
+10-18 14:46:59.032 19982 19982 I WifiHAL : wifi_get_link_stats: result=-1
+10-18 14:46:59.033 19814 19926 E WifiVendorHal: getWifiLinkLayerStats_1_5_Internal(l.1191) failed {.code = ERROR_UNKNOWN, .description = unknown}
+10-18 14:46:59.038 31068 31186 I Inotia4Qol: 2026-10-18 14:46:59.038 f=1953 I extension_bag extension_bag exit seq=112 ms=2993555286 phase=delegate_post_orig event=0xffffffff80000006 param=0x1 param2=0x1480064 x=0 y=0 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:46:59.048 19814 19926 D WifiClientModeImpl[wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-65 TxLinkspeed=390 freq=5240 RxLinkSpeed=292
+10-18 14:46:59.048 19814 19926 D WifiDataStall: tx tput in kbps: 159000
+10-18 14:46:59.048 19814 19926 D WifiDataStall: rx tput in kbps: 159000
+10-18 14:46:59.049 19814 19926 V WifiConfigManager: Updating scan detail cache freq=5240 BSSID=e4:4e:12:af:53:7a RSSI=-64 for "chy&zqs_5G"WPA_PSK
+10-18 14:46:59.049 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:46:59.049 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:46:59.049 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -65 Nss: 1 Mode: 5 symDur: 3600 snrDb 9 bitPerTone: 3161 rate: 205 throughput: 159
+10-18 14:46:59.049 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:46:59.049 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:46:59.049 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -65 Nss: 1 Mode: 5 symDur: 3600 snrDb 9 bitPerTone: 3161 rate: 205 throughput: 159
+10-18 14:46:59.050 19814 19926 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1832793812 SSID: "chy&zqs_5G", BSSID: e4:4e:12:af:53:7a, MAC: 9a:90:18:9e:98:88, Security type: 4, Supplicant state: COMPLETED, Wi-Fi standard: 5, RSSI: -65, Link speed: 390Mbps, Tx Link speed: 390Mbps, Max Supported Tx Link speed: 433Mbps, Rx Link speed: 292Mbps, Max Supported Rx Link speed: 433Mbps, Frequency: 5240MHz, Net ID: 3, Metered hint: false, score: 60, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1
+10-18 14:46:59.050 19814 19926 D WifiScoreCard: txRate: 6 txSpeed: 390
+10-18 14:46:59.050 19814 19926 D WifiScoreCard: network update SIGNAL_POLL "chy&zqs_5G" ID: 74066996 RSSI -65 txSpeed 390
+10-18 14:46:59.053 19814 19926 D WifiClientModeImpl[wlan0]:  L2ConnectedState screen=on 4 0 "chy&zqs_5G" e4:4e:12:af:53:7a rssi=-65 f=5240 sc=60 link=390 tx=5.6, 0.0, 0.0  rx=6.6 bcn=0 [on:0 tx:0 rx:0 period:3020] from screen [on:0 period:162425474] score=60
+10-18 14:46:59.110 31068 31186 I Inotia4Qol: 2026-10-18 14:46:59.110 f=1953 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:59.110   952   952 W Binder:952_4: type=1400 audit(0.0:57422971): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:59.167 31068 31186 I Inotia4Qol: 2026-10-18 14:46:59.167 f=1954 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:59.166   952   952 W Binder:952_4: type=1400 audit(0.0:57422972): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:59.226 31068 31186 I Inotia4Qol: 2026-10-18 14:46:59.226 f=1955 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:59.226   952   952 W Binder:952_4: type=1400 audit(0.0:57422973): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:59.278 31068 31186 I Inotia4Qol: 2026-10-18 14:46:59.278 f=1956 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:59.327 31068 31186 I Inotia4Qol: 2026-10-18 14:46:59.327 f=1957 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:59.381 31068 31186 I Inotia4Qol: 2026-10-18 14:46:59.381 f=1958 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:59.438 31068 31186 I Inotia4Qol: 2026-10-18 14:46:59.438 f=1959 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:59.438   952   952 W Binder:952_4: type=1400 audit(0.0:57422977): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:59.488 31068 31186 I Inotia4Qol: 2026-10-18 14:46:59.488 f=1960 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:59.486   952   952 W Binder:952_4: type=1400 audit(0.0:57422978): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:59.541 31068 31186 I Inotia4Qol: 2026-10-18 14:46:59.541 f=1961 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:59.538   952   952 W Binder:952_4: type=1400 audit(0.0:57422979): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:59.552   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:8.755529,dur:1027.92,max:598.81,min:35.73  
+10-18 14:46:59.591 31068 31186 I Inotia4Qol: 2026-10-18 14:46:59.591 f=1962 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:59.590   952   952 W Binder:952_4: type=1400 audit(0.0:57422980): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:59.640 31068 31186 I Inotia4Qol: 2026-10-18 14:46:59.640 f=1963 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:59.638   952   952 W Binder:952_4: type=1400 audit(0.0:57422981): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:46:59.691 31068 31186 I Inotia4Qol: 2026-10-18 14:46:59.691 f=1964 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:59.743 31068 31186 I Inotia4Qol: 2026-10-18 14:46:59.743 f=1965 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:59.793 31068 31186 I Inotia4Qol: 2026-10-18 14:46:59.793 f=1966 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:59.921 31068 31186 I Inotia4Qol: 2026-10-18 14:46:59.921 f=1967 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:46:59.979 31068 31186 I Inotia4Qol: 2026-10-18 14:46:59.979 f=1968 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:00.033 31068 31186 I Inotia4Qol: 2026-10-18 14:47:00.033 f=1969 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:00.089 31068 31186 I Inotia4Qol: 2026-10-18 14:47:00.089 f=1970 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:00.138 31068 31186 I Inotia4Qol: 2026-10-18 14:47:00.138 f=1971 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:00.192 31068 31186 I Inotia4Qol: 2026-10-18 14:47:00.192 f=1972 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:00.243 31068 31186 I Inotia4Qol: 2026-10-18 14:47:00.243 f=1973 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:00.294 31068 31186 I Inotia4Qol: 2026-10-18 14:47:00.294 f=1974 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:00.342 31068 31186 I Inotia4Qol: 2026-10-18 14:47:00.342 f=1975 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:00.392 31068 31186 I Inotia4Qol: 2026-10-18 14:47:00.392 f=1976 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:00.444 31068 31186 I Inotia4Qol: 2026-10-18 14:47:00.444 f=1977 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:00.442   952   952 W Binder:952_2: type=1400 audit(0.0:57423000): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:00.494 31068 31186 I Inotia4Qol: 2026-10-18 14:47:00.494 f=1978 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:00.494   952   952 W Binder:952_2: type=1400 audit(0.0:57423001): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:00.554 31068 31186 I Inotia4Qol: 2026-10-18 14:47:00.553 f=1979 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:00.554   952   952 W Binder:952_2: type=1400 audit(0.0:57423002): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:00.574   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:17.614605,dur:1021.88,max:127.89,min:35.49  
+10-18 14:47:00.612 31068 31186 I Inotia4Qol: 2026-10-18 14:47:00.612 f=1980 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:00.668 31068 31186 I Inotia4Qol: 2026-10-18 14:47:00.668 f=1981 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:00.802 31068 31186 I Inotia4Qol: 2026-10-18 14:47:00.802 f=1982 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:00.862 31068 31186 I Inotia4Qol: 2026-10-18 14:47:00.862 f=1983 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:00.925 31068 31186 I Inotia4Qol: 2026-10-18 14:47:00.925 f=1984 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:00.985 31068 31186 I Inotia4Qol: 2026-10-18 14:47:00.984 f=1985 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:01.042 31068 31186 I Inotia4Qol: 2026-10-18 14:47:01.042 f=1986 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:01.105 31068 31186 I Inotia4Qol: 2026-10-18 14:47:01.105 f=1987 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:01.164 31068 31186 I Inotia4Qol: 2026-10-18 14:47:01.164 f=1988 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:01.218 31068 31186 I Inotia4Qol: 2026-10-18 14:47:01.218 f=1989 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:01.276 31068 31186 I Inotia4Qol: 2026-10-18 14:47:01.276 f=1990 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:01.330 31068 31186 I Inotia4Qol: 2026-10-18 14:47:01.330 f=1991 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:01.386 31068 31186 I Inotia4Qol: 2026-10-18 14:47:01.386 f=1992 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:01.440 31068 31186 I Inotia4Qol: 2026-10-18 14:47:01.440 f=1993 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:01.502 31068 31186 I Inotia4Qol: 2026-10-18 14:47:01.501 f=1994 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:01.566 31068 31186 I Inotia4Qol: 2026-10-18 14:47:01.566 f=1995 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:01.575   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:15.978928,dur:1001.32,max:133.18,min:43.33  
+10-18 14:47:01.624 31068 31186 I Inotia4Qol: 2026-10-18 14:47:01.624 f=1996 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:01.763 31068 31186 I Inotia4Qol: 2026-10-18 14:47:01.763 f=1997 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:01.819 31068 31186 I Inotia4Qol: 2026-10-18 14:47:01.819 f=1998 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:01.880 31068 31186 I Inotia4Qol: 2026-10-18 14:47:01.880 f=1999 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:01.940 31068 31186 I Inotia4Qol: 2026-10-18 14:47:01.940 f=2000 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:01.998 31068 31186 I Inotia4Qol: 2026-10-18 14:47:01.998 f=2001 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:02.052 19982 19982 I WifiHAL : Get link layer stats
+10-18 14:47:02.052 19982 19982 I WifiHAL : GetLinkStatsCommand::create
+10-18 14:47:02.052 19982 19982 D android.hardware.wifi@1.0-service-lazy: WifiRequest::create vendor command to iface 31, vendor_id=0x1a11, subcmd=0x1200, res=0
+10-18 14:47:02.052 19982 19982 I android.hardware.wifi@1.0-service-lazy: WifiCommand::requestResponse err=-14
+10-18 14:47:02.052 19982 19982 I WifiHAL : wifi_get_link_stats: result=-1
+10-18 14:47:02.053 19814 19926 E WifiVendorHal: getWifiLinkLayerStats_1_5_Internal(l.1191) failed {.code = ERROR_UNKNOWN, .description = unknown}
+10-18 14:47:02.054 31068 31186 I Inotia4Qol: 2026-10-18 14:47:02.054 f=2002 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:02.064 19814 19926 D WifiClientModeImpl[wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-66 TxLinkspeed=390 freq=5240 RxLinkSpeed=292
+10-18 14:47:02.066 19814 19926 D WifiDataStall: tx tput in kbps: 159000
+10-18 14:47:02.066 19814 19926 D WifiDataStall: rx tput in kbps: 159000
+10-18 14:47:02.066 19814 19926 V WifiConfigManager: Updating scan detail cache freq=5240 BSSID=e4:4e:12:af:53:7a RSSI=-65 for "chy&zqs_5G"WPA_PSK
+10-18 14:47:00.610   952   952 W Binder:952_2: type=1400 audit(0.0:57423003): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:00.666   952   952 W Binder:952_2: type=1400 audit(0.0:57423004): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:02.067 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:47:02.067 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:47:02.067 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -66 Nss: 1 Mode: 5 symDur: 3600 snrDb 8 bitPerTone: 2870 rate: 186 throughput: 144
+10-18 14:47:02.067 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:47:02.067 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:47:02.067 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -66 Nss: 1 Mode: 5 symDur: 3600 snrDb 8 bitPerTone: 2870 rate: 186 throughput: 144
+10-18 14:47:02.070 19814 19926 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1832793812 SSID: "chy&zqs_5G", BSSID: e4:4e:12:af:53:7a, MAC: 9a:90:18:9e:98:88, Security type: 4, Supplicant state: COMPLETED, Wi-Fi standard: 5, RSSI: -66, Link speed: 390Mbps, Tx Link speed: 390Mbps, Max Supported Tx Link speed: 433Mbps, Rx Link speed: 292Mbps, Max Supported Rx Link speed: 433Mbps, Frequency: 5240MHz, Net ID: 3, Metered hint: false, score: 60, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1
+10-18 14:47:02.070 19814 19926 D WifiScoreCard: txRate: 4 txSpeed: 390
+10-18 14:47:01.566   952   952 W Binder:952_2: type=1400 audit(0.0:57423018): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:01.622   952   952 W Binder:952_2: type=1400 audit(0.0:57423019): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:01.762   952   952 W Binder:952_2: type=1400 audit(0.0:57423020): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:01.818   952   952 W Binder:952_2: type=1400 audit(0.0:57423021): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:02.562   952   952 W Binder:952_2: type=1400 audit(0.0:57423038): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:02.706   952   952 W Binder:952_2: type=1400 audit(0.0:57423039): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:02.770   952   952 W Binder:952_2: type=1400 audit(0.0:57423040): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:02.830   952   952 W Binder:952_2: type=1400 audit(0.0:57423041): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:02.890   952   952 W Binder:952_2: type=1400 audit(0.0:57423042): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:03.626   952   952 W Binder:952_2: type=1400 audit(0.0:57423054): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:03.690   952   952 W Binder:952_2: type=1400 audit(0.0:57423055): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:03.750   952   952 W Binder:952_2: type=1400 audit(0.0:57423056): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:03.810   952   952 W Binder:952_2: type=1400 audit(0.0:57423057): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:03.834 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57423058): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:platform_app:s0:c512,c768 tclass=process permissive=0
+10-18 14:47:02.073 19814 19926 D WifiClientModeImpl[wlan0]:  L2ConnectedState screen=on 4 0 "chy&zqs_5G" e4:4e:12:af:53:7a rssi=-66 f=5240 sc=60 link=390 tx=3.3, 0.0, 0.0  rx=4.1 bcn=0 [on:0 tx:0 rx:0 period:3018] from screen [on:0 period:162428493] score=60
+10-18 14:47:02.118 31068 31186 I Inotia4Qol: 2026-10-18 14:47:02.118 f=2003 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:02.173 31068 31186 I Inotia4Qol: 2026-10-18 14:47:02.173 f=2004 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:02.223 31068 31186 I Inotia4Qol: 2026-10-18 14:47:02.223 f=2005 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:02.274 31068 31186 I Inotia4Qol: 2026-10-18 14:47:02.274 f=2006 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:02.328 31068 31186 I Inotia4Qol: 2026-10-18 14:47:02.328 f=2007 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:02.388 31068 31186 I Inotia4Qol: 2026-10-18 14:47:02.388 f=2008 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:02.441 31068 31186 I Inotia4Qol: 2026-10-18 14:47:02.441 f=2009 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:02.503 31068 31186 I Inotia4Qol: 2026-10-18 14:47:02.503 f=2010 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:02.563 31068 31186 I Inotia4Qol: 2026-10-18 14:47:02.563 f=2011 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:02.707 31068 31186 I Inotia4Qol: 2026-10-18 14:47:02.707 f=2012 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:02.716   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:14.897616,dur:1141.12,max:143.53,min:47.64  
+10-18 14:47:02.770 31068 31186 I Inotia4Qol: 2026-10-18 14:47:02.770 f=2013 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:02.829 31068 31186 I Inotia4Qol: 2026-10-18 14:47:02.829 f=2014 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:02.889 31068 31186 I Inotia4Qol: 2026-10-18 14:47:02.889 f=2015 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:02.948 31068 31186 I Inotia4Qol: 2026-10-18 14:47:02.948 f=2016 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:02.999 31068 31186 I Inotia4Qol: 2026-10-18 14:47:02.999 f=2017 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:03.050 31068 31186 I Inotia4Qol: 2026-10-18 14:47:03.050 f=2018 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:03.105 31068 31186 I Inotia4Qol: 2026-10-18 14:47:03.105 f=2019 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:03.164 31068 31186 I Inotia4Qol: 2026-10-18 14:47:03.164 f=2020 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:03.214 31068 31186 I Inotia4Qol: 2026-10-18 14:47:03.214 f=2021 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:03.266 31068 31186 I Inotia4Qol: 2026-10-18 14:47:03.266 f=2022 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:03.317 31068 31186 I Inotia4Qol: 2026-10-18 14:47:03.317 f=2023 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:03.368 31068 31186 I Inotia4Qol: 2026-10-18 14:47:03.368 f=2024 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:03.423 31068 31186 I Inotia4Qol: 2026-10-18 14:47:03.423 f=2025 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:03.483 31068 31186 I Inotia4Qol: 2026-10-18 14:47:03.483 f=2026 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:03.626 31068 31186 I Inotia4Qol: 2026-10-18 14:47:03.626 f=2027 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:03.691 31068 31186 I Inotia4Qol: 2026-10-18 14:47:03.691 f=2028 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:03.751 31068 31186 I Inotia4Qol: 2026-10-18 14:47:03.751 f=2029 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:03.769   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:16.154062,dur:1052.37,max:139.85,min:46.35  
+10-18 14:47:03.812 31068 31186 I Inotia4Qol: 2026-10-18 14:47:03.812 f=2030 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:03.872 31068 31186 I Inotia4Qol: 2026-10-18 14:47:03.872 f=2031 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:03.929 31068 31186 I Inotia4Qol: 2026-10-18 14:47:03.929 f=2032 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:03.982 31068 31186 I Inotia4Qol: 2026-10-18 14:47:03.982 f=2033 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:04.037 31068 31186 I Inotia4Qol: 2026-10-18 14:47:04.037 f=2034 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:04.096 31068 31186 I Inotia4Qol: 2026-10-18 14:47:04.096 f=2035 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:04.148 31068 31186 I Inotia4Qol: 2026-10-18 14:47:04.147 f=2036 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:04.206 31068 31186 I Inotia4Qol: 2026-10-18 14:47:04.206 f=2037 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:04.256 31068 31186 I Inotia4Qol: 2026-10-18 14:47:04.256 f=2038 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:04.309 31068 31186 I Inotia4Qol: 2026-10-18 14:47:04.309 f=2039 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:04.361 31068 31186 I Inotia4Qol: 2026-10-18 14:47:04.361 f=2040 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:04.420 31940 31940 D ProcessState: Binder ioctl to enable oneway spam detection failed: Invalid argument
+10-18 14:47:04.424 31068 31186 I Inotia4Qol: 2026-10-18 14:47:04.424 f=2041 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:04.431 31940 31941 D hw-ProcessState: Binder ioctl to enable oneway spam detection failed: Invalid argument
+10-18 14:47:04.461 31940 31941 E ion     : ioctl c0044901 failed with code -1: Invalid argument
+10-18 14:47:04.558 31068 31186 I Inotia4Qol: 2026-10-18 14:47:04.558 f=2042 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:04.617 31068 31186 I Inotia4Qol: 2026-10-18 14:47:04.617 f=2043 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:04.676 31068 31186 I Inotia4Qol: 2026-10-18 14:47:04.676 f=2044 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:04.674   952   952 W Binder:952_2: type=1400 audit(0.0:57423077): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:04.713 31940 31940 E IMGSRV  : :2631: GrallocUnregisterBuffer: Cannot free a locked buffer (ID=108968302)
+10-18 14:47:04.713 31940 31940 E IMGMapper: freeBuffer:64 Failed to unregister native handle
+10-18 14:47:04.713 31940 31940 E Gralloc4: freeBuffer(0xb400007ca1815610) failed with 2
+10-18 14:47:04.728 31068 31186 I Inotia4Qol: 2026-10-18 14:47:04.728 f=2045 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:04.726   952   952 W Binder:952_2: type=1400 audit(0.0:57423078): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:04.785 31068 31186 I Inotia4Qol: 2026-10-18 14:47:04.785 f=2046 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:04.782   952   952 W Binder:952_2: type=1400 audit(0.0:57423079): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:04.798   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:16.506044,dur:1029.93,max:139.54,min:43.62  
+10-18 14:47:04.837 31068 31186 I Inotia4Qol: 2026-10-18 14:47:04.837 f=2047 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:04.838   952   952 W Binder:952_2: type=1400 audit(0.0:57423080): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:04.889 31068 31186 I Inotia4Qol: 2026-10-18 14:47:04.889 f=2048 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:04.890   952   952 W Binder:952_2: type=1400 audit(0.0:57423081): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:04.939 31068 31186 I Inotia4Qol: 2026-10-18 14:47:04.939 f=2049 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:04.989 31068 31186 I Inotia4Qol: 2026-10-18 14:47:04.989 f=2050 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:05.038 31068 31186 I Inotia4Qol: 2026-10-18 14:47:05.038 f=2051 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:05.072 19982 19982 I WifiHAL : Get link layer stats
+10-18 14:47:05.072 19982 19982 I WifiHAL : GetLinkStatsCommand::create
+10-18 14:47:05.072 19982 19982 D android.hardware.wifi@1.0-service-lazy: WifiRequest::create vendor command to iface 31, vendor_id=0x1a11, subcmd=0x1200, res=0
+10-18 14:47:05.072 19982 19982 I android.hardware.wifi@1.0-service-lazy: WifiCommand::requestResponse err=-14
+10-18 14:47:05.072 19982 19982 I WifiHAL : wifi_get_link_stats: result=-1
+10-18 14:47:05.072 19814 19926 E WifiVendorHal: getWifiLinkLayerStats_1_5_Internal(l.1191) failed {.code = ERROR_UNKNOWN, .description = unknown}
+10-18 14:47:05.079 19814 19926 D WifiClientModeImpl[wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-64 TxLinkspeed=351 freq=5240 RxLinkSpeed=292
+10-18 14:47:05.080 19814 19926 D WifiDataStall: tx tput in kbps: 144000
+10-18 14:47:05.080 19814 19926 D WifiDataStall: rx tput in kbps: 144000
+10-18 14:47:05.080 19814 19926 V WifiConfigManager: Updating scan detail cache freq=5240 BSSID=e4:4e:12:af:53:7a RSSI=-64 for "chy&zqs_5G"WPA_PSK
+10-18 14:47:05.080 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:47:05.081 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:47:05.081 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -64 Nss: 1 Mode: 5 symDur: 3600 snrDb 10 bitPerTone: 3330 rate: 216 throughput: 167
+10-18 14:47:05.081 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:47:05.081 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:47:05.081 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -64 Nss: 1 Mode: 5 symDur: 3600 snrDb 10 bitPerTone: 3330 rate: 216 throughput: 167
+10-18 14:47:05.082 19814 19926 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1832793812 SSID: "chy&zqs_5G", BSSID: e4:4e:12:af:53:7a, MAC: 9a:90:18:9e:98:88, Security type: 4, Supplicant state: COMPLETED, Wi-Fi standard: 5, RSSI: -64, Link speed: 351Mbps, Tx Link speed: 351Mbps, Max Supported Tx Link speed: 433Mbps, Rx Link speed: 292Mbps, Max Supported Rx Link speed: 433Mbps, Frequency: 5240MHz, Net ID: 3, Metered hint: false, score: 60, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1
+10-18 14:47:05.082 19814 19926 D WifiScoreCard: txRate: 58 txSpeed: 351
+10-18 14:47:05.082 19814 19926 D WifiScoreCard: network update SIGNAL_POLL "chy&zqs_5G" ID: 74066996 RSSI -64 txSpeed 351
+10-18 14:47:05.084 19814 19926 D WifiClientModeImpl[wlan0]:  L2ConnectedState screen=on 4 0 "chy&zqs_5G" e4:4e:12:af:53:7a rssi=-64 f=5240 sc=60 link=351 tx=57.7, 0.0, 0.0  rx=22.1 bcn=0 [on:0 tx:0 rx:0 period:3011] from screen [on:0 period:162431505] score=60
+10-18 14:47:05.088 31068 31186 I Inotia4Qol: 2026-10-18 14:47:05.088 f=2052 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:05.140 31068 31186 I Inotia4Qol: 2026-10-18 14:47:05.140 f=2053 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:05.191 31068 31186 I Inotia4Qol: 2026-10-18 14:47:05.191 f=2054 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:05.241 31068 31186 I Inotia4Qol: 2026-10-18 14:47:05.241 f=2055 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:05.294 31068 31186 I Inotia4Qol: 2026-10-18 14:47:05.294 f=2056 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:05.421 31068 31186 I Inotia4Qol: 2026-10-18 14:47:05.421 f=2057 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:05.478 31068 31186 I Inotia4Qol: 2026-10-18 14:47:05.478 f=2058 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:05.530 31068 31186 I Inotia4Qol: 2026-10-18 14:47:05.530 f=2059 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:05.579 31068 31186 I Inotia4Qol: 2026-10-18 14:47:05.579 f=2060 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:05.629 31068 31186 I Inotia4Qol: 2026-10-18 14:47:05.629 f=2061 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:05.679 31068 31186 I Inotia4Qol: 2026-10-18 14:47:05.679 f=2062 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:05.678   952   952 W Binder:952_2: type=1400 audit(0.0:57423095): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:05.731 31068 31186 I Inotia4Qol: 2026-10-18 14:47:05.731 f=2063 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:05.730   952   952 W Binder:952_2: type=1400 audit(0.0:57423096): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:05.782 31068 31186 I Inotia4Qol: 2026-10-18 14:47:05.782 f=2064 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:05.782   952   952 W Binder:952_2: type=1400 audit(0.0:57423097): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:05.832 31068 31186 I Inotia4Qol: 2026-10-18 14:47:05.832 f=2065 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:05.830   952   952 W Binder:952_2: type=1400 audit(0.0:57423098): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:05.838 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57423099): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:platform_app:s0:c512,c768 tclass=process permissive=0
+10-18 14:47:05.853   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:18.023981,dur:1054.15,max:128.21,min:45.46  
+10-18 14:47:05.884 31068 31186 I Inotia4Qol: 2026-10-18 14:47:05.884 f=2066 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:05.942 31068 31186 I Inotia4Qol: 2026-10-18 14:47:05.942 f=2067 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:05.994 31068 31186 I Inotia4Qol: 2026-10-18 14:47:05.994 f=2068 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:06.045 31068 31186 I Inotia4Qol: 2026-10-18 14:47:06.045 f=2069 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:06.096 31068 31186 I Inotia4Qol: 2026-10-18 14:47:06.096 f=2070 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:06.146 31068 31186 I Inotia4Qol: 2026-10-18 14:47:06.146 f=2071 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:06.275 31068 31186 I Inotia4Qol: 2026-10-18 14:47:06.275 f=2072 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:06.332 31068 31186 I Inotia4Qol: 2026-10-18 14:47:06.332 f=2073 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:06.386 31068 31186 I Inotia4Qol: 2026-10-18 14:47:06.386 f=2074 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:06.448 31068 31186 I Inotia4Qol: 2026-10-18 14:47:06.448 f=2075 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:06.505 31068 31186 I Inotia4Qol: 2026-10-18 14:47:06.505 f=2076 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:06.552 31068 31186 I Inotia4Qol: 2026-10-18 14:47:06.552 f=2077 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:06.606 31068 31186 I Inotia4Qol: 2026-10-18 14:47:06.606 f=2078 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:06.656 31068 31186 I Inotia4Qol: 2026-10-18 14:47:06.656 f=2079 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:06.706 31068 31186 I Inotia4Qol: 2026-10-18 14:47:06.706 f=2080 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:06.706   952   952 W Binder:952_2: type=1400 audit(0.0:57423117): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:06.756 31068 31186 I Inotia4Qol: 2026-10-18 14:47:06.756 f=2081 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:06.754   952   952 W Binder:952_2: type=1400 audit(0.0:57423118): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:06.810 31068 31186 I Inotia4Qol: 2026-10-18 14:47:06.810 f=2082 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:06.810   952   952 W Binder:952_2: type=1400 audit(0.0:57423119): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:06.861 31068 31186 I Inotia4Qol: 2026-10-18 14:47:06.861 f=2083 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:06.858   952   952 W Binder:952_2: type=1400 audit(0.0:57423120): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:06.869   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:17.713936,dur:1016.15,max:129.05,min:43.60  
+10-18 14:47:06.912 31068 31186 I Inotia4Qol: 2026-10-18 14:47:06.912 f=2084 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:06.910   952   952 W Binder:952_2: type=1400 audit(0.0:57423121): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:06.961 31068 31186 I Inotia4Qol: 2026-10-18 14:47:06.961 f=2085 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:07.002  1182  1182 I thermal_repeater: [recvMdThermalInfo] ret=5, strLen=127, ERROR
+10-18 14:47:07.013 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.013 f=2086 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:07.140 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.140 f=2087 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:07.199 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.199 f=2088 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:07.258 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.258 f=2089 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:07.309 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.309 f=2090 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:07.359 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.359 f=2091 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:07.413 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.413 f=2092 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:07.470 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.470 f=2093 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:07.522 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.522 f=2094 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:07.575 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.575 f=2095 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:07.627 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.626 f=2096 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:07.677 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.677 f=2097 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:07.726 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.726 f=2098 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:07.726   952   952 W Binder:952_2: type=1400 audit(0.0:57423139): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:07.756 31945 31945 D ProcessState: Binder ioctl to enable oneway spam detection failed: Invalid argument
+10-18 14:47:07.754 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57423140): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:su:s0 tclass=process permissive=0
+10-18 14:47:07.778 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.778 f=2099 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:07.778   952   952 W Binder:952_2: type=1400 audit(0.0:57423141): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:07.807 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.807 f=2100 I extension_bag extension_bag exit seq=113 ms=2993564053 phase=event_enter event=0x17 param=0x7957927698 param2=0x0 x=592 y=524 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:47:07.807 31068 31186 D Inotia4Qol: 2026-10-18 14:47:07.807 f=2100 D extension_bag extension_bag touch bounds event=0x17 x=592 y=524 grid=761,160 323x323 grid_hit=0 tab_origin=1220,134 mode=1 selected=0 overlay=1 root=0x793910ace0 root_gen=4 state_gen=4
+10-18 14:47:07.831 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.831 f=2100 I extension_bag extension_bag exit seq=114 ms=2993564080 phase=delegate_pre_orig event=0x17 param=0x7957927698 param2=0x0 x=592 y=524 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:47:07.831 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.831 f=2100 I extension_bag extension_bag orig_event pre event=0x17 session_projected=0 source=-1/-1 inven_valid=0 digest=0x14650fb0739d0383 nonnull=0
+10-18 14:47:07.832 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.832 f=2100 I extension_bag extension_bag orig_event post event=0x17 session_projected=0 source=-1/-1 inven_valid=0 digest=0x14650fb0739d0383 nonnull=0
+10-18 14:47:07.838 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57423142): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:platform_app:s0:c512,c768 tclass=process permissive=0
+10-18 14:47:07.842 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57423143): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:platform_app:s0:c512,c768 tclass=process permissive=0
+10-18 14:47:07.856 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.856 f=2100 I extension_bag extension_bag exit seq=115 ms=2993564104 phase=delegate_post_orig event=0x17 param=0x7957927698 param2=0x0 x=592 y=524 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:47:07.902 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.902 f=2100 I extension_bag extension_bag exit seq=116 ms=2993564150 phase=event_enter event=0xffffffff80000001 param=0xc8 param2=0x106 x=-1 y=-1 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:47:07.927 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.927 f=2100 I extension_bag extension_bag exit seq=117 ms=2993564175 phase=delegate_pre_orig event=0xffffffff80000001 param=0xc8 param2=0x106 x=0 y=0 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:47:07.927 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.927 f=2100 I extension_bag extension_bag orig_event pre event=0xffffffff80000001 session_projected=0 source=-1/-1 inven_valid=0 digest=0x14650fb0739d0383 nonnull=0
+10-18 14:47:07.927 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.927 f=2100 I extension_bag extension_bag orig_event post event=0xffffffff80000001 session_projected=0 source=-1/-1 inven_valid=0 digest=0x14650fb0739d0383 nonnull=0
+10-18 14:47:07.953 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.952 f=2100 I extension_bag extension_bag exit seq=118 ms=2993564200 phase=delegate_post_orig event=0xffffffff80000001 param=0xc8 param2=0x106 x=0 y=0 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:47:07.988 31068 31186 I Inotia4Qol: 2026-10-18 14:47:07.988 f=2100 I extension_bag extension_bag exit seq=119 ms=2993564236 phase=event_enter event=0xffffffff80000004 param=0x1 param2=0xc80106 x=-1 y=-1 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:47:08.014 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.014 f=2100 I extension_bag extension_bag exit seq=120 ms=2993564261 phase=delegate_pre_orig event=0xffffffff80000004 param=0x1 param2=0xc80106 x=0 y=0 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:47:08.014 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.014 f=2100 I extension_bag extension_bag orig_event pre event=0xffffffff80000004 session_projected=0 source=-1/-1 inven_valid=0 digest=0x14650fb0739d0383 nonnull=0
+10-18 14:47:08.014 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.014 f=2100 I extension_bag extension_bag orig_event post event=0xffffffff80000004 session_projected=0 source=-1/-1 inven_valid=0 digest=0x14650fb0739d0383 nonnull=0
+10-18 14:47:08.039 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.039 f=2100 I extension_bag extension_bag exit seq=121 ms=2993564287 phase=delegate_post_orig event=0xffffffff80000004 param=0x1 param2=0xc80106 x=0 y=0 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:47:08.075 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.075 f=2100 I extension_bag extension_bag exit seq=122 ms=2993564323 phase=event_release event=0x18 param=0x7957927698 param2=0x0 x=592 y=524 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:47:08.084 19982 19982 I WifiHAL : Get link layer stats
+10-18 14:47:08.084 19982 19982 I WifiHAL : GetLinkStatsCommand::create
+10-18 14:47:08.084 19982 19982 D android.hardware.wifi@1.0-service-lazy: WifiRequest::create vendor command to iface 31, vendor_id=0x1a11, subcmd=0x1200, res=0
+10-18 14:47:08.084 19982 19982 I android.hardware.wifi@1.0-service-lazy: WifiCommand::requestResponse err=-14
+10-18 14:47:08.084 19982 19982 I WifiHAL : wifi_get_link_stats: result=-1
+10-18 14:47:08.085 19814 19926 E WifiVendorHal: getWifiLinkLayerStats_1_5_Internal(l.1191) failed {.code = ERROR_UNKNOWN, .description = unknown}
+10-18 14:47:08.088 19814 19926 D WifiClientModeImpl[wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-64 TxLinkspeed=390 freq=5240 RxLinkSpeed=260
+10-18 14:47:08.089 19814 19926 D WifiDataStall: tx tput in kbps: 167000
+10-18 14:47:08.089 19814 19926 D WifiDataStall: rx tput in kbps: 167000
+10-18 14:47:08.089 19814 19926 V WifiConfigManager: Updating scan detail cache freq=5240 BSSID=e4:4e:12:af:53:7a RSSI=-64 for "chy&zqs_5G"WPA_PSK
+10-18 14:47:08.089 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:47:08.089 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:47:08.089 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -64 Nss: 1 Mode: 5 symDur: 3600 snrDb 10 bitPerTone: 3330 rate: 216 throughput: 167
+10-18 14:47:08.089 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:47:08.089 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:47:08.089 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -64 Nss: 1 Mode: 5 symDur: 3600 snrDb 10 bitPerTone: 3330 rate: 216 throughput: 167
+10-18 14:47:08.091 19814 19926 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1832793812 SSID: "chy&zqs_5G", BSSID: e4:4e:12:af:53:7a, MAC: 9a:90:18:9e:98:88, Security type: 4, Supplicant state: COMPLETED, Wi-Fi standard: 5, RSSI: -64, Link speed: 390Mbps, Tx Link speed: 390Mbps, Max Supported Tx Link speed: 433Mbps, Rx Link speed: 260Mbps, Max Supported Rx Link speed: 433Mbps, Frequency: 5240MHz, Net ID: 3, Metered hint: false, score: 60, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1
+10-18 14:47:08.091 19814 19926 D WifiScoreCard: txRate: 24 txSpeed: 390
+10-18 14:47:08.091 19814 19926 D WifiScoreCard: network update SIGNAL_POLL "chy&zqs_5G" ID: 74066996 RSSI -64 txSpeed 390
+10-18 14:47:08.093 19814 19926 D WifiClientModeImpl[wlan0]:  L2ConnectedState screen=on 4 0 "chy&zqs_5G" e4:4e:12:af:53:7a rssi=-64 f=5240 sc=60 link=390 tx=23.9, 0.0, 0.0  rx=11.2 bcn=0 [on:0 tx:0 rx:0 period:3008] from screen [on:0 period:162434514] score=60
+10-18 14:47:08.101 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.101 f=2100 I extension_bag extension_bag exit seq=123 ms=2993564348 phase=event_enter event=0x18 param=0x7957927698 param2=0x0 x=-1 y=-1 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:47:08.126 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.126 f=2100 I extension_bag extension_bag exit seq=124 ms=2993564373 phase=delegate_pre_orig event=0x18 param=0x7957927698 param2=0x0 x=592 y=524 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:47:08.126 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.126 f=2100 I extension_bag extension_bag orig_event pre event=0x18 session_projected=0 source=-1/-1 inven_valid=0 digest=0x14650fb0739d0383 nonnull=0
+10-18 14:47:08.140 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.140 f=2100 I extension_bag extension_bag extension desc execute index=1 original=0x79572cb240 bag=0 slot=2
+10-18 14:47:08.141 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.141 f=2100 I extension_bag extension_bag extension sell button matched source=destroy bag=0 slot=2 item=0x793902cc60
+10-18 14:47:08.141 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.141 f=2100 I extension_bag extension_bag sell price source=equip category=56 count=7 unit=455 variant=70 final=2229 payload=4072479743 gen=3
+10-18 14:47:08.141 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.141 f=2100 I extension_bag extension_bag extension sell confirmation created price=2229
+10-18 14:47:08.152 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.152 f=2100 I extension_bag extension_bag orig_event post event=0x18 session_projected=0 source=-1/-1 inven_valid=0 digest=0x14650fb0739d0383 nonnull=0
+10-18 14:47:08.178 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.178 f=2100 I extension_bag extension_bag exit seq=125 ms=2993564425 phase=delegate_post_orig event=0x18 param=0x7957927698 param2=0x0 x=592 y=524 mode=1 selected=0 inspected=-1 overlay=1 overlay_index=0 direct=0 got=0 desc=2 saved_direct=0 saved_got=0
+10-18 14:47:08.255 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.255 f=2100 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:08.261   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:12.213869,dur:1391.86,max:468.63,min:45.82  
+10-18 14:47:08.308 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.308 f=2101 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:08.439 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.439 f=2102 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:08.495 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.495 f=2103 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:08.551 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.551 f=2104 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:08.600 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.600 f=2105 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:08.655 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.655 f=2106 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:08.704 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.704 f=2107 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:08.742   376   376 W Binder:376_2: type=1400 audit(0.0:57423154): avc: denied { getattr } for scontext=u:r:vold:s0 tcontext=u:r:system_server:s0 tclass=process permissive=0
+10-18 14:47:08.756 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.756 f=2108 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:08.754   952   952 W Binder:952_2: type=1400 audit(0.0:57423155): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:08.805 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.805 f=2109 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:08.806   952   952 W Binder:952_2: type=1400 audit(0.0:57423156): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:08.858 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.858 f=2110 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:08.858   952   952 W Binder:952_2: type=1400 audit(0.0:57423157): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:08.910 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.910 f=2111 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:08.910   952   952 W Binder:952_2: type=1400 audit(0.0:57423158): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:08.966 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.966 f=2112 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:09.018 31068 31186 I Inotia4Qol: 2026-10-18 14:47:09.018 f=2113 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:09.075 31068 31186 I Inotia4Qol: 2026-10-18 14:47:09.075 f=2114 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:09.132 31068 31186 I Inotia4Qol: 2026-10-18 14:47:09.132 f=2115 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:09.180 31068 31186 I Inotia4Qol: 2026-10-18 14:47:09.180 f=2116 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:09.310 31068 31186 I Inotia4Qol: 2026-10-18 14:47:09.310 f=2117 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:09.319   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:16.062452,dur:1058.37,max:133.21,min:43.27  
+10-18 14:47:09.366 31068 31186 I Inotia4Qol: 2026-10-18 14:47:09.366 f=2118 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:09.415 31068 31186 I Inotia4Qol: 2026-10-18 14:47:09.415 f=2119 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:09.467 31068 31186 I Inotia4Qol: 2026-10-18 14:47:09.467 f=2120 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:09.520 31068 31186 I Inotia4Qol: 2026-10-18 14:47:09.520 f=2121 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:09.570 31068 31186 I Inotia4Qol: 2026-10-18 14:47:09.570 f=2122 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:09.619 31068 31186 I Inotia4Qol: 2026-10-18 14:47:09.619 f=2123 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:09.668 31068 31186 I Inotia4Qol: 2026-10-18 14:47:09.668 f=2124 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:09.720 31068 31186 I Inotia4Qol: 2026-10-18 14:47:09.720 f=2125 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:09.772 31068 31186 I Inotia4Qol: 2026-10-18 14:47:09.772 f=2126 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:09.770   952   952 W Binder:952_2: type=1400 audit(0.0:57423173): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:09.823 31068 31186 I Inotia4Qol: 2026-10-18 14:47:09.823 f=2127 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:09.822   952   952 W Binder:952_2: type=1400 audit(0.0:57423174): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:09.842 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57423175): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:platform_app:s0:c512,c768 tclass=process permissive=0
+10-18 14:47:09.842 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57423176): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:platform_app:s0:c512,c768 tclass=process permissive=0
+10-18 14:47:09.846 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57423177): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:platform_app:s0:c512,c768 tclass=process permissive=0
+10-18 14:47:09.872 31068 31186 I Inotia4Qol: 2026-10-18 14:47:09.872 f=2128 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:09.933 31068 31186 I Inotia4Qol: 2026-10-18 14:47:09.933 f=2129 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:09.990 31068 31186 I Inotia4Qol: 2026-10-18 14:47:09.990 f=2130 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:10.047 31068 31186 I Inotia4Qol: 2026-10-18 14:47:10.047 f=2131 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:10.182 31068 31186 I Inotia4Qol: 2026-10-18 14:47:10.182 f=2132 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:10.241 31068 31186 I Inotia4Qol: 2026-10-18 14:47:10.241 f=2133 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:10.302 31068 31186 I Inotia4Qol: 2026-10-18 14:47:10.302 f=2134 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:10.358 31068 31186 I Inotia4Qol: 2026-10-18 14:47:10.358 f=2135 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:10.379   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:16.973440,dur:1060.48,max:133.29,min:42.92  
+10-18 14:47:10.420 31068 31186 I Inotia4Qol: 2026-10-18 14:47:10.420 f=2136 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:10.482 31068 31186 I Inotia4Qol: 2026-10-18 14:47:10.482 f=2137 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:10.539 31068 31186 I Inotia4Qol: 2026-10-18 14:47:10.539 f=2138 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:10.592 31068 31186 I Inotia4Qol: 2026-10-18 14:47:10.592 f=2139 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:10.650 31068 31186 I Inotia4Qol: 2026-10-18 14:47:10.650 f=2140 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:10.702 31068 31186 I Inotia4Qol: 2026-10-18 14:47:10.702 f=2141 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:10.759 31068 31186 I Inotia4Qol: 2026-10-18 14:47:10.759 f=2142 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:10.816 31068 31186 I Inotia4Qol: 2026-10-18 14:47:10.816 f=2143 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:10.874 31068 31186 I Inotia4Qol: 2026-10-18 14:47:10.874 f=2144 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:10.927 31068 31186 I Inotia4Qol: 2026-10-18 14:47:10.926 f=2145 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:10.983 31068 31186 I Inotia4Qol: 2026-10-18 14:47:10.983 f=2146 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:10.814   952   952 W Binder:952_2: type=1400 audit(0.0:57423194): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:10.874   952   952 W Binder:952_2: type=1400 audit(0.0:57423195): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:10.926   952   952 W Binder:952_2: type=1400 audit(0.0:57423196): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:10.982   952   952 W Binder:952_2: type=1400 audit(0.0:57423197): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:11.122   952   952 W Binder:952_2: type=1400 audit(0.0:57423198): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:11.842   952   952 W Binder:952_2: type=1400 audit(0.0:57423211): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:11.846 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57423212): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:platform_app:s0:c512,c768 tclass=process permissive=0
+10-18 14:47:11.846 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57423213): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:platform_app:s0:c512,c768 tclass=process permissive=0
+10-18 14:47:11.850 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57423214): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:platform_app:s0:c512,c768 tclass=process permissive=0
+10-18 14:47:11.850 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57423215): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:platform_app:s0:c512,c768 tclass=process permissive=0
+10-18 14:47:12.846   952   952 W Binder:952_2: type=1400 audit(0.0:57423233): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:12.986   952   952 W Binder:952_2: type=1400 audit(0.0:57423234): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:11.096 19982 19982 I WifiHAL : GetLinkStatsCommand::create
+10-18 14:47:11.096 19982 19982 D android.hardware.wifi@1.0-service-lazy: WifiRequest::create vendor command to iface 31, vendor_id=0x1a11, subcmd=0x1200, res=0
+10-18 14:47:11.096 19982 19982 I android.hardware.wifi@1.0-service-lazy: WifiCommand::requestResponse err=-14
+10-18 14:47:11.096 19982 19982 I WifiHAL : wifi_get_link_stats: result=-1
+10-18 14:47:11.096 19814 19926 E WifiVendorHal: getWifiLinkLayerStats_1_5_Internal(l.1191) failed {.code = ERROR_UNKNOWN, .description = unknown}
+10-18 14:47:11.099 19814 19926 D WifiClientModeImpl[wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-64 TxLinkspeed=390 freq=5240 RxLinkSpeed=260
+10-18 14:47:11.100 19814 19926 D WifiDataStall: tx tput in kbps: 167000
+10-18 14:47:11.100 19814 19926 D WifiDataStall: rx tput in kbps: 167000
+10-18 14:47:11.100 19814 19926 V WifiConfigManager: Updating scan detail cache freq=5240 BSSID=e4:4e:12:af:53:7a RSSI=-64 for "chy&zqs_5G"WPA_PSK
+10-18 14:47:11.101 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:47:11.101 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:47:11.101 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -64 Nss: 1 Mode: 5 symDur: 3600 snrDb 10 bitPerTone: 3330 rate: 216 throughput: 167
+10-18 14:47:11.101 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:47:11.101 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:47:11.101 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -64 Nss: 1 Mode: 5 symDur: 3600 snrDb 10 bitPerTone: 3330 rate: 216 throughput: 167
+10-18 14:47:11.102 19814 19926 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1832793812 SSID: "chy&zqs_5G", BSSID: e4:4e:12:af:53:7a, MAC: 9a:90:18:9e:98:88, Security type: 4, Supplicant state: COMPLETED, Wi-Fi standard: 5, RSSI: -64, Link speed: 390Mbps, Tx Link speed: 390Mbps, Max Supported Tx Link speed: 433Mbps, Rx Link speed: 260Mbps, Max Supported Rx Link speed: 433Mbps, Frequency: 5240MHz, Net ID: 3, Metered hint: false, score: 60, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1
+10-18 14:47:11.102 19814 19926 D WifiScoreCard: txRate: 11 txSpeed: 390
+10-18 14:47:11.102 19814 19926 D WifiScoreCard: network update SIGNAL_POLL "chy&zqs_5G" ID: 74066996 RSSI -64 txSpeed 390
+10-18 14:47:11.104 19814 19926 D WifiClientModeImpl[wlan0]:  L2ConnectedState screen=on 4 0 "chy&zqs_5G" e4:4e:12:af:53:7a rssi=-64 f=5240 sc=60 link=390 tx=10.0, 0.0, 0.0  rx=7.7 bcn=0 [on:0 tx:0 rx:0 period:3011] from screen [on:0 period:162437525] score=60
+10-18 14:47:11.121 31068 31186 I Inotia4Qol: 2026-10-18 14:47:11.121 f=2147 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:11.184 31068 31186 I Inotia4Qol: 2026-10-18 14:47:11.184 f=2148 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:11.243 31068 31186 I Inotia4Qol: 2026-10-18 14:47:11.243 f=2149 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:11.297 31068 31186 I Inotia4Qol: 2026-10-18 14:47:11.297 f=2150 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:11.356 31068 31186 I Inotia4Qol: 2026-10-18 14:47:11.356 f=2151 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:11.408 31068 31186 I Inotia4Qol: 2026-10-18 14:47:11.408 f=2152 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:11.416   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:16.400490,dur:1036.55,max:139.04,min:43.34  
+10-18 14:47:11.466 31068 31186 I Inotia4Qol: 2026-10-18 14:47:11.466 f=2153 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:11.519 31068 31186 I Inotia4Qol: 2026-10-18 14:47:11.519 f=2154 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:11.581 31068 31186 I Inotia4Qol: 2026-10-18 14:47:11.581 f=2155 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:11.633 31068 31186 I Inotia4Qol: 2026-10-18 14:47:11.633 f=2156 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:11.691 31068 31186 I Inotia4Qol: 2026-10-18 14:47:11.691 f=2157 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:11.742 31068 31186 I Inotia4Qol: 2026-10-18 14:47:11.742 f=2158 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:11.793 31068 31186 I Inotia4Qol: 2026-10-18 14:47:11.793 f=2159 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:11.843 31068 31186 I Inotia4Qol: 2026-10-18 14:47:11.843 f=2160 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:11.896 31068 31186 I Inotia4Qol: 2026-10-18 14:47:11.896 f=2161 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:12.031 31068 31186 I Inotia4Qol: 2026-10-18 14:47:12.031 f=2162 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:12.091 31068 31186 I Inotia4Qol: 2026-10-18 14:47:12.091 f=2163 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:12.142 31068 31186 I Inotia4Qol: 2026-10-18 14:47:12.142 f=2164 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:12.204 31068 31186 I Inotia4Qol: 2026-10-18 14:47:12.204 f=2165 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:12.264 31068 31186 I Inotia4Qol: 2026-10-18 14:47:12.264 f=2166 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:12.321 31068 31186 I Inotia4Qol: 2026-10-18 14:47:12.320 f=2167 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:12.376 31068 31186 I Inotia4Qol: 2026-10-18 14:47:12.376 f=2168 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:12.427 31068 31186 I Inotia4Qol: 2026-10-18 14:47:12.427 f=2169 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:12.446   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:16.501625,dur:1030.20,max:138.37,min:43.56  
+10-18 14:47:12.480 31068 31186 I Inotia4Qol: 2026-10-18 14:47:12.480 f=2170 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:12.542 31068 31186 I Inotia4Qol: 2026-10-18 14:47:12.542 f=2171 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:12.603 31068 31186 I Inotia4Qol: 2026-10-18 14:47:12.603 f=2172 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:12.664 31068 31186 I Inotia4Qol: 2026-10-18 14:47:12.664 f=2173 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:12.726 31068 31186 I Inotia4Qol: 2026-10-18 14:47:12.726 f=2174 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:12.788 31068 31186 I Inotia4Qol: 2026-10-18 14:47:12.788 f=2175 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:12.848 31068 31186 I Inotia4Qol: 2026-10-18 14:47:12.848 f=2176 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:12.986 31068 31186 I Inotia4Qol: 2026-10-18 14:47:12.986 f=2177 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:13.043 31068 31186 I Inotia4Qol: 2026-10-18 14:47:13.043 f=2178 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:13.102 31068 31186 I Inotia4Qol: 2026-10-18 14:47:13.102 f=2179 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:13.162 31068 31186 I Inotia4Qol: 2026-10-18 14:47:13.162 f=2180 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:13.216 31068 31186 I Inotia4Qol: 2026-10-18 14:47:13.216 f=2181 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:13.275 31068 31186 I Inotia4Qol: 2026-10-18 14:47:13.275 f=2182 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:13.330 31068 31186 I Inotia4Qol: 2026-10-18 14:47:13.330 f=2183 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:13.388 31068 31186 I Inotia4Qol: 2026-10-18 14:47:13.388 f=2184 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:13.448 31068 31186 I Inotia4Qol: 2026-10-18 14:47:13.448 f=2185 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:13.464   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:15.727061,dur:1017.35,max:143.31,min:47.67  
+10-18 14:47:13.499 31068 31186 I Inotia4Qol: 2026-10-18 14:47:13.499 f=2186 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:13.042   952   952 W Binder:952_2: type=1400 audit(0.0:57423235): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:13.102   952   952 W Binder:952_2: type=1400 audit(0.0:57423236): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:13.162   952   952 W Binder:952_2: type=1400 audit(0.0:57423237): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:13.552 31068 31186 I Inotia4Qol: 2026-10-18 14:47:13.552 f=2187 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:13.607 31068 31186 I Inotia4Qol: 2026-10-18 14:47:13.607 f=2188 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:13.628  1000  1000 I libPerfCtl: xgfGetCmd ioctl_ret:-1
+10-18 14:47:13.658 31068 31186 I Inotia4Qol: 2026-10-18 14:47:13.658 f=2189 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:13.715 31068 31186 I Inotia4Qol: 2026-10-18 14:47:13.715 f=2190 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:13.770 31068 31186 I Inotia4Qol: 2026-10-18 14:47:13.770 f=2191 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:13.850 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57423249): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:platform_app:s0:c512,c768 tclass=process permissive=0
+10-18 14:47:13.854 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57423250): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:platform_app:s0:c512,c768 tclass=process permissive=0
+10-18 14:47:13.854 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57423251): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:platform_app:s0:c512,c768 tclass=process permissive=0
+10-18 14:47:13.854 19814 19814 W Binder:19814_17: type=1400 audit(0.0:57423252): avc: denied { getattr } for scontext=u:r:system_server:s0 tcontext=u:r:platform_app:s0:c512,c768 tclass=process permissive=0
+10-18 14:47:13.899 31068 31186 I Inotia4Qol: 2026-10-18 14:47:13.898 f=2192 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:13.898   952   952 W Binder:952_2: type=1400 audit(0.0:57423253): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:13.956 31068 31186 I Inotia4Qol: 2026-10-18 14:47:13.956 f=2193 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:14.007 31068 31186 I Inotia4Qol: 2026-10-18 14:47:14.007 f=2194 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:14.062 31068 31186 I Inotia4Qol: 2026-10-18 14:47:14.062 f=2195 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:14.104 19982 19982 I WifiHAL : Get link layer stats
+10-18 14:47:14.104 19982 19982 I WifiHAL : GetLinkStatsCommand::create
+10-18 14:47:14.104 19982 19982 D android.hardware.wifi@1.0-service-lazy: WifiRequest::create vendor command to iface 31, vendor_id=0x1a11, subcmd=0x1200, res=0
+10-18 14:47:14.104 19982 19982 I android.hardware.wifi@1.0-service-lazy: WifiCommand::requestResponse err=-14
+10-18 14:47:14.104 19982 19982 I WifiHAL : wifi_get_link_stats: result=-1
+10-18 14:47:14.105 19814 19926 E WifiVendorHal: getWifiLinkLayerStats_1_5_Internal(l.1191) failed {.code = ERROR_UNKNOWN, .description = unknown}
+10-18 14:47:14.116 31068 31186 I Inotia4Qol: 2026-10-18 14:47:14.116 f=2196 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:14.117 19814 19926 D WifiClientModeImpl[wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-64 TxLinkspeed=390 freq=5240 RxLinkSpeed=260
+10-18 14:47:14.117 19814 19926 D WifiDataStall: tx tput in kbps: 167000
+10-18 14:47:14.118 19814 19926 D WifiDataStall: rx tput in kbps: 167000
+10-18 14:47:14.118 19814 19926 V WifiConfigManager: Updating scan detail cache freq=5240 BSSID=e4:4e:12:af:53:7a RSSI=-64 for "chy&zqs_5G"WPA_PSK
+10-18 14:47:14.118 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:47:14.118 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:47:14.118 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -64 Nss: 1 Mode: 5 symDur: 3600 snrDb 10 bitPerTone: 3330 rate: 216 throughput: 167
+10-18 14:47:14.118 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:47:14.118 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:47:14.118 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -64 Nss: 1 Mode: 5 symDur: 3600 snrDb 10 bitPerTone: 3330 rate: 216 throughput: 167
+10-18 14:47:14.120 19814 19926 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1832793812 SSID: "chy&zqs_5G", BSSID: e4:4e:12:af:53:7a, MAC: 9a:90:18:9e:98:88, Security type: 4, Supplicant state: COMPLETED, Wi-Fi standard: 5, RSSI: -64, Link speed: 390Mbps, Tx Link speed: 390Mbps, Max Supported Tx Link speed: 433Mbps, Rx Link speed: 260Mbps, Max Supported Rx Link speed: 433Mbps, Frequency: 5240MHz, Net ID: 3, Metered hint: false, score: 60, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1
+10-18 14:47:14.120 19814 19926 D WifiScoreCard: txRate: 18 txSpeed: 390
+10-18 14:47:14.120 19814 19926 D WifiScoreCard: network update SIGNAL_POLL "chy&zqs_5G" ID: 74066996 RSSI -64 txSpeed 390
+10-18 14:47:14.122 19814 19926 D WifiClientModeImpl[wlan0]:  L2ConnectedState screen=on 4 0 "chy&zqs_5G" e4:4e:12:af:53:7a rssi=-64 f=5240 sc=60 link=390 tx=17.4, 0.0, 0.0  rx=9.1 bcn=0 [on:0 tx:0 rx:0 period:3013] from screen [on:0 period:162440542] score=60
+10-18 14:47:14.167 31068 31186 I Inotia4Qol: 2026-10-18 14:47:14.167 f=2197 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:14.221 31068 31186 I Inotia4Qol: 2026-10-18 14:47:14.221 f=2198 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:14.270 31068 31186 I Inotia4Qol: 2026-10-18 14:47:14.270 f=2199 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:14.320 31068 31186 I Inotia4Qol: 2026-10-18 14:47:14.320 f=2200 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:14.372 31068 31186 I Inotia4Qol: 2026-10-18 14:47:14.372 f=2201 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:14.420 31068 31186 I Inotia4Qol: 2026-10-18 14:47:14.420 f=2202 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:14.474 31068 31186 I Inotia4Qol: 2026-10-18 14:47:14.474 f=2203 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:14.486   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:17.608780,dur:1022.22,max:128.03,min:43.11  
+10-18 14:47:14.525 31068 31186 I Inotia4Qol: 2026-10-18 14:47:14.525 f=2204 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:14.576 31068 31186 I Inotia4Qol: 2026-10-18 14:47:14.576 f=2205 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:14.627 31068 31186 I Inotia4Qol: 2026-10-18 14:47:14.627 f=2206 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:14.760 31068 31186 I Inotia4Qol: 2026-10-18 14:47:14.760 f=2207 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:14.811 31068 31186 I Inotia4Qol: 2026-10-18 14:47:14.811 f=2208 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:14.862 31068 31186 I Inotia4Qol: 2026-10-18 14:47:14.862 f=2209 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:14.862   952   952 W Binder:952_2: type=1400 audit(0.0:57423270): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:14.916 31068 31186 I Inotia4Qol: 2026-10-18 14:47:14.916 f=2210 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:14.914   952   952 W Binder:952_2: type=1400 audit(0.0:57423271): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:14.973 31068 31186 I Inotia4Qol: 2026-10-18 14:47:14.973 f=2211 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:14.970   952   952 W Binder:952_2: type=1400 audit(0.0:57423272): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:15.024 31068 31186 I Inotia4Qol: 2026-10-18 14:47:15.024 f=2212 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:15.022   952   952 W Binder:952_2: type=1400 audit(0.0:57423273): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:15.074 31068 31186 I Inotia4Qol: 2026-10-18 14:47:15.074 f=2213 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:15.074   952   952 W Binder:952_2: type=1400 audit(0.0:57423274): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:15.124 31068 31186 I Inotia4Qol: 2026-10-18 14:47:15.124 f=2214 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:15.175 31068 31186 I Inotia4Qol: 2026-10-18 14:47:15.175 f=2215 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:15.226 31068 31186 I Inotia4Qol: 2026-10-18 14:47:15.226 f=2216 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:15.277 31068 31186 I Inotia4Qol: 2026-10-18 14:47:15.277 f=2217 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:15.328 31068 31186 I Inotia4Qol: 2026-10-18 14:47:15.328 f=2218 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:15.384 31068 31186 I Inotia4Qol: 2026-10-18 14:47:15.384 f=2219 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:15.440 31068 31186 I Inotia4Qol: 2026-10-18 14:47:15.440 f=2220 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:15.493 31068 31186 I Inotia4Qol: 2026-10-18 14:47:15.493 f=2221 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:15.498   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:17.778692,dur:1012.45,max:122.72,min:46.26  
+10-18 14:47:15.621 31068 31186 I Inotia4Qol: 2026-10-18 14:47:15.621 f=2222 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:15.676 31068 31186 I Inotia4Qol: 2026-10-18 14:47:15.676 f=2223 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:15.727 31068 31186 I Inotia4Qol: 2026-10-18 14:47:15.727 f=2224 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:15.781 31068 31186 I Inotia4Qol: 2026-10-18 14:47:15.781 f=2225 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:15.837 31068 31186 I Inotia4Qol: 2026-10-18 14:47:15.837 f=2226 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:15.887 31068 31186 I Inotia4Qol: 2026-10-18 14:47:15.886 f=2227 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:15.886   952   952 W Binder:952_2: type=1400 audit(0.0:57423292): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:15.939 31068 31186 I Inotia4Qol: 2026-10-18 14:47:15.939 f=2228 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:15.938   952   952 W Binder:952_2: type=1400 audit(0.0:57423293): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:15.988 31068 31186 I Inotia4Qol: 2026-10-18 14:47:15.988 f=2229 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:15.986   952   952 W Binder:952_2: type=1400 audit(0.0:57423294): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:16.039 31068 31186 I Inotia4Qol: 2026-10-18 14:47:16.039 f=2230 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:16.038   952   952 W Binder:952_2: type=1400 audit(0.0:57423295): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:16.091 31068 31186 I Inotia4Qol: 2026-10-18 14:47:16.090 f=2231 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:16.090   952   952 W Binder:952_2: type=1400 audit(0.0:57423296): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:16.141 31068 31186 I Inotia4Qol: 2026-10-18 14:47:16.141 f=2232 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:16.195 31068 31186 I Inotia4Qol: 2026-10-18 14:47:16.195 f=2233 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:16.238 31068 31953 I Inotia4Qol: 2026-10-18 14:47:16.238 f=2234 I api UiActions.kt:22 endpoint=POST /api/ui/dialog/select params={action=cancel,index=-1} result={ok:true} dur=23ms
+10-18 14:47:16.246 31068 31186 I Inotia4Qol: 2026-10-18 14:47:16.246 f=2234 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:16.248 31068 31186 V FINDOK  : UIPopupMsg_ButtonCancelExe
+10-18 14:47:16.294 31068 31186 I Inotia4Qol: 2026-10-18 14:47:16.294 f=2235 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:16.344 31068 31186 I Inotia4Qol: 2026-10-18 14:47:16.344 f=2236 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:16.473 31068 31186 I Inotia4Qol: 2026-10-18 14:47:16.473 f=2237 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:16.531 31068 31186 I Inotia4Qol: 2026-10-18 14:47:16.531 f=2238 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:16.538   916   916 I hwcomposer: [HWCDisplay] [Display_0 (type:1)] fps:16.344509,dur:1040.10,max:132.64,min:42.68  
+10-18 14:47:16.583 31068 31186 I Inotia4Qol: 2026-10-18 14:47:16.583 f=2239 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:16.640 31068 31186 I Inotia4Qol: 2026-10-18 14:47:16.640 f=2240 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:16.690 31068 31186 I Inotia4Qol: 2026-10-18 14:47:16.690 f=2241 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:16.742 31068 31186 I Inotia4Qol: 2026-10-18 14:47:16.742 f=2242 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:16.792 31068 31186 I Inotia4Qol: 2026-10-18 14:47:16.792 f=2243 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:16.844 31068 31186 I Inotia4Qol: 2026-10-18 14:47:16.844 f=2244 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:16.893 31068 31186 I Inotia4Qol: 2026-10-18 14:47:16.893 f=2245 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:16.890   952   952 W Binder:952_2: type=1400 audit(0.0:57423310): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:16.944 31068 31186 I Inotia4Qol: 2026-10-18 14:47:16.944 f=2246 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:16.942   952   952 W Binder:952_2: type=1400 audit(0.0:57423311): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:16.996 31068 31186 I Inotia4Qol: 2026-10-18 14:47:16.996 f=2247 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:16.994   952   952 W Binder:952_2: type=1400 audit(0.0:57423312): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:17.009  1182  1182 I thermal_repeater: [recvMdThermalInfo] ret=5, strLen=127, ERROR
+10-18 14:47:17.047 31068 31186 I Inotia4Qol: 2026-10-18 14:47:17.047 f=2248 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:17.046   952   952 W Binder:952_2: type=1400 audit(0.0:57423313): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:17.097 31068 31186 I Inotia4Qol: 2026-10-18 14:47:17.097 f=2249 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:17.098   952   952 W Binder:952_2: type=1400 audit(0.0:57423314): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
+10-18 14:47:17.122 19982 19982 I WifiHAL : Get link layer stats
+10-18 14:47:17.122 19982 19982 I WifiHAL : GetLinkStatsCommand::create
+10-18 14:47:17.122 19982 19982 D android.hardware.wifi@1.0-service-lazy: WifiRequest::create vendor command to iface 31, vendor_id=0x1a11, subcmd=0x1200, res=0
+10-18 14:47:17.122 19982 19982 I android.hardware.wifi@1.0-service-lazy: WifiCommand::requestResponse err=-14
+10-18 14:47:17.122 19982 19982 I WifiHAL : wifi_get_link_stats: result=-1
+10-18 14:47:17.123 19814 19926 E WifiVendorHal: getWifiLinkLayerStats_1_5_Internal(l.1191) failed {.code = ERROR_UNKNOWN, .description = unknown}
+10-18 14:47:17.129 19814 19926 D WifiClientModeImpl[wlan0]: updateLinkLayerStatsRssiSpeedFrequencyCapabilities rssi=-65 TxLinkspeed=390 freq=5240 RxLinkSpeed=260
+10-18 14:47:17.130 19814 19926 D WifiDataStall: tx tput in kbps: 167000
+10-18 14:47:17.130 19814 19926 D WifiDataStall: rx tput in kbps: 167000
+10-18 14:47:17.130 19814 19926 V WifiConfigManager: Updating scan detail cache freq=5240 BSSID=e4:4e:12:af:53:7a RSSI=-64 for "chy&zqs_5G"WPA_PSK
+10-18 14:47:17.130 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:47:17.130 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:47:17.130 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -65 Nss: 1 Mode: 5 symDur: 3600 snrDb 9 bitPerTone: 3161 rate: 205 throughput: 159
+10-18 14:47:17.130 19814 19926 D WifiThroughputPredictor:  utilization (BssLoad) -1 utilization (LLStats) 15 isBluetoothConnected: false final utilization: 15
+10-18 14:47:17.130 19814 19926 D WifiThroughputPredictor:  airTime20: 240 airTime: 198
+10-18 14:47:17.130 19814 19926 D WifiThroughputPredictor:  BW: 2 RSSI: -65 Nss: 1 Mode: 5 symDur: 3600 snrDb 9 bitPerTone: 3161 rate: 205 throughput: 159
+10-18 14:47:17.131 19814 19926 D WifiScoreCard: BSSID update SIGNAL_POLL ID: 1832793812 SSID: "chy&zqs_5G", BSSID: e4:4e:12:af:53:7a, MAC: 9a:90:18:9e:98:88, Security type: 4, Supplicant state: COMPLETED, Wi-Fi standard: 5, RSSI: -65, Link speed: 390Mbps, Tx Link speed: 390Mbps, Max Supported Tx Link speed: 433Mbps, Rx Link speed: 260Mbps, Max Supported Rx Link speed: 433Mbps, Frequency: 5240MHz, Net ID: 3, Metered hint: false, score: 60, CarrierMerged: false, SubscriptionId: -1, IsPrimary: 1
+10-18 14:47:17.131 19814 19926 D WifiScoreCard: txRate: 9 txSpeed: 390
+10-18 14:47:17.132 19814 19926 D WifiScoreCard: network update SIGNAL_POLL "chy&zqs_5G" ID: 74066996 RSSI -65 txSpeed 390
+10-18 14:47:17.134 19814 19926 D WifiClientModeImpl[wlan0]:  L2ConnectedState screen=on 4 0 "chy&zqs_5G" e4:4e:12:af:53:7a rssi=-65 f=5240 sc=60 link=390 tx=8.9, 0.0, 0.0  rx=6.1 bcn=0 [on:0 tx:0 rx:0 period:3011] from screen [on:0 period:162443554] score=60
+10-18 14:47:17.148 31068 31186 I Inotia4Qol: 2026-10-18 14:47:17.148 f=2250 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:17.198 31068 31186 I Inotia4Qol: 2026-10-18 14:47:17.198 f=2251 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0
+10-18 14:47:17.326 31068 31186 I Inotia4Qol: 2026-10-18 14:47:17.326 f=2252 I extension_bag extension_bag deferred free drain queue=0/0 custody=0/0 freed=0

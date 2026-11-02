@@ -8,26 +8,34 @@
 // 被测代码依赖的 Android 头由 stubs/android/log.h 覆盖；游戏内存符号由 test_stubs.cpp 提供。
 
 #include <array>
+#include <cerrno>
 #include <cstdio>
+#include <cstdint>
 #include <cstring>
+#include <limits>
 #include <string>
+#include <sys/mman.h>
+#include <sys/types.h>
 #include <vector>
 
-#include "game_json.h"
-#include "game_nav.h"
-#include "game_save_preflight.h"
-#include "game_tiles.h"
-#include "core/native/call_patch.h"
-#include "feature/extension_bag/model/ownership_ledger.h"
-#include "core/native/stack_codec.h"
-#include "core/native/sell_price.h"
-#include "feature/extension_bag/model/virtual_bag_state.h"
-#include "feature/patch/inventory_find_item_poc.h"
-#include "feature/save_backup/save_backup_bundle.h"
-#include "feature/world_teleport/world_teleport_rules.h"
-#include "../data/native/game_tiles.cpp"
+#include "game/json/game_json.h"
+#include "game/nav/game_nav.h"
+#include "game/access/save_preflight.h"
+#include "game/read/game_tiles.h"
+#include "patch/call_patch.h"
+#include "plugins/extension_bag/model/ownership_ledger.h"
+#include "plugins/extension_bag/model/item_handle_custody.h"
+#include "plugins/extension_bag/runtime/extension_bag_port.h"
+#include "contracts/sell_price.h"
+#include "plugins/extension_bag/model/virtual_bag_state.h"
+#include "plugins/extension_bag/model/serialization.h"
+#include "plugins/extension_bag/core/drag_session.h"
+#include "plugins/save_backup/bundle.h"
+#include "plugins/world_teleport/rules.h"
+#include "../game/read/game_tiles.cpp"
 
-extern void set_host_stack_limit_enabled(bool enabled);
+// W33：save_preflight 实现迁 game 层（game/access/save_preflight.h），测试沿用原名。
+using namespace qol::game;
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -54,31 +62,6 @@ static int g_fail = 0;
         }                                                                  \
     } while (0)
 
-static void* g_find_original_result = nullptr;
-static void* g_find_extension_result = nullptr;
-static int g_find_original_calls = 0;
-static int g_find_extension_calls = 0;
-static bool* g_find_recursive_guard = nullptr;
-
-static void* p7_find_original_stub(int32_t) {
-    ++g_find_original_calls;
-    return g_find_original_result;
-}
-
-static void* p7_find_extension_stub(int32_t) {
-    ++g_find_extension_calls;
-    return g_find_extension_result;
-}
-
-static void* p7_find_recursive_original_stub(int32_t category) {
-    ++g_find_original_calls;
-    if (g_find_original_calls == 1 && g_find_recursive_guard != nullptr) {
-        return inventory_find_item_original_first(category, p7_find_recursive_original_stub,
-                                                   p7_find_extension_stub, *g_find_recursive_guard);
-    }
-    return nullptr;
-}
-
 // call_patch 通用字替换：栈上变量作 patch 目标（host Linux 允许栈页 mprotect RWX）。
 // 覆盖 fail-closed 拒判 / 安装改写 / 幂等 / mismatch 不改写 / 还原。
 static void test_call_patch_word() {
@@ -102,52 +85,291 @@ static void test_call_patch_word() {
     CHECK(word == kOrig);
 }
 
-static void test_p7_stage4_find_item_poc() {    bool recursive_guard = false;
-    g_find_original_result = reinterpret_cast<void*>(static_cast<uintptr_t>(0x101));
-    g_find_extension_result = reinterpret_cast<void*>(static_cast<uintptr_t>(0x202));
-    g_find_original_calls = 0;
-    g_find_extension_calls = 0;
-    CHECK(inventory_find_item_original_first(7, p7_find_original_stub, p7_find_extension_stub,
-                                             recursive_guard) == g_find_original_result);
-    CHECK_EQ(g_find_original_calls, 1);
-    CHECK_EQ(g_find_extension_calls, 0);
-    CHECK(!recursive_guard);
+void patch_test_handler() {}
 
-    g_find_original_result = nullptr;
-    g_find_original_calls = 0;
-    g_find_extension_calls = 0;
-    CHECK(inventory_find_item_original_first(7, p7_find_original_stub, p7_find_extension_stub,
-                                             recursive_guard) == g_find_extension_result);
-    CHECK_EQ(g_find_original_calls, 1);
-    CHECK_EQ(g_find_extension_calls, 1);
-    CHECK(!recursive_guard);
+static void test_call_patch_thunk_reuse_and_capacity() {
+    constexpr uint32_t kOriginal = 0x14000000u;
+    constexpr size_t kSiteCount = 24;
+    auto* words = static_cast<uint32_t*>(mmap(nullptr, 4096, PROT_READ | PROT_WRITE | PROT_EXEC,
+                                              MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+    CHECK(words != MAP_FAILED);
+    if (words == MAP_FAILED) return;
 
-    g_find_extension_result = nullptr;
-    g_find_original_calls = 0;
-    g_find_extension_calls = 0;
-    CHECK(inventory_find_item_original_first(7, p7_find_original_stub, p7_find_extension_stub,
-                                             recursive_guard) == nullptr);
-    CHECK_EQ(g_find_original_calls, 1);
-    CHECK_EQ(g_find_extension_calls, 1);
-    CHECK(!recursive_guard);
+    const CallPatchStats before = call_patch_stats();
+    for (int cycle = 0; cycle < 200; ++cycle) {
+        words[0] = kOriginal;
+        CHECK(call_patch_install_branch(reinterpret_cast<uintptr_t>(&words[0]), kOriginal,
+                                        reinterpret_cast<void*>(&patch_test_handler)) != 0);
+        const CallPatchStats active = call_patch_stats();
+        CHECK(active.patched_calls == before.patched_calls + 1);
+        CHECK(call_patch_revert_branch(reinterpret_cast<uintptr_t>(&words[0]), kOriginal));
+        const CallPatchStats released = call_patch_stats();
+        CHECK(released.patched_calls == before.patched_calls);
+        CHECK(released.slots_in_use == before.slots_in_use);
+    }
 
-    g_find_original_calls = 0;
-    g_find_extension_calls = 0;
-    g_find_recursive_guard = &recursive_guard;
-    CHECK(inventory_find_item_original_first(7, p7_find_recursive_original_stub,
-                                             p7_find_extension_stub, recursive_guard) == nullptr);
-    CHECK_EQ(g_find_original_calls, 2);
-    CHECK_EQ(g_find_extension_calls, 1);
-    CHECK(!recursive_guard);
-    g_find_recursive_guard = nullptr;
+    const CallPatchStats after_cycles = call_patch_stats();
+    CHECK(after_cycles.page_count == before.page_count + 1);
+    CHECK(after_cycles.slots_allocated == before.slots_allocated + 1);
+    CHECK(after_cycles.free_slots == before.free_slots + 1);
 
-    recursive_guard = true;
-    g_find_original_result = reinterpret_cast<void*>(static_cast<uintptr_t>(0x303));
-    g_find_extension_calls = 0;
-    CHECK(inventory_find_item_original_first(7, p7_find_original_stub, p7_find_extension_stub,
-                                             recursive_guard) == g_find_original_result);
-    CHECK_EQ(g_find_extension_calls, 0);
-    recursive_guard = false;
+    for (size_t i = 0; i < kSiteCount; ++i) {
+        words[i] = kOriginal;
+        CHECK(call_patch_install_branch(reinterpret_cast<uintptr_t>(&words[i]), kOriginal,
+                                        reinterpret_cast<void*>(&patch_test_handler)) != 0);
+    }
+    const CallPatchStats simultaneous = call_patch_stats();
+    CHECK(simultaneous.patched_calls == before.patched_calls + kSiteCount);
+    for (size_t i = 0; i < kSiteCount; ++i) {
+        CHECK(call_patch_revert_branch(reinterpret_cast<uintptr_t>(&words[i]), kOriginal));
+    }
+    const CallPatchStats final = call_patch_stats();
+    CHECK(final.patched_calls == before.patched_calls);
+    CHECK(final.page_count == after_cycles.page_count);
+    CHECK(final.slots_allocated == after_cycles.slots_allocated + kSiteCount - 1);
+    CHECK(final.slots_in_use == before.slots_in_use);
+
+    CHECK(munmap(words, 4096) == 0);
+}
+
+constexpr int kTestMapFixedNoReplace = 0x100000;
+constexpr size_t kTestPageSize = 4096;
+
+struct FakeMmapResponse {
+    bool fail = true;
+    int error = EEXIST;
+    void* returned = nullptr;
+    bool return_requested = false;
+};
+
+struct FakeMmapState {
+    std::array<FakeMmapResponse, 8> responses{};
+    std::array<void*, 8> requested{};
+    std::array<int, 8> flags{};
+    size_t response_count = 0;
+    size_t calls = 0;
+    std::array<void*, 8> unmapped{};
+    size_t unmap_calls = 0;
+};
+
+static FakeMmapState g_fake_mmap_state;
+static uintptr_t g_call_patch_test_arena = 0;
+
+static void reset_fake_mmap_state() {
+    g_fake_mmap_state = FakeMmapState{};
+}
+
+static void add_fake_mmap_success(void* returned, bool return_requested = false) {
+    auto& response = g_fake_mmap_state.responses[g_fake_mmap_state.response_count++];
+    response.fail = false;
+    response.returned = returned;
+    response.return_requested = return_requested;
+}
+
+static void add_fake_mmap_failure(int error) {
+    auto& response = g_fake_mmap_state.responses[g_fake_mmap_state.response_count++];
+    response.fail = true;
+    response.error = error;
+}
+
+static void* fake_call_patch_mmap(void* address, size_t, int, int flags, int, off_t) noexcept {
+    const size_t call_index = g_fake_mmap_state.calls++;
+    if (call_index < g_fake_mmap_state.requested.size()) {
+        g_fake_mmap_state.requested[call_index] = address;
+        g_fake_mmap_state.flags[call_index] = flags;
+    }
+    if (call_index >= g_fake_mmap_state.response_count) {
+        errno = EEXIST;
+        return MAP_FAILED;
+    }
+    const FakeMmapResponse& response = g_fake_mmap_state.responses[call_index];
+    if (response.fail) {
+        errno = response.error;
+        return MAP_FAILED;
+    }
+    return response.return_requested ? address : response.returned;
+}
+
+static int fake_call_patch_munmap(void* address, size_t) noexcept {
+    if (g_fake_mmap_state.unmap_calls < g_fake_mmap_state.unmapped.size()) {
+        g_fake_mmap_state.unmapped[g_fake_mmap_state.unmap_calls] = address;
+    }
+    ++g_fake_mmap_state.unmap_calls;
+    return 0;
+}
+
+static void configure_fake_call_patch_mapping() {
+    call_patch_test_set_mapping_functions(fake_call_patch_mmap, fake_call_patch_munmap);
+}
+
+static uintptr_t call_patch_test_site() {
+    return g_call_patch_test_arena + 256;
+}
+
+static void test_call_patch_noreplace_ignored_address_is_rejected() {
+    call_patch_test_reset_state();
+    reset_fake_mmap_state();
+    configure_fake_call_patch_mapping();
+    add_fake_mmap_success(reinterpret_cast<void*>(g_call_patch_test_arena));
+    add_fake_mmap_success(reinterpret_cast<void*>(g_call_patch_test_arena));
+
+    void* slot = call_patch_test_acquire_thunk_slot(call_patch_test_site());
+    CHECK(slot == reinterpret_cast<void*>(g_call_patch_test_arena));
+    CHECK_EQ(g_fake_mmap_state.calls, 2u);
+    CHECK(g_fake_mmap_state.requested[0] != reinterpret_cast<void*>(g_call_patch_test_arena));
+    CHECK(g_fake_mmap_state.requested[0] == g_fake_mmap_state.requested[1]);
+    CHECK(g_fake_mmap_state.flags[0] == (MAP_PRIVATE | MAP_ANONYMOUS | kTestMapFixedNoReplace));
+    CHECK(g_fake_mmap_state.flags[1] == (MAP_PRIVATE | MAP_ANONYMOUS));
+    CHECK_EQ(g_fake_mmap_state.unmap_calls, 1u);
+    CHECK(g_fake_mmap_state.unmapped[0] == reinterpret_cast<void*>(g_call_patch_test_arena));
+    const CallPatchStats stats = call_patch_stats();
+    CHECK_EQ(stats.page_count, 1u);
+    CHECK_EQ(stats.slots_allocated, 1u);
+    CHECK_EQ(stats.slots_in_use, 1u);
+    call_patch_test_release_thunk_slot(slot);
+}
+
+static void test_call_patch_einval_uses_same_candidate_hint() {
+    call_patch_test_reset_state();
+    reset_fake_mmap_state();
+    configure_fake_call_patch_mapping();
+    add_fake_mmap_failure(EINVAL);
+    add_fake_mmap_success(reinterpret_cast<void*>(g_call_patch_test_arena));
+
+    void* slot = call_patch_test_acquire_thunk_slot(call_patch_test_site());
+    CHECK(slot == reinterpret_cast<void*>(g_call_patch_test_arena));
+    CHECK_EQ(g_fake_mmap_state.calls, 2u);
+    CHECK(g_fake_mmap_state.requested[0] == g_fake_mmap_state.requested[1]);
+    CHECK(g_fake_mmap_state.flags[0] == (MAP_PRIVATE | MAP_ANONYMOUS | kTestMapFixedNoReplace));
+    CHECK(g_fake_mmap_state.flags[1] == (MAP_PRIVATE | MAP_ANONYMOUS));
+    CHECK_EQ(g_fake_mmap_state.unmap_calls, 0u);
+    call_patch_test_release_thunk_slot(slot);
+}
+
+static void test_call_patch_eexist_advances_candidate() {
+    call_patch_test_reset_state();
+    reset_fake_mmap_state();
+    configure_fake_call_patch_mapping();
+    add_fake_mmap_failure(EEXIST);
+    add_fake_mmap_failure(EINVAL);
+    add_fake_mmap_success(reinterpret_cast<void*>(g_call_patch_test_arena));
+
+    void* slot = call_patch_test_acquire_thunk_slot(call_patch_test_site());
+    CHECK(slot == reinterpret_cast<void*>(g_call_patch_test_arena));
+    CHECK_EQ(g_fake_mmap_state.calls, 3u);
+    CHECK(g_fake_mmap_state.requested[0] != g_fake_mmap_state.requested[1]);
+    CHECK(g_fake_mmap_state.requested[1] == g_fake_mmap_state.requested[2]);
+    CHECK_EQ(g_fake_mmap_state.unmap_calls, 0u);
+    call_patch_test_release_thunk_slot(slot);
+}
+
+static void test_call_patch_far_hint_is_unmapped_without_pool_poison() {
+    call_patch_test_reset_state();
+    reset_fake_mmap_state();
+    configure_fake_call_patch_mapping();
+    const uintptr_t far_address = g_call_patch_test_arena + 0x10000000u;
+    add_fake_mmap_failure(EINVAL);
+    add_fake_mmap_success(reinterpret_cast<void*>(far_address));
+    add_fake_mmap_success(reinterpret_cast<void*>(g_call_patch_test_arena));
+
+    void* slot = call_patch_test_acquire_thunk_slot(call_patch_test_site());
+    CHECK(slot == reinterpret_cast<void*>(g_call_patch_test_arena));
+    CHECK_EQ(g_fake_mmap_state.calls, 3u);
+    CHECK(g_fake_mmap_state.requested[1] != g_fake_mmap_state.requested[2]);
+    CHECK_EQ(g_fake_mmap_state.unmap_calls, 1u);
+    CHECK(g_fake_mmap_state.unmapped[0] == reinterpret_cast<void*>(far_address));
+    const CallPatchStats stats = call_patch_stats();
+    CHECK_EQ(stats.page_count, 1u);
+    CHECK_EQ(stats.slots_allocated, 1u);
+    CHECK_EQ(stats.slots_in_use, 1u);
+    CHECK_EQ(stats.free_slots, 0u);
+    call_patch_test_release_thunk_slot(slot);
+}
+
+static void test_call_patch_branch_range_and_candidate_arithmetic() {
+    constexpr uintptr_t from = 0x20000000u;
+    uint32_t instruction = 0;
+    CHECK(call_patch_test_encode_branch(from, from - 0x08000000u, &instruction));
+    CHECK_EQ(instruction, 0x16000000u);
+    CHECK(call_patch_test_encode_branch(from, from + 0x07fffffcu, &instruction));
+    CHECK_EQ(instruction, 0x15ffffffu);
+    CHECK(!call_patch_test_encode_branch(from, from + 0x08000000u, &instruction));
+    CHECK(!call_patch_test_encode_branch(from, from - 0x08000004u, &instruction));
+    CHECK(!call_patch_test_encode_branch(from, from + 0x1002u, &instruction));
+
+    uintptr_t candidate = 0;
+    const uintptr_t max_page = std::numeric_limits<uintptr_t>::max() &
+                               ~(static_cast<uintptr_t>(kTestPageSize) - 1);
+    CHECK(!call_patch_test_candidate_address(max_page, kTestPageSize, true, &candidate));
+    CHECK(call_patch_test_candidate_address(max_page, kTestPageSize, false, &candidate));
+    CHECK_EQ(candidate, max_page - kTestPageSize);
+    CHECK(!call_patch_test_candidate_address(kTestPageSize, kTestPageSize, false, &candidate));
+}
+
+static void test_call_patch_unreachable_reused_slot_stays_free() {
+    call_patch_test_reset_state();
+    reset_fake_mmap_state();
+    configure_fake_call_patch_mapping();
+    add_fake_mmap_success(reinterpret_cast<void*>(g_call_patch_test_arena));
+    add_fake_mmap_success(reinterpret_cast<void*>(g_call_patch_test_arena));
+
+    void* slot = call_patch_test_acquire_thunk_slot(call_patch_test_site());
+    CHECK(slot == reinterpret_cast<void*>(g_call_patch_test_arena));
+    call_patch_test_release_thunk_slot(slot);
+    CHECK_EQ(call_patch_stats().free_slots, 1u);
+    CHECK(call_patch_test_acquire_existing_thunk_slot(
+              g_call_patch_test_arena + 0x10000000u) == nullptr);
+    const CallPatchStats stats = call_patch_stats();
+    CHECK_EQ(stats.page_count, 1u);
+    CHECK_EQ(stats.slots_allocated, 1u);
+    CHECK_EQ(stats.slots_in_use, 0u);
+    CHECK_EQ(stats.free_slots, 1u);
+}
+
+static void test_call_patch_branch_return_checks_both_edges_before_emit() {
+    call_patch_test_reset_state();
+    reset_fake_mmap_state();
+    configure_fake_call_patch_mapping();
+    add_fake_mmap_failure(EINVAL);
+    add_fake_mmap_success(reinterpret_cast<void*>(g_call_patch_test_arena));
+
+    auto* arena = reinterpret_cast<uint8_t*>(g_call_patch_test_arena);
+    std::memset(arena, 0xa5, 32);
+    constexpr uint32_t kOriginal = 0x14000000u;
+    auto* site = reinterpret_cast<uint32_t*>(call_patch_test_site());
+    *site = kOriginal;
+    CHECK(!call_patch_install_branch_with_return(
+        reinterpret_cast<uintptr_t>(site), kOriginal, 0,
+        reinterpret_cast<void*>(&patch_test_handler), g_call_patch_test_arena + 0x10000000u,
+        0xd2800020u));
+    CHECK_EQ(*site, kOriginal);
+    for (size_t i = 0; i < 32; ++i) CHECK_EQ(arena[i], 0xa5u);
+    const CallPatchStats stats = call_patch_stats();
+    CHECK_EQ(stats.page_count, 1u);
+    CHECK_EQ(stats.slots_allocated, 1u);
+    CHECK_EQ(stats.slots_in_use, 0u);
+    CHECK_EQ(stats.free_slots, 1u);
+    CHECK_EQ(stats.patched_calls, 0u);
+}
+
+static void test_call_patch_old_kernel_mapping_seams() {
+    void* arena = mmap(nullptr, kTestPageSize, PROT_READ | PROT_WRITE | PROT_EXEC,
+                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    CHECK(arena != MAP_FAILED);
+    if (arena == MAP_FAILED) return;
+    g_call_patch_test_arena = reinterpret_cast<uintptr_t>(arena);
+
+    test_call_patch_noreplace_ignored_address_is_rejected();
+    test_call_patch_einval_uses_same_candidate_hint();
+    test_call_patch_eexist_advances_candidate();
+    test_call_patch_far_hint_is_unmapped_without_pool_poison();
+    test_call_patch_branch_range_and_candidate_arithmetic();
+    test_call_patch_unreachable_reused_slot_stays_free();
+    test_call_patch_branch_return_checks_both_edges_before_emit();
+
+    call_patch_test_reset_state();
+    CHECK(munmap(arena, kTestPageSize) == 0);
+    g_call_patch_test_arena = 0;
 }
 
 static void test_world_teleport_target_map_id() {
@@ -164,11 +386,20 @@ static void test_world_teleport_target_map_id() {
     CHECK_EQ(world_teleport::target_map_id(5, -10), 414);
     CHECK_EQ(world_teleport::target_map_id(414, 0), 414);
     CHECK_EQ(world_teleport::target_map_id(0, 0), 0);
+    CHECK_EQ(world_teleport::target_map_id(std::numeric_limits<int>::min(), 1), -1);
+    CHECK_EQ(world_teleport::target_map_id(std::numeric_limits<int>::max(), -1), -1);
+    CHECK_EQ(world_teleport::target_map_id(-1, 1), -1);
+    CHECK_EQ(world_teleport::target_map_id(414, std::numeric_limits<int>::max()), 0);
+    CHECK_EQ(world_teleport::target_map_id(0, std::numeric_limits<int>::min()), 414);
+    CHECK_EQ(world_teleport::target_map_id(0, -1, std::numeric_limits<int>::max()), -1);
+    CHECK_EQ(world_teleport::target_map_id(87, 1), world_teleport::target_map_id(87, 1, 414));
+    CHECK_EQ(world_teleport::target_map_id(-1, 1), world_teleport::target_map_id(-1, 1, 414));
     CHECK_EQ(world_teleport::max_map_id_from_record_count(416), 414);
     CHECK_EQ(world_teleport::max_map_id_from_record_count(415), 414);
     CHECK_EQ(world_teleport::max_map_id_from_record_count(414), 413);
     CHECK_EQ(world_teleport::max_map_id_from_record_count(278), 277);
     CHECK_EQ(world_teleport::max_map_id_from_record_count(0), 414);
+    CHECK_EQ(world_teleport::max_map_id_from_record_count(-1), 414);
     CHECK_EQ(world_teleport::target_map_id(277, 1, 277), 0);
     CHECK_EQ(world_teleport::target_map_id(0, -1, 277), 277);
     CHECK_EQ(world_teleport::target_map_id(277, 10, 277), 0);
@@ -338,143 +569,43 @@ static void test_nav_bfs_multi() {
     CHECK_EQ(d2[64], -1);
 }
 
-static void test_stack_codec() {
+static void test_native_bag_marker() {
     // 原版袋对象 marker：bit0..24 容量位不被触碰，bit25..31 置 marker。
     const uint32_t bag_flags = 0x01A54321u | (0x55u << 25);
-    const uint32_t marked = stack_codec::write_native_bag_object_marker(bag_flags);
+    const uint32_t marked = qol::features::extension_bag::write_native_bag_object_marker(bag_flags);
     CHECK_EQ(marked & ((1u << 25) - 1u), bag_flags & ((1u << 25) - 1u));
-    CHECK_EQ((marked >> stack_codec::kNativeBagObjectMarkerShift) & 0x7Fu, 1u);
-}
-
-// 布局层不变性（统一 S2、无版本标识）：s2_* 编解码本身与模式无关，同一数值在
-// 堆叠上限启用/关闭两态下写入产物逐位一致、解码一致；切换模式不改变已编码值。
-// 模式语义由 effective_* 模式感知层承载（见 test_stack_codec_effective_mode）。
-static void test_stack_codec_mode_invariance() {
-    const uint32_t low = 0x0003A55Fu;
-    const uint32_t mixed = low | (0x5u << 22) | (0x2Au << 25);
-    for (uint32_t count : {99u, 127u, 128u, 217u, 999u}) {
-        set_host_stack_limit_enabled(false);
-        const uint32_t encoded_disabled = stack_codec::s2_write_count(low, count);
-        CHECK_EQ(stack_codec::s2_read_count(encoded_disabled), count);
-        set_host_stack_limit_enabled(true);
-        const uint32_t encoded_enabled = stack_codec::s2_write_count(low, count);
-        // 写入产物与模式无关：逐位一致，解码一致。
-        CHECK_EQ(encoded_enabled, encoded_disabled);
-        CHECK_EQ(stack_codec::s2_read_count(encoded_enabled), count);
-        // 含保留数据位的字段同样逐位一致（bits0–21 原样保留）。
-        CHECK_EQ(stack_codec::s2_write_count(mixed, count),
-                 stack_codec::s2_write_count(mixed, count));
-        CHECK_EQ(stack_codec::s2_write_count(mixed, count) & ((1u << 22) - 1u), low);
-        CHECK_EQ(stack_codec::s2_read_count(stack_codec::s2_write_count(mixed, count)), count);
-        // 切换模式不改变已编码值：解码在两态下相同。
-        set_host_stack_limit_enabled(false);
-        CHECK_EQ(stack_codec::s2_read_count(encoded_enabled), count);
-        set_host_stack_limit_enabled(true);
-        CHECK_EQ(stack_codec::s2_read_count(encoded_disabled), count);
-    }
-    set_host_stack_limit_enabled(false);
-}
-
-// S2 编码（拆段 10-bit）独立测试段。
-static void test_stack_codec_s2() {
-    // 往返：bits0–21 干净基值 + 全部边界 count。
-    const uint32_t low = 0x0003A55Fu;
-    for (uint32_t count : {0u, 1u, 99u, 100u, 127u, 128u, 199u, 999u, 1023u}) {
-        const uint32_t encoded = stack_codec::s2_write_count(low, count);
-        CHECK_EQ(stack_codec::s2_read_count(encoded), count);
-        CHECK_EQ(encoded & ((1u << 22) - 1u), low);
-    }
-    // 编码位布局抽查：count 拆段落位。
-    CHECK_EQ(stack_codec::s2_write_count(0u, 128u), 1u << stack_codec::kS2ShiftA);
-    CHECK_EQ(stack_codec::s2_write_count(0u, 127u), stack_codec::kS2MaskB);
-    CHECK_EQ(stack_codec::s2_write_count(0u, 1023u),
-             stack_codec::kS2MaskA | stack_codec::kS2MaskB);
-    // 位保留：构造含 bits0–21 数据位与 marker 位（bits25–31）的值，写 count 后
-    // bits0–21 不变；bits22–31 完全被 S2 编码接管（marker 区归 b 段，
-    // 装备/宝石/袋容量类别禁止走 s2 写，见 stack_codec.h 门控注释）。
-    const uint32_t mixed = 0x0003A55Fu | (0x7u << 22) | (0x55u << 25);
-    for (uint32_t count : {0u, 1u, 128u, 999u, 1023u}) {
-        const uint32_t encoded = stack_codec::s2_write_count(mixed, count);
-        CHECK_EQ(encoded & ((1u << 22) - 1u), 0x0003A55Fu);
-        CHECK_EQ(stack_codec::s2_read_count(encoded), count);
-    }
-    // split/combine 互逆：全编码域 0..1023。
-    for (uint32_t count = 0; count <= stack_codec::kS2Max; ++count) {
-        CHECK_EQ(stack_codec::s2_combine(stack_codec::s2_split_a(count),
-                                         stack_codec::s2_split_b(count)),
-                 count);
-    }
-    CHECK_EQ(stack_codec::s2_split_a(128u), 1u);
-    CHECK_EQ(stack_codec::s2_split_b(128u), 0u);
-    CHECK_EQ(stack_codec::s2_split_a(1023u), 7u);
-    CHECK_EQ(stack_codec::s2_split_b(1023u), 127u);
-    // clamp 两态：业务上限 999/99，编码上限 1023 只对操作层钳制生效。
-    CHECK_EQ(stack_codec::s2_clamp(1023u, true), 999u);
-    CHECK_EQ(stack_codec::s2_clamp(1000u, true), 999u);
-    CHECK_EQ(stack_codec::s2_clamp(100u, true), 100u);
-    CHECK_EQ(stack_codec::s2_clamp(0u, true), 0u);
-    CHECK_EQ(stack_codec::s2_clamp(1023u, false), 99u);
-    CHECK_EQ(stack_codec::s2_clamp(100u, false), 99u);
-    CHECK_EQ(stack_codec::s2_clamp(99u, false), 99u);
-}
-
-// 模式感知读写（R-47 决策 b）：启用态 = S2 全量 128a+b（上限 999）；关闭态 =
-// 低 7 位视图 b（上限 99），a（bits22–24）不读、不写、不参与运算，只原样保留。
-// 核心断言：模式切换不丢值——canonical 199 关闭态读 71、重开读 199；关闭态写 99
-// 只改 b → 重开读 128a+99；关闭态消耗按 b 计算、a 保留。
-static void test_stack_codec_effective_mode() {
-    const uint32_t low = 0x00012345u;  // bits0–21 保留数据位
-    // canonical 199 = a=1、b=71。
-    const uint32_t f199 = stack_codec::effective_write_count(low, 199u, true);
-    CHECK_EQ(stack_codec::s2_read_count(f199), 199u);
-    CHECK_EQ(f199 & ((1u << 22) - 1u), low);
-    CHECK_EQ((f199 >> stack_codec::kS2ShiftA) & 0x7u, 1u);
-    // 读：启用态全量 199；关闭态只读 b=71。
-    CHECK_EQ(stack_codec::effective_read_count(f199, true), 199u);
-    CHECK_EQ(stack_codec::effective_read_count(f199, false), 71u);
-    // 127/128/99 的关闭态读：b 视图（128 的 b=0 → 关闭态读 0）。
-    CHECK_EQ(stack_codec::effective_read_count(stack_codec::s2_write_count(low, 127u), false), 127u);
-    CHECK_EQ(stack_codec::effective_read_count(stack_codec::s2_write_count(low, 128u), false), 0u);
-    CHECK_EQ(stack_codec::effective_read_count(stack_codec::s2_write_count(low, 99u), false), 99u);
-    // 关闭态写 99：只写 b、保留 a 与低位 → 重开读 128+99=227。
-    const uint32_t off_write99 =
-        stack_codec::effective_write_count(f199, stack_codec::effective_clamp(99u, false), false);
-    CHECK_EQ(stack_codec::effective_read_count(off_write99, false), 99u);
-    CHECK_EQ(stack_codec::s2_read_count(off_write99), 227u);
-    CHECK_EQ(off_write99 & ((1u << 22) - 1u), low);
-    CHECK_EQ((off_write99 >> stack_codec::kS2ShiftA) & 0x7u, 1u);
-    // 关闭态消耗 1：b 71→70、a 保留 → 重开读 198。
-    const uint32_t off_consume = stack_codec::effective_write_count(f199, 70u, false);
-    CHECK_EQ(stack_codec::effective_read_count(off_consume, false), 70u);
-    CHECK_EQ(stack_codec::s2_read_count(off_consume), 198u);
-    // 模式切换不丢值：字段未动时，关闭态读 71 → 重开读 199。
-    CHECK_EQ(stack_codec::effective_read_count(f199, false), 71u);
-    CHECK_EQ(stack_codec::s2_read_count(f199), 199u);
-    // clamp 两态：启用 999 / 关闭 99。
-    CHECK_EQ(stack_codec::effective_clamp(1000u, true), 999u);
-    CHECK_EQ(stack_codec::effective_clamp(142u, false), 99u);
-    CHECK_EQ(stack_codec::effective_clamp(100u, false), 99u);
-    CHECK_EQ(stack_codec::effective_clamp(99u, false), 99u);
-    CHECK_EQ(stack_codec::effective_clamp(71u, false), 71u);
-    // canonical int 域（descriptor）模式视图：199 off→71、128 off→0、重开原样。
-    CHECK_EQ(stack_codec::effective_view_count(199u, true), 199u);
-    CHECK_EQ(stack_codec::effective_view_count(199u, false), 71u);
-    CHECK_EQ(stack_codec::effective_view_count(128u, false), 0u);
-    CHECK_EQ(stack_codec::effective_view_count(99u, false), 99u);
+    CHECK_EQ((marked >> qol::features::extension_bag::kNativeBagObjectMarkerShift) & 0x7Fu, 1u);
 }
 
 static void test_sell_price_bounds() {
     int64_t price = 0;
-    CHECK(sell_price::calculate(100, 99, false, &price));
+    CHECK(qol::contracts::sell_price::calculate(100, 99, 10, 10, &price));
     CHECK_EQ(price, 9900);
-    CHECK(sell_price::calculate(100, 999, true, &price));
+    CHECK(qol::contracts::sell_price::calculate(100, 999, 7, 10, &price));
     CHECK_EQ(price, 69930);
-    CHECK(!sell_price::calculate(-1, 1, false, &price));
-    CHECK(!sell_price::calculate(sell_price::kMaxValue + 1, 1, false, &price));
-    CHECK(!sell_price::calculate(sell_price::kMaxValue, 2, false, &price));
-    CHECK(!sell_price::calculate(1, 0, false, &price));
-    CHECK_EQ(stack_codec::s2_clamp(1000u, false), 99u);
-    CHECK_EQ(stack_codec::s2_clamp(1000u, true), 999u);
+    constexpr uint32_t kTestCounts[] = {1, 99, 127, 128, 999};
+    for (uint32_t count : kTestCounts) {
+        CHECK(qol::contracts::sell_price::calculate(100, count, 7, 10, &price));
+        CHECK_EQ(price, static_cast<int64_t>(count) * 70);
+    }
+    CHECK(!qol::contracts::sell_price::calculate(-1, 1, 10, 10, &price));
+    CHECK(!qol::contracts::sell_price::calculate(1, 1, 1, 0, &price));
+    CHECK(!qol::contracts::sell_price::calculate(1, 1, 11, 10, &price));
+    CHECK(qol::contracts::sell_price::calculate(INT32_MAX, 1, 10, 10, &price));
+    CHECK_EQ(price, INT32_MAX);
+    CHECK(!qol::contracts::sell_price::calculate(INT32_MAX, 2, 10, 10, &price));
+    CHECK(qol::contracts::sell_price::calculate(1, 1, 0, 10, &price));
+    CHECK_EQ(price, 0);
+    CHECK(!qol::contracts::sell_price::calculate(1, 0, 7, 10, &price));
+    int64_t legacy_price = 0;
+    CHECK(qol::contracts::sell_price::calculate(100, 99, true, &legacy_price));
+    CHECK(qol::contracts::sell_price::calculate(100, 99, 7, 10, &price));
+    CHECK_EQ(legacy_price, price);
+    CHECK(qol::contracts::sell_price::calculate(100, 99, false, &legacy_price));
+    CHECK(qol::contracts::sell_price::calculate(100, 99, 10, 10, &price));
+    CHECK_EQ(legacy_price, price);
+    CHECK_EQ(virtual_bag::merge_view_counts(1000u, 0u, 99u), 99u);
+    CHECK_EQ(virtual_bag::merge_view_counts(1000u, 0u, 999u), 999u);
 }
 
 static void test_virtual_bag_state() {
@@ -487,12 +618,12 @@ static void test_virtual_bag_state() {
     CHECK_EQ((int)virtual_bag::derive_capacity(5), 0);
     virtual_bag::State state{};
     virtual_bag::normalize(&state);
-    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+    for (int index = 0; index < virtual_bag::kMaxExtensionBags; ++index) {
         CHECK_EQ((int)state.capacities[index], 0);
     }
-    state.types = {4, 4, 4, 4, 4};
+    state.types.fill(4);
     virtual_bag::normalize(&state);
-    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+    for (int index = 0; index < virtual_bag::active_extension_bags(); ++index) {
         CHECK_EQ((int)state.capacities[index], 16);
     }
     state.mode = virtual_bag::Mode::kModule;
@@ -595,16 +726,11 @@ static void test_extension_bag_exit_rendering_state() {
     CHECK_EQ(state.original_selected, 0);
 }
 
-// S2 布局 payload（bits22–24=a、bits25–31=b）：数量位只有 S2 一种布局，统一用
-// 本构造器生成可堆叠 payload。
-static void make_s2_payload(virtual_bag::Item* item, uint32_t count) {
+// 测试载荷只把数量字段作为 opaque canonical 整数交给模型；布局转换由边界策略提供。
+static void make_canonical_payload(virtual_bag::Item* item, uint32_t count) {
     item->payload_size = 19;
     item->payload[0] = static_cast<uint8_t>(item->payload_size - 1);
-    const uint32_t count_u32 = stack_codec::s2_write_count(0x00012345u, count);
-    for (size_t i = 0; i < 4; ++i) {
-        item->payload[virtual_bag::kPayloadCountOffset + i] =
-            static_cast<uint8_t>((count_u32 >> (8 * i)) & 0xFF);
-    }
+    std::memcpy(item->payload.data() + virtual_bag::kPayloadCountOffset, &count, sizeof(count));
 }
 
 // payload UID 区间 [1,9)：构造两份不同实例身份的载荷。VM-39 根因是拾取对象与
@@ -617,16 +743,12 @@ static void set_payload_uid(virtual_bag::Item* item, uint64_t uid) {
 }
 
 // 带词缀链的 S2 payload（每节点 4B：u16 编码 + s16 值），用于词缀身份断言。
-static void make_s2_payload_with_options(virtual_bag::Item* item, uint32_t count,
-                                         size_t option_count) {
+static void make_canonical_payload_with_options(virtual_bag::Item* item, uint32_t count,
+                                                size_t option_count) {
     item->payload_size = static_cast<uint16_t>(
         virtual_bag::kPayloadHeaderSize + 4 * option_count);
     item->payload[0] = static_cast<uint8_t>(item->payload_size - 1);
-    const uint32_t count_u32 = stack_codec::s2_write_count(0x00012345u, count);
-    for (size_t index = 0; index < 4; ++index) {
-        item->payload[virtual_bag::kPayloadCountOffset + index] =
-            static_cast<uint8_t>((count_u32 >> (8 * index)) & 0xFF);
-    }
+    std::memcpy(item->payload.data() + virtual_bag::kPayloadCountOffset, &count, sizeof(count));
     for (size_t option = 0; option < option_count; ++option) {
         const size_t base = virtual_bag::kPayloadHeaderSize + option * 4;
         item->payload[base] = static_cast<uint8_t>(0x10 + option);
@@ -636,14 +758,41 @@ static void make_s2_payload_with_options(virtual_bag::Item* item, uint32_t count
     }
 }
 
-static stack_codec::CountEncoding host_category_uses_stack_count(int category) {
-    return category == 333 ? stack_codec::CountEncoding::kNotEncoded
-                           : stack_codec::CountEncoding::kEncoded;
+static int host_category_uses_stack_count(int category) {
+    return category == 333 ? 1 : 2;
 }
 
-static stack_codec::CountEncoding host_unknown_category(int) {
-    return stack_codec::CountEncoding::kUnknown;
+static int host_unknown_category(int) {
+    return 0;
 }
+
+static uint32_t host_model_view_count(uint32_t canonical, bool extended) {
+    (void)extended;
+    return canonical;
+}
+
+static uint32_t host_model_write_view(uint32_t field, uint32_t count, bool extended) {
+    (void)field;
+    (void)extended;
+    return count;
+}
+
+static uint32_t host_model_write_canonical(uint32_t field, uint32_t count) {
+    (void)field;
+    return count;
+}
+
+static uint32_t host_model_limit(bool extended) {
+    return extended ? 999u : 99u;
+}
+
+static const virtual_bag::CountPolicy kHostModelCountPolicy{
+    &virtual_bag::default_canonical_count,
+    &host_model_view_count,
+    &host_model_write_view,
+    &host_model_write_canonical,
+    &host_model_limit,
+};
 
 struct PayloadBridgeFixture {
     std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
@@ -684,11 +833,7 @@ static std::array<uint8_t, virtual_bag::kSerializedItemBuffer> make_payload_byte
         payload[index] = static_cast<uint8_t>(index * 13u + 5u);
     }
     if (payload_size > 0) payload[0] = static_cast<uint8_t>(payload_size - 1);
-    const uint32_t count_flags = stack_codec::s2_write_count(0x00012345u, count);
-    for (size_t index = 0; index < 4; ++index) {
-        payload[virtual_bag::kPayloadCountOffset + index] =
-            static_cast<uint8_t>((count_flags >> (8 * index)) & 0xffu);
-    }
+    std::memcpy(payload.data() + virtual_bag::kPayloadCountOffset, &count, sizeof(count));
     return payload;
 }
 
@@ -717,7 +862,7 @@ static void test_virtual_bag_payload_bridge() {
             encoded_count |= static_cast<uint32_t>(
                                  payload[kPayloadCountOffset + index]) << (8 * index);
         }
-        CHECK_EQ(static_cast<int>(stack_codec::s2_read_count(encoded_count)), static_cast<int>(count));
+        CHECK_EQ(encoded_count, count);
         CHECK_EQ(g_payload_bridge_fixture.free_count, 0);
     }
 
@@ -891,15 +1036,13 @@ static void test_virtual_bag_payload_helpers() {
     virtual_bag::Item item{};
     item.category = 401;
     item.count = 3;
-    make_s2_payload(&item, 3);
+    make_canonical_payload(&item, 3);
     CHECK(virtual_bag::valid_payload(item));
-    CHECK_EQ(static_cast<int>(stack_codec::s2_read_count(virtual_bag::payload_count(item))), 3);
+    CHECK_EQ(virtual_bag::payload_count(item), 3u);
     CHECK(virtual_bag::patch_payload_count(&item, 7, host_category_uses_stack_count));
-    CHECK_EQ(static_cast<int>(stack_codec::s2_read_count(virtual_bag::payload_count(item))), 7);
-    CHECK_EQ(virtual_bag::payload_count(item) & ~(stack_codec::kS2MaskA | stack_codec::kS2MaskB),
-             0x00012345u);
+    CHECK_EQ(virtual_bag::payload_count(item), 7u);
     CHECK(virtual_bag::patch_payload_count(&item, 999, host_category_uses_stack_count));
-    CHECK_EQ(static_cast<int>(stack_codec::s2_read_count(virtual_bag::payload_count(item))), 999);
+    CHECK_EQ(virtual_bag::payload_count(item), 999u);
     virtual_bag::Item equipment = item;
     equipment.category = 333;
     const auto equipment_payload = equipment.payload;
@@ -919,50 +1062,19 @@ static void test_virtual_bag_merge_count() {
     CHECK_EQ(virtual_bag::merge_count(0, 0, false), 0u);
 }
 
-// 模式感知操作（R-47 决策 b）：patch_payload_count 关闭态只写 payload b 位、
-// 保留 a；descriptor canonical 回读完整值；合并按 b 视图计算且目标 a 保留。
+// 视图操作只接收调用方准备好的整数结果；模型不解释数量字段布局。
 static void test_virtual_bag_mode_aware_ops() {
     virtual_bag::Item item{};
     item.category = 401;
-    make_s2_payload(&item, 199);
+    make_canonical_payload(&item, 199);
     item.count = 199;
-    // 关闭态写 99：payload b=99、a 与低位保留（canonical 227）。
+    // 关闭态写入由边界策略收敛到 legacy 视图上限。
     CHECK(virtual_bag::patch_payload_count(&item, 99, host_category_uses_stack_count, false));
-    CHECK_EQ(static_cast<int>(stack_codec::s2_read_count(virtual_bag::payload_count(item))), 227);
-    CHECK_EQ(virtual_bag::payload_count(item) & ~(stack_codec::kS2MaskA | stack_codec::kS2MaskB),
-             0x00012345u);
-    // descriptor 回写 canonical：关闭态操作后重开读回完整值。
-    item.count = static_cast<int>(
-        stack_codec::s2_read_count(virtual_bag::payload_count(item)));
-    CHECK_EQ(item.count, 227);
-    CHECK_EQ(stack_codec::effective_view_count(static_cast<uint32_t>(item.count), false), 99u);
-    // 默认参数（canonical 语义）写与既有行为一致。
+    CHECK_EQ(virtual_bag::payload_count(item), 99u);
     CHECK(virtual_bag::patch_payload_count(&item, 999, host_category_uses_stack_count));
-    CHECK_EQ(static_cast<int>(stack_codec::s2_read_count(virtual_bag::payload_count(item))), 999);
-    // 关闭态合并：视图 71+71=142 → clamp 99；目标 a 保留 → canonical 227。
-    virtual_bag::Item existing{};
-    virtual_bag::Item source{};
-    existing.category = 401;
-    source.category = 401;
-    make_s2_payload(&existing, 199);
-    make_s2_payload(&source, 199);
-    existing.count = 199;
-    source.count = 199;
-    const uint32_t existing_view = stack_codec::effective_view_count(199u, false);
-    const uint32_t source_view = stack_codec::effective_view_count(199u, false);
-    CHECK_EQ(existing_view, 71u);
-    CHECK_EQ(source_view, 71u);
-    CHECK_EQ(virtual_bag::merge_count(static_cast<int>(existing_view),
-                                      static_cast<int>(source_view), false), 99u);
-    CHECK(virtual_bag::patch_payload_count(&existing, 99, host_category_uses_stack_count, false));
-    CHECK_EQ(static_cast<int>(stack_codec::s2_read_count(virtual_bag::payload_count(existing))),
-             227);
-    // 启用态同输入：全量合并 71+71=142 < 999 → payload canonical 142（a=1）。
-    CHECK_EQ(virtual_bag::merge_count(static_cast<int>(existing_view),
-                                      static_cast<int>(source_view), true), 142u);
-    CHECK(virtual_bag::patch_payload_count(&existing, 142, host_category_uses_stack_count, true));
-    CHECK_EQ(static_cast<int>(stack_codec::s2_read_count(virtual_bag::payload_count(existing))),
-             142);
+    CHECK_EQ(virtual_bag::payload_count(item), 999u);
+    CHECK_EQ(virtual_bag::merge_view_counts(71u, 71u, 99u), 99u);
+    CHECK_EQ(virtual_bag::merge_view_counts(71u, 71u, 999u), 142u);
 }
 
 static void test_virtual_bag_mergeable_items() {
@@ -972,8 +1084,8 @@ static void test_virtual_bag_mergeable_items() {
     source.category = 401;
     existing.count = 3;
     source.count = 5;
-    make_s2_payload(&existing, existing.count);
-    make_s2_payload(&source, source.count);
+    make_canonical_payload(&existing, existing.count);
+    make_canonical_payload(&source, source.count);
     // 不同 UID + 不同数量位（S2 a/b 段）→ 堆叠身份一致，可并（VM-39 根因回归）。
     set_payload_uid(&existing, 0x1122334455667788ull);
     set_payload_uid(&source, 0x99aabbccddeeff00ull);
@@ -998,7 +1110,7 @@ static void test_virtual_bag_mergeable_items() {
     virtual_bag::Item option_existing{};
     option_existing.category = 401;
     option_existing.count = 2;
-    make_s2_payload_with_options(&option_existing, 2, 2);
+    make_canonical_payload_with_options(&option_existing, 2, 2);
     virtual_bag::Item option_source = option_existing;
     set_payload_uid(&option_source, 0x0102030405060708ull);
     CHECK(virtual_bag::mergeable_items(option_existing, option_source,
@@ -1009,7 +1121,7 @@ static void test_virtual_bag_mergeable_items() {
     virtual_bag::Item option_extra{};
     option_extra.category = 401;
     option_extra.count = 2;
-    make_s2_payload_with_options(&option_extra, 2, 1);
+    make_canonical_payload_with_options(&option_extra, 2, 1);
     CHECK(!virtual_bag::mergeable_items(option_existing, option_extra,
                                         host_category_uses_stack_count));
     // 空载荷（无有效长度前缀）→ 不可并（fail-closed）。
@@ -1023,8 +1135,8 @@ static void test_virtual_bag_mergeable_items() {
     equipment_source.category = 333;
     equipment_existing.count = 1;
     equipment_source.count = 1;
-    make_s2_payload(&equipment_existing, 100);
-    make_s2_payload(&equipment_source, 100);
+    make_canonical_payload(&equipment_existing, 100);
+    make_canonical_payload(&equipment_source, 100);
     CHECK(!virtual_bag::same_extension_bag_mergeable_items(
         equipment_existing, equipment_source, host_category_uses_stack_count));
     CHECK(virtual_bag::same_extension_bag_merge_allowed(0, 0));
@@ -1056,30 +1168,56 @@ static void test_virtual_bag_mergeable_items() {
     CHECK(!virtual_bag::physical_inventory_snapshot_changed(before, after));
 }
 
-// VM-37：出售/拆堆直接位读重定向后的解码语义。重定向把调用点改为
-// `bl ITEM_GetCumulateCount(item)`，其值等价于 effective_read_count：启用态
-// 128a+b 全量、关闭态 b（与原版 GetBitValue(31,25) 逐位一致）。同时守卫
-// 「GetBitValue start 25→22」的伪修复：十位窗口 (v>>22)&0x3FF 是 `a+8b`，
-// 与 `a*128+b` 在 count≥128 时不等价。
-static void test_sell_divide_s2_read_window() {
-    const uint32_t samples[] = {0u, 1u, 71u, 72u, 99u, 127u, 128u, 150u, 199u, 200u,
-                                999u, 1023u};
-    for (uint32_t count : samples) {
-        const uint32_t field = stack_codec::s2_write_count(0x00012345u, count);
-        CHECK_EQ(stack_codec::effective_read_count(field, true), count);
-        CHECK_EQ(stack_codec::effective_read_count(field, false), (field >> 25) & 0x7Fu);
-    }
-    // 伪修复反例：十位窗口不是全量（128/150/199/200/999）。
-    const uint32_t unequal[] = {128u, 150u, 199u, 200u, 999u};
-    for (uint32_t count : unequal) {
-        const uint32_t field = stack_codec::s2_write_count(0x00012345u, count);
-        CHECK(((field >> 22) & 0x3FFu) != stack_codec::s2_read_count(field));
-    }
-    // 200 = a1+b72：启用态读 200，关闭态读 72（与原版 b 读一致）。
-    const uint32_t field200 = stack_codec::s2_write_count(0x00012345u, 200u);
-    CHECK_EQ(stack_codec::effective_read_count(field200, true), 200u);
-    CHECK_EQ(stack_codec::effective_read_count(field200, false), 72u);
-    CHECK_EQ((field200 >> 25) & 0x7Fu, 72u);
+// 自动落位合并槽扫描（原始→扩展 / ext→ext 自动槽共用判据）：单袋内第一个
+// 同身份可堆叠且并入后 ≤ limit 的占用槽；身份不同/超限/skip/非法输入不命中。
+static void test_virtual_bag_first_mergeable_slot() {
+    std::array<std::array<virtual_bag::Item, virtual_bag::kSlotCount>,
+               virtual_bag::kMaxExtensionBags>
+        items{};
+    virtual_bag::Item source{};
+    source.category = 401;
+    source.count = 5;
+    make_canonical_payload(&source, source.count);
+    // slot1 同身份堆（slot0 空）→ 命中 slot1，先于任何空槽。
+    items[0][1].category = 401;
+    items[0][1].count = 7;
+    make_canonical_payload(&items[0][1], 7);
+    set_payload_uid(&items[0][1], 0xfeedfacefeedfaceull);
+    CHECK_EQ(virtual_bag::first_mergeable_slot(items, 0, 4, source,
+                                               host_category_uses_stack_count, 99u, -1),
+             1);
+    // 身份不同（镶嵌位 payload[16]）→ 跳过，无命中。
+    items[0][1].payload[16] ^= 1;
+    CHECK_EQ(virtual_bag::first_mergeable_slot(items, 0, 4, source,
+                                               host_category_uses_stack_count, 99u, -1),
+             -1);
+    items[0][1].payload[16] ^= 1;
+    // 超上限（7+5>10）→ 不命中；limit=12 → 命中。
+    CHECK_EQ(virtual_bag::first_mergeable_slot(items, 0, 4, source,
+                                               host_category_uses_stack_count, 10u, -1),
+             -1);
+    CHECK_EQ(virtual_bag::first_mergeable_slot(items, 0, 4, source,
+                                               host_category_uses_stack_count, 12u, -1),
+             1);
+    // skip_slot 排除源槽（ext→ext 自并防护）。
+    CHECK_EQ(virtual_bag::first_mergeable_slot(items, 0, 4, source,
+                                               host_category_uses_stack_count, 99u, 1),
+             -1);
+    // 容量裁剪：slot1 在容量外时不可见。
+    CHECK_EQ(virtual_bag::first_mergeable_slot(items, 0, 1, source,
+                                               host_category_uses_stack_count, 99u, -1),
+             -1);
+    // source 非法（count=0）→ -1。
+    source.count = 0;
+    CHECK_EQ(virtual_bag::first_mergeable_slot(items, 0, 4, source,
+                                               host_category_uses_stack_count, 99u, -1),
+             -1);
+    // bag 越界 → -1。
+    source.count = 5;
+    CHECK_EQ(virtual_bag::first_mergeable_slot(items, virtual_bag::kMaxExtensionBags, 4,
+                                               source, host_category_uses_stack_count,
+                                               99u, -1),
+             -1);
 }
 
 // VM-39：SaveItem 漏斗的同类堆合并计划（backup 前 merge_native_item 与 backup
@@ -1089,17 +1227,16 @@ static void test_adopt_merge_plan() {
     virtual_bag::Item existing{};
     existing.category = 401;
     existing.count = 150;
-    make_s2_payload(&existing, 150);
+    make_canonical_payload(&existing, 150);
     virtual_bag::Item incoming{};
     incoming.category = 401;
     incoming.count = 1;
-    make_s2_payload(&incoming, 1);
+    make_canonical_payload(&incoming, 1);
     virtual_bag::Item merged{};
     CHECK(virtual_bag::adopt_merge_into(existing, incoming,
                                         host_category_uses_stack_count, true, &merged));
     CHECK_EQ(merged.count, 151);
-    CHECK_EQ(static_cast<int>(stack_codec::s2_read_count(virtual_bag::payload_count(merged))),
-             151);
+    CHECK_EQ(virtual_bag::payload_count(merged), 151u);
     CHECK_EQ(merged.payload_size, existing.payload_size);
     // 不同 UID（拾取对象 vs 扩展堆实例）→ 身份一致，仍可并（VM-39 根因回归）。
     virtual_bag::Item other_uid = incoming;
@@ -1116,41 +1253,22 @@ static void test_adopt_merge_plan() {
     virtual_bag::Item big{};
     big.category = 401;
     big.count = 850;
-    make_s2_payload(&big, 850);
+    make_canonical_payload(&big, 850);
     CHECK(!virtual_bag::adopt_merge_into(existing, big,
                                          host_category_uses_stack_count, true, &merged));
     big.count = 849;
-    make_s2_payload(&big, 849);
+    make_canonical_payload(&big, 849);
     CHECK(virtual_bag::adopt_merge_into(existing, big,
                                         host_category_uses_stack_count, true, &merged));
     CHECK_EQ(merged.count, 999);
-    // 关闭态：视图 b 相加、上限 99（a 不参与运算，R-47）。existing canonical
-    // 150（a=1,b=22）保留 a，只改 b=23 → canonical 128+23=151，视图 23。
-    virtual_bag::Item off_existing{};
-    off_existing.category = 401;
-    off_existing.count = 150;  // 关闭态视图 = 22
-    make_s2_payload(&off_existing, 150);
-    virtual_bag::Item off_incoming{};
-    off_incoming.category = 401;
-    off_incoming.count = 1;
-    make_s2_payload(&off_incoming, 1);
-    CHECK(virtual_bag::adopt_merge_into(off_existing, off_incoming,
-                                        host_category_uses_stack_count, false, &merged));
-    CHECK_EQ(merged.count, 151);  // canonical 保留 a
-    CHECK_EQ(stack_codec::effective_view_count(static_cast<uint32_t>(merged.count), false),
-             23u);
-    // 关闭态超上限：22 + 78 = 100 > 99 → 不合并。
-    virtual_bag::Item off_big{};
-    off_big.category = 401;
-    off_big.count = 78;
-    make_s2_payload(&off_big, 78);
-    CHECK(!virtual_bag::adopt_merge_into(off_existing, off_big,
-                                         host_category_uses_stack_count, false, &merged));
+    // 关闭态只接收 facade 提供的 view 数量：22 + 1 → 23，22 + 78 超过 99。
+    CHECK_EQ(virtual_bag::merge_view_counts(22u, 1u, 99u), 23u);
+    CHECK_EQ(virtual_bag::merge_view_counts(22u, 78u, 99u), 99u);
     // 非可堆叠类别 → mergeable 门控拒绝（R-46 fail-closed）。
     virtual_bag::Item equip_existing{};
     equip_existing.category = 333;
     equip_existing.count = 1;
-    make_s2_payload(&equip_existing, 1);
+    make_canonical_payload(&equip_existing, 1);
     CHECK(!virtual_bag::adopt_merge_into(equip_existing, equip_existing,
                                          host_category_uses_stack_count, true, &merged));
 }
@@ -1162,10 +1280,10 @@ static void test_adopt_merge_plan() {
 static void test_place_plan() {
     using Outcome = virtual_bag::PlaceOutcome;
     using ItemGrid =
-        std::array<std::array<virtual_bag::Item, virtual_bag::kSlotCount>, virtual_bag::kBagCount>;
+        std::array<std::array<virtual_bag::Item, virtual_bag::kSlotCount>, virtual_bag::kMaxExtensionBags>;
     ItemGrid items{};
-    std::array<uint8_t, virtual_bag::kBagCount> types{};
-    std::array<uint8_t, virtual_bag::kBagCount> capacities{};
+    std::array<uint8_t, virtual_bag::kMaxExtensionBags> types{};
+    std::array<uint8_t, virtual_bag::kMaxExtensionBags> capacities{};
 
     // 同身份（payload count 位不同/a≠0）：existing canonical 150 + 拾取 1 → 151。
     types[0] = 4;
@@ -1173,12 +1291,12 @@ static void test_place_plan() {
     virtual_bag::Item existing{};
     existing.category = 401;
     existing.count = 150;
-    make_s2_payload(&existing, 150);
+    make_canonical_payload(&existing, 150);
     items[0][0] = existing;
     virtual_bag::Item incoming{};
     incoming.category = 401;
     incoming.count = 1;
-    make_s2_payload(&incoming, 1);
+    make_canonical_payload(&incoming, 1);
 
     const virtual_bag::PlacePlan merged_merge = virtual_bag::place_plan(
         items, types, capacities, incoming, /*allow_new_slot=*/false, true,
@@ -1187,8 +1305,7 @@ static void test_place_plan() {
     CHECK_EQ(merged_merge.bag, 0);
     CHECK_EQ(merged_merge.slot, 0);
     CHECK_EQ(merged_merge.merged.count, 151);
-    CHECK_EQ(stack_codec::effective_view_count(
-                 static_cast<uint32_t>(merged_merge.merged.count), false), 23u);
+    CHECK_EQ(virtual_bag::merge_view_counts(22u, 1u, 99u), 23u);
     // 同一输入 allow_new_slot=true 仍优先合并（两路径同契约）。
     const virtual_bag::PlacePlan merged_adopt = virtual_bag::place_plan(
         items, types, capacities, incoming, /*allow_new_slot=*/true, true,
@@ -1217,7 +1334,7 @@ static void test_place_plan() {
         virtual_bag::Item filler{};
         filler.category = 401;
         filler.count = 1;
-        make_s2_payload(&filler, 1);
+        make_canonical_payload(&filler, 1);
         filler.payload[16] ^= static_cast<uint8_t>(slot + 1);  // 与 source 身份不同
         full[0][slot] = filler;
     }
@@ -1227,7 +1344,7 @@ static void test_place_plan() {
     CHECK(no_space.outcome == Outcome::kNoSpace);
 
     // 未装备袋不参与落位：types 全 0 且有空槽仍 kNoSpace（维度保证不触物理袋 5）。
-    std::array<uint8_t, virtual_bag::kBagCount> no_types{};
+    std::array<uint8_t, virtual_bag::kMaxExtensionBags> no_types{};
     const virtual_bag::PlacePlan unequipped = virtual_bag::place_plan(
         items, no_types, capacities, incoming, /*allow_new_slot=*/true, true,
         host_category_uses_stack_count);
@@ -1264,25 +1381,25 @@ static void test_place_plan() {
 static void test_virtual_bag_capacity_bounds() {
     using Outcome = virtual_bag::PlaceOutcome;
     using ItemGrid =
-        std::array<std::array<virtual_bag::Item, virtual_bag::kSlotCount>, virtual_bag::kBagCount>;
+        std::array<std::array<virtual_bag::Item, virtual_bag::kSlotCount>, virtual_bag::kMaxExtensionBags>;
 
     ItemGrid items{};
-    std::array<uint8_t, virtual_bag::kBagCount> types{};
-    std::array<uint8_t, virtual_bag::kBagCount> capacities{};
+    std::array<uint8_t, virtual_bag::kMaxExtensionBags> types{};
+    std::array<uint8_t, virtual_bag::kMaxExtensionBags> capacities{};
     types[0] = 1;  // BagType 1 → 容量 4
     capacities[0] = virtual_bag::derive_capacity(1);
     for (int slot = 0; slot < capacities[0]; ++slot) {
         virtual_bag::Item filler{};
         filler.category = 401;
         filler.count = 1;
-        make_s2_payload(&filler, 1);
+        make_canonical_payload(&filler, 1);
         filler.payload[16] ^= static_cast<uint8_t>(slot + 1);  // 与 source 身份不同
         items[0][slot] = filler;
     }
     virtual_bag::Item incoming{};
     incoming.category = 401;
     incoming.count = 1;
-    make_s2_payload(&incoming, 1);
+    make_canonical_payload(&incoming, 1);
 
     // 容量 4 的袋 0..3 全满：不得继续落到 slot 4..15（16 槽全空也不落）。
     const virtual_bag::PlacePlan over_capacity = virtual_bag::place_plan(
@@ -1358,7 +1475,7 @@ static void test_virtual_bag_json_roundtrip() {
     virtual_bag::Item payload_item{};
     payload_item.category = 401;
     payload_item.count = 7;
-    make_s2_payload(&payload_item, 7);
+    make_canonical_payload(&payload_item, 7);
     state.items[1][2] = payload_item;
     virtual_bag::set_item(&state, 2, 3, 55, 9);
     state.pending.valid = true;
@@ -1409,56 +1526,47 @@ static void test_virtual_bag_json_count_clamp() {
     virtual_bag::State oversized_state{};
     oversized_state.items[0][0].category = 401;
     oversized_state.items[0][0].count = 1000;
-    make_s2_payload(&oversized_state.items[0][0], 1000);
+    make_canonical_payload(&oversized_state.items[0][0], 1000);
 
     virtual_bag::State oversized_parsed{};
     CHECK(virtual_bag::parse_state_json(
         virtual_bag::state_json(oversized_state).c_str(), &oversized_parsed,
         host_category_uses_stack_count));
-    CHECK_EQ(oversized_parsed.items[0][0].count, 999);
-    CHECK_EQ(static_cast<int>(stack_codec::s2_read_count(
-                  virtual_bag::payload_count(oversized_parsed.items[0][0]))), 999);
+    CHECK_EQ(oversized_parsed.items[0][0].count, 1000);
+    CHECK_EQ(virtual_bag::payload_count(oversized_parsed.items[0][0]), 1000u);
 
     virtual_bag::State cross_config_state{};
     cross_config_state.items[0][0].category = 401;
     cross_config_state.items[0][0].count = 199;
-    make_s2_payload(&cross_config_state.items[0][0], 199);
+    make_canonical_payload(&cross_config_state.items[0][0], 199);
 
-    set_host_stack_limit_enabled(true);
     const std::string enabled_json = virtual_bag::state_json(cross_config_state);
-    set_host_stack_limit_enabled(false);
     virtual_bag::State parsed_disabled{};
     CHECK(virtual_bag::parse_state_json(
         enabled_json.c_str(), &parsed_disabled, host_category_uses_stack_count));
     CHECK_EQ(parsed_disabled.items[0][0].count, 199);
-    CHECK_EQ(static_cast<int>(stack_codec::s2_read_count(
-                  virtual_bag::payload_count(parsed_disabled.items[0][0]))), 199);
+    CHECK_EQ(virtual_bag::payload_count(parsed_disabled.items[0][0]), 199u);
 
-    set_host_stack_limit_enabled(false);
     const std::string disabled_json = virtual_bag::state_json(cross_config_state);
-    set_host_stack_limit_enabled(true);
     virtual_bag::State parsed_enabled{};
     CHECK(virtual_bag::parse_state_json(
         disabled_json.c_str(), &parsed_enabled, host_category_uses_stack_count));
     CHECK_EQ(parsed_enabled.items[0][0].count, 199);
-    CHECK_EQ(static_cast<int>(stack_codec::s2_read_count(
-                  virtual_bag::payload_count(parsed_enabled.items[0][0]))), 199);
-    set_host_stack_limit_enabled(false);
+    CHECK_EQ(virtual_bag::payload_count(parsed_enabled.items[0][0]), 199u);
 
     virtual_bag::State mismatched_state = cross_config_state;
-    make_s2_payload(&mismatched_state.items[0][0], 17);
+    make_canonical_payload(&mismatched_state.items[0][0], 17);
     virtual_bag::State mismatched_parsed{};
     CHECK(virtual_bag::parse_state_json(
         virtual_bag::state_json(mismatched_state).c_str(), &mismatched_parsed,
         host_category_uses_stack_count));
     CHECK_EQ(mismatched_parsed.items[0][0].count, 199);
-    CHECK_EQ(static_cast<int>(stack_codec::s2_read_count(
-                  virtual_bag::payload_count(mismatched_parsed.items[0][0]))), 199);
+    CHECK_EQ(virtual_bag::payload_count(mismatched_parsed.items[0][0]), 199u);
 
     virtual_bag::Item equipment{};
     equipment.category = 333;
     equipment.count = 1;
-    make_s2_payload(&equipment, 100);
+    make_canonical_payload(&equipment, 100);
     virtual_bag::State equipment_state{};
     equipment_state.items[0][0] = equipment;
     const std::string equipment_json = virtual_bag::state_json(equipment_state);
@@ -1473,7 +1581,7 @@ static void test_virtual_bag_json_count_clamp() {
     virtual_bag::State legal_state{};
     legal_state.items[0][0].category = 401;
     legal_state.items[0][0].count = 7;
-    make_s2_payload(&legal_state.items[0][0], 7);
+    make_canonical_payload(&legal_state.items[0][0], 7);
     const std::string legal_json = virtual_bag::state_json(legal_state);
     virtual_bag::State legal_parsed{};
     CHECK(virtual_bag::parse_state_json(
@@ -1485,7 +1593,7 @@ static void test_virtual_bag_json_count_clamp() {
 
 // 跨配置往返（读档不改写 canonical）：
 // 已持久化的 canonical 数量与 payload 数量位在启用/关闭切换与反复读档下
-// 原样保留——读档路径与 stack_limit_enabled() 完全解耦，解码永远按 S2，
+// 原样保留——读档路径与 999 有效态完全解耦，解码永远按 S2，
 // 模式只影响写路径 clamp。无版本标识：切换不依赖任何 encodingVersion 状态。
 static void test_virtual_bag_cross_config_roundtrip() {
     using namespace virtual_bag;
@@ -1494,23 +1602,19 @@ static void test_virtual_bag_cross_config_roundtrip() {
         State saved{};
         saved.items[0][0].category = 401;
         saved.items[0][0].count = static_cast<int>(count);
-        make_s2_payload(&saved.items[0][0], count);
+        make_canonical_payload(&saved.items[0][0], count);
 
-        set_host_stack_limit_enabled(true);
         std::string json = state_json(saved);
         std::string previous_payload(
             saved.items[0][0].payload.begin(),
             saved.items[0][0].payload.begin() + saved.items[0][0].payload_size);
         for (int round = 0; round < 3; ++round) {
             // 关闭态读档：不得 clamp、不得按当前配置重编码。
-            set_host_stack_limit_enabled(false);
             State parsed_disabled{};
             CHECK(parse_state_json(json.c_str(), &parsed_disabled,
                                    host_category_uses_stack_count));
             CHECK_EQ(parsed_disabled.items[0][0].count, static_cast<int>(count));
-            CHECK_EQ(static_cast<int>(stack_codec::s2_read_count(
-                          payload_count(parsed_disabled.items[0][0]))),
-                     static_cast<int>(count));
+            CHECK_EQ(payload_count(parsed_disabled.items[0][0]), count);
             const std::string disabled_payload(
                 parsed_disabled.items[0][0].payload.begin(),
                 parsed_disabled.items[0][0].payload.begin() +
@@ -1519,14 +1623,11 @@ static void test_virtual_bag_cross_config_roundtrip() {
 
             // 关闭态再保存 → 启用态读档：仍不得改写。
             const std::string disabled_json = state_json(parsed_disabled);
-            set_host_stack_limit_enabled(true);
             State parsed_enabled{};
             CHECK(parse_state_json(disabled_json.c_str(), &parsed_enabled,
                                    host_category_uses_stack_count));
             CHECK_EQ(parsed_enabled.items[0][0].count, static_cast<int>(count));
-            CHECK_EQ(static_cast<int>(stack_codec::s2_read_count(
-                          payload_count(parsed_enabled.items[0][0]))),
-                     static_cast<int>(count));
+            CHECK_EQ(payload_count(parsed_enabled.items[0][0]), count);
             const std::string enabled_payload(
                 parsed_enabled.items[0][0].payload.begin(),
                 parsed_enabled.items[0][0].payload.begin() +
@@ -1535,14 +1636,13 @@ static void test_virtual_bag_cross_config_roundtrip() {
             json = state_json(parsed_enabled);
         }
     }
-    set_host_stack_limit_enabled(false);
 
     // 旧字段宽容忽略：携带 \"encodingVersion\"（任意值，含历史 1/2/未知）的 JSON
     // 不报错、不迁移，descriptor 与 payload 均按统一 S2 语义读取，值不变。
     State legacy_field_state{};
     legacy_field_state.items[0][0].category = 401;
     legacy_field_state.items[0][0].count = 217;
-    make_s2_payload(&legacy_field_state.items[0][0], 217);
+    make_canonical_payload(&legacy_field_state.items[0][0], 217);
     std::string legacy_json = state_json(legacy_field_state);
     const std::string legacy_payload(
         legacy_field_state.items[0][0].payload.begin(),
@@ -1554,21 +1654,17 @@ static void test_virtual_bag_cross_config_roundtrip() {
         State legacy_parsed{};
         CHECK(parse_state_json(tagged.c_str(), &legacy_parsed, host_category_uses_stack_count));
         CHECK_EQ(legacy_parsed.items[0][0].count, 217);
-        CHECK_EQ(static_cast<int>(stack_codec::s2_read_count(
-                      payload_count(legacy_parsed.items[0][0]))),
-                 217);
+        CHECK_EQ(payload_count(legacy_parsed.items[0][0]), 217u);
         const std::string parsed_payload(
             legacy_parsed.items[0][0].payload.begin(),
             legacy_parsed.items[0][0].payload.begin() +
                 legacy_parsed.items[0][0].payload_size);
         CHECK(parsed_payload == legacy_payload);
     }
-    set_host_stack_limit_enabled(true);
     State legacy_enabled_parsed{};
     CHECK(parse_state_json(legacy_json.c_str(), &legacy_enabled_parsed,
                            host_category_uses_stack_count));
     CHECK_EQ(legacy_enabled_parsed.items[0][0].count, 217);
-    set_host_stack_limit_enabled(false);
 }
 
 static void test_virtual_bag_legacy_json() {
@@ -1616,7 +1712,7 @@ static void test_virtual_bag_recovery() {
     virtual_bag::Item payload_item{};
     payload_item.category = 401;
     payload_item.count = 4;
-    make_s2_payload(&payload_item, 4);
+    make_canonical_payload(&payload_item, 4);
     p.payload_size = payload_item.payload_size;
     p.payload = payload_item.payload;
 
@@ -1663,30 +1759,30 @@ static void test_virtual_bag_transaction_domain() {
     CHECK(!valid_original_transaction_bag(255));
 
     CHECK(valid_extension_logical_bag(kExtensionLogicalBagFirst));
-    CHECK(valid_extension_logical_bag(kExtensionLogicalBagLast));
+    CHECK(valid_extension_logical_bag(extension_logical_bag_last()));
     CHECK(!valid_extension_logical_bag(kOriginalTaskBag));
     CHECK(!valid_extension_logical_bag(11));
-    CHECK_EQ(extension_internal_bag(kExtensionLogicalBagFirst), 0);
-    CHECK_EQ(extension_internal_bag(kExtensionLogicalBagLast), kBagCount - 1);
-    CHECK_EQ(extension_internal_bag(11), -1);
+    CHECK_EQ(extension_storage_index(kExtensionLogicalBagFirst), 0);
+    CHECK_EQ(extension_storage_index(extension_logical_bag_last()), active_extension_bags() - 1);
+    CHECK_EQ(extension_storage_index(11), -1);
     CHECK_EQ(extension_logical_bag(0), kExtensionLogicalBagFirst);
-    CHECK_EQ(extension_logical_bag(kBagCount - 1), kExtensionLogicalBagLast);
-    CHECK_EQ(extension_logical_bag(kBagCount), -1);
+    CHECK_EQ(extension_logical_bag(active_extension_bags() - 1), extension_logical_bag_last());
+    CHECK_EQ(extension_logical_bag(active_extension_bags()), -1);
 
     CHECK(valid_transaction_domain(kTransferOriginalToExtension, 0, 0, 4, 15));
     CHECK(valid_transaction_domain(kTransferExtensionToOriginal, 4, 15, 0, 0));
     CHECK(!valid_transaction_domain(kTransferOriginalToExtension, -1, 0, 0, 0));
     CHECK(!valid_transaction_domain(kTransferOriginalToExtension, kOriginalTaskBag, 0, 0, 0));
     CHECK(!valid_transaction_domain(kTransferExtensionToOriginal, 0, 0, kOriginalTaskBag, 0));
-    CHECK(!valid_transaction_domain(kTransferOriginalToExtension, 0, 0, kBagCount, 0));
-    CHECK(!valid_transaction_domain(kTransferExtensionToOriginal, kBagCount, 0, 0, 0));
+    CHECK(!valid_transaction_domain(kTransferOriginalToExtension, 0, 0, kMaxExtensionBags, 0));
+    CHECK(!valid_transaction_domain(kTransferExtensionToOriginal, kMaxExtensionBags, 0, 0, 0));
     CHECK(!valid_transaction_domain(kTransferOriginalToExtension, 0, -1, 0, 0));
     CHECK(!valid_transaction_domain(kTransferExtensionToOriginal, 0, 0, 0, kSlotCount));
 
     Item item{};
     item.category = 401;
     item.count = 4;
-    make_s2_payload(&item, item.count);
+    make_canonical_payload(&item, item.count);
 
     State source{};
     source.types = {4, 0, 0, 0, 0};
@@ -1824,7 +1920,7 @@ static void test_save_preflight_json() {
     CHECK(semantic.find("hero pointer is null") != npos);
 }
 
-// save-backup 纯逻辑层（feature/save_backup/save_backup_bundle.cpp，编译真实被测源文件）：
+// save-backup 纯逻辑层（plugins/save_backup/bundle.cpp，编译真实被测源文件）：
 
 static void test_save_backup_digests() {
     namespace sb = save_backup;
@@ -1880,7 +1976,7 @@ static void test_save_backup_base64() {
 static void test_save_backup_bundle_roundtrip() {
     namespace sb = save_backup;
     using sb::Entry; using sb::ParsedBundle;
-    const std::vector<uint8_t> plain = {1, 2, 3, 4, 5, 6, 7, 8};
+    const std::vector<uint8_t> plain = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
     const std::vector<uint8_t> module = {0x4D, 0x53, 0x41, 0x56, 0, 1, 0, 9};
     const std::string meta = "{\"source_slot\":1,\"export_time\":1700000000000,\"map_id\":37,"
                              "\"hero_level\":5,\"hero_index\":0,\"save_version\":5,"
@@ -1888,9 +1984,9 @@ static void test_save_backup_bundle_roundtrip() {
                              "\"module_sha256\":\"cd34\",\"checksum\":\"89abcdef0123\"}";
     std::vector<uint8_t> bundle;
     sb::build_bundle(1, 1700000000000LL, plain, module, {}, meta, bundle);
-    // v2 比 v1 多 u32 warehouseLen（空 blob 时 blob 为 0 字节）。
+    // v4 在空 warehouseLen 之外还包含空 C18 section 长度字段。
     CHECK_EQ(bundle.size(),
-             sb::kMinBundleBytes + 4 + plain.size() + module.size() + meta.size());
+             sb::kMinBundleBytes + 8 + plain.size() + module.size() + meta.size());
 
     sb::ParsedBundle parsed;
     CHECK(sb::parse_bundle(bundle.data(), bundle.size(), parsed));
@@ -1927,10 +2023,56 @@ static void test_save_backup_bundle_roundtrip() {
     CHECK(!sb::parse_bundle(bundle.data(), sb::kMinBundleBytes - 1, parsed));
 }
 
+static void test_save_backup_plain_slot_meta() {
+    namespace sb = save_backup;
+    // 最小原版明文：7 块目录；块 0/1/2 分别放在 36/69/79。
+    std::vector<uint8_t> plain(86, 0);
+    auto set16 = [&](size_t off, uint16_t v) {
+        plain[off] = static_cast<uint8_t>(v);
+        plain[off + 1] = static_cast<uint8_t>(v >> 8);
+    };
+    set16(8, 28);   // block0 offset_rel -> 36
+    set16(10, 33);  // block0 len
+    set16(12, 61);  // block1 offset_rel -> 69
+    set16(14, 10);  // block1 len
+    set16(16, 71);  // block2 offset_rel -> 79
+    set16(18, 7);   // block2 len
+    plain[69] = 20;  // block1 +0 i16 map_id
+    plain[79] = 1;   // block2 +0 u8 count
+    set16(80, 5);    // 记录 0 偏移（相对块 2 基址）
+    set16(82, 2);    // 记录 0 长度
+    plain[84] = 5;   // 记录 +0 等级
+    plain[85] = 3;   // 记录 +1 职业
+
+    int map_id = -1;
+    CHECK(sb::parse_plain_map_id(plain, map_id));
+    CHECK_EQ(map_id, 20);
+    int level = -1;
+    int class_idx = -1;
+    CHECK(sb::parse_plain_main_character(plain, level, class_idx));
+    CHECK_EQ(level, 5);
+    CHECK_EQ(class_idx, 3);
+
+    // 非法：空/过短、块表不完整、count=0、记录越界。
+    std::vector<uint8_t> bad;
+    CHECK(!sb::parse_plain_map_id(bad, map_id));
+    CHECK(!sb::parse_plain_main_character(bad, level, class_idx));
+    bad = plain;
+    bad[16] = 0;
+    bad[17] = 0;
+    CHECK(!sb::parse_plain_main_character(bad, level, class_idx));
+    bad = plain;
+    bad[79] = 0;
+    CHECK(!sb::parse_plain_main_character(bad, level, class_idx));
+    bad = plain;
+    bad.resize(84);
+    CHECK(!sb::parse_plain_main_character(bad, level, class_idx));
+}
+
 static void test_save_backup_meta_entry() {
     namespace sb = save_backup;
     using sb::Entry; using sb::ParsedBundle;
-    const std::vector<uint8_t> plain(4, 0xAB);
+    const std::vector<uint8_t> plain(16, 0xAB);
     const std::string meta = sb::build_meta_json(1, 1700000000000LL, 37, 5, 0, 5, 1699999999000LL,
                                              "aa00bb00bb00bb00bb00bb00bb00bb00bb00bb00bb00bb00bb00bb00bb00bb00",
                                              "cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00",
@@ -2031,7 +2173,7 @@ static void test_save_backup_entry_map_name() {
 
     // entry_from_bundle 不填充 map_name（Kotlin 启动期设置由 native 层注入；
     // bundle 字节布局未引入新字段，旧 .qol_save 解析仍向前兼容）。
-    const std::vector<uint8_t> plain(4, 0xAB);
+    const std::vector<uint8_t> plain(16, 0xAB);
     const std::string meta = sb::build_meta_json(0, 1, 30, 5, 0, 5, 0,
                                                  std::string(64, 'a'), std::string(),
                                                  "89abcdef0123");
@@ -2055,52 +2197,61 @@ static void test_save_backup_checksum_name() {
     CHECK(!sb::valid_checksum("89abcdef01234")); // 14 位
     CHECK(!sb::valid_checksum("89abcdefg123"));  // 非 hex
     std::string out;
+    CHECK(sb::extract_checksum_from_name("20260912-122823_s0_89abcdef0123.qol.bak", out));
+    CHECK_EQ(out, std::string("89abcdef0123"));
     CHECK(sb::extract_checksum_from_name("20260912-122823_s0_89abcdef0123.qol_save", out));
     CHECK_EQ(out, std::string("89abcdef0123"));
     CHECK(!sb::extract_checksum_from_name("20260912-122823_s0_89abcdef0123.txt", out));
-    CHECK(!sb::extract_checksum_from_name("89abcdef0123.qol_save", out));  // 缺 `_` 前缀
-    CHECK(!sb::extract_checksum_from_name("short.qol_save", out));
+    CHECK(!sb::extract_checksum_from_name("89abcdef0123.qol.bak", out));  // 缺 `_` 前缀
+    CHECK(!sb::extract_checksum_from_name("short.qol.bak", out));
 }
 
-static void test_save_backup_module_container() {
+// SB-02：slot 严格整数解析（拒绝小数/指数/十六进制/溢出/越界/缺失/无值/空 body）。
+static void test_save_backup_slot_parse() {
     namespace sb = save_backup;
-    using sb::Entry; using sb::ParsedBundle;
-    // 构造 fake MSAV 容器：magic + ver + slot + generation + count + 6 字节负载 + crc。
-    std::vector<uint8_t> container;
-    container.push_back(0x4D); container.push_back(0x53); container.push_back(0x41); container.push_back(0x56);
-    container.push_back(0x00); container.push_back(0x01);
-    container.push_back(0x00);  // slot=0
-    for (int i = 0; i < 8; ++i) container.push_back(0);
-    container.push_back(0x00); container.push_back(0x01);
-    const uint8_t payload[] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
-    container.insert(container.end(), payload, payload + sizeof(payload));
-    const uint32_t crc = sb::crc32_ieee(container.data(), container.size());
-    container.push_back(static_cast<uint8_t>(crc >> 24));
-    container.push_back(static_cast<uint8_t>(crc >> 16));
-    container.push_back(static_cast<uint8_t>(crc >> 8));
-    container.push_back(static_cast<uint8_t>(crc));
-    CHECK(sb::module_container_valid(container));
+    int slot = -1;
+    CHECK(sb::json_find_slot("{\"slot\":0}", slot));
+    CHECK_EQ(slot, 0);
+    CHECK(sb::json_find_slot("{\"slot\": 2}", slot));
+    CHECK_EQ(slot, 2);
+    CHECK(sb::json_find_slot("{\"slot\":1,\"checksum\":\"89abcdef0123\"}", slot));
+    CHECK_EQ(slot, 1);
+    CHECK(sb::json_find_slot("{\"checksum\":\"89abcdef0123\",\"slot\":1}", slot));
+    CHECK_EQ(slot, 1);
+    CHECK(!sb::json_find_slot("{\"slot\":1.5}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":1e3}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":0x10}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":1abc}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":4294967296}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":2147483648}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":-1}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":3}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":\"1\"}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":true}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":", slot));
+    CHECK(!sb::json_find_slot("{\"other\":1}", slot));
+    CHECK(!sb::json_find_slot("", slot));
+}
 
-    // 重定槽：第 6 字节改目标槽 + CRC 重算后仍校验通过，其余字节不变。
-    std::vector<uint8_t> reslotted = container;
-    CHECK(sb::module_container_reslot(reslotted, 2));
-    CHECK_EQ(static_cast<int>(reslotted[6]), 2);
-    CHECK(sb::module_container_valid(reslotted));
-    CHECK(std::memcmp(reslotted.data(), container.data(), 6) == 0);
-    // 第 6 字节之后、尾部 CRC 之前的字节不变。
-    CHECK(std::memcmp(reslotted.data() + 7, container.data() + 7, container.size() - 11) == 0);
-
-    // 损坏拒绝：翻转 payload 一字节 → CRC 失配。
-    std::vector<uint8_t> broken = container;
-    broken[15] ^= 1;
-    CHECK(!sb::module_container_valid(broken));
-    CHECK(!sb::module_container_reslot(broken, 1));
-    // 过小/坏 magic 拒绝。
-    std::vector<uint8_t> tiny = {0x4D, 0x53, 0x41};
-    CHECK(!sb::module_container_valid(tiny));
-    std::vector<uint8_t> bad_magic = container;
-    bad_magic[0] = 'X';
-    CHECK(!sb::module_container_valid(bad_magic));
+// SB-10：entry_json 对所有字符串字段做 JSON 转义（引号/反斜杠/换行/控制字符）。
+static void test_save_backup_entry_json_escape() {
+    namespace sb = save_backup;
+    sb::Entry e;
+    e.file_name = "a\"b\\c\n.qol_save";
+    e.map_name = "地\t图";
+    e.class_name = std::string("x") + '\x01';
+    e.original_sha256 = "aa";
+    e.module_sha256 = "bb";
+    e.checksum = "cc";
+    const std::string j = sb::entry_json(e);
+    CHECK(j.find("\"file_name\":\"a\\\"b\\\\c\\n.qol_save\"") != std::string::npos);
+    CHECK(j.find("\"map_name\":\"地\\t图\"") != std::string::npos);
+    CHECK(j.find("\"class_name\":\"x\\u0001\"") != std::string::npos);
+    CHECK(j.find('\n') == std::string::npos);  // 原始换行不得出现在输出中
+    CHECK(j.find("\"original_sha256\":\"aa\"") != std::string::npos);
+    CHECK(j.find("\"module_sha256\":\"bb\"") != std::string::npos);
+    CHECK(j.find("\"checksum\":\"cc\"") != std::string::npos);
 }
 
 // 个人仓库段（v2 bundle）：encode/decode 往返、build/parse 携带、v1 兼容、
@@ -2134,7 +2285,7 @@ static void test_save_backup_warehouse() {
     CHECK(decoded[1].data == bak_file.data);
 
     // 3) build_bundle 携带 blob → parse_bundle：has_warehouse 为真且内容一致。
-    const std::vector<uint8_t> plain = {1, 2, 3, 4};
+    const std::vector<uint8_t> plain(16, 0x5A);
     const std::string meta = "{}";
     std::vector<uint8_t> bundle;
     sb::build_bundle(1, 123, plain, {}, blob, meta, bundle);
@@ -2161,7 +2312,7 @@ static void test_save_backup_warehouse() {
     auto wb64 = [](std::vector<uint8_t>& o, uint64_t v) {
         for (int i = 7; i >= 0; --i) o.push_back(static_cast<uint8_t>(v >> (8 * i)));
     };
-    const std::vector<uint8_t> v1_plain = {9, 8, 7};
+    const std::vector<uint8_t> v1_plain = {9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 1, 2, 3, 4, 5, 6};
     const std::vector<uint8_t> v1_module = {0x4D};
     const std::string v1_meta = "{\"checksum\":\"001122334455\"}";
     std::vector<uint8_t> v1;
@@ -2295,7 +2446,7 @@ static void test_prepare_journal() {
     {
         JournalRecord journal = base_record();
         journal.direction = kTransferExtensionToOriginal;
-        journal.src_bag = kBagCount;
+        journal.src_bag = kMaxExtensionBags;
         CHECK(!valid_journal_record(journal));
     }
     {
@@ -2415,14 +2566,14 @@ static void test_prepare_journal() {
             "\"mode\":\"module\",\"originalSelected\":1,\"types\":[2,0,0,0,0],"
             "\"selected\":0,\"inspected\":-1,\"items\":[" ;
         std::string json = with_unknown_fields;
-        for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+        for (int bag = 0; bag < virtual_bag::kMaxExtensionBags; ++bag) {
             json += '[';
             for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
                 if (slot > 0) json += ',';
                 json += (bag == 0 && slot == 0) ? R"({"category":7,"count":5})" : "{\"category\":0,\"count\":0}";
             }
             json += ']';
-            if (bag + 1 < virtual_bag::kBagCount) json += ',';
+            if (bag + 1 < virtual_bag::kMaxExtensionBags) json += ',';
         }
         json += "]}";
         virtual_bag::State forward{};
@@ -2439,7 +2590,7 @@ static void test_prepare_journal() {
         std::string json =
             "{\"mode\":\"original\",\"originalSelected\":1,\"types\":[0,0,0,0,0],"
             "\"selected\":-1,\"inspected\":-1,\"items\":[";
-        for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+        for (int bag = 0; bag < virtual_bag::kMaxExtensionBags; ++bag) {
             json += '[';
             for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
                 if (slot > 0) json += ',';
@@ -2452,7 +2603,7 @@ static void test_prepare_journal() {
                 }
             }
             json += ']';
-            if (bag + 1 < virtual_bag::kBagCount) json += ',';
+            if (bag + 1 < virtual_bag::kMaxExtensionBags) json += ',';
         }
         json += "]}";
         virtual_bag::State escaped{};
@@ -2517,6 +2668,33 @@ static void test_ownership_ledger() {
     CHECK(ownership::allocate(nullptr, &c) == ownership::Outcome::kRejectInvalidState);
     CHECK(ownership::allocate(&ledger, nullptr) == ownership::Outcome::kRejectInvalidState);
     CHECK(ownership::release(&ledger, 0x7FFFFFFF) == ownership::Outcome::kRejectUnknownHandle);
+}
+
+static void test_item_handle_custody_releasing_rebind_guard() {
+    using qol::contracts::QolItemHandle;
+    using qol::features::extension_bag::model::ItemHandleCustody;
+    ItemHandleCustody custody;
+    int item = 1;
+    void* resolved = nullptr;
+    const QolItemHandle active{21, 4};
+    const QolItemHandle replacement{21, 5};
+
+    CHECK(custody.bind(&item, active));
+    CHECK(custody.bind(&item, active));  // active same-handle bind is idempotent
+    CHECK(custody.begin_release(active));
+    CHECK(!custody.bind(&item, active));
+    CHECK(!custody.bind(&item, replacement));
+    CHECK(!custody.rebind(&item, active, replacement));
+    CHECK(custody.finish_release(active, false));
+    CHECK(custody.lookup(active, &resolved) && resolved == &item);
+
+    CHECK(custody.begin_release(active));
+    CHECK(!custody.bind(&item, replacement));
+    CHECK(!custody.rebind(&item, active, replacement));
+    CHECK(custody.finish_release(active, true));
+    CHECK(!custody.lookup(active, &resolved));
+    CHECK(custody.bind(&item, replacement));
+    CHECK(custody.lookup(replacement, &resolved) && resolved == &item);
 }
 
 static void test_ownership_ledger_p43() {
@@ -2640,13 +2818,13 @@ static void test_p44_transaction_stages() {
     CHECK(valid_pending_transaction_domain(kTransferExtensionToExtension, 2, 0, 3, 4));
     CHECK(valid_pending_transaction_domain(kTransferExtensionToExtension, 2, 0, 2, 1));
     CHECK(!valid_pending_transaction_domain(kTransferExtensionToExtension, 2, 0, 2, 0));
-    CHECK(!valid_pending_transaction_domain(kTransferExtensionToExtension, 2, 0, kBagCount, 1));
+    CHECK(!valid_pending_transaction_domain(kTransferExtensionToExtension, 2, 0, kMaxExtensionBags, 1));
     CHECK(!valid_transaction_domain(kTransferExtensionToExtension, 2, 0, 3, 4));
 
     Item src{};
     src.category = 401;
     src.count = 5;
-    make_s2_payload(&src, src.count);
+    make_canonical_payload(&src, src.count);
     Item committed = src;
     committed.count = 9;
     CHECK(patch_payload_count(&committed, 9, host_category_uses_stack_count));
@@ -2795,6 +2973,39 @@ static void test_p44_transaction_stages() {
     CHECK(p44_item_identity(st.items[1][1], e2o.source));
     CHECK(!st.pending.valid);
 
+    // ext→orig 真实入槽后注入落位校验失败：先从可见原版槽摘除，再清 handle
+    // custody；扩展逻辑源保持不变，不允许留下原版副本。
+    {
+        using qol::contracts::QolItemHandle;
+        using qol::features::extension_bag::model::ItemHandleCustody;
+        ItemHandleCustody custody;
+        int inserted_object = 77;
+        const QolItemHandle inserted_handle{41, 3};
+        void* resolved = nullptr;
+        std::array<QolItemHandle, kSlotCount> original_handles{};
+        std::array<void*, kSlotCount> original_slots{};
+        bool extension_source_retained = true;
+        CHECK(custody.bind(&inserted_object, inserted_handle));
+
+        // Fake SaveItemOnEmpty writes the object and its registered handle to slot 4.
+        original_slots[4] = &inserted_object;
+        original_handles[4] = inserted_handle;
+        CHECK(qol::features::extension_bag::model::find_handle_slot(
+                  inserted_handle, original_handles.data(), original_handles.size()) == 4);
+        CHECK(custody.lookup(inserted_handle, &resolved) && resolved == &inserted_object);
+
+        // Failure injection at the final transaction verification boundary.
+        original_slots[4] = nullptr;
+        original_handles[4] = {};
+        CHECK(custody.begin_release(inserted_handle));
+        CHECK(custody.finish_release(inserted_handle, true));
+        CHECK(extension_source_retained);
+        CHECK(original_slots[4] == nullptr);
+        CHECK(qol::features::extension_bag::model::find_handle_slot(
+                  inserted_handle, original_handles.data(), original_handles.size()) == -1);
+        CHECK(!custody.lookup(inserted_handle, &resolved));
+    }
+
     // recovery_action：ext→ext 目标匹配 committed → kComplete；不匹配 → kRollback。
     State rs{};
     rs.pending = e2e.pending;
@@ -2828,9 +3039,14 @@ static void test_p44_transaction_stages() {
 
 static void test_p52_drag_session() {
     using namespace virtual_bag;
+    using qol::features::extension_bag::core::classify_drag_target;
 
     ExtensionDragSession session{};
     CHECK_EQ(session_begin(&session, 17, 42, 2, 3), DragTransition::kAdvanced);
+    session.source_identity = 71;
+    CHECK(drag_session_source_identity_matches(session, 2, 3, 71));
+    CHECK(!drag_session_source_identity_matches(session, 2, 3, 72));
+    CHECK(!drag_session_source_identity_matches(session, 2, 4, 71));
     CHECK_EQ(session.phase, DragPhase::kPressed);
     CHECK_EQ(session_on_native_moving(&session, 42), DragTransition::kAdvanced);
     CHECK_EQ(session.phase, DragPhase::kNativeMoving);
@@ -2853,7 +3069,7 @@ static void test_p52_drag_session() {
     ExtensionDragSession tab_session{};
     CHECK_EQ(session_begin(&tab_session, 22, 9, 0, 1), DragTransition::kAdvanced);
     CHECK_EQ(session_on_native_moving(&tab_session, 9), DragTransition::kAdvanced);
-    CHECK_EQ(session_resolve_target(&tab_session, 9, DragTargetKind::kExtensionTab),
+    CHECK_EQ(session_resolve_target(&tab_session, 9, DragTargetKind::kExternalTarget),
              DragTransition::kAdvanced);
     CHECK_EQ(session_begin_transaction(&tab_session, 9), DragTransition::kAdvanced);
     CHECK(session_claim_transaction(&tab_session));
@@ -2869,7 +3085,7 @@ static void test_p52_drag_session() {
 
     ExtensionDragSession tab_illegal{};
     CHECK_EQ(session_begin(&tab_illegal, 23, 9, 0, 1), DragTransition::kAdvanced);
-    CHECK_EQ(session_resolve_target(&tab_illegal, 9, DragTargetKind::kExtensionTab),
+    CHECK_EQ(session_resolve_target(&tab_illegal, 9, DragTargetKind::kExternalTarget),
              DragTransition::kIllegal);
 
     // 非法跳转不能绕过原生 moving、目标解析或事务阶段。
@@ -2912,10 +3128,10 @@ static void test_p52_drag_session() {
     CHECK_EQ(classify_drag_target(0, 0), DragTargetKind::kOriginalBag);
     CHECK_EQ(classify_drag_target(kOriginalTaskBag, 0), DragTargetKind::kTaskBagRejected);
     CHECK_EQ(classify_drag_target(kExtensionLogicalBagFirst, 4), DragTargetKind::kExtensionSlot);
-    CHECK_EQ(classify_drag_target(kExtensionLogicalBagLast, 15), DragTargetKind::kExtensionSlot);
+    CHECK_EQ(classify_drag_target(extension_logical_bag_last(), 15), DragTargetKind::kExtensionSlot);
     CHECK_EQ(classify_drag_target(kExtensionLogicalBagFirst, 0, true),
-             DragTargetKind::kExtensionTab);
-    CHECK_EQ(classify_drag_target(kBagCount, 0), DragTargetKind::kTaskBagRejected);
+             DragTargetKind::kExternalTarget);
+    CHECK_EQ(classify_drag_target(kOriginalTaskBag, 0), DragTargetKind::kTaskBagRejected);
     CHECK_EQ(classify_drag_target(0, kSlotCount), DragTargetKind::kInvalid);
     CHECK_EQ(classify_drag_target(0, 0, false, true), DragTargetKind::kCancel);
 }
@@ -3094,14 +3310,17 @@ static void test_p45_isolation() {
 }
 
 int main() {
+    virtual_bag::set_count_policy(&kHostModelCountPolicy);
     test_call_patch_word();
-    test_p7_stage4_find_item_poc();
+    test_call_patch_thunk_reuse_and_capacity();
+    test_call_patch_old_kernel_mapping_seams();
     test_world_teleport_target_map_id();
     test_json_escape();
     test_base64_decode();
     test_parse_int_field();
     test_tiles_parse();
     test_ownership_ledger();
+    test_item_handle_custody_releasing_rebind_guard();
     test_ownership_ledger_p43();
     test_p44_transaction_stages();
     test_p52_drag_session();
@@ -3110,10 +3329,7 @@ int main() {
     test_equip_bag();
     test_nav_bfs();
     test_nav_bfs_multi();
-    test_stack_codec();
-    test_stack_codec_s2();
-    test_stack_codec_mode_invariance();
-    test_stack_codec_effective_mode();
+    test_native_bag_marker();
     test_sell_price_bounds();
     test_virtual_bag_state();
     test_extension_bag_exit_rendering_state();
@@ -3124,7 +3340,7 @@ int main() {
     test_virtual_bag_merge_count();
     test_virtual_bag_mode_aware_ops();
     test_virtual_bag_mergeable_items();
-    test_sell_divide_s2_read_window();
+    test_virtual_bag_first_mergeable_slot();
     test_adopt_merge_plan();
     test_place_plan();
     test_virtual_bag_capacity_bounds();
@@ -3142,10 +3358,12 @@ int main() {
     test_save_backup_digests();
     test_save_backup_base64();
     test_save_backup_bundle_roundtrip();
+    test_save_backup_plain_slot_meta();
     test_save_backup_meta_entry();
     test_save_backup_entry_map_name();
     test_save_backup_checksum_name();
-    test_save_backup_module_container();
+    test_save_backup_slot_parse();
+    test_save_backup_entry_json_escape();
     test_save_backup_warehouse();
 
     std::printf("host_tests: %d passed, %d failed\n", g_pass, g_fail);

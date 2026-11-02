@@ -1,11 +1,12 @@
 // gamebridge_log.cpp —— 统一日志系统 JNI 薄层。
 //
-// 仅做 JNI 参数转换；格式化与发射逻辑在 core/native/qol_log.*。
-// Kotlin 侧方法名已冻结：nativeQolLogInit / nativeQolLogWrite / nativeQolLogSetDebugEnabled。
+// 仅做 JNI 参数转换；格式化与发射逻辑在 infra/log/qol_log.*。
+// Debug 门控由 native core.settings Store commit 决定，JNI 侧不提供 setter。
 
 #include <jni.h>
 
-#include "core/native/qol_log.h"
+#include "infra/log/qol_crash.h"
+#include "infra/log/qol_log.h"
 
 namespace {
 
@@ -52,6 +53,15 @@ Java_com_inotia4_qol_NativeBridge_nativeQolLogWrite(
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeQolLogSetDebugEnabled(JNIEnv*, jclass, jboolean enabled) {
-    qol_log_set_debug_enabled(enabled == JNI_TRUE);
+Java_com_inotia4_qol_NativeBridge_nativeQolCrashSetIdentity(JNIEnv* env, jclass, jstring text) {
+    // UtfChars：text==nullptr 时 get() 返回 nullptr 并原样传给 setter；作用域结束
+    // 立即释放，不长期持有 jstring 指针。
+    UtfChars chars(env, text);
+    qol_crash_set_identity(chars.get());
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeQolCrashSetConfig(JNIEnv* env, jclass, jstring text) {
+    UtfChars chars(env, text);
+    qol_crash_set_config(chars.get());
 }

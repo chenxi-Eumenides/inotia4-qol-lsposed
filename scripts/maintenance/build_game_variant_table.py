@@ -1,0 +1,334 @@
+#!/usr/bin/env python3
+"""离线生成 libgame.so 校验值 → 游戏变体/能力对照表。
+
+用法：
+    uv run python scripts/maintenance/build_game_variant_table.py [--all]
+
+输入：
+    apk/game-apk/*.apk
+    apk/game-apk/history/*.apk
+    apk/game-apk/history/*.xapk
+
+输出：
+    module/app/src/main/cpp/game/variants/game_variant_table.inc
+
+设计要点：
+  * 主键为 arm64 `lib/arm64-v8a/libgame.so` 的 md5（16 字节）。
+  * `.xapk` 的 arm64 库位于内部 `config.arm64_v8a.apk`，需先打开内层 zip。
+  * 无 arm64 库的 APK 记为 unsupported：打印警告，不写入表。
+  * 客观能力位由 ELF 结构事实计算；内容签名能力位从库字节检测，其余语义位由 `CURATION` 登记。
+  * 输出确定性排序（系列 → 版本标签 → md5），不含时间戳，重复运行结果一致。
+  * 脚本输出仅允许写入 apk/、output/、archive/、.tmp/ 或生成的 .inc 文件。
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import io
+import re
+import struct
+import sys
+import zipfile
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# 路径解析（本文件位于 <root>/scripts/maintenance/）
+# ---------------------------------------------------------------------------
+ROOT = Path(__file__).resolve().parents[2]
+OUTPUT = ROOT / "module/app/src/main/cpp/game/variants/game_variant_table.inc"
+
+INPUT_GLOBS = [
+    "apk/game-apk/*.apk",
+    "apk/game-apk/history/*.apk",
+    "apk/game-apk/history/*.xapk",
+]
+
+LIB_PATH = "lib/arm64-v8a/libgame.so"
+XAPK_INNER = "config.arm64_v8a.apk"
+
+# ---------------------------------------------------------------------------
+# ELF64 常量与结构事实
+# ---------------------------------------------------------------------------
+PT_LOAD = 1
+PF_X = 0x1
+HIDDEN_SEGMENT_VADDR_MIN = 0x700000  # 隐藏注入段起始 vaddr 下限
+WH4_MARKER = b"WH4JRN01"             # monster 隐藏段内的仓库容器 magic
+C18_BAG_MARKER = b"C18BAG01"
+C18_BAG_DATA_MARKER = b"C18Lbag.dat"
+
+# 能力位（与 game/variants/game_variant.h 保持一致）
+CAP_HIDDEN_SEGMENT = 1 << 0   # 存在隐藏可执行 PT_LOAD 段
+CAP_WAREHOUSE = 1 << 1        # 隐藏段内包含 ASCII WH4JRN01
+CAP_WAREHOUSE_INLINE = 1 << 2 # block3 内嵌 WH96v002 仓库段（语义位）
+CAP_C18_NATIVE_BAG_LAYOUT_CANDIDATE = 1 << 3 # C18 背包布局签名候选（语义位）
+
+# 语义位登记：客观位由脚本从 ELF 计算；其余需人工验证的语义位按文件名登记。
+# 未登记者语义位保持 0（表示“未验证”，不是“确定没有”）。
+CURATION = {
+    # 依据：真机/反汇编实测（backlog 2026-09-14/15，block3 校验器 0x7413b4 调用链）
+    # 仅 monster v23 的 block3 内嵌 WH96v002 仓库段；其余版本未验证。
+    "艾诺迪亚4_monster_v23.apk": CAP_WAREHOUSE_INLINE,
+}
+
+# v28 and v29 ship the same libgame.so; retain the existing v29 runtime label.
+PREFERRED_DUPLICATE_SOURCE = {
+    "4c332e9b508b35fe1e97f1f26e56f04d": "apk/game-apk/艾诺迪亚4_monster_v29.apk",
+}
+
+# Preserve established runtime labels after the source APKs were renamed.
+VERSION_LABEL_OVERRIDES = {
+    "艾诺迪亚4_盗版大修_v0704.apk": "20260704",
+    "艾诺迪亚4_盗版大修_v0717.apk": "20260717",
+    "艾诺迪亚4_盗版大修_v0720.apk": "20260720",
+    "艾诺迪亚4_盗版大修_v0723.apk": "20260723",
+    "艾诺迪亚4_盗版大修_v0726.apk": "20260726",
+    "艾诺迪亚4_盗版大修_v0801.apk": "20260801",
+    "艾诺迪亚4_盗版大修_v0804.apk": "20260804",
+    "艾诺迪亚4_盗版大修_v0810.apk": "20260810",
+    "艾诺迪亚4_盗版大修_v0824.apk": "20260824",
+    "艾诺迪亚4_盗版大修_v0830.apk": "20260830",
+    "艾诺迪亚4_monster_v19.apk": "v1.3.2",
+    "Inotia4_v1.4.0_APKPure.xapk": "",
+}
+
+# This special-edition APK was not part of the frozen variant set; only the
+# requested v31 row is admitted in this registration batch.
+EXCLUDED_SOURCES = {
+    "apk/game-apk/history/艾诺迪亚4_monster_国庆比赛专用.apk",
+}
+
+
+# ---------------------------------------------------------------------------
+# 文件名解析
+# ---------------------------------------------------------------------------
+def parse_series(name: str) -> str:
+    """系列：monster / c18 / overhaul(盗版大修) / original(原版) / unknown。"""
+    lower = name.lower()
+    if "monster" in lower:
+        return "monster"
+    if "c18" in lower:
+        return "c18"
+    if "盗版大修" in name:
+        return "overhaul"
+    if "原版" in name:
+        return "original"
+    return "unknown"
+
+
+def parse_version_label(name: str) -> str:
+    """版本标签：优先 8 位日期（大修构建），否则取最后一个 v<版本>；取不到留空。"""
+    if name in VERSION_LABEL_OVERRIDES:
+        return VERSION_LABEL_OVERRIDES[name]
+    date = re.search(r"(20\d{6})", name)
+    if date:
+        return date.group(1)
+    versions = re.findall(r"v(\d+(?:\.\d+)*)", name)
+    if versions:
+        return "v" + versions[-1]
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# 提取与 ELF 解析
+# ---------------------------------------------------------------------------
+def read_libgame(apk_path: Path) -> bytes | None:
+    """提取 arm64 libgame.so；无 arm64 库返回 None。"""
+    try:
+        with zipfile.ZipFile(apk_path) as zf:
+            if apk_path.suffix.lower() == ".xapk":
+                inner = zf.read(XAPK_INNER)
+                with zipfile.ZipFile(io.BytesIO(inner)) as inner_zf:
+                    try:
+                        return inner_zf.read(LIB_PATH)
+                    except KeyError:
+                        return None
+            try:
+                return zf.read(LIB_PATH)
+            except KeyError:
+                return None
+    except (zipfile.BadZipFile, KeyError, OSError):
+        return None
+
+
+def parse_elf_facts(data: bytes) -> tuple[bool, int, bool]:
+    """返回 (是否有隐藏可执行段, 隐藏段 p_filesz, 隐藏段是否含 WH4JRN01)。
+
+    仅支持 ELF64 小端（arm64）。解析失败按无隐藏段处理。
+    """
+    if len(data) < 0x40 or data[:4] != b"\x7fELF" or data[4] != 2 or data[5] != 1:
+        return False, 0, False
+    phoff = struct.unpack_from("<Q", data, 0x20)[0]
+    phentsize = struct.unpack_from("<H", data, 0x36)[0]
+    phnum = struct.unpack_from("<H", data, 0x38)[0]
+    has_hidden = False
+    hidden_size = 0
+    has_marker = False
+    for i in range(phnum):
+        base = phoff + i * phentsize
+        if base + 56 > len(data):
+            break
+        # 字段顺序：p_type(4) p_flags(4) p_offset(8) p_vaddr(8)
+        #           p_paddr(8) p_filesz(8) p_memsz(8) p_align(8)
+        p_type, p_flags = struct.unpack_from("<II", data, base)
+        p_offset = struct.unpack_from("<Q", data, base + 8)[0]
+        p_vaddr = struct.unpack_from("<Q", data, base + 16)[0]
+        p_filesz = struct.unpack_from("<Q", data, base + 32)[0]
+        if p_type != PT_LOAD or not (p_flags & PF_X):
+            continue
+        if p_vaddr < HIDDEN_SEGMENT_VADDR_MIN:
+            continue
+        has_hidden = True
+        hidden_size = p_filesz
+        segment = data[p_offset:p_offset + p_filesz]
+        if WH4_MARKER in segment:
+            has_marker = True
+    return has_hidden, hidden_size, has_marker
+
+
+def has_c18_native_bag_layout_candidate_signature(data: bytes) -> bool:
+    """配对 marker 仅表示 C18 原生背包布局候选，不代表运行时拓扑已准入。"""
+    return C18_BAG_MARKER in data and C18_BAG_DATA_MARKER in data
+
+
+def capabilities_for(
+    name: str,
+    has_hidden: bool,
+    has_marker: bool,
+    has_c18_native_bag_layout_candidate: bool = False,
+) -> int:
+    caps = 0
+    if has_hidden:
+        caps |= CAP_HIDDEN_SEGMENT
+    if has_marker:
+        caps |= CAP_WAREHOUSE
+    if has_c18_native_bag_layout_candidate:
+        caps |= CAP_C18_NATIVE_BAG_LAYOUT_CANDIDATE
+    caps |= CURATION.get(name, 0)
+    return caps
+
+
+# ---------------------------------------------------------------------------
+# 生成
+# ---------------------------------------------------------------------------
+def collect() -> tuple[list[dict], list[str]]:
+    entries: list[dict] = []
+    sources: list[str] = []
+    unsupported: list[str] = []
+    for pattern in INPUT_GLOBS:
+        for apk_path in sorted(ROOT.glob(pattern)):
+            rel = apk_path.relative_to(ROOT).as_posix()
+            sources.append(rel)
+            if rel in EXCLUDED_SOURCES:
+                print(f"[excluded] {rel}: 不属于冻结变体集，本批不登记", file=sys.stderr)
+                continue
+            name = apk_path.name
+            data = read_libgame(apk_path)
+            if data is None:
+                unsupported.append(rel)
+                print(f"[unsupported] {rel}: 无 arm64 libgame.so，跳过", file=sys.stderr)
+                continue
+            has_hidden, hidden_size, has_marker = parse_elf_facts(data)
+            has_c18_native_bag_layout_candidate = has_c18_native_bag_layout_candidate_signature(data)
+            entries.append({
+                "name": name,
+                "source": rel,
+                "series": parse_series(name),
+                "version": parse_version_label(name),
+                "md5": hashlib.md5(data).hexdigest(),
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "size": len(data),
+                "hidden": has_hidden,
+                "hidden_size": hidden_size,
+                "marker": has_marker,
+                "c18_native_bag_layout_candidate": has_c18_native_bag_layout_candidate,
+                "caps": capabilities_for(name, has_hidden, has_marker, has_c18_native_bag_layout_candidate),
+            })
+    return entries, sources
+
+
+SERIES_ORDER = {"original": 0, "overhaul": 1, "monster": 2, "c18": 3, "unknown": 4}
+
+
+def md5_bytes_literal(hex32: str) -> str:
+    pairs = [hex32[i:i + 2] for i in range(0, 32, 2)]
+    return ", ".join(f"0x{p}" for p in pairs)
+
+
+def render(entries: list[dict], sources: list[str]) -> str:
+    ordered = sorted(entries, key=lambda e: (SERIES_ORDER[e["series"]], e["version"], e["md5"]))
+    lines: list[str] = []
+    lines.append("// 本文件由 scripts/maintenance/build_game_variant_table.py 生成，请勿手改。")
+    lines.append("// 重新生成：uv run python scripts/maintenance/build_game_variant_table.py")
+    lines.append("//")
+    lines.append("// 源文件清单（确定性排序，无 arm64 libgame.so 的 APK 不在此表内）：")
+    for src in sources:
+        lines.append(f"//   {src}")
+    lines.append("//")
+    lines.append("// 排序：系列(original/overhaul/monster/unknown) → 版本标签 → md5")
+    lines.append("// 能力位：bit0 kCapHiddenSegment / bit1 kCapWarehouse / bit2 kCapWarehouseInline / bit3 kCapC18NativeBagLayoutCandidate")
+    lines.append("// 条目为 qol::GameVariant 聚合初始化；known 由运行时命中后置位。")
+    lines.append("")
+    lines.append("static const GameVariant kGameVariantTable[] = {")
+    for e in ordered:
+        lines.append(
+            f"    {{GameSeries::k{e['series'].capitalize()}, \"{e['version']}\", "
+            f"0x{e['caps']:08x}u, {{{md5_bytes_literal(e['md5'])}}}}},"
+        )
+    lines.append("};")
+    lines.append("")
+    lines.append("static const size_t kGameVariantTableSize =")
+    lines.append("    sizeof(kGameVariantTable) / sizeof(kGameVariantTable[0]);")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--all", action="store_true", help="输出全部游戏变体明细")
+    args = parser.parse_args()
+
+    entries, sources = collect()
+    entries_by_md5: dict[str, list[dict]] = {}
+    for entry in entries:
+        entries_by_md5.setdefault(entry["md5"], []).append(entry)
+
+    unique_entries = []
+    for md5, duplicates in entries_by_md5.items():
+        if len(duplicates) == 1:
+            unique_entries.append(duplicates[0])
+            continue
+
+        preferred_source = PREFERRED_DUPLICATE_SOURCE.get(md5)
+        preferred = [entry for entry in duplicates if entry["source"] == preferred_source]
+        if (
+            preferred_source is None
+            or len(preferred) != 1
+            or any(entry["series"] != preferred[0]["series"] for entry in duplicates)
+        ):
+            print(f"[error] md5 不唯一且无有效首选源，拒绝生成：{md5}", file=sys.stderr)
+            return 1
+        unique_entries.append(preferred[0])
+        print(
+            f"[duplicate] md5={md5}: 保留 {preferred_source}，"
+            f"跳过 {', '.join(entry['source'] for entry in duplicates if entry is not preferred[0])}",
+            file=sys.stderr,
+        )
+
+    entries = unique_entries
+    text = render(entries, sources)
+    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    OUTPUT.write_text(text, encoding="utf-8")
+    print(f"生成 {OUTPUT.relative_to(ROOT)}：{len(entries)} 条")
+    if args.all:
+        for e in sorted(entries, key=lambda x: (SERIES_ORDER[x["series"]], x["version"], x["md5"])):
+            print(
+                f"  {e['series']:<8} {e['version'] or '-':<10} caps=0x{e['caps']:02x} "
+                f"hidden={'Y' if e['hidden'] else 'N'}(0x{e['hidden_size']:x}) "
+                f"marker={'Y' if e['marker'] else 'N'} md5={e['md5']} {e['name']}"
+            )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,331 @@
+#include "plugin.h"
+
+#include <cstdint>
+#include <cstring>
+#include <string>
+
+#include "contracts/game_ports/system_port.h"
+#include "contracts/host_sdk.h"
+#include "contracts/http.h"
+#include "snapshot_sdk.h"
+
+namespace qol::features::core_system {
+namespace {
+
+constexpr const char* kPluginId = "core.system";
+constexpr const char* kPluginVersion = "0.1.0";
+// 单个响应体上限：party 三人 + 装备聚合远小于此值，超出即放弃本轮发布。
+constexpr uint32_t kSnapshotCapacity = 32768;
+constexpr uint32_t kGameCapacity = 32768;
+constexpr uint32_t kInfoCapacity = 8192;
+constexpr uint32_t kFrameCapacity = 64;
+// 主线程快照节拍：快照/info 聚合 JSON 构造不宜每帧执行；15 帧（≈4Hz）对只读查询足够。
+constexpr int32_t kSnapshotIntervalFrames = 15;
+
+enum class Query : uint8_t { kSnapshot, kGame, kInfo, kFrame, kEvents };
+
+constexpr contracts::HttpRoute kRoutes[] = {
+    {contracts::HttpMethod::kGet, "/api/system/snapshot", kPluginId, 0, 1},
+    {contracts::HttpMethod::kGet, "/api/system/game", kPluginId, 0, 1},
+    {contracts::HttpMethod::kGet, "/api/system/info", kPluginId, 0, 1},
+    {contracts::HttpMethod::kGet, "/api/system/game_frame", kPluginId, 0, 1},
+    {contracts::HttpMethod::kGet, "/api/system/events", kPluginId, 0, 1},
+};
+
+Query kQueries[] = {Query::kSnapshot, Query::kGame, Query::kInfo, Query::kFrame,
+                    Query::kEvents};
+
+enum class SnapshotState : uint8_t { kUnavailable, kReady };
+
+struct SystemSnapshot {
+    SnapshotState state = SnapshotState::kUnavailable;
+    uint32_t snapshot_size = 0;
+    char snapshot[kSnapshotCapacity]{};
+    uint32_t game_size = 0;
+    char game[kGameCapacity]{};
+    uint32_t info_size = 0;
+    char info[kInfoCapacity]{};
+    uint32_t frame_size = 0;
+    char frame[kFrameCapacity]{};
+};
+
+const contracts::QolHostSdk* g_sdk = nullptr;
+const contracts::QolSystemPort* g_port = nullptr;
+uint64_t g_frame_task = 0;
+Snapshot<SystemSnapshot> g_snapshot;
+bool g_snapshot_failure_warned = false;
+
+const contracts::QolPortRequirement kPorts[] = {
+    {contracts::QolPortId::QOL_PORT_SYSTEM, {1, 1}},
+};
+
+const contracts::CapabilityRequirement kOptionalHttpRequires[] = {
+    {contracts::kHttpRegistryCapabilityId, {contracts::kHttpRegistryVersion.major,
+                                            contracts::kHttpRegistryVersion.minor}},
+    {contracts::kHttpDispatchCapabilityId, {contracts::kHttpDispatchVersion.major,
+                                             contracts::kHttpDispatchVersion.minor}},
+};
+
+void log_message(const contracts::QolHostSdk* sdk, const char* message) {
+    if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
+    uint32_t length = 0;
+    while (message[length] != '\0') ++length;
+    (void)sdk->log.write(1, 1, kPluginId, message, length);
+}
+
+void warn_snapshot_failure() {
+    if (!g_snapshot_failure_warned) {
+        constexpr char kMessage[] =
+            "[core.system] snapshot read failed or exceeded capacity; keeping previous snapshot";
+        if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
+            (void)g_sdk->log.write(2, 1, kPluginId, kMessage, sizeof(kMessage) - 1);
+        }
+        g_snapshot_failure_warned = true;
+    }
+}
+
+void update_snapshot() {
+    if (g_port == nullptr || g_port->read.body_json == nullptr) return;
+    static SystemSnapshot next{};
+    std::memset(&next, 0, sizeof(next));
+    struct Slot {
+        int32_t kind;
+        char* out;
+        uint32_t capacity;
+        uint32_t* size;
+    };
+    const Slot slots[] = {
+        {static_cast<int32_t>(contracts::QolSystemJsonKind::kSnapshot), next.snapshot,
+         kSnapshotCapacity, &next.snapshot_size},
+        {static_cast<int32_t>(contracts::QolSystemJsonKind::kGame), next.game, kGameCapacity,
+         &next.game_size},
+        {static_cast<int32_t>(contracts::QolSystemJsonKind::kInfo), next.info, kInfoCapacity,
+         &next.info_size},
+        {static_cast<int32_t>(contracts::QolSystemJsonKind::kFrame), next.frame, kFrameCapacity,
+         &next.frame_size},
+    };
+    bool core_ready = true;
+    for (const Slot& slot : slots) {
+        const QolResult result =
+            g_port->read.body_json(slot.kind, slot.out, slot.capacity, slot.size);
+        if (!contracts::succeeded(result) || *slot.size == 0 || *slot.size >= slot.capacity) {
+            *slot.size = 0;
+            // 身份未下发时 info/game 暂不可用；快照与帧计数与其无关，照常发布。
+            const bool identity_dependent =
+                slot.kind == static_cast<int32_t>(contracts::QolSystemJsonKind::kInfo) ||
+                slot.kind == static_cast<int32_t>(contracts::QolSystemJsonKind::kGame);
+            if (!identity_dependent) core_ready = false;
+        }
+    }
+    if (!core_ready) {
+        warn_snapshot_failure();
+        return;
+    }
+    next.state = SnapshotState::kReady;
+    g_snapshot.publish(next);
+    g_snapshot_failure_warned = false;
+}
+
+int32_t frame_tick(int64_t, void*) {
+    update_snapshot();
+    return 1;
+}
+
+QolResult response_error(contracts::HttpRes* response, uint16_t status, const char* message) {
+    const std::string body = std::string("{\"ok\":false,\"error\":\"") + message + "\"}";
+    if (response == nullptr || response->body == nullptr || response->body_capacity < body.size()) {
+        return contracts::error(kQolErrInternal, "http response buffer too small", 31);
+    }
+    std::memcpy(response->body, body.data(), body.size());
+    response->body_size = static_cast<uint32_t>(body.size());
+    response->status = status;
+    return contracts::error(status == 503 ? kQolErrNotReady : kQolErrInvalidArgument, message,
+                            static_cast<uint32_t>(std::strlen(message)));
+}
+
+QolResult response_body(contracts::HttpRes* response, const char* body, uint32_t size) {
+    if (response == nullptr || response->body == nullptr || body == nullptr ||
+        response->body_capacity < size) {
+        return response_error(response, 500, "http response buffer too small");
+    }
+    std::memcpy(response->body, body, size);
+    response->body_size = size;
+    response->status = 200;
+    return contracts::ok();
+}
+
+QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* response, void* ctx) {
+    if (request == nullptr || response == nullptr || ctx == nullptr) {
+        return response_error(response, 400, "bad request");
+    }
+    const Query query = *static_cast<const Query*>(ctx);
+    if (query == Query::kEvents) {
+        if (g_port == nullptr || g_port->read.events_json == nullptr) {
+            return response_error(response, 503, "snapshot not ready");
+        }
+        uint32_t size = 0;
+        const QolResult result = g_port->read.events_json(
+            reinterpret_cast<char*>(response->body), response->body_capacity, &size);
+        if (!contracts::succeeded(result) || size > response->body_capacity) {
+            warn_snapshot_failure();
+            return response_error(response, 503, "snapshot not ready");
+        }
+        response->body_size = size;
+        response->status = 200;
+        return contracts::ok();
+    }
+    SystemSnapshot snapshot{};
+    if (!g_snapshot.read(snapshot) || snapshot.state != SnapshotState::kReady) {
+        return response_error(response, 503, "snapshot not ready");
+    }
+    switch (query) {
+        case Query::kSnapshot:
+            if (snapshot.snapshot_size == 0) return response_error(response, 503, "snapshot not ready");
+            return response_body(response, snapshot.snapshot, snapshot.snapshot_size);
+        case Query::kGame:
+            if (snapshot.game_size == 0) return response_error(response, 503, "snapshot not ready");
+            return response_body(response, snapshot.game, snapshot.game_size);
+        case Query::kInfo:
+            if (snapshot.info_size == 0) return response_error(response, 503, "snapshot not ready");
+            return response_body(response, snapshot.info, snapshot.info_size);
+        case Query::kFrame:
+            if (snapshot.frame_size == 0) return response_error(response, 503, "snapshot not ready");
+            return response_body(response, snapshot.frame, snapshot.frame_size);
+        case Query::kEvents:
+            break;
+    }
+    return response_error(response, 500, "unknown system query");
+}
+
+const contracts::HttpEndpointDescriptor kHttpEndpoints[] = {
+    {kRoutes[0].method, kRoutes[0].path, kPluginId, contracts::HttpHandlerKind::kQuery,
+     0, 1, &query_handler, nullptr, &kQueries[0]},
+    {kRoutes[1].method, kRoutes[1].path, kPluginId, contracts::HttpHandlerKind::kQuery,
+     0, 1, &query_handler, nullptr, &kQueries[1]},
+    {kRoutes[2].method, kRoutes[2].path, kPluginId, contracts::HttpHandlerKind::kQuery,
+     0, 1, &query_handler, nullptr, &kQueries[2]},
+    {kRoutes[3].method, kRoutes[3].path, kPluginId, contracts::HttpHandlerKind::kQuery,
+     0, 1, &query_handler, nullptr, &kQueries[3]},
+    {kRoutes[4].method, kRoutes[4].path, kPluginId, contracts::HttpHandlerKind::kQuery,
+     0, 1, &query_handler, nullptr, &kQueries[4]},
+};
+
+void stop_frame_task(const contracts::QolHostSdk* sdk) {
+    if (g_frame_task != 0 && sdk != nullptr && sdk->scheduler.remove != nullptr) {
+        (void)sdk->scheduler.remove(g_frame_task);
+    }
+    g_frame_task = 0;
+}
+
+int plugin_install(contracts::PluginContext& ctx) {
+    g_sdk = ctx.sdk;
+    g_port = nullptr;
+    g_frame_task = 0;
+    if (ctx.struct_size < contracts::PLUGIN_CONTEXT_PORTS_STRUCT_SIZE ||
+        ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || ctx.ports == nullptr ||
+        ctx.port_count != 1 || ctx.ports[0] == nullptr) {
+        g_sdk = nullptr;
+        return 1;
+    }
+    g_port = static_cast<const contracts::QolSystemPort*>(ctx.ports[0]);
+    if (!contracts::satisfies(g_port->abi_version, {1, 1}) || g_port->read.body_json == nullptr ||
+        g_port->read.events_json == nullptr) {
+        g_port = nullptr;
+        g_sdk = nullptr;
+        return 1;
+    }
+    if (!g_snapshot.initialize(g_sdk)) {
+        g_port = nullptr;
+        g_sdk = nullptr;
+        return 1;
+    }
+    SystemSnapshot empty_snapshot{};
+    g_snapshot.publish(empty_snapshot);
+    g_snapshot_failure_warned = false;
+    log_message(g_sdk, "[core.system] provider install");
+    return 0;
+}
+
+void plugin_deactivate(contracts::PluginContext& ctx) {
+    stop_frame_task(ctx.sdk);
+    g_snapshot.destroy();
+    log_message(ctx.sdk, "[core.system] provider deactivate");
+    g_port = nullptr;
+    g_sdk = nullptr;
+}
+
+void plugin_on_enabled(contracts::PluginContext& ctx) {
+    if (!g_snapshot.initialize(g_sdk)) {
+        log_message(ctx.sdk, "[core.system] snapshot unavailable");
+        return;
+    }
+    SystemSnapshot empty_snapshot{};
+    g_snapshot.publish(empty_snapshot);
+    g_snapshot_failure_warned = false;
+    if (g_frame_task == 0 && g_sdk != nullptr && g_sdk->scheduler.add != nullptr) {
+        uint64_t task = 0;
+        if (contracts::succeeded(g_sdk->scheduler.add(
+                1, &frame_tick, nullptr, kSnapshotIntervalFrames, 0, &task))) {
+            g_frame_task = task;
+        } else {
+            log_message(ctx.sdk, "[core.system] snapshot scheduler unavailable");
+        }
+    }
+    log_message(ctx.sdk, "[core.system] provider enabled: http queries");
+}
+
+void plugin_on_disabled(contracts::PluginContext& ctx) {
+    stop_frame_task(ctx.sdk);
+    g_snapshot.destroy();
+    log_message(ctx.sdk, "[core.system] provider disabled: http queries withdrawn");
+}
+
+void plugin_fill_status(contracts::PluginStatusOut& out) {
+    out.enabled = g_port != nullptr;
+    out.error = nullptr;
+}
+
+// Feature callback does not replace the existing lifecycle or business controls.
+constexpr contracts::FeatureDefinition kFeatures[] = {
+    {"core.system.snapshots", 1, contracts::FeatureCategory::kHidden,
+     contracts::FeatureType::kToggle, "系统状态服务", "",
+     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+};
+
+const contracts::PluginDescriptor kDescriptor = {
+    kPluginId,
+    kPluginVersion,
+    0,
+    nullptr,
+    2,
+    kOptionalHttpRequires,
+    0,
+    nullptr,
+    0,
+    nullptr,
+    0,
+    nullptr,
+    &plugin_install,
+    &plugin_deactivate,
+    &plugin_on_enabled,
+    &plugin_on_disabled,
+    &plugin_fill_status,
+    nullptr,
+    kPorts,
+    1,
+    nullptr,
+    0,
+    kFeatures, 1,
+    kHttpEndpoints,
+    static_cast<uint32_t>(sizeof(kHttpEndpoints) / sizeof(kHttpEndpoints[0])),
+    nullptr,
+    nullptr, 0,
+};
+
+}  // namespace
+
+const contracts::PluginDescriptor& plugin_descriptor() {
+    return kDescriptor;
+}
+
+}  // namespace qol::features::core_system

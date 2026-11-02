@@ -1,9 +1,15 @@
-#include "feature/patch/inventory_hook_stage4.h"
+#include "contracts/inventory_stage4.h"
+#include "contracts/s2_writeback.h"
+#include "plugins/core.item/usecases/consume_item.h"
+#include "plugins/core.item/hooks/inventory_hooks.h"
+#include "plugins/extension_bag/model/equip_rules.h"
 
-#include "data/native/game_symbols.h"
+#include "game/symbols/game_symbols.h"
 
 #include <cstdint>
 #include <cstdio>
+
+namespace inventory_stage = qol::contracts::inventory_stage;
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -12,6 +18,19 @@ static int g_fail = 0;
     if (cond) ++g_pass; \
     else { ++g_fail; std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
 } while (0)
+
+static void test_s2_writeback_applied_gate() {
+    // Off 与 NotReady 都映射为 applied=false，故关闭态只由原版写 b，模块不回写 a+b。
+    CHECK(!qol::contracts::s2_writeback::allowed(false, true));
+    CHECK(!qol::contracts::s2_writeback::allowed(true, false));
+    CHECK(qol::contracts::s2_writeback::allowed(true, true));
+    // 128 倍数合并：b 段不变，只有源槽消失能证明原版完成合并。
+    CHECK(qol::contracts::s2_writeback::source_removed_confirms_merge(640, true, false));
+    CHECK(!qol::contracts::s2_writeback::source_removed_confirms_merge(640, true, true));
+    CHECK(!qol::contracts::s2_writeback::source_removed_confirms_merge(641, true, false));
+    CHECK(!qol::contracts::s2_writeback::source_removed_confirms_merge(640, false, false));
+    CHECK(!qol::contracts::s2_writeback::source_removed_confirms_merge(0, true, false));
+}
 
 static int g_original_value = 0;
 static int g_extension_value = 0;
@@ -24,36 +43,22 @@ static int extension_count(int32_t) { ++g_extension_calls; return g_extension_va
 static int recursive_original(int32_t category) {
     ++g_original_calls;
     if (g_original_calls == 1 && g_recursive_guard != nullptr) {
-        return stage4_have_item(category, recursive_original, extension_count, *g_recursive_guard);
+        return inventory_stage::have_item(category, recursive_original, extension_count, *g_recursive_guard);
     }
     return 0;
 }
 
-static int g_empty_original = 0;
-static bool g_empty_extension = false;
-static int g_empty_original_calls = 0;
-static int g_empty_extension_calls = 0;
-static int empty_original(int32_t, int32_t) { ++g_empty_original_calls; return g_empty_original; }
-static bool empty_extension(int32_t, int32_t) { ++g_empty_extension_calls; return g_empty_extension; }
-
-static void test_original_only_queries() {
-    bool guard = false;
+static void test_original_only_queries() {    bool guard = false;
     g_original_value = 0;
     g_original_calls = 0;
     g_extension_calls = 0;
-    CHECK(stage4_have_item_original_only(1, original_count, guard) == 0);
+    CHECK(inventory_stage::have_item_original_only(1, original_count, guard) == 0);
     CHECK(g_original_calls == 1 && g_extension_calls == 0 && !guard);
 
     g_original_value = 4;
     g_original_calls = 0;
-    CHECK(stage4_get_item_count_original_only(1, original_count, guard) == 4);
+    CHECK(inventory_stage::get_item_count_original_only(1, original_count, guard) == 4);
     CHECK(g_original_calls == 1 && g_extension_calls == 0 && !guard);
-
-    g_empty_original = 1;
-    g_empty_original_calls = 0;
-    g_empty_extension_calls = 0;
-    CHECK(stage4_is_having_empty_slot_original_only(1, 1, empty_original, guard) == 1);
-    CHECK(g_empty_original_calls == 1 && g_empty_extension_calls == 0 && !guard);
 }
 
 static void* g_extension_item = reinterpret_cast<void*>(static_cast<uintptr_t>(0x1234));
@@ -123,41 +128,19 @@ static int fake_uninstall(void*) { ++g_uninstall_calls; return 0; }
 static void test_queries() {
     bool guard = false;
     g_original_value = 1; g_extension_value = 5; g_original_calls = 0; g_extension_calls = 0;
-    CHECK(stage4_have_item(1, original_count, extension_count, guard) == 1);
+    CHECK(inventory_stage::have_item(1, original_count, extension_count, guard) == 1);
     CHECK(g_original_calls == 1 && g_extension_calls == 0 && !guard);
 
     g_original_value = 0; g_extension_value = 5; g_original_calls = 0; g_extension_calls = 0;
-    CHECK(stage4_have_item(1, original_count, extension_count, guard) == 1);
+    CHECK(inventory_stage::have_item(1, original_count, extension_count, guard) == 1);
     CHECK(g_original_calls == 1 && g_extension_calls == 1 && !guard);
 
     g_original_value = 4; g_extension_value = 6; g_original_calls = 0; g_extension_calls = 0;
-    CHECK(stage4_get_item_count(1, original_count, extension_count, guard) == 10);
+    CHECK(inventory_stage::get_item_count(1, original_count, extension_count, guard) == 10);
     CHECK(g_original_calls == 1 && g_extension_calls == 1 && !guard);
 
-    g_empty_original = 1; g_empty_extension = false; g_empty_original_calls = 0; g_empty_extension_calls = 0;
-    CHECK(stage4_is_having_empty_slot(1, 0, empty_original, empty_extension, guard) == 1);
-    CHECK(g_empty_extension_calls == 0 && !guard);
-
-    // 普通袋域（include_task_bag==0）：原版无空位时允许扩展空位兜底。
-    g_empty_original = 0; g_empty_extension = true; g_empty_original_calls = 0; g_empty_extension_calls = 0;
-    CHECK(stage4_is_having_empty_slot(2, 0, empty_original, empty_extension, guard) == 1);
-    CHECK(g_empty_original_calls == 1 && g_empty_extension_calls == 1 && !guard);
-
-    // 任务袋域（include_task_bag!=0，原版只查物理袋 5）：扩展逻辑袋不属于该域，
-    // 原版 0 结果不得被扩展空位改判为 1（否则上层误判任务袋有空间，SaveItem 失败
-    // 后任务物品被 H-13 收编进扩展袋）。
-    g_empty_original = 0; g_empty_extension = true; g_empty_original_calls = 0; g_empty_extension_calls = 0;
-    CHECK(stage4_is_having_empty_slot(2, 1, empty_original, empty_extension, guard) == 0);
-    CHECK(g_empty_original_calls == 1 && g_empty_extension_calls == 0 && !guard);
-
-    // needed<=0 = 无需新槽（物品全可叠进现有堆）：原版返回 1（可放），
-    // 不得误报满（0x103460 反汇编 0x10347c b.le → 0x1035d8 return 1）。
-    g_empty_original_calls = 0; g_empty_extension_calls = 0;
-    CHECK(stage4_is_having_empty_slot(0, 1, empty_original, empty_extension, guard) == 1);
-    CHECK(g_empty_original_calls == 0 && g_empty_extension_calls == 0 && !guard);
-
     g_original_calls = 0; g_extension_calls = 0; g_recursive_guard = &guard;
-    CHECK(stage4_have_item(1, recursive_original, extension_count, guard) == 1);
+    CHECK(inventory_stage::have_item(1, recursive_original, extension_count, guard) == 1);
     CHECK(g_original_calls == 2 && g_extension_calls == 1 && !guard);
     g_recursive_guard = nullptr;
 }
@@ -166,24 +149,24 @@ static void test_object_operations() {
     bool guard = false;
     g_identify_calls = 0; g_extension_action_calls = 0; g_backup_action_calls = 0;
     g_extension_consume_result = true;
-    CHECK(stage4_consume_item(g_extension_item, identify_item, extension_consume, backup_consume,
+    CHECK(inventory_stage::consume_item(g_extension_item, identify_item, extension_consume, backup_consume,
                               guard));
     CHECK(g_extension_action_calls == 1 && g_backup_action_calls == 0 && !guard);
-    CHECK(stage4_consume_item(reinterpret_cast<void*>(static_cast<uintptr_t>(0x9999)),
+    CHECK(inventory_stage::consume_item(reinterpret_cast<void*>(static_cast<uintptr_t>(0x9999)),
                               identify_item, extension_consume, backup_consume, guard));
     CHECK(g_backup_action_calls == 1 && !guard);
 
     g_extension_consume_result = false;
     g_extension_action_calls = 0; g_backup_action_calls = 0;
-    CHECK(!stage4_consume_item(g_extension_item, identify_item, extension_consume, backup_consume,
+    CHECK(!inventory_stage::consume_item(g_extension_item, identify_item, extension_consume, backup_consume,
                                guard));
     CHECK(g_extension_action_calls == 1 && g_backup_action_calls == 0 && !guard);
 
     g_extension_action_calls = 0; g_backup_action_calls = 0;
-    CHECK(stage4_remove_item(g_extension_item, identify_item, remove_item_extension,
+    CHECK(inventory_stage::remove_item(g_extension_item, identify_item, remove_item_extension,
                              backup_remove, guard) == 1);
     CHECK(g_extension_action_calls == 1 && g_backup_action_calls == 0 && !guard);
-    CHECK(stage4_remove_item(reinterpret_cast<void*>(static_cast<uintptr_t>(0x9999)),
+    CHECK(inventory_stage::remove_item(reinterpret_cast<void*>(static_cast<uintptr_t>(0x9999)),
                              identify_item, remove_item_extension, backup_remove, guard) == 7);
     CHECK(g_backup_action_calls == 1 && !guard);
 
@@ -228,26 +211,26 @@ static void test_object_operations() {
 
     // EquipControlEventProc 的 wrapper 判据：只有 event=0x04、扩展宝石源且目标为
     // 装备槽才进入扩展分支；原版源、扩展非宝石、非装备目标和其它事件均必须 backup。
-    CHECK(stage4_is_extension_equip_control_source(0x04, true, true, true));
-    CHECK(!stage4_is_extension_equip_control_source(0x04, true, true, false));
-    CHECK(!stage4_is_extension_equip_control_source(0x04, true, false, true));
-    CHECK(!stage4_is_extension_equip_control_source(0x04, false, true, true));
-    CHECK(!stage4_is_extension_equip_control_source(0x02, true, true, true));
-    CHECK(stage4_is_extension_equip_control_source(0x04, true, true, true));
+    CHECK(extension_bag_is_equip_control_source(0x04, true, true, true));
+    CHECK(!extension_bag_is_equip_control_source(0x04, true, true, false));
+    CHECK(!extension_bag_is_equip_control_source(0x04, true, false, true));
+    CHECK(!extension_bag_is_equip_control_source(0x04, false, true, true));
+    CHECK(!extension_bag_is_equip_control_source(0x02, true, true, true));
+    CHECK(extension_bag_is_equip_control_source(0x04, true, true, true));
 
     // S-03/R-50 apply 准入判据：宝石/卷轴 + 装备类目标 + IsApplyStuff 判真才进入
     // apply；宝石/卷轴 + 普通物品目标必须非 apply（回退扩展交换/移动）；普通物品
     // 源 + 任意目标一律非 apply；类别数据不可用由调用方映射为 target_is_equip=false，
     // 与普通物品目标同路径 fail-closed。
-    CHECK(stage4_is_extension_apply_candidate(true, true, true, true));
-    CHECK(stage4_is_extension_apply_candidate(true, true, true, false) == false);
-    CHECK(stage4_is_extension_apply_candidate(true, true, false, true) == false);
-    CHECK(stage4_is_extension_apply_candidate(true, true, false, false) == false);
-    CHECK(stage4_is_extension_apply_candidate(false, true, true, true) == false);
-    CHECK(stage4_is_extension_apply_candidate(true, false, true, true) == false);
-    CHECK(stage4_is_extension_apply_candidate(false, false, false, false) == false);
-    CHECK(stage4_finish_requires_abort(false));
-    CHECK(!stage4_finish_requires_abort(true));
+    CHECK(extension_bag_is_apply_candidate(true, true, true, true));
+    CHECK(extension_bag_is_apply_candidate(true, true, true, false) == false);
+    CHECK(extension_bag_is_apply_candidate(true, true, false, true) == false);
+    CHECK(extension_bag_is_apply_candidate(true, true, false, false) == false);
+    CHECK(extension_bag_is_apply_candidate(false, true, true, true) == false);
+    CHECK(extension_bag_is_apply_candidate(true, false, true, true) == false);
+    CHECK(extension_bag_is_apply_candidate(false, false, false, false) == false);
+    CHECK(extension_bag_finish_requires_abort(false));
+    CHECK(!extension_bag_finish_requires_abort(true));
 }
 
 static void test_unequip_to_inven() {
@@ -290,280 +273,318 @@ static int g_cumulate_backup_result = 0;
 static int g_cumulate_backup_calls = 0;
 static int cumulate_backup(void*) { ++g_cumulate_backup_calls; return g_cumulate_backup_result; }
 
-// H-17 读侧分流（R-45/R-46/R-47/R-49）：仅 count-encoded 类别按模式视图解码
-//（启用态 128a+b、关闭态只读 b），非可堆叠与 kUnknown fail-closed 走 backup；
-// kEncoded 不先调 backup（§3.2 1.1 例外）。
-static void test_get_cumulate_count_s2() {
-    void* nonnull_item = reinterpret_cast<void*>(static_cast<uintptr_t>(0x417));
-    using stack_codec::CountEncoding;
-    using stack_codec::s2_write_count;
+enum class EffectiveResultMode : uint8_t { kOk, kNotReady, kUnsupported };
+static uint32_t g_effective_count = 0;
+static EffectiveResultMode g_effective_result_mode = EffectiveResultMode::kOk;
 
-    // kEncoded 启用态：S2 全量解码直达，backup 保持未调用（数量 0/99/100/127/128/199/999/1023）。
+static QolResult fake_effective(const void*, uint32_t* out_count) {
+    if (g_effective_result_mode == EffectiveResultMode::kNotReady) {
+        return qol::contracts::error(kQolErrNotReady, "not ready", 9);
+    }
+    if (g_effective_result_mode == EffectiveResultMode::kUnsupported) {
+        return qol::contracts::error(kQolErrUnsupported, "unsupported", 11);
+    }
+    *out_count = g_effective_count;
+    return qol::contracts::ok();
+}
+
+static const qol::contracts::QolItemCountApi kStage4ItemCountApi = {
+    nullptr, &fake_effective, nullptr, nullptr, nullptr};
+
+// H-17 读侧分流（R-45/R-46/R-47/R-49）：effective facade 成功时直接返回，
+// 未驻留/未就绪与 unsupported 走原版 backup。
+static void test_get_cumulate_count_facade() {
+    void* nonnull_item = reinterpret_cast<void*>(static_cast<uintptr_t>(0x417));
+    // facade 成功：返回 facade 值，backup 保持未调用（数量 0/99/100/127/128/199/999/1023）。
     const uint32_t counts[] = {0u, 99u, 100u, 127u, 128u, 199u, 999u, 1023u};
     for (const uint32_t count : counts) {
         g_cumulate_backup_calls = 0;
         g_cumulate_backup_result = -1;
-        CHECK(stage4_get_cumulate_count(nonnull_item, s2_write_count(0u, count),
-                                        CountEncoding::kEncoded,
-                                        cumulate_backup, true) == static_cast<int>(count));
+        g_effective_result_mode = EffectiveResultMode::kOk;
+        g_effective_count = count;
+        CHECK(inventory_stage::get_cumulate_count(nonnull_item, &kStage4ItemCountApi,
+                                        cumulate_backup) == static_cast<int>(count));
         CHECK(g_cumulate_backup_calls == 0);
     }
-    // kEncoded 关闭态（R-47 决策 b）：只读 b 段（count mod 128），a 不读不参与。
-    for (const uint32_t count : counts) {
-        g_cumulate_backup_calls = 0;
-        g_cumulate_backup_result = -1;
-        CHECK(stage4_get_cumulate_count(nonnull_item, s2_write_count(0u, count),
-                                        CountEncoding::kEncoded,
-                                        cumulate_backup, false) ==
-              static_cast<int>(count & 0x7Fu));
-        CHECK(g_cumulate_backup_calls == 0);
-    }
-    // 模式切换不丢值：canonical 199 关闭态读 71，重开读 199。
-    CHECK(stage4_get_cumulate_count(nonnull_item, s2_write_count(0u, 199u),
-                                    CountEncoding::kEncoded, cumulate_backup, false) == 71);
-    CHECK(stage4_get_cumulate_count(nonnull_item, s2_write_count(0u, 199u),
-                                    CountEncoding::kEncoded, cumulate_backup, true) == 199);
-    // a 段进位边界：127 = b 满（b=127<<25）、128 = a=1（1<<22）、999 = b=103、a=7。
-    CHECK(s2_write_count(0u, 127u) == (127u << 25));
-    CHECK(s2_write_count(0u, 128u) == (1u << 22));
-    CHECK(s2_write_count(0u, 999u) == ((103u << 25) | (7u << 22)));
-
-    // 非可堆叠：original-first backup（装备 marker/宝石选项/袋容量不解释 bits22–31）。
+    // kNotReady：provider 未驻留/999 原子组未就绪时 original-first backup。
     g_cumulate_backup_calls = 0; g_cumulate_backup_result = 1;
-    CHECK(stage4_get_cumulate_count(nonnull_item, 0xFFFFFFFFu, CountEncoding::kNotEncoded,
-                                    cumulate_backup, true) == 1);
+    g_effective_result_mode = EffectiveResultMode::kNotReady;
+    CHECK(inventory_stage::get_cumulate_count(nonnull_item, &kStage4ItemCountApi,
+                                    cumulate_backup) == 1);
     CHECK(g_cumulate_backup_calls == 1);
 
-    // fail-closed：类别表不可用（kUnknown）必须走 backup，不得按可堆叠解码。
+    // kUnsupported：类别判定不可用时 fail-closed 走 backup。
     g_cumulate_backup_calls = 0; g_cumulate_backup_result = 1;
-    CHECK(stage4_get_cumulate_count(nonnull_item, 0xFFFFFFFFu, CountEncoding::kUnknown,
-                                    cumulate_backup, false) == 1);
+    g_effective_result_mode = EffectiveResultMode::kUnsupported;
+    CHECK(inventory_stage::get_cumulate_count(nonnull_item, &kStage4ItemCountApi,
+                                    cumulate_backup) == 1);
     CHECK(g_cumulate_backup_calls == 1);
 
     // 空指针：原版语义返回 0（backup(nullptr)）。
     g_cumulate_backup_calls = 0; g_cumulate_backup_result = 0;
-    CHECK(stage4_get_cumulate_count(nullptr, 0u, CountEncoding::kUnknown,
-                                    cumulate_backup, true) == 0);
+    CHECK(inventory_stage::get_cumulate_count(nullptr, &kStage4ItemCountApi,
+                                    cumulate_backup) == 0);
     CHECK(g_cumulate_backup_calls == 1);
 
-    // backup 缺失兜底：非可堆叠/未知返回 0，不崩。
-    CHECK(stage4_get_cumulate_count(nonnull_item, 0u, CountEncoding::kNotEncoded, nullptr, true) == 0);
-    CHECK(stage4_get_cumulate_count(nonnull_item, 0u, CountEncoding::kUnknown, nullptr, false) == 0);
+    // facade 未驻留与 backup 缺失兜底：返回 0，不崩。
+    CHECK(inventory_stage::get_cumulate_count(nonnull_item, nullptr, nullptr) == 0);
+    g_effective_result_mode = EffectiveResultMode::kOk;
+}
+
+static QolResult fake_conversion_limit(int32_t extended, uint32_t* out_limit) {
+    if (out_limit == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    *out_limit = extended != 0 ? 999u : 99u;
+    return qol::contracts::ok();
+}
+
+static constexpr uint32_t kTestS2ShiftA = 22u;
+static constexpr uint32_t kTestS2MaskA = 0x7u << kTestS2ShiftA;
+static constexpr uint32_t kTestS2ShiftB = 25u;
+static constexpr uint32_t kTestS2MaskB = 0x7fu << kTestS2ShiftB;
+
+static uint32_t s2_test_write_count(uint32_t raw, uint32_t count) {
+    return (raw & ~(kTestS2MaskA | kTestS2MaskB)) |
+           (((count / 128u) & 0x7u) << kTestS2ShiftA) |
+           ((count & 0x7fu) << kTestS2ShiftB);
+}
+
+static uint32_t s2_test_read_count(uint32_t raw) {
+    return (((raw >> kTestS2ShiftA) & 0x7u) * 128u) +
+           ((raw >> kTestS2ShiftB) & 0x7fu);
 }
 
 static uint32_t s2_test_raw(uint32_t count) {
-    return stack_codec::s2_write_count(0u, count);
+    return s2_test_write_count(0x00123456u, count);
 }
 
 static uint32_t s2_test_b_only_raw(uint32_t pre_raw, uint32_t remain) {
-    return (pre_raw & ~stack_codec::kS2MaskB) |
-           (stack_codec::s2_split_b(remain) << stack_codec::kS2ShiftB);
+    return (pre_raw & ~kTestS2MaskB) | ((remain & 0x7fu) << kTestS2ShiftB);
 }
 
-static Stage4RemoveDataEntry s2_test_pre(void* item, uint32_t full) {
+static QolResult fake_field_from_canonical(uint32_t raw, uint32_t canonical,
+                                           int32_t extended, uint32_t* out_raw) {
+    if (out_raw == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    if (extended != 0) {
+        if (canonical > 999u) canonical = 999u;
+        *out_raw = s2_test_write_count(raw, canonical);
+    } else {
+        uint32_t view = canonical & 0x7fu;
+        if (view > 99u) view = 99u;
+        *out_raw = (raw & ~kTestS2MaskB) | (view << kTestS2ShiftB);
+    }
+    return qol::contracts::ok();
+}
+
+static QolResult fake_field_from_canonical_failure(uint32_t, uint32_t, int32_t, uint32_t*) {
+    return qol::contracts::error(kQolErrUnsupported, "unsupported", 11);
+}
+
+static const qol::contracts::QolItemCountApi kStage4ConversionApi = {
+    nullptr, nullptr, nullptr, nullptr, nullptr, &fake_field_from_canonical,
+    nullptr, nullptr, &fake_conversion_limit, nullptr, nullptr, nullptr};
+
+static inventory_stage::RemoveDataEntry s2_test_pre(void* item, uint32_t full) {
     return {item, s2_test_raw(full), full};
 }
 
-static Stage4RemoveDataPost s2_test_post(void* item, uint32_t raw) {
-    return {item, raw, stack_codec::s2_read_count(raw)};
+static inventory_stage::RemoveDataPost s2_test_post(void* item, uint32_t raw) {
+    const uint32_t decoded = s2_test_read_count(raw);
+    // 与 item_count.effective 的启用态读视图一致：超过 999 时 clamp。
+    return {item, raw, decoded > 999u ? 999u : decoded};
 }
 
-// H-21 INVEN_RemoveItemData 修正计划（R-45/R-49）：按原版 b-only 写回形态识别
-// 部分删堆，覆盖三种 wrap、整删、消失堆组合、矛盾变化和 fail-closed 守卫。
+// H-21 INVEN_RemoveItemData 按原版 b-only 写回形态识别唯一部分删堆，覆盖跨 127、
+// clamp 边界、整删消失堆、多候选、非候选原始字段变化与 fail-closed 入参。
 static void test_remove_item_data_plan() {
     void* a = reinterpret_cast<void*>(static_cast<uintptr_t>(0x501));
     void* b = reinterpret_cast<void*>(static_cast<uintptr_t>(0x502));
     void* c = reinterpret_cast<void*>(static_cast<uintptr_t>(0x503));
-    using stack_codec::s2_write_count;
 
-    // 场景 1：150 - 25 = 125，b-only 写回保留旧 a，getter 读到 253。
+    // 150 - 25 = 125；原版保留 a=1，只写 b，视图增大为 253，需修正为 125。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 150u)};
+        const inventory_stage::RemoveDataPost post[] = {
             s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 125u))};
-        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(pre, post, 1, 25);
+        const inventory_stage::RemoveDataPlan plan = inventory_stage::remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 1, 25);
+        CHECK(post[0].post_view == 253u);
         CHECK(plan.correct && plan.entry_index == 0 && plan.remain == 125u);
     }
 
-    // 场景 2：199 - 72 = 127，post_view 因旧 a 仍为 255，但 raw 是 b-only 形态。
+    // remain=127 与 9 时，旧 a 分别使原版 b-only 视图成为 255 与 137。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 199u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 199u)};
+        const inventory_stage::RemoveDataPost post[] = {
             s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 127u))};
-        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(pre, post, 1, 72);
-        CHECK(plan.correct && plan.entry_index == 0 && plan.remain == 127u);
+        const inventory_stage::RemoveDataPlan plan = inventory_stage::remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 1, 72);
+        CHECK(post[0].post_view == 255u);
+        CHECK(plan.correct && plan.remain == 127u);
     }
-
-    // 场景 2b：199 - 190 = 9，b-only 写回保留旧 a，getter 读到 137。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 199u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 199u)};
+        const inventory_stage::RemoveDataPost post[] = {
             s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 9u))};
-        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(pre, post, 1, 190);
-        CHECK(plan.correct && plan.entry_index == 0 && plan.remain == 9u);
+        const inventory_stage::RemoveDataPlan plan = inventory_stage::remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 1, 190);
+        CHECK(post[0].post_view == 137u);
+        CHECK(plan.correct && plan.remain == 9u);
     }
 
-    // 场景 3：300 - 128 = 172，b 段不变但该槽仍是唯一可解释候选。
+    // remain=172 与 100 均按 a 段原样保留识别，尽管 b 段可不变或回绕增大。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 300u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 300u)};
+        const inventory_stage::RemoveDataPost post[] = {
             s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 172u))};
-        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(pre, post, 1, 128);
-        CHECK(plan.correct && plan.entry_index == 0 && plan.remain == 172u);
+        const inventory_stage::RemoveDataPlan plan = inventory_stage::remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 1, 128);
+        CHECK(post[0].post_raw == pre[0].pre_raw);
+        CHECK(plan.correct && plan.remain == 172u);
     }
-
-    // 场景 4：300 - 200 = 100，b 段回绕增大，仍需修正。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 300u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 300u)};
+        const inventory_stage::RemoveDataPost post[] = {
             s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 100u))};
-        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(pre, post, 1, 200);
-        CHECK(plan.correct && plan.entry_index == 0 && plan.remain == 100u);
+        const inventory_stage::RemoveDataPlan plan = inventory_stage::remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 1, 200);
+        CHECK(plan.correct && plan.remain == 100u);
     }
 
-    // 场景 5：300 - 44 = 256，原版 b-only 写回已经由旧 a 正确表达。
+    // 300 - 44 = 256；b-only 写回视图已等于 remain，不需要二次回写。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 300u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 300u)};
+        const inventory_stage::RemoveDataPost post[] = {
             s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 256u))};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 1, 44).correct);
+        CHECK(!inventory_stage::remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 1, 44).correct);
     }
 
-    // 场景 6（整堆删除）：没有部分删堆候选，不回写。
+    // expected_view 超过 999 时只按未 clamp 的 S2 视图判断原版 b-only 形态。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 199u), s2_test_pre(b, 50u)};
-        const Stage4RemoveDataPost post[] = {{nullptr, 0u, 0u}, {nullptr, 0u, 0u}};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 2, 249).correct);
-        CHECK(!stage4_remove_item_data_plan(pre, post, 2, 9999).correct);
-
-        const Stage4RemoveDataEntry single_pre[] = {s2_test_pre(a, 300u)};
-        const Stage4RemoveDataPost single_post[] = {{nullptr, 0u, 0u}};
-        CHECK(!stage4_remove_item_data_plan(single_pre, single_post, 1, 300).correct);
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 999u)};
+        const inventory_stage::RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 127u))};
+        const inventory_stage::RemoveDataPlan plan = inventory_stage::remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 1, 872);
+        CHECK(post[0].post_view == 999u);
+        CHECK(plan.correct && plan.remain == 127u);
     }
 
-    // 场景 7（消失堆 + wrap 部分删堆）：150 整删后 300 - 100 = 200。
+    // 整删只累计消失堆；全部删除与 sum_vanished > count 均不回写。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u), s2_test_pre(b, 300u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 199u), s2_test_pre(b, 50u)};
+        const inventory_stage::RemoveDataPost post[] = {{nullptr, 0u, 0u}, {nullptr, 0u, 0u}};
+        CHECK(!inventory_stage::remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 2, 249).correct);
+        CHECK(!inventory_stage::remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 2, 9999).correct);
+    }
+    {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 150u)};
+        const inventory_stage::RemoveDataPost post[] = {{nullptr, 0u, 0u}};
+        CHECK(!inventory_stage::remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 1, 149).correct);
+    }
+
+    // 消失堆累计扣除后，剩余堆仍按其唯一 b-only 形态修正。
+    {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 150u), s2_test_pre(b, 300u)};
+        const inventory_stage::RemoveDataPost post[] = {
             {nullptr, 0u, 0u},
             s2_test_post(b, s2_test_b_only_raw(pre[1].pre_raw, 200u))};
-        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(pre, post, 2, 250);
+        const inventory_stage::RemoveDataPlan plan = inventory_stage::remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 2, 250);
         CHECK(plan.correct && plan.entry_index == 1 && plan.remain == 200u);
     }
 
-    // 场景 8（fail-closed：两个候选）。
+    // 两个堆都呈现同一 b-only 结果时，多候选 fail-closed。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u), s2_test_pre(b, 150u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 150u), s2_test_pre(b, 150u)};
+        const inventory_stage::RemoveDataPost post[] = {
             s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 125u)),
             s2_test_post(b, s2_test_b_only_raw(pre[1].pre_raw, 125u))};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 2, 25).correct);
+        CHECK(!inventory_stage::remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 2, 25).correct);
     }
 
-    // 场景 9（fail-closed：候选之外的对象 b 段发生变化）。
+    // 非候选同对象槽 raw 改变时 fail-closed，包括数量段以外的位变化。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u), s2_test_pre(b, 300u)};
-        const Stage4RemoveDataPost post[] = {
-            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 125u)),
-            s2_test_post(b, s2_test_b_only_raw(pre[1].pre_raw, 100u))};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 2, 25).correct);
-    }
-
-    // 场景 9b（fail-closed：唯一候选槽的 bits0..21 发生变化）。
-    {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u), s2_test_pre(b, 300u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 150u), s2_test_pre(b, 300u)};
+        const inventory_stage::RemoveDataPost post[] = {
             s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 125u)),
             s2_test_post(b, pre[1].pre_raw ^ 1u)};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 2, 25).correct);
+        CHECK(!inventory_stage::remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 2, 25).correct);
     }
-
-    // 场景 10（fail-closed：对象替换、count<=0、删除量越过当前堆）。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 199u)};
-        const Stage4RemoveDataPost replaced[] = {s2_test_post(c, s2_test_raw(1u))};
-        const Stage4RemoveDataPost unchanged[] = {
-            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 137u))};
-        CHECK(!stage4_remove_item_data_plan(pre, replaced, 1, 1).correct);
-        CHECK(!stage4_remove_item_data_plan(pre, unchanged, 1, 0).correct);
-        CHECK(!stage4_remove_item_data_plan(pre, unchanged, 1, -1).correct);
-        CHECK(!stage4_remove_item_data_plan(pre, unchanged, 1, 200).correct);
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 150u)};
+        const inventory_stage::RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 124u))};
+        CHECK(!inventory_stage::remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 1, 25).correct);
     }
 
-    // 场景 11（非候选槽原始字段完全不变，包含非数量位）：不回写 bits22-24。
+    // 没有部分删除、对象替换、count<=0 和退化输入均不回写。
     {
-        const uint32_t nonstack_raw = 0x00C00000u | (3u << 25);
-        const Stage4RemoveDataEntry pre[] = {{a, nonstack_raw, 50u}};
-        const Stage4RemoveDataPost post[] = {{a, nonstack_raw, 50u}};
-        CHECK(!stage4_remove_item_data_plan(pre, post, 1, 10).correct);
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 199u)};
+        const inventory_stage::RemoveDataPost unchanged[] = {s2_test_post(a, pre[0].pre_raw)};
+        const inventory_stage::RemoveDataPost replaced[] = {s2_test_post(c, s2_test_raw(1u))};
+        CHECK(!inventory_stage::remove_item_data_plan(
+            &kStage4ConversionApi, pre, unchanged, 1, 1).correct);
+        CHECK(!inventory_stage::remove_item_data_plan(
+            &kStage4ConversionApi, pre, unchanged, 1, 0).correct);
+        CHECK(!inventory_stage::remove_item_data_plan(
+            &kStage4ConversionApi, pre, unchanged, 1, -1).correct);
+        CHECK(!inventory_stage::remove_item_data_plan(
+            &kStage4ConversionApi, pre, replaced, 1, 1).correct);
+    }
+    CHECK(!inventory_stage::remove_item_data_plan(
+        &kStage4ConversionApi, nullptr, nullptr, 0, 5).correct);
+    CHECK(!inventory_stage::remove_item_data_plan(nullptr, nullptr, nullptr, 0, 5).correct);
+
+    // 转换 API 缺失或失败时不猜测原版写回形态。
+    {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 150u)};
+        const inventory_stage::RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 125u))};
+        qol::contracts::QolItemCountApi missing_api = kStage4ConversionApi;
+        missing_api.field_from_canonical = nullptr;
+        qol::contracts::QolItemCountApi failed_api = kStage4ConversionApi;
+        failed_api.field_from_canonical = &fake_field_from_canonical_failure;
+        CHECK(!inventory_stage::remove_item_data_plan(&missing_api, pre, post, 1, 25).correct);
+        CHECK(!inventory_stage::remove_item_data_plan(&failed_api, pre, post, 1, 25).correct);
     }
 
-    // 场景 12（S2 编码交叉验证：139 = a1 + b11、9 = a0 + b9）。
-    CHECK(s2_write_count(0u, 139u) == ((1u << 22) | (11u << 25)));
-    CHECK(s2_write_count(0u, 9u) == (9u << 25));
-    // 场景 13（空/退化入参）→ 不修正。
-    CHECK(!stage4_remove_item_data_plan(nullptr, nullptr, 0, 5).correct);
+    // 原版形态已将 a+b 表达为 remain 时无需回写。
+    {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 50u)};
+        const inventory_stage::RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 40u))};
+        CHECK(!inventory_stage::remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 1, 10).correct);
+    }
 }
 
 // H-21 扩展桥接（R-56）补扣量纯函数：物理实扣 = 前后 H-03 总数差，扩展补扣 =
 // max(0, requested - physical_removed)。覆盖足额/不足/全扩展/退化入参。
 static void test_remove_data_extension_shortfall() {
     // 物理足额（含恰好全扣）→ 不补扣。
-    CHECK(stage4_remove_data_extension_shortfall(10, 5, 3) == 0);
-    CHECK(stage4_remove_data_extension_shortfall(8, 3, 5) == 0);
-    CHECK(stage4_remove_data_extension_shortfall(10, 0, 10) == 0);
+    CHECK(inventory_stage::remove_data_extension_shortfall(10, 5, 3) == 0);
+    CHECK(inventory_stage::remove_data_extension_shortfall(8, 3, 5) == 0);
+    CHECK(inventory_stage::remove_data_extension_shortfall(10, 0, 10) == 0);
     // 物理不足 → 补差额。
-    CHECK(stage4_remove_data_extension_shortfall(10, 8, 5) == 3);
-    CHECK(stage4_remove_data_extension_shortfall(2, 0, 5) == 3);
+    CHECK(inventory_stage::remove_data_extension_shortfall(10, 8, 5) == 3);
+    CHECK(inventory_stage::remove_data_extension_shortfall(2, 0, 5) == 3);
     // 材料全在扩展袋（原版一个物理都没扣）→ 全额补扣。
-    CHECK(stage4_remove_data_extension_shortfall(5, 5, 5) == 5);
-    CHECK(stage4_remove_data_extension_shortfall(0, 0, 1) == 1);
+    CHECK(inventory_stage::remove_data_extension_shortfall(5, 5, 5) == 5);
+    CHECK(inventory_stage::remove_data_extension_shortfall(0, 0, 1) == 1);
     // requested<=0 不补扣。
-    CHECK(stage4_remove_data_extension_shortfall(5, 5, 0) == 0);
-    CHECK(stage4_remove_data_extension_shortfall(5, 5, -1) == 0);
+    CHECK(inventory_stage::remove_data_extension_shortfall(5, 5, 0) == 0);
+    CHECK(inventory_stage::remove_data_extension_shortfall(5, 5, -1) == 0);
     // 数据反向（after>before）按物理零扣处理，返回全额，绝不产生负补扣。
-    CHECK(stage4_remove_data_extension_shortfall(5, 6, 4) == 4);
-}
-
-// 原版装备页出售/销毁结算数量语义（0x1261c4 直读 b 段 + clamp）：把 canonical
-// 编码成原生 +0x10 字段后，函数必须复现实测表（199→71→546 的价格基数）。
-static void test_native_equip_sell_count() {
-    using stack_codec::s2_write_count;
-    const auto field = [](uint32_t canonical) { return s2_write_count(0u, canonical); };
-    // 实测：100..129→1（b∈{0,1} 或 b=100..127），130→2，199→71，227→99，228→1。
-    CHECK(native_equip_sell_count(field(100u)) == 1u);
-    CHECK(native_equip_sell_count(field(128u)) == 1u);
-    CHECK(native_equip_sell_count(field(129u)) == 1u);
-    CHECK(native_equip_sell_count(field(130u)) == 2u);
-    CHECK(native_equip_sell_count(field(199u)) == 71u);
-    CHECK(native_equip_sell_count(field(227u)) == 99u);
-    CHECK(native_equip_sell_count(field(228u)) == 1u);
-    CHECK(native_equip_sell_count(field(999u)) == 1u);
-    // 裸字段边界：b=0（128 的 a 段单独）与 b=100（228）都必须回退 1。
-    CHECK(native_equip_sell_count(0u) == 1u);
-    CHECK(native_equip_sell_count(1u << 22) == 1u);
-    CHECK(native_equip_sell_count(100u << 25) == 1u);
-    CHECK(native_equip_sell_count(99u << 25) == 99u);
-}
-
-// 装备页详情出售结算点（0x1261c4）重定向指令映射（VM-37 装备页分支）：
-// 反汇编原字节 → 重定向表条目逐位固定；替换 arg 必须是 mov x0,x21（物品指针在
-// x21），不能套用其它点的 mov x0,x19。重定向表（game_patch_core.inc）与 Host
-// 共用 inventory_hook_stage4.h 的同一常量，避免表与证据漂移。
-static void test_equip_sell_redirect_mapping() {
-    CHECK(kEquipSellRedirectArgOriginal == 0xb94012a0u);   // ldr w0,[x21,#0x10]
-    CHECK(kEquipSellRedirectCallOriginal == 0x940068c8u);  // bl UTIL_GetBitValue
-    CHECK(kEquipSellRedirectArgReplacement == (0xaa0003e0u | (21u << 16)));  // mov x0,x21
-    CHECK(stage4_equip_sell_redirect_matches(kEquipSellRedirectArgOriginal,
-                                             kEquipSellRedirectCallOriginal));
-    // x19 版本的 arg 原字节（商店/拆堆点）不得被装备页条目误匹配。
-    CHECK(!stage4_equip_sell_redirect_matches(0xb9401260u, kEquipSellRedirectCallOriginal));
-    CHECK(!stage4_equip_sell_redirect_matches(kEquipSellRedirectArgOriginal, 0x9401bb13u));
-    // 重定向语义：canonical 199（a=1,b=71）原版读 71（546 缺陷基线），
-    // 重定向后的 getter 读 199。
-    const uint32_t field = stack_codec::s2_write_count(0u, 199u);
-    CHECK(native_equip_sell_count(field) == 71u);
-    CHECK(stack_codec::effective_read_count(field, true) == 199u);
+    CHECK(inventory_stage::remove_data_extension_shortfall(5, 6, 4) == 4);
 }
 
 // VM-38：ITEMSYSTEM_MakeItem 数量回写计划——arg2 是静态表查找/品质参数
@@ -587,62 +608,58 @@ static void test_make_item_writeback_count() {
 
 // VM-41：原版背包详情出售接管判定 + 金额（R-55）。调用点常量与 game_symbols.h
 // 同源；启用/关闭两态、canonical 0/1/99/100/199/999、越界拒绝全覆盖。
-static void test_vanilla_sell_takeover() {
+static void test_vanilla_sell_routing() {
     // 结算点常量与反汇编证据一致（0xb83d0 回调 / desc_type==2 背包详情）。
     CHECK(F_UIEQUIP_OK_DESTROY_ITEM_VMA == 0xb83d0u);
     CHECK(F_UIEQUIP_BUTTON_DESTROY_EXE_VMA == 0xb6240u);
     CHECK(kUIEquipBagDescType == 2u);
 
-    // 关闭态：预演与真实结算都 backup（原版逐指令不变）。
-    CHECK(vanilla_sell_route(false, true) == VanillaSellRoute::kBackup);
-    CHECK(vanilla_sell_route(false, false) == VanillaSellRoute::kBackup);
+    // 原版可表示数量、非 count-encoded 物品与任务袋均透传；S2 编码才接管。
+    const uint32_t canonical_counts[]{1u, 99u, 100u, 127u, 128u, 199u, 999u};
+    for (size_t index = 0; index < 4; ++index) {
+        CHECK(vanilla_sell_route(0, true, canonical_counts[index], true) ==
+              VanillaSellRoute::kBackup);
+        CHECK(vanilla_sell_route(0, true, canonical_counts[index], false) ==
+              VanillaSellRoute::kBackup);
+    }
+    for (size_t index = 4; index < 7; ++index) {
+        CHECK(vanilla_sell_route(0, true, canonical_counts[index], true) ==
+              VanillaSellRoute::kPreview);
+        CHECK(vanilla_sell_route(0, true, canonical_counts[index], false) ==
+              VanillaSellRoute::kTakeover);
+    }
+    CHECK(vanilla_sell_route(0, false, 199u, true) == VanillaSellRoute::kBackup);
+    CHECK(vanilla_sell_route(5, true, 199u, true) == VanillaSellRoute::kBackup);
 
-    // 启用态：按钮预演只回填展示金额；弹窗 OK 真实接管。
-    CHECK(vanilla_sell_route(true, true) == VanillaSellRoute::kPreview);
-    CHECK(vanilla_sell_route(true, false) == VanillaSellRoute::kTakeover);
+    qol::contracts::QolItemDetailContext preview{2, 1, 4, {17, 3}};
+    auto confirmation = preview;
+    CHECK(vanilla_sell_detail_context_matches(preview, confirmation));
+    confirmation.bag = 2;
+    CHECK(!vanilla_sell_detail_context_matches(preview, confirmation));
+    confirmation = preview;
+    confirmation.slot = 5;
+    CHECK(!vanilla_sell_detail_context_matches(preview, confirmation));
+    confirmation = preview;
+    confirmation.item.generation = 4;
+    CHECK(!vanilla_sell_detail_context_matches(preview, confirmation));
+    confirmation = preview;
+    confirmation.item.slot = 0;
+    CHECK(!vanilla_sell_detail_context_matches(preview, confirmation));
 
-    // 金额：unit × canonical × 7 / 10。
-    int64_t price = -1;
-    CHECK(vanilla_sell_money(10, 1u, &price) && price == 7);
-    CHECK(vanilla_sell_money(10, 99u, &price) && price == 693);
-    CHECK(vanilla_sell_money(10, 100u, &price) && price == 700);
-    CHECK(vanilla_sell_money(10, 199u, &price) && price == 1393);
-    CHECK(vanilla_sell_money(10, 999u, &price) && price == 6993);
-    // canonical 0 拒绝；越界 canonical 按启用态上限 999 收敛。
-    CHECK(!vanilla_sell_money(10, 0u, &price));
-    CHECK(vanilla_sell_money(10, 1023u, &price) && price == 6993);
-    CHECK(vanilla_sell_money(10, 1000u, &price) && price == 6993);
-    // 越界拒绝：负单价 / 结果超出 int32 / 空出参。
-    CHECK(!vanilla_sell_money(-1, 10u, &price));
-    CHECK(!vanilla_sell_money(INT32_MAX, 999u, &price));
-    CHECK(!vanilla_sell_money(10, 10u, nullptr));
-    // 单价 0 合法（金额 0），不得因结果 0 被误拒。
-    CHECK(vanilla_sell_money(0, 10u, &price) && price == 0);
-}
-
-// S2 写侧回写门控必须与读侧 getter 门控（stack_limit_enabled）对齐：
-// 堆叠上限开启即需要写侧进位，与扩展背包开关无关；扩展背包开启保持既有行为。
-static void test_s2_writeback_gate() {
-    CHECK(!stack_codec::writeback_needed(false, false));
-    CHECK(stack_codec::writeback_needed(false, true));   // 堆叠开 + 扩展关：修复点
-    CHECK(stack_codec::writeback_needed(true, false));
-    CHECK(stack_codec::writeback_needed(true, true));
 }
 
 int main() {
+    test_s2_writeback_applied_gate();
     test_queries();
     test_original_only_queries();
-    test_get_cumulate_count_s2();
+    test_get_cumulate_count_facade();
     test_remove_item_data_plan();
     test_remove_data_extension_shortfall();
-    test_native_equip_sell_count();
-    test_equip_sell_redirect_mapping();
     test_make_item_writeback_count();
-    test_vanilla_sell_takeover();
+    test_vanilla_sell_routing();
     test_object_operations();
     test_unequip_to_inven();
     test_install_transaction();
-    test_s2_writeback_gate();
     std::printf("stage4_hook_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

@@ -1,0 +1,5 @@
+FATAL=0
+SIGSEGV=0
+SIGABRT=0
+UnsatisfiedLinkError=0
+window_lines=18285

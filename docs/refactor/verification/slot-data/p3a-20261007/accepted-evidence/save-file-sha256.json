@@ -1,0 +1,285 @@
+{
+  "dat_directory_identifiers": "opaque labels; device unique-directory identifiers intentionally excluded",
+  "files": [
+    {
+      "file": "dat-directory-1/save0.dat",
+      "bytes": 4106,
+      "before_sha256": "1b06aabb6a30043bbc93658bff94f58cfd3e0d141c0557cada653baee576ef2a",
+      "after_sha256": "1b06aabb6a30043bbc93658bff94f58cfd3e0d141c0557cada653baee576ef2a",
+      "final_sha256": "1b06aabb6a30043bbc93658bff94f58cfd3e0d141c0557cada653baee576ef2a",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-1/save0.dat.wh4-000001a043a2bba1",
+      "bytes": 803,
+      "before_sha256": "4988a4bd9a23fe6d6f3a8e51d9c7db03e1b1b023ebb0a58556b1282ed4fd722d",
+      "after_sha256": "4988a4bd9a23fe6d6f3a8e51d9c7db03e1b1b023ebb0a58556b1282ed4fd722d",
+      "final_sha256": "4988a4bd9a23fe6d6f3a8e51d9c7db03e1b1b023ebb0a58556b1282ed4fd722d",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-1/save0.dat.wh4-000001a043a2bba1.bak",
+      "bytes": 803,
+      "before_sha256": "5f05a376acaade46cbb48632f952898c89633007291efe5789fd65e04c8bbdbc",
+      "after_sha256": "5f05a376acaade46cbb48632f952898c89633007291efe5789fd65e04c8bbdbc",
+      "final_sha256": "5f05a376acaade46cbb48632f952898c89633007291efe5789fd65e04c8bbdbc",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-1/save1.dat",
+      "bytes": 7158,
+      "before_sha256": "f499ba63535be011acbfbb76e9aa084b45d1dbe020dfedc2a057031cb7f806da",
+      "after_sha256": "f499ba63535be011acbfbb76e9aa084b45d1dbe020dfedc2a057031cb7f806da",
+      "final_sha256": "f499ba63535be011acbfbb76e9aa084b45d1dbe020dfedc2a057031cb7f806da",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-1/save1.dat.wh4-000001a043a2bba1",
+      "bytes": 803,
+      "before_sha256": "7d0ac4210288fa8b08521c0a76e718a5bbf338cf2b021357a589642f7b68987b",
+      "after_sha256": "7d0ac4210288fa8b08521c0a76e718a5bbf338cf2b021357a589642f7b68987b",
+      "final_sha256": "7d0ac4210288fa8b08521c0a76e718a5bbf338cf2b021357a589642f7b68987b",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-1/save1.dat.wh4-000001a043a2bba1.bak",
+      "bytes": 803,
+      "before_sha256": "513b321b2ae455d7e76dd4ffa2720b8297df2eb2ed5c02283b301b8a7a12dba4",
+      "after_sha256": "513b321b2ae455d7e76dd4ffa2720b8297df2eb2ed5c02283b301b8a7a12dba4",
+      "final_sha256": "513b321b2ae455d7e76dd4ffa2720b8297df2eb2ed5c02283b301b8a7a12dba4",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-1/save1.dat.wh4-000001a0a69579e9",
+      "bytes": 675,
+      "before_sha256": "a75ca79de7446fa457600b1501e6831c01495148e57a52c504bd5cfc453c6296",
+      "after_sha256": "a75ca79de7446fa457600b1501e6831c01495148e57a52c504bd5cfc453c6296",
+      "final_sha256": "a75ca79de7446fa457600b1501e6831c01495148e57a52c504bd5cfc453c6296",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-1/save1.dat.wh4-000001a0a69579e9.bak",
+      "bytes": 675,
+      "before_sha256": "7e84c5ba56c6d3ba45876154ab05162b767cb8a2d1fe14bc0e7c3a32a02d8725",
+      "after_sha256": "7e84c5ba56c6d3ba45876154ab05162b767cb8a2d1fe14bc0e7c3a32a02d8725",
+      "final_sha256": "7e84c5ba56c6d3ba45876154ab05162b767cb8a2d1fe14bc0e7c3a32a02d8725",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-1/save1.dat.wh4-000001a0ac24fe8a",
+      "bytes": 675,
+      "before_sha256": "b45adabc68b4057e9952a91bc9cca614ece6e593dc5cd383de48ed408456fa40",
+      "after_sha256": "b45adabc68b4057e9952a91bc9cca614ece6e593dc5cd383de48ed408456fa40",
+      "final_sha256": "b45adabc68b4057e9952a91bc9cca614ece6e593dc5cd383de48ed408456fa40",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-1/save1.dat.wh4-000001a0ac24fe8a.bak",
+      "bytes": 675,
+      "before_sha256": "03f21136ebae3f3616ca79b8c6d625a6d5e02e14daefcf8fbbb9f4383eeab6ba",
+      "after_sha256": "03f21136ebae3f3616ca79b8c6d625a6d5e02e14daefcf8fbbb9f4383eeab6ba",
+      "final_sha256": "03f21136ebae3f3616ca79b8c6d625a6d5e02e14daefcf8fbbb9f4383eeab6ba",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-1/save2.dat",
+      "bytes": 3139,
+      "before_sha256": "77beb220aacd1041871cbbfbb4b2e08af46d30fcec204218047e48505e377f94",
+      "after_sha256": "77beb220aacd1041871cbbfbb4b2e08af46d30fcec204218047e48505e377f94",
+      "final_sha256": "77beb220aacd1041871cbbfbb4b2e08af46d30fcec204218047e48505e377f94",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-1/save2.dat.wh4-000001a043a2bba1",
+      "bytes": 803,
+      "before_sha256": "b32e461167b3651e1283c60fd13edc092a3a5160527cd2e85c29e9e5679b0809",
+      "after_sha256": "b32e461167b3651e1283c60fd13edc092a3a5160527cd2e85c29e9e5679b0809",
+      "final_sha256": "b32e461167b3651e1283c60fd13edc092a3a5160527cd2e85c29e9e5679b0809",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-1/save2.dat.wh4-000001a043a2bba1.bak",
+      "bytes": 803,
+      "before_sha256": "78f0444450ae89afc2d0720da2150142627f90d821e2e9e30b6bb17f44bfc4b5",
+      "after_sha256": "78f0444450ae89afc2d0720da2150142627f90d821e2e9e30b6bb17f44bfc4b5",
+      "final_sha256": "78f0444450ae89afc2d0720da2150142627f90d821e2e9e30b6bb17f44bfc4b5",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-1/save2.dat.wh4-000001a093605c53",
+      "bytes": 1107,
+      "before_sha256": "31e406c4863ebca4f187b8cd55ec3eaddb1760058cae0d7e84318a92cd83f598",
+      "after_sha256": "31e406c4863ebca4f187b8cd55ec3eaddb1760058cae0d7e84318a92cd83f598",
+      "final_sha256": "31e406c4863ebca4f187b8cd55ec3eaddb1760058cae0d7e84318a92cd83f598",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-1/save2.dat.wh4-000001a093605c53.bak",
+      "bytes": 1107,
+      "before_sha256": "a6f57f31b4d268cdd13f30b4dde4ccaa07923d1911ff0fd440286499b287bd1b",
+      "after_sha256": "a6f57f31b4d268cdd13f30b4dde4ccaa07923d1911ff0fd440286499b287bd1b",
+      "final_sha256": "a6f57f31b4d268cdd13f30b4dde4ccaa07923d1911ff0fd440286499b287bd1b",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-1/save2.dat.wh4-000001a0a64d6eb5",
+      "bytes": 675,
+      "before_sha256": "835adcd37fafea2f415ca29c04ef2d32e6f8ff78a8efdeeed3a25bd88b0e9bc2",
+      "after_sha256": "835adcd37fafea2f415ca29c04ef2d32e6f8ff78a8efdeeed3a25bd88b0e9bc2",
+      "final_sha256": "835adcd37fafea2f415ca29c04ef2d32e6f8ff78a8efdeeed3a25bd88b0e9bc2",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-1/save2.dat.wh4-000001a0a64d6eb5.bak",
+      "bytes": 675,
+      "before_sha256": "c00a8dd7792a20171b1dd4ed153827f755fd0d30e4ffa5754ddf03e66195aa54",
+      "after_sha256": "c00a8dd7792a20171b1dd4ed153827f755fd0d30e4ffa5754ddf03e66195aa54",
+      "final_sha256": "c00a8dd7792a20171b1dd4ed153827f755fd0d30e4ffa5754ddf03e66195aa54",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-1/save2.dat.wh4-000001a0ac24fe8a",
+      "bytes": 675,
+      "before_sha256": "fa95384794da9411f1c246815132248c39ff01069446825863dc91323b7f5598",
+      "after_sha256": "fa95384794da9411f1c246815132248c39ff01069446825863dc91323b7f5598",
+      "final_sha256": "fa95384794da9411f1c246815132248c39ff01069446825863dc91323b7f5598",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-1/save2.dat.wh4-000001a0ac24fe8a.bak",
+      "bytes": 675,
+      "before_sha256": "b5fe6c6bc932fe5b19d9e89fa6b55c59e7a6a9f90e979432787393a976be84d1",
+      "after_sha256": "b5fe6c6bc932fe5b19d9e89fa6b55c59e7a6a9f90e979432787393a976be84d1",
+      "final_sha256": "b5fe6c6bc932fe5b19d9e89fa6b55c59e7a6a9f90e979432787393a976be84d1",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-1/save2.dat.wh4-000001a0cfe6d5da",
+      "bytes": 675,
+      "before_sha256": "ccb73c8459d44857b0cbc1162e367a6ece371121a02d71751f0055f217e3266c",
+      "after_sha256": "ccb73c8459d44857b0cbc1162e367a6ece371121a02d71751f0055f217e3266c",
+      "final_sha256": "ccb73c8459d44857b0cbc1162e367a6ece371121a02d71751f0055f217e3266c",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-1/save2.dat.wh4-000001a0cfe6d5da.bak",
+      "bytes": 675,
+      "before_sha256": "5cd9a378c37dc1e416efb30e92634493ae7c64e097f9cf93026dc5969709c6fd",
+      "after_sha256": "5cd9a378c37dc1e416efb30e92634493ae7c64e097f9cf93026dc5969709c6fd",
+      "final_sha256": "5cd9a378c37dc1e416efb30e92634493ae7c64e097f9cf93026dc5969709c6fd",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-2/thpcheckslot1.dat",
+      "bytes": 27,
+      "before_sha256": "8e53fb2602c4b01eda0025ccf4278352d829ba0fedec37203f63360583efc07e",
+      "after_sha256": "8e53fb2602c4b01eda0025ccf4278352d829ba0fedec37203f63360583efc07e",
+      "final_sha256": "8e53fb2602c4b01eda0025ccf4278352d829ba0fedec37203f63360583efc07e",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-2/thpcheckslot2.dat",
+      "bytes": 31,
+      "before_sha256": "78358c224ac56f3e5ae01e78a26b115f265eaa4f492272055c9be3e72a1534a6",
+      "after_sha256": "78358c224ac56f3e5ae01e78a26b115f265eaa4f492272055c9be3e72a1534a6",
+      "final_sha256": "78358c224ac56f3e5ae01e78a26b115f265eaa4f492272055c9be3e72a1534a6",
+      "unchanged": true
+    },
+    {
+      "file": "dat-directory-2/thpcheckslot3.dat",
+      "bytes": 30,
+      "before_sha256": "2c7d5eccd430397ddbc57a3162c1e357d8acea6e5bb50ac12214243f4a94f9ee",
+      "after_sha256": "2c7d5eccd430397ddbc57a3162c1e357d8acea6e5bb50ac12214243f4a94f9ee",
+      "final_sha256": "2c7d5eccd430397ddbc57a3162c1e357d8acea6e5bb50ac12214243f4a94f9ee",
+      "unchanged": true
+    },
+    {
+      "file": "module-saves/original-backup/slot-0.dat.last-good",
+      "bytes": 3693,
+      "before_sha256": "c64fe8ff368dafc0c671eb12623cd4d7a4ff4e73fe85bb804d56dc86f9166940",
+      "after_sha256": "c64fe8ff368dafc0c671eb12623cd4d7a4ff4e73fe85bb804d56dc86f9166940",
+      "final_sha256": "c64fe8ff368dafc0c671eb12623cd4d7a4ff4e73fe85bb804d56dc86f9166940",
+      "unchanged": true
+    },
+    {
+      "file": "module-saves/original-backup/slot-0.dat.last-good.meta.json",
+      "bytes": 280,
+      "before_sha256": "734f240859e27d5954000d3695617c6577b74f787e34964e0d196ac043aaf2e8",
+      "after_sha256": "734f240859e27d5954000d3695617c6577b74f787e34964e0d196ac043aaf2e8",
+      "final_sha256": "734f240859e27d5954000d3695617c6577b74f787e34964e0d196ac043aaf2e8",
+      "unchanged": true
+    },
+    {
+      "file": "module-saves/original-backup/slot-0.dat.pre-save",
+      "bytes": 3693,
+      "before_sha256": "326111dcffefe5d9005b92c2140ff0dd6c7e9d4144f9cd892a545062a5056882",
+      "after_sha256": "326111dcffefe5d9005b92c2140ff0dd6c7e9d4144f9cd892a545062a5056882",
+      "final_sha256": "326111dcffefe5d9005b92c2140ff0dd6c7e9d4144f9cd892a545062a5056882",
+      "unchanged": true
+    },
+    {
+      "file": "module-saves/original-backup/slot-0.dat.pre-save.meta.json",
+      "bytes": 279,
+      "before_sha256": "6445ab2e2192919955b9665202d4cbdf9b14a927906a327742ace797ecc52714",
+      "after_sha256": "6445ab2e2192919955b9665202d4cbdf9b14a927906a327742ace797ecc52714",
+      "final_sha256": "6445ab2e2192919955b9665202d4cbdf9b14a927906a327742ace797ecc52714",
+      "unchanged": true
+    },
+    {
+      "file": "module-saves/original-backup/slot-0.save-failed.meta.json",
+      "bytes": 296,
+      "before_sha256": "f931a28b74079c0180d489f5d724a336844974151f57625e5b1bb739bde1caef",
+      "after_sha256": "f931a28b74079c0180d489f5d724a336844974151f57625e5b1bb739bde1caef",
+      "final_sha256": "f931a28b74079c0180d489f5d724a336844974151f57625e5b1bb739bde1caef",
+      "unchanged": true
+    },
+    {
+      "file": "module-saves/slot-0.module-save",
+      "bytes": 5929,
+      "before_sha256": "cbd84f34468a1c5820b14a6ff99dccd7e5eaecc7c6575d1a2ac36d370a1fc028",
+      "after_sha256": "cbd84f34468a1c5820b14a6ff99dccd7e5eaecc7c6575d1a2ac36d370a1fc028",
+      "final_sha256": "cbd84f34468a1c5820b14a6ff99dccd7e5eaecc7c6575d1a2ac36d370a1fc028",
+      "unchanged": true
+    },
+    {
+      "file": "module-saves/slot-0.module-save.last-good",
+      "bytes": 5929,
+      "before_sha256": "cbd84f34468a1c5820b14a6ff99dccd7e5eaecc7c6575d1a2ac36d370a1fc028",
+      "after_sha256": "cbd84f34468a1c5820b14a6ff99dccd7e5eaecc7c6575d1a2ac36d370a1fc028",
+      "final_sha256": "cbd84f34468a1c5820b14a6ff99dccd7e5eaecc7c6575d1a2ac36d370a1fc028",
+      "unchanged": true
+    },
+    {
+      "file": "module-saves/slot-1.module-save",
+      "bytes": 2919,
+      "before_sha256": "6af45873781531bebea1a895d5933f65fb4cf687332a885dd3377e5e41ae513e",
+      "after_sha256": "6af45873781531bebea1a895d5933f65fb4cf687332a885dd3377e5e41ae513e",
+      "final_sha256": "6af45873781531bebea1a895d5933f65fb4cf687332a885dd3377e5e41ae513e",
+      "unchanged": true
+    },
+    {
+      "file": "module-saves/slot-1.module-save.last-good",
+      "bytes": 2919,
+      "before_sha256": "6af45873781531bebea1a895d5933f65fb4cf687332a885dd3377e5e41ae513e",
+      "after_sha256": "6af45873781531bebea1a895d5933f65fb4cf687332a885dd3377e5e41ae513e",
+      "final_sha256": "6af45873781531bebea1a895d5933f65fb4cf687332a885dd3377e5e41ae513e",
+      "unchanged": true
+    },
+    {
+      "file": "module-saves/slot-2.module-save",
+      "bytes": 21,
+      "before_sha256": "188a774a5f83d13aad8fd0df503ae698d5dda35100621c5d2df0b836b2b63acc",
+      "after_sha256": "188a774a5f83d13aad8fd0df503ae698d5dda35100621c5d2df0b836b2b63acc",
+      "final_sha256": "188a774a5f83d13aad8fd0df503ae698d5dda35100621c5d2df0b836b2b63acc",
+      "unchanged": true
+    },
+    {
+      "file": "module-saves/slot-2.module-save.last-good",
+      "bytes": 21,
+      "before_sha256": "188a774a5f83d13aad8fd0df503ae698d5dda35100621c5d2df0b836b2b63acc",
+      "after_sha256": "188a774a5f83d13aad8fd0df503ae698d5dda35100621c5d2df0b836b2b63acc",
+      "final_sha256": "188a774a5f83d13aad8fd0df503ae698d5dda35100621c5d2df0b836b2b63acc",
+      "unchanged": true
+    }
+  ]
+}

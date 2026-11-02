@@ -1,0 +1,2 @@
+{"ok":false,"error":"direction 0-3 required"}
+HTTP 400

@@ -1,0 +1,254 @@
+#include "host/item_inventory_state_write_port.h"
+
+#include "game/adapter_ports/item_count_facade.h"
+#include <cstring>
+#include <string>
+
+#include "contracts/game_cache.h"
+#include "core/native/inventory_trade.h"
+#include "game/ops/item_inventory_state_write.h"
+#include "game/state/game_state.h"
+
+namespace qol::host {
+namespace {
+
+QolResult trade_error(contracts::QolItemInventoryStateWriteResult* out, const char* message) {
+    const size_t length = std::strlen(message);
+    if (length >= sizeof(out->error_message)) {
+        return contracts::error(kQolErrInternal, "item trade error too long", 25);
+    }
+    std::memcpy(out->error_message, message, length + 1);
+    out->error_message_len = static_cast<uint32_t>(length);
+    return contracts::error(kQolErrInternal, out->error_message, out->error_message_len);
+}
+
+QolResult cleanup_error(contracts::QolItemInventoryStateWriteResult* out,
+                        const QolResult& cleanup) {
+    const char* message = cleanup.message != nullptr ? cleanup.message : "loaded item cleanup failed";
+    const size_t length = cleanup.message != nullptr
+                              ? cleanup.message_len
+                              : std::strlen(message);
+    if (out == nullptr) return contracts::error(cleanup.code, message, static_cast<uint32_t>(length));
+    const size_t copied = length < sizeof(out->error_message) - 1
+                              ? length
+                              : sizeof(out->error_message) - 1;
+    std::memcpy(out->error_message, message, copied);
+    out->error_message[copied] = '\0';
+    out->error_message_len = static_cast<uint32_t>(copied);
+    return contracts::error(cleanup.code, out->error_message, out->error_message_len);
+}
+
+const char* sell_error(inventory_trade::Status status) {
+    switch (status) {
+        case inventory_trade::Status::kNotInWorld: return "not in game";
+        case inventory_trade::Status::kTaskBagExcluded: return "task bag excluded";
+        case inventory_trade::Status::kEmptySlot: return "slot empty";
+        case inventory_trade::Status::kNoNativeItem: return "item unavailable";
+        case inventory_trade::Status::kStale: return "slot empty";
+        case inventory_trade::Status::kSymbolsUnresolved: return "symbol not resolved";
+        case inventory_trade::Status::kNoSell: return "item cannot be sold";
+        case inventory_trade::Status::kPriceInvalid: return "invalid sell price";
+        case inventory_trade::Status::kCreditFailed: return "sell money update failed";
+        case inventory_trade::Status::kRemoveFailed: return "sell failed";
+        case inventory_trade::Status::kRollbackFailed: return "sell rollback failed";
+        case inventory_trade::Status::kOk: return "";
+        default: return "sell failed";
+    }
+}
+
+const char* discard_error(inventory_trade::Status status) {
+    switch (status) {
+        case inventory_trade::Status::kNotInWorld: return "not in game";
+        case inventory_trade::Status::kTaskBagExcluded: return "task bag excluded";
+        case inventory_trade::Status::kEmptySlot: return "slot empty";
+        case inventory_trade::Status::kNoNativeItem: return "item unavailable";
+        case inventory_trade::Status::kStale: return "slot empty";
+        case inventory_trade::Status::kSymbolsUnresolved: return "symbol not resolved";
+        case inventory_trade::Status::kRemoveFailed: return "discard failed";
+        case inventory_trade::Status::kOk: return "";
+        default: return "discard failed";
+    }
+}
+
+QolResult use_item(int32_t bag, int32_t slot,
+                   contracts::QolItemInventoryStateWriteResult* out) {
+    if (out == nullptr) return contracts::error(kQolErrInvalidArgument, "invalid item result", 19);
+    *out = {};
+    if (!game_in_world()) {
+        return contracts::error(kQolErrNotReady, "not in game", 11);
+    }
+    if (bag == 5) {
+        return trade_error(out, "task bag excluded");
+    }
+    InventoryItemRef item_ref;
+    if (!inventory_item_ref_at(bag, slot, &item_ref)) {
+        return trade_error(out, "slot empty");
+    }
+    return qol::game::ops::use_item(bag, slot, out);
+}
+
+QolResult sell_item(int32_t bag, int32_t slot,
+                    contracts::QolItemInventoryStateWriteResult* out) {
+    if (out == nullptr) return contracts::error(kQolErrInvalidArgument, "invalid item result", 19);
+    *out = {};
+    InventoryItemRef expected;
+    const bool found = inventory_item_ref_at(bag, slot, &expected);
+    const inventory_trade::Result result = inventory_trade::sell(
+        bag, slot, found ? expected.native_item : nullptr, "api");
+    if (result.status != inventory_trade::Status::kOk) return trade_error(out, sell_error(result.status));
+    out->value = result.price;
+    frame_cache_force_refresh();
+    return contracts::ok();
+}
+
+QolResult discard_item(int32_t bag, int32_t slot,
+                       contracts::QolItemInventoryStateWriteResult* out) {
+    if (out == nullptr) return contracts::error(kQolErrInvalidArgument, "invalid item result", 19);
+    *out = {};
+    InventoryItemRef expected;
+    const bool found = inventory_item_ref_at(bag, slot, &expected);
+    const inventory_trade::Status status = inventory_trade::discard(
+        bag, slot, found ? expected.native_item : nullptr);
+    if (status != inventory_trade::Status::kOk) return trade_error(out, discard_error(status));
+    frame_cache_force_refresh();
+    return contracts::ok();
+}
+
+QolResult shop_buy(int32_t slot, contracts::QolItemInventoryStateWriteResult* out) {
+    return qol::game::ops::shop_buy(slot, out);
+}
+
+QolResult move_item(int32_t bag, int32_t slot, int32_t count, int32_t to_bag,
+                    int32_t to_slot,
+                    contracts::QolItemInventoryStateWriteResult* out) {
+    return qol::game::ops::move_item(bag, slot, count, to_bag, to_slot, out);
+}
+
+QolResult add_item(int32_t category, int32_t count, int32_t socket_total,
+                   int32_t enhance_remaining, int32_t rarity_group,
+                   const contracts::QolItemCountApi* item_count,
+                   contracts::QolItemInventoryStateWriteResult* out) {
+    const contracts::QolItemCountApi* provider =
+        item_count != nullptr ? item_count : qol::game::item_count_api_if_resident();
+    return qol::game::ops::add_item(category, count, socket_total, enhance_remaining,
+                                    rarity_group, provider, out);
+}
+
+QolResult load_item(const uint8_t* payload, uint32_t size, contracts::QolItemHandle* out_item) {
+    return qol::game::ops::load_item(payload, size, out_item);
+}
+
+QolResult place_item(const contracts::QolBagRef* ref, int32_t slot,
+                     contracts::QolItemHandle item,
+                     contracts::QolItemInventoryStateWriteResult* out) {
+    const QolResult result = qol::game::ops::place_item(ref, slot, item, out);
+    if (contracts::succeeded(result) || item.slot == 0 || item.generation == 0) return result;
+    const QolResult cleanup = qol::game::ops::free_loaded_item(item);
+    if (!contracts::succeeded(cleanup) && cleanup.code != kQolErrConflict &&
+        cleanup.code != kQolErrNotFound) {
+        return cleanup_error(out, cleanup);
+    }
+    return result;
+}
+
+QolResult remove_item(contracts::QolItemHandle item, int32_t count,
+                      contracts::QolItemInventoryStateWriteResult* out) {
+    return qol::game::ops::remove_item(item, count, out);
+}
+
+QolResult equip_item(int32_t role, int32_t bag, int32_t slot,
+                     contracts::QolItemInventoryStateWriteResult* out) {
+    return qol::game::ops::equip_item(role, bag, slot, out);
+}
+
+QolResult unequip_item(int32_t role, int32_t equip_slot,
+                       contracts::QolItemInventoryStateWriteResult* out) {
+    return qol::game::ops::unequip_item(role, equip_slot, out);
+}
+
+QolResult put_jewel(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
+                    contracts::QolItemInventoryStateWriteResult* out) {
+    return qol::game::ops::put_jewel(role, bag, slot, equip_slot, out);
+}
+
+QolResult enchant(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
+                  contracts::QolItemInventoryStateWriteResult* out) {
+    return qol::game::ops::enchant(role, bag, slot, equip_slot, out);
+}
+
+QolResult move_handle(contracts::QolItemHandle item, int32_t count,
+                      const contracts::QolBagRef* ref, int32_t slot,
+                      contracts::QolItemInventoryStateWriteResult* out) {
+    const QolResult result = qol::game::ops::move_handle(item, count, ref, slot, out);
+    if (contracts::succeeded(result)) return result;
+    const QolResult cleanup = qol::game::ops::free_loaded_item(item);
+    if (!contracts::succeeded(cleanup) && cleanup.code != kQolErrNotFound) return cleanup;
+    return result;
+}
+
+QolResult equip_handle(int32_t role, contracts::QolItemHandle item, int32_t equip_slot,
+                       contracts::QolItemInventoryStateWriteResult* out) {
+    return qol::game::ops::equip_handle(role, item, equip_slot, out);
+}
+
+QolResult unequip_handle(int32_t role, int32_t equip_slot,
+                         contracts::QolItemInventoryStateWriteResult* out) {
+    return qol::game::ops::unequip_handle(role, equip_slot, out);
+}
+
+QolResult put_jewel_handles(int32_t role, contracts::QolItemHandle equip_item,
+                            contracts::QolItemHandle jewel_item,
+                            contracts::QolItemInventoryStateWriteResult* out) {
+    return qol::game::ops::put_jewel_handles(role, equip_item, jewel_item, out);
+}
+
+QolResult create_item(int32_t category, int32_t arg1, int32_t arg2, int32_t arg3,
+                      contracts::QolItemHandle* out_item) {
+    return qol::game::ops::create_item(category, arg1, arg2, arg3, out_item);
+}
+
+QolResult create_perfect_item(int32_t category, contracts::QolItemHandle* out_item) {
+    return qol::game::ops::create_perfect_item(category, out_item);
+}
+
+QolResult free_item(contracts::QolItemHandle item) {
+    // v2.3 的释放口只接受 create/load_item 产生的 detached 句柄；背包内物品走 remove_item。
+    return qol::game::ops::free_loaded_item(item);
+}
+
+QolResult save_item(contracts::QolItemHandle item, int32_t* out_saved) {
+    return qol::game::ops::save_detached_item(item, out_saved);
+}
+
+const contracts::QolItemInventoryStateWritePort kPort{
+    contracts::kQolPortItemInventoryStateWriteVersion,
+    &use_item,
+    &sell_item,
+    &discard_item,
+    &shop_buy,
+    &move_item,
+    &add_item,
+    &equip_item,
+    &unequip_item,
+    &put_jewel,
+    &enchant,
+    &load_item,
+    &place_item,
+    &remove_item,
+    &move_handle,
+    &equip_handle,
+    &unequip_handle,
+    &put_jewel_handles,
+    &create_item,
+    &create_perfect_item,
+    &free_item,
+    &save_item,
+};
+
+}  // namespace
+
+const contracts::QolItemInventoryStateWritePort& item_inventory_state_write_port() {
+    return kPort;
+}
+
+}  // namespace qol::host

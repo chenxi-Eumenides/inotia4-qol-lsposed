@@ -1,0 +1,681 @@
+#include "game/access/game_access.h"
+#include "game/access/item_handle_registry.h"
+#include "game/symbols/symbol_resolver.h"
+#include "game/variants/game_variant.h"
+#include "game/feature/game_feature.h"
+
+#include <algorithm>
+#include <cstdio>
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
+#include <cstring>
+#include <mutex>
+#include <limits>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "game/access/game_access_globals.inc"
+
+namespace {
+
+std::mutex g_mutex;
+std::atomic<bool> g_bridge_ready{false};
+
+// 启动期常驻 patch 入口（host 在 nativeInit 早段注入；见 game/access/game_access.h 的 BridgeBootPatchFn）。
+BridgeBootPatchFn g_boot_patch_hook = nullptr;
+
+struct MappingRange {
+    uintptr_t start = 0;
+    uintptr_t end = 0;
+    uint8_t permissions = 0;
+};
+
+std::mutex g_maps_mutex;
+std::vector<MappingRange> g_maps;
+std::chrono::steady_clock::time_point g_maps_refreshed{};
+
+constexpr auto kMapsCacheTtl = std::chrono::seconds(5);
+constexpr auto kMapsMissRefreshInterval = std::chrono::milliseconds(1000);
+
+uint8_t permission_bit(char permission) {
+    switch (permission) {
+        case 'r': return 1u << 0;
+        case 'w': return 1u << 1;
+        case 'x': return 1u << 2;
+        default: return 0;
+    }
+}
+
+uint8_t permission_bits(const char* permissions) {
+    uint8_t bits = 0;
+    for (const char* p = permissions; p != nullptr && *p != '\0'; ++p) {
+        bits |= permission_bit(*p);
+    }
+    return bits;
+}
+
+void refresh_mapping_cache_locked() {
+    g_maps.clear();
+    FILE* f = fopen("/proc/self/maps", "r");
+    if (f == nullptr) {
+        g_maps_refreshed = std::chrono::steady_clock::now();
+        return;
+    }
+    char line[512];
+    while (fgets(line, sizeof(line), f) != nullptr) {
+        unsigned long long start = 0;
+        unsigned long long end = 0;
+        char permissions[5] = {};
+        if (sscanf(line, "%llx-%llx %4s", &start, &end, permissions) != 3) continue;
+        if (end <= start) continue;
+        g_maps.push_back(MappingRange{
+            static_cast<uintptr_t>(start), static_cast<uintptr_t>(end),
+            permission_bits(permissions)});
+    }
+    fclose(f);
+    g_maps_refreshed = std::chrono::steady_clock::now();
+}
+
+bool mapping_has_permission(uintptr_t address, size_t size, char permission) {
+    if (address == 0 || size == 0 || address > std::numeric_limits<uintptr_t>::max() - size) {
+        return false;
+    }
+    const uint8_t requested = permission_bit(permission);
+    if (requested == 0) return false;
+    const uintptr_t end_address = address + size;
+    std::lock_guard<std::mutex> lock(g_maps_mutex);
+    auto now = std::chrono::steady_clock::now();
+    bool refreshed = false;
+    if (g_maps.empty() || now - g_maps_refreshed >= kMapsCacheTtl) {
+        refresh_mapping_cache_locked();
+        refreshed = true;
+    }
+    // /proc/self/maps is sorted by start address; find the last mapping that
+    // starts at or before the target and verify the full range fits inside it.
+    const auto lookup = [&]() -> const MappingRange* {
+        const auto it = std::upper_bound(
+            g_maps.begin(), g_maps.end(), address,
+            [](uintptr_t value, const MappingRange& range) { return value < range.start; });
+        if (it == g_maps.begin()) return nullptr;
+        const MappingRange& range = *(it - 1);
+        return address >= range.start && end_address <= range.end ? &range : nullptr;
+    };
+    if (const MappingRange* range = lookup()) {
+        return (range->permissions & requested) != 0;
+    }
+    // A newly loaded library can appear after the periodic refresh. Retry a
+    // miss at most once per second so a genuinely invalid pointer cannot turn
+    // every check into a /proc/self/maps scan.
+    now = std::chrono::steady_clock::now();
+    if (!refreshed && now - g_maps_refreshed >= kMapsMissRefreshInterval) {
+        refresh_mapping_cache_locked();
+        if (const MappingRange* range = lookup()) {
+            return (range->permissions & requested) != 0;
+        }
+    }
+    return false;
+}
+
+// 宏名 → 游戏符号名查找表（X-macro 注册表生成，backlog P1 VMA 治理）
+const char* symbol_name_for_macro(const char* macro) {
+    if (macro == nullptr || macro[0] == '\0') return nullptr;
+#define SYM(macro_name, symbol) { #macro_name, #symbol },
+    static const struct { const char* macro; const char* symbol; } kSymbolTable[] = {
+#include "game/symbols/symbol_registry.h"
+    };
+#undef SYM
+    for (const auto& e : kSymbolTable) {
+        if (strcmp(e.macro, macro) == 0) return e.symbol;
+    }
+    return nullptr;
+}
+
+bool find_libgame_base() {
+    FILE* f = fopen("/proc/self/maps", "r");
+    if (f == nullptr) return false;
+    char line[512];
+    bool found = false;
+    while (fgets(line, sizeof(line), f) != nullptr) {
+        if (strstr(line, "libgame.so") != nullptr) {
+            g_base = strtoul(line, nullptr, 16);
+            found = true;
+            char* p = strchr(line, '/');
+            if (p != nullptr) {
+                std::string s(p);
+                s.erase(s.find_last_not_of("\n\r") + 1);
+                g_lib_path = s;
+            }
+            break;
+        }
+    }
+    fclose(f);
+    return found;
+}
+
+// 原生滚动接口仅接受具名函数；解析失败不能把基址或旧版 VMA 当成可调用函数。
+template <typename Fn>
+Fn resolve_native_ui_function(const char* macro_name) {
+    const uintptr_t offset = g_resolver.resolveFunctionByName(symbol_name_for_macro(macro_name));
+    const bool available = offset != 0 &&
+        game_memory_accessible(reinterpret_cast<void*>(g_base + offset), 4, 'x');
+    g_symbol_report.emplace_back(macro_name, available);
+    return available ? reinterpret_cast<Fn>(g_base + offset) : nullptr;
+}
+
+// 全局变量/数据地址：有符号名 → ELF 动态解析（未命中回退 VMA），无符号名 → 直接 VMA
+void resolve_global(void*& dst, uintptr_t vma, const char* macro_name) {
+    const char* symbol = symbol_name_for_macro(macro_name);
+    ResolvedSymbol r = g_resolver.resolve(symbol, vma);
+    dst = reinterpret_cast<void*>(g_base + r.offset);
+    g_symbol_report.emplace_back(macro_name, r.source != SymbolSource::MISS);
+}
+
+// GOT 槽地址：不把槽内的目标符号地址误当作数据全局地址，统一走 RELATIVE 反查。
+void resolve_global_slot(void*& dst, uintptr_t vma, const char* macro_name) {
+    ResolvedSymbol r = g_resolver.resolve(nullptr, vma);
+    (void)r;
+    // resolveSlot() 返回槽内目标的相对偏移；这里需要的是 GOT 槽本身地址。
+    dst = reinterpret_cast<void*>(g_base + vma);
+    g_symbol_report.emplace_back(macro_name, r.source != SymbolSource::MISS);
+}
+
+}  // namespace
+
+bool game_memory_accessible(const void* address, size_t size, char permission) {
+    return mapping_has_permission(reinterpret_cast<uintptr_t>(address), size, permission);
+}
+
+bool bridge_ready() {
+    return g_bridge_ready.load(std::memory_order_acquire);
+}
+
+void bridge_set_boot_patch_hook(BridgeBootPatchFn fn) {
+    g_boot_patch_hook = fn;
+}
+
+// 函数指针地址：同 resolve_global（返回相对偏移，调用方拼 g_base）
+uintptr_t fn_resolve(const char* macro_name, uintptr_t vma) {
+    const char* symbol = symbol_name_for_macro(macro_name);
+    ResolvedSymbol r = g_resolver.resolve(symbol, vma);
+    if (r.source == SymbolSource::ELF) {
+        g_symbol_report.emplace_back(macro_name, true);
+    } else if (r.source == SymbolSource::MISS) {
+        g_symbol_report.emplace_back(macro_name, false);
+    }
+    return r.offset;
+}
+
+bool bridge_init() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_bridge_ready.load(std::memory_order_acquire)) return true;
+    g_symbol_report.clear();
+    if (!find_libgame_base()) {
+        g_bridge_ready.store(false, std::memory_order_release);
+        g_symbol_report.emplace_back("libgame_not_loaded", false);
+        g_dl_error = "libgame.so not loaded yet";
+        return false;
+    }
+    g_dl_error.clear();
+    g_resolver.attach(g_base);  // 解析 .dynsym 哈希表（幂等），后续 fn_resolve/resolve_global 动态解析符号
+    resolve_global(g_money, G_MONEY_VMA, "G_MONEY_VMA");
+    resolve_global(g_map_id, G_MAP_ID_VMA, "G_MAP_ID_VMA");
+    resolve_global(g_party, G_PARTY_VMA, "G_PARTY_VMA");
+    resolve_global(g_active_quest, G_ACTIVE_QUEST_VMA, "G_ACTIVE_QUEST_VMA");
+    resolve_global(g_inven, G_INVEN_VMA, "G_INVEN_VMA");
+    resolve_global(g_main_merc_slot, G_MAIN_MERC_SLOT_VMA, "G_MAIN_MERC_SLOT_VMA");
+    resolve_global(g_prev_state, G_PREV_STATE_VMA, "G_PREV_STATE_VMA");
+    resolve_global(g_state, G_STATE_VMA, "G_STATE_VMA");
+    resolve_global(g_gamestate, G_GAMESTATE_VMA, "G_GAMESTATE_VMA");
+    resolve_global(g_initstate, G_INITSTATE_VMA, "G_INITSTATE_VMA");
+    resolve_global(g_popup_on, G_POPUP_ON_VMA, "G_POPUP_ON_VMA");
+    resolve_global(g_mainmenu_draw, G_MAINMENU_DRAW_VMA, "G_MAINMENU_DRAW_VMA");
+    resolve_global(g_popup_stack, G_POPUP_STACK_VMA, "G_POPUP_STACK_VMA");
+    resolve_global(g_player_active, G_PLAYER_ACTIVE_VMA, "G_PLAYER_ACTIVE_VMA");
+    resolve_global_slot(g_player_active_got, G_PLAYER_ACTIVE_GOT_VMA, "G_PLAYER_ACTIVE_GOT_VMA");
+    resolve_global_slot(g_mapinfo_pdata_got, G_MAPINFOBASE_PDATA_GOT_VMA,
+                        "G_MAPINFOBASE_PDATA_GOT_VMA");
+    resolve_global(g_mapinfo_record_size, G_MAPINFOBASE_RECORD_SIZE_VMA,
+                   "G_MAPINFOBASE_RECORD_SIZE_VMA");
+    resolve_global(g_mapinfo_record_count, G_MAPINFOBASE_RECORD_COUNT_VMA,
+                   "G_MAPINFOBASE_RECORD_COUNT_VMA");
+    resolve_global(g_uichoice_itemtext, G_UICHOICE_ITEMTEXT_VMA, "G_UICHOICE_ITEMTEXT_VMA");
+    resolve_global(g_uichoice_count, G_UICHOICE_COUNT_VMA, "G_UICHOICE_COUNT_VMA");
+    resolve_global(g_uichoice_focus, G_UICHOICE_FOCUS_VMA, "G_UICHOICE_FOCUS_VMA");
+    resolve_global(g_uichoice_main_text, G_UICHOICE_MAIN_TEXT_VMA, "G_UICHOICE_MAIN_TEXT_VMA");
+    resolve_global_slot(g_uichoice_button_list_exe_got, G_UICHOICE_BUTTON_LIST_EXE_GOT_VMA,
+                        "G_UICHOICE_BUTTON_LIST_EXE_GOT_VMA");
+    resolve_global_slot(g_uichoice_control_got, G_UICHOICE_CONTROL_GOT_VMA,
+                        "G_UICHOICE_CONTROL_GOT_VMA");
+    resolve_global(g_uimix, G_UIMIX_VMA, "G_UIMIX_VMA");
+    fn_get_money = reinterpret_cast<GetMoneyFn>(g_base + fn_resolve("F_GET_MONEY_VMA", F_GET_MONEY_VMA));
+    fn_get_member = reinterpret_cast<GetMemberFn>(g_base + fn_resolve("F_GET_MEMBER_VMA", F_GET_MEMBER_VMA));
+    fn_get_party_size = reinterpret_cast<GetPartySizeFn>(g_base + fn_resolve("F_GET_PARTY_SIZE_VMA", F_GET_PARTY_SIZE_VMA));
+    fn_get_attr = reinterpret_cast<GetAttrFn>(g_base + fn_resolve("F_GET_ATTR_VMA", F_GET_ATTR_VMA));
+    fn_get_equip = reinterpret_cast<GetEquipFn>(g_base + fn_resolve("F_GET_EQUIP_VMA", F_GET_EQUIP_VMA));
+    fn_get_exp = reinterpret_cast<GetExpFn>(g_base + fn_resolve("F_GET_EXP_VMA", F_GET_EXP_VMA));
+    fn_get_next_exp = reinterpret_cast<GetExpFn>(g_base + fn_resolve("F_GET_NEXT_EXP_VMA", F_GET_NEXT_EXP_VMA));
+    fn_get_rarity = reinterpret_cast<GetRarityFn>(g_base + fn_resolve("F_GET_RARITY_VMA", F_GET_RARITY_VMA));
+    fn_get_bag_size = reinterpret_cast<GetBagSizeFn>(g_base + fn_resolve("F_GET_BAG_SIZE_VMA", F_GET_BAG_SIZE_VMA));
+    fn_get_empty_bag_slot = reinterpret_cast<GetEmptyBagSlotFn>(
+        g_base + fn_resolve("F_INVEN_GET_EMPTY_BAG_SLOT_VMA", F_INVEN_GET_EMPTY_BAG_SLOT_VMA));
+    fn_is_empty_bag = reinterpret_cast<IsEmptyBagFn>(
+        g_base + fn_resolve("F_INVEN_IS_EMPTY_BAG_VMA", F_INVEN_IS_EMPTY_BAG_VMA));
+    fn_is_having_empty_slot = reinterpret_cast<IsHavingEmptySlotFn>(
+        g_base + fn_resolve("F_INVEN_IS_HAVING_EMPTY_SLOT_VMA", F_INVEN_IS_HAVING_EMPTY_SLOT_VMA));
+    fn_get_bit = reinterpret_cast<GetBitFn>(g_base + fn_resolve("F_GET_BIT_VMA", F_GET_BIT_VMA));
+    fn_get_cumulate_count = reinterpret_cast<GetCumulateCountFn>(g_base + fn_resolve("F_GET_CUMULATE_COUNT_VMA", F_GET_CUMULATE_COUNT_VMA));
+    fn_get_damage = reinterpret_cast<GetItemStatFn>(g_base + fn_resolve("F_GET_DAMAGE_VMA", F_GET_DAMAGE_VMA));
+    fn_get_defense = reinterpret_cast<GetItemStatFn>(g_base + fn_resolve("F_GET_DEFENSE_VMA", F_GET_DEFENSE_VMA));
+    fn_get_stat = reinterpret_cast<GetAttrFn2>(g_base + F_GET_STAT_VMA);
+    fn_get_stat_base = reinterpret_cast<GetAttrFn2>(g_base + F_GET_STAT_BASE_VMA);
+    fn_get_stat_bonus = reinterpret_cast<GetAttrFn2>(g_base + F_GET_STAT_BONUS_VMA);
+    fn_get_status_point = reinterpret_cast<GetStatusPointFn>(g_base + fn_resolve("F_GET_STATUS_POINT_VMA", F_GET_STATUS_POINT_VMA));
+    fn_get_stat_main = reinterpret_cast<GetStatMainFn>(g_base + fn_resolve("F_GET_STAT_MAIN_VMA", F_GET_STAT_MAIN_VMA));
+    fn_set_stat_main = reinterpret_cast<SetStatMainFn>(g_base + fn_resolve("F_SET_STAT_MAIN_VMA", F_SET_STAT_MAIN_VMA));
+    fn_set_stat_base = reinterpret_cast<SetStatBaseFn>(g_base + fn_resolve("F_SET_STAT_BASE_VMA", F_SET_STAT_BASE_VMA));
+    fn_status_dice_roll = reinterpret_cast<RollStatusDiceFn>(g_base + fn_resolve("F_STATUSDICE_ROLL_VMA", F_STATUSDICE_ROLL_VMA));
+    fn_put_jewel = reinterpret_cast<PutJewelFn>(g_base + fn_resolve("F_PUT_JEWEL_VMA", F_PUT_JEWEL_VMA));
+    fn_is_jewel = reinterpret_cast<IsJewelFn>(g_base + fn_resolve("F_IS_JEWEL_VMA", F_IS_JEWEL_VMA));
+    fn_enchant_item = reinterpret_cast<EnchantItemFn>(g_base + fn_resolve("F_ENCHANT_ITEM_VMA", F_ENCHANT_ITEM_VMA));
+    fn_is_enchant_scroll = reinterpret_cast<IsEnchantScrollFn>(g_base + fn_resolve("F_IS_ENCHANT_SCROLL_VMA", F_IS_ENCHANT_SCROLL_VMA));
+    fn_save_is_ok = reinterpret_cast<SaveIsOkFn>(g_base + fn_resolve("F_SAVE_IS_OK_VMA", F_SAVE_IS_OK_VMA));
+    fn_char_initialize_status = reinterpret_cast<CharInitializeStatusFn>(g_base + fn_resolve("F_CHAR_INITIALIZE_STATUS_VMA", F_CHAR_INITIALIZE_STATUS_VMA));
+    fn_char_initialize_skill = reinterpret_cast<CharInitializeSkillFn>(g_base + fn_resolve("F_CHAR_INITIALIZE_SKILL_VMA", F_CHAR_INITIALIZE_SKILL_VMA));
+    fn_char_set_action_id = reinterpret_cast<CharSetActionIdFn>(g_base + fn_resolve("F_CHAR_SET_ACTION_ID_VMA", F_CHAR_SET_ACTION_ID_VMA));
+    fn_char_get_enemy_target = reinterpret_cast<CharGetEnemyTargetFn>(g_base + fn_resolve("F_CHAR_GET_ENEMY_TARGET_VMA", F_CHAR_GET_ENEMY_TARGET_VMA));
+    fn_questsystem_find = reinterpret_cast<QuestSystemFindFn>(g_base + fn_resolve("F_QUESTSYSTEM_FIND_VMA", F_QUESTSYSTEM_FIND_VMA));
+    fn_questsystem_remove_slot = reinterpret_cast<QuestSystemRemoveSlotFn>(g_base + fn_resolve("F_QUESTSYSTEM_REMOVE_SLOT_VMA", F_QUESTSYSTEM_REMOVE_SLOT_VMA));
+    fn_questsystem_is_complete = reinterpret_cast<QuestSystemIsCompleteFn>(g_base + fn_resolve("F_QUESTSYSTEM_IS_COMPLETE_VMA", F_QUESTSYSTEM_IS_COMPLETE_VMA));
+    fn_questsystem_change_quest_state = reinterpret_cast<QuestSystemChangeQuestStateFn>(g_base + fn_resolve("F_QUESTSYSTEM_CHANGE_QUEST_STATE_VMA", F_QUESTSYSTEM_CHANGE_QUEST_STATE_VMA));
+    fn_save = reinterpret_cast<SaveFn>(g_base + fn_resolve("F_SAVE_VMA", F_SAVE_VMA));
+    fn_save_get_save_slot = reinterpret_cast<SaveGetSaveSlotFn>(g_base + fn_resolve("F_SAVE_GET_SAVE_SLOT_VMA", F_SAVE_GET_SAVE_SLOT_VMA));
+    fn_save_load_save_slot = reinterpret_cast<SaveLoadSaveSlotFn>(g_base + fn_resolve("F_SAVE_LOAD_SAVE_SLOT_VMA", F_SAVE_LOAD_SAVE_SLOT_VMA));
+    fn_ui_set_popup_process_info = reinterpret_cast<UiSetPopupProcessInfoFn>(g_base + fn_resolve("F_UI_SET_POPUP_PROCESS_INFO_VMA", F_UI_SET_POPUP_PROCESS_INFO_VMA));
+    fn_game_start_resume_game = reinterpret_cast<GameStartResumeGameFn>(g_base + fn_resolve("F_GAME_START_RESUME_GAME_VMA", F_GAME_START_RESUME_GAME_VMA));
+    fn_save_create_save_slot = reinterpret_cast<SaveCreateSaveSlotFn>(g_base + fn_resolve("F_SAVE_CREATE_SAVE_SLOT_VMA", F_SAVE_CREATE_SAVE_SLOT_VMA));
+    fn_save_destroy_save_slot = reinterpret_cast<SaveDestroySaveSlotFn>(g_base + fn_resolve("F_SAVE_DESTROY_SAVE_SLOT_VMA", F_SAVE_DESTROY_SAVE_SLOT_VMA));
+    fn_saveslot_get_hero = reinterpret_cast<SaveslotGetHeroFn>(g_base + fn_resolve("F_SAVESLOT_GET_HERO_VMA", F_SAVESLOT_GET_HERO_VMA));
+    fn_state_set = reinterpret_cast<StateSetFn>(g_base + fn_resolve("F_STATE_SET_VMA", F_STATE_SET_VMA));
+    fn_state_next_start_process = reinterpret_cast<StateNextStartProcessFn>(g_base + fn_resolve("F_STATE_NEXT_START_PROCESS_VMA", F_STATE_NEXT_START_PROCESS_VMA));
+    fn_game_exit_save_slot_select_char = reinterpret_cast<GameExitSaveSlotSelectCharFn>(g_base + fn_resolve("F_GAME_EXIT_SAVE_SLOT_SELECT_CHAR_VMA", F_GAME_EXIT_SAVE_SLOT_SELECT_CHAR_VMA));
+    fn_select_character_start_game = reinterpret_cast<SelectCharacterStartGameFn>(g_base + fn_resolve("F_SELECT_CHARACTER_START_GAME_VMA", F_SELECT_CHARACTER_START_GAME_VMA));
+    fn_tutorial_start = reinterpret_cast<TutorialStartFn>(g_base + fn_resolve("F_TUTORIAL_START_VMA", F_TUTORIAL_START_VMA));
+    fn_save_get_save_file_name = reinterpret_cast<SaveGetSaveFileNameFn>(g_base + fn_resolve("F_SAVE_GET_SAVE_FILE_NAME_VMA", F_SAVE_GET_SAVE_FILE_NAME_VMA));
+    fn_cs_fs_remove = reinterpret_cast<CsFsRemoveFn>(g_base + fn_resolve("F_CS_FS_REMOVE_VMA", F_CS_FS_REMOVE_VMA));
+    fn_hub_save_get_key = reinterpret_cast<HubSaveGetKeyFn>(g_base + fn_resolve("F_HUBSAVE_GET_KEY_VMA", F_HUBSAVE_GET_KEY_VMA));
+    fn_save_load_data = reinterpret_cast<SaveLoadDataFn>(g_base + fn_resolve("F_SAVE_LOAD_DATA_VMA", F_SAVE_LOAD_DATA_VMA));
+    fn_mem_free = reinterpret_cast<MemFreeFn>(g_base + fn_resolve("F_MEM_FREE_VMA", F_MEM_FREE_VMA));
+    fn_encrypt_process2 = reinterpret_cast<EncryptProcess2Fn>(g_base + fn_resolve("F_ENCRYPT_PROCESS2_VMA", F_ENCRYPT_PROCESS2_VMA));
+    fn_gamestate_set_state = reinterpret_cast<GamestateSetStateFn>(g_base + fn_resolve("F_GAMESTATE_SET_STATE_VMA", F_GAMESTATE_SET_STATE_VMA));
+    fn_game_exit = reinterpret_cast<GameExitFn>(g_base + fn_resolve("F_GAME_EXIT_VMA", F_GAME_EXIT_VMA));
+    fn_uinpc_init = reinterpret_cast<UinpcInitFn>(g_base + fn_resolve("F_UINPC_INIT_VMA", F_UINPC_INIT_VMA));
+    fn_check_function_display = reinterpret_cast<NpcSystemCheckFunctionDisplayFn>(g_base + fn_resolve("F_NPCSYSTEM_CHECK_FUNCTION_DISPLAY_VMA", F_NPCSYSTEM_CHECK_FUNCTION_DISPLAY_VMA));
+    fn_uinpc_exe_current_task = reinterpret_cast<UinpcExeTaskFn>(g_base + fn_resolve("F_UINPC_EXE_CURRENT_TASK_VMA", F_UINPC_EXE_CURRENT_TASK_VMA));
+    fn_uinpc_quest_button_ok_exe = reinterpret_cast<UinpcQuestButtonOkExeFn>(g_base + fn_resolve("F_UINPC_QUEST_BUTTON_OK_EXE_VMA", F_UINPC_QUEST_BUTTON_OK_EXE_VMA));
+    fn_npctasklist_make_dlg = reinterpret_cast<NpctasklistMakeDlgFn>(g_base + fn_resolve("F_NPCTASKLIST_MAKE_DLG_VMA", F_NPCTASKLIST_MAKE_DLG_VMA));
+    fn_player_check_near_npc = reinterpret_cast<PlayerCheckNearNpcFn>(g_base + fn_resolve("F_PLAYER_DO_CHECK_NEAR_NPC_VMA", F_PLAYER_DO_CHECK_NEAR_NPC_VMA));
+    fn_get_skill_usage = reinterpret_cast<GetSkillUsageFn>(g_base + fn_resolve("F_CHAR_GET_SKILL_USAGE_VMA", F_CHAR_GET_SKILL_USAGE_VMA));
+    fn_set_skill_usage = reinterpret_cast<SetSkillUsageFn>(g_base + fn_resolve("F_CHAR_SET_SKILL_USAGE_VMA", F_CHAR_SET_SKILL_USAGE_VMA));
+    fn_get_name = reinterpret_cast<GetNameFn>(g_base + fn_resolve("F_GET_NAME_VMA", F_GET_NAME_VMA));
+    fn_get_act_max_level = reinterpret_cast<GetActMaxLevelFn>(g_base + fn_resolve("F_GET_ACT_MAX_LEVEL_VMA", F_GET_ACT_MAX_LEVEL_VMA));
+    fn_find_merc_slot = reinterpret_cast<FindMercSlotFn>(g_base + fn_resolve("F_FIND_MERC_SLOT_VMA", F_FIND_MERC_SLOT_VMA));
+    fn_search_path = reinterpret_cast<SearchPathFn>(g_base + fn_resolve("F_SEARCH_PATH_VMA", F_SEARCH_PATH_VMA));
+    fn_evt_set_state = reinterpret_cast<EvtSetStateFn>(g_base + fn_resolve("F_EVT_SET_STATE_VMA", F_EVT_SET_STATE_VMA));
+    fn_textctrl_move_next_page = reinterpret_cast<TextctrlMoveNextPageFn>(g_base + fn_resolve("F_TEXTCTRL2_MOVE_NEXT_PAGE_VMA", F_TEXTCTRL2_MOVE_NEXT_PAGE_VMA));
+    fn_key_set_code = reinterpret_cast<KeySetCodeFn>(g_base + fn_resolve("F_KEY_SET_CODE_VMA", F_KEY_SET_CODE_VMA));
+    fn_wipeout_button_gameover = reinterpret_cast<IntVoidFn>(g_base + fn_resolve("F_WIPEOUT_BUTTON_GAMEOVER_VMA", F_WIPEOUT_BUTTON_GAMEOVER_VMA));
+    fn_event_button_ok_exe = reinterpret_cast<IntVoidFn>(g_base + fn_resolve("F_EVENT_BUTTON_OK_EXE_VMA", F_EVENT_BUTTON_OK_EXE_VMA));
+    fn_event_button_skip_exe = reinterpret_cast<IntVoidFn>(g_base + fn_resolve("F_EVENT_BUTTON_SKIP_EXE_VMA", F_EVENT_BUTTON_SKIP_EXE_VMA));
+    fn_evtsystem_do_check_all_event = reinterpret_cast<IntIntFn>(g_base + fn_resolve("F_EVTSYSTEM_DO_CHECK_ALL_EVENT_VMA", F_EVTSYSTEM_DO_CHECK_ALL_EVENT_VMA));
+    fn_tutorial_getstate = reinterpret_cast<IntVoidFn>(g_base + fn_resolve("F_TUTORIAL_GETSTATE_VMA", F_TUTORIAL_GETSTATE_VMA));
+    fn_set_money = reinterpret_cast<SetMoneyFn>(g_base + fn_resolve("F_SET_MONEY_VMA", F_SET_MONEY_VMA));
+    fn_add_money = reinterpret_cast<AddMoneyFn>(g_base + fn_resolve("F_ADD_MONEY_VMA", F_ADD_MONEY_VMA));
+    fn_minus_money = reinterpret_cast<AddMoneyFn>(g_base + fn_resolve("F_MINUS_MONEY_VMA", F_MINUS_MONEY_VMA));
+    fn_find_item = reinterpret_cast<FindItemFn>(g_base + fn_resolve("F_FIND_ITEM_VMA", F_FIND_ITEM_VMA));
+    fn_have_item = reinterpret_cast<HaveItemFn>(g_base + fn_resolve("F_INVEN_HAVE_ITEM_VMA", F_INVEN_HAVE_ITEM_VMA));
+    fn_get_item_count = reinterpret_cast<GetItemCountFn>(
+        g_base + fn_resolve("F_INVEN_GET_ITEM_COUNT_VMA", F_INVEN_GET_ITEM_COUNT_VMA));
+     fn_inven_find_item_slot = reinterpret_cast<InvenFindItemSlotFn>(
+         g_base + fn_resolve("F_INVEN_FIND_ITEM_SLOT_VMA", F_INVEN_FIND_ITEM_SLOT_VMA));
+     fn_inven_calculate_empty_slot_count_for_save = reinterpret_cast<InvenCalculateEmptySlotCountForSaveFn>(
+         g_base + fn_resolve("F_INVEN_CALCULATE_EMPTY_SLOT_COUNT_FOR_SAVE_VMA", F_INVEN_CALCULATE_EMPTY_SLOT_COUNT_FOR_SAVE_VMA));
+     fn_inven_get_empty_save_slot_ex = reinterpret_cast<InvenGetEmptySaveSlotExFn>(
+         g_base + fn_resolve("F_INVEN_GET_EMPTY_SAVE_SLOT_EX_VMA", F_INVEN_GET_EMPTY_SAVE_SLOT_EX_VMA));
+     fn_inven_get_needed_save_slot_ex = reinterpret_cast<InvenGetNeededSaveSlotExFn>(
+         g_base + fn_resolve("F_INVEN_GET_NEEDED_SAVE_SLOT_EX_VMA", F_INVEN_GET_NEEDED_SAVE_SLOT_EX_VMA));
+     fn_inven_get_cumulate_save_slot_ex = reinterpret_cast<InvenGetCumulateSaveSlotExFn>(
+         g_base + fn_resolve("F_INVEN_GET_CUMULATE_SAVE_SLOT_EX_VMA", F_INVEN_GET_CUMULATE_SAVE_SLOT_EX_VMA));
+    fn_remove_item = reinterpret_cast<RemoveItemFn>(g_base + fn_resolve("F_REMOVE_ITEM_VMA", F_REMOVE_ITEM_VMA));
+    fn_inven_remove_item_data = reinterpret_cast<InvenRemoveItemDataFn>(g_base + fn_resolve("F_INVEN_REMOVE_ITEM_DATA_VMA", F_INVEN_REMOVE_ITEM_DATA_VMA));
+    fn_inven_get_item_count = reinterpret_cast<GetItemCountFn>(g_base + fn_resolve("F_INVEN_GET_ITEM_COUNT_VMA", F_INVEN_GET_ITEM_COUNT_VMA));
+     fn_item_get_price = reinterpret_cast<ItemGetPriceFn>(g_base + fn_resolve("F_ITEM_GET_PRICE_VMA", F_ITEM_GET_PRICE_VMA));
+     fn_item_get_sell_price = reinterpret_cast<ItemGetSellPriceFn>(g_base + fn_resolve("F_ITEM_GET_SELL_PRICE_VMA", F_ITEM_GET_SELL_PRICE_VMA));
+     fn_item_is_no_sell = reinterpret_cast<IntIntFn>(g_base + fn_resolve("F_ITEMDATABASE_IS_NO_SELL_VMA", F_ITEMDATABASE_IS_NO_SELL_VMA));
+    fn_item_get_ability_level = reinterpret_cast<ItemGetAbilityLevelFn>(g_base + fn_resolve("F_ITEM_GET_ABILITY_LEVEL_VMA", F_ITEM_GET_ABILITY_LEVEL_VMA));
+    fn_item_get_buy_price = reinterpret_cast<ItemGetBuyPriceFn>(g_base + fn_resolve("F_ITEM_GET_BUY_PRICE_VMA", F_ITEM_GET_BUY_PRICE_VMA));
+    fn_item_system_get_option_value = reinterpret_cast<ItemSystemGetOptionValueFn>(g_base + fn_resolve("F_ITEMSYSTEM_GET_OPTION_VALUE_VMA", F_ITEMSYSTEM_GET_OPTION_VALUE_VMA));
+    fn_item_create_perfect_item = reinterpret_cast<ItemCreatePerfectItemFn>(g_base + fn_resolve("F_ITEMSYSTEM_CREATE_PERFECT_ITEM_VMA", F_ITEMSYSTEM_CREATE_PERFECT_ITEM_VMA));
+    fn_item_system_get_jewel_option_value = reinterpret_cast<ItemSystemGetJewelOptionValueFn>(g_base + fn_resolve("F_ITEMSYSTEM_GET_JEWEL_OPTION_VALUE_VMA", F_ITEMSYSTEM_GET_JEWEL_OPTION_VALUE_VMA));
+    fn_math_get_random = reinterpret_cast<MathGetRandomFn>(g_base + fn_resolve("F_MATH_GET_RANDOM_VMA", F_MATH_GET_RANDOM_VMA));
+    fn_inven_find_save_slot = reinterpret_cast<InvenFindSaveSlotFn>(g_base + fn_resolve("F_INVEN_FIND_SAVE_SLOT_VMA", F_INVEN_FIND_SAVE_SLOT_VMA));
+    fn_inven_save_item = reinterpret_cast<InvenSaveItemFn>(g_base + fn_resolve("F_INVEN_SAVE_ITEM_VMA", F_INVEN_SAVE_ITEM_VMA));
+    fn_inven_save_item_direct = reinterpret_cast<InvenSaveItemDirectFn>(g_base + fn_resolve("F_INVEN_SAVE_ITEM_DIRECT_VMA", F_INVEN_SAVE_ITEM_DIRECT_VMA));
+    fn_inven_save_item_on_empty = reinterpret_cast<InvenSaveItemOnEmptyFn>(g_base + fn_resolve("F_INVEN_SAVE_ITEM_ON_EMPTY_VMA", F_INVEN_SAVE_ITEM_ON_EMPTY_VMA));
+    fn_dealsystem_find_sale_by_id = reinterpret_cast<DealSystemFindSaleByIdFn>(g_base + fn_resolve("F_DEALSYSTEM_FIND_SALE_BY_ID_VMA", F_DEALSYSTEM_FIND_SALE_BY_ID_VMA));
+    fn_dealsystem_clear_item = reinterpret_cast<DealSystemClearItemFn>(g_base + fn_resolve("F_DEALSYSTEM_CLEAR_ITEM_VMA", F_DEALSYSTEM_CLEAR_ITEM_VMA));
+    fn_inven_move_item = reinterpret_cast<InvenMoveItemFn>(g_base + fn_resolve("F_INVEN_MOVE_ITEM_VMA", F_INVEN_MOVE_ITEM_VMA));
+    fn_item_system_divide = reinterpret_cast<ItemSystemDivideFn>(
+        g_base + fn_resolve("F_ITEMSYSTEM_DIVIDE_VMA", F_ITEMSYSTEM_DIVIDE_VMA));
+    fn_set_exp = reinterpret_cast<SetExpFn>(g_base + fn_resolve("F_SET_EXP_VMA", F_SET_EXP_VMA));
+    fn_set_level = reinterpret_cast<SetLevelFn>(g_base + fn_resolve("F_SET_LEVEL_VMA", F_SET_LEVEL_VMA));
+    fn_add_exp = reinterpret_cast<AddExpFn>(g_base + fn_resolve("F_ADD_EXP_VMA", F_ADD_EXP_VMA));
+    fn_add_life = reinterpret_cast<CharAddResourceFn>(
+        g_base + fn_resolve("F_CHAR_ADD_LIFE_VMA", F_CHAR_ADD_LIFE_VMA));
+    fn_add_mana = reinterpret_cast<CharAddResourceFn>(
+        g_base + fn_resolve("F_CHAR_ADD_MANA_VMA", F_CHAR_ADD_MANA_VMA));
+    fn_set_status_point = reinterpret_cast<SetStatusPointFn>(g_base + fn_resolve("F_SET_STATUS_POINT_VMA", F_SET_STATUS_POINT_VMA));
+    fn_set_auto_attack = reinterpret_cast<SetAutoAttackFn>(g_base + fn_resolve("F_SET_AUTO_ATTACK_VMA", F_SET_AUTO_ATTACK_VMA));
+  fn_equip_item = reinterpret_cast<EquipItemFn>(g_base + fn_resolve("F_EQUIP_ITEM_VMA", F_EQUIP_ITEM_VMA));
+  fn_equip_item_from_inven_to_slot = reinterpret_cast<EquipItemFromInvenToSlotFn>(g_base + fn_resolve("F_EQUIP_ITEM_FROM_INVEN_TO_SLOT_VMA", F_EQUIP_ITEM_FROM_INVEN_TO_SLOT_VMA));
+    fn_unequip = reinterpret_cast<UnequipFn>(g_base + fn_resolve("F_UNEQUIP_VMA", F_UNEQUIP_VMA));
+    fn_can_equip = reinterpret_cast<CanEquipFn>(g_base + fn_resolve("F_CAN_EQUIP_VMA", F_CAN_EQUIP_VMA));
+    fn_can_unequip = reinterpret_cast<CanUnequipFn>(g_base + fn_resolve("F_CAN_UNEQUIP_VMA", F_CAN_UNEQUIP_VMA));
+    fn_char_can_change_equip = reinterpret_cast<CanChangeEquipFn>(g_base + fn_resolve("F_CAN_CHANGE_EQUIP_VMA", F_CAN_CHANGE_EQUIP_VMA));
+    fn_get_menu_character = reinterpret_cast<GetMenuCharacterFn>(g_base + fn_resolve("F_GET_MENU_CHARACTER_VMA", F_GET_MENU_CHARACTER_VMA));
+    fn_find_equip_slot = reinterpret_cast<FindEquipSlotFn>(g_base + fn_resolve("F_FIND_EQUIP_SLOT_VMA", F_FIND_EQUIP_SLOT_VMA));
+    fn_get_equip_item = reinterpret_cast<GetEquipItemFn>(g_base + fn_resolve("F_GET_EQUIP_ITEM_VMA", F_GET_EQUIP_ITEM_VMA));
+    fn_char_reset_equip_item = reinterpret_cast<ResetEquipItemFn>(g_base + fn_resolve("F_CHAR_RESET_EQUIP_ITEM_VMA", F_CHAR_RESET_EQUIP_ITEM_VMA));
+    fn_set_equip_item = reinterpret_cast<SetEquipItemFn>(g_base + fn_resolve("F_SET_EQUIP_ITEM_VMA", F_SET_EQUIP_ITEM_VMA));
+    fn_is_special_npc = reinterpret_cast<IsSpecialNpcFn>(g_base + fn_resolve("F_IS_SPECIAL_NPC_VMA", F_IS_SPECIAL_NPC_VMA));
+    fn_learn_action = reinterpret_cast<LearnActionFn>(g_base + fn_resolve("F_LEARN_ACTION_VMA", F_LEARN_ACTION_VMA));
+    fn_set_active_player = reinterpret_cast<SetActivePlayerFn>(g_base + fn_resolve("F_SET_ACTIVE_PLAYER_VMA", F_SET_ACTIVE_PLAYER_VMA));
+    fn_party_swap = reinterpret_cast<PartySwapFn>(g_base + fn_resolve("F_PARTY_SWAP_VMA", F_PARTY_SWAP_VMA));
+    fn_set_position = reinterpret_cast<SetPositionFn>(g_base + fn_resolve("F_SET_POSITION_VMA", F_SET_POSITION_VMA));
+    fn_change_map = reinterpret_cast<ChangeMapFn>(g_base + fn_resolve("F_CHANGE_MAP_VMA", F_CHANGE_MAP_VMA));
+    fn_uichoice_button_list_exe = reinterpret_cast<UiChoiceButtonListExeFn>(
+        g_base + fn_resolve("F_UICHOICE_BUTTON_LIST_EXE_VMA", F_UICHOICE_BUTTON_LIST_EXE_VMA));
+    fn_uichoice_create_control = reinterpret_cast<UiChoiceCreateControlFn>(
+        g_base + fn_resolve("F_UICHOICE_CREATE_CONTROL_VMA", F_UICHOICE_CREATE_CONTROL_VMA));
+    fn_uichoice_process = reinterpret_cast<UiChoiceProcessFn>(
+        g_base + fn_resolve("F_UICHOICE_PROCESS_VMA", F_UICHOICE_PROCESS_VMA));
+    fn_uichoice_init = reinterpret_cast<UiChoiceInitFn>(
+        g_base + fn_resolve("F_UI_CHOICE_INIT_VMA", F_UI_CHOICE_INIT_VMA));
+    fn_uichoice_draw = reinterpret_cast<UiChoiceDrawFn>(
+        g_base + fn_resolve("F_UI_CHOICE_DRAW_VMA", F_UI_CHOICE_DRAW_VMA));
+    fn_scene_event_popup_sc_choice = reinterpret_cast<SceneEventPopupScChoiceFn>(
+        g_base + fn_resolve("F_SCENE_EVENT_POPUP_SC_CHOICE_VMA",
+                            F_SCENE_EVENT_POPUP_SC_CHOICE_VMA));
+    fn_mapchange_set = reinterpret_cast<MapchangeSetFn>(
+        g_base + fn_resolve("F_MAPCHANGE_SET_VMA", F_MAPCHANGE_SET_VMA));
+    fn_memorytext_get_text = reinterpret_cast<MemorytextGetTextFn>(
+        g_base + fn_resolve("F_MEMORYTEXT_GET_TEXT_VMA", F_MEMORYTEXT_GET_TEXT_VMA));
+    fn_move_as_path = reinterpret_cast<MoveAsPathFn>(g_base + fn_resolve("F_MOVE_AS_PATH_VMA", F_MOVE_AS_PATH_VMA));
+    fn_char_move = reinterpret_cast<CharMoveFn>(g_base + fn_resolve("F_CHAR_MOVE_VMA", F_CHAR_MOVE_VMA));
+    fn_char_pick_item_all = reinterpret_cast<CharPickItemAllFn>(g_base + fn_resolve("F_CHAR_PICK_ITEM_ALL_VMA", F_CHAR_PICK_ITEM_ALL_VMA));
+    fn_char_get_area_rect = reinterpret_cast<CharGetAreaRectFn>(g_base + fn_resolve("F_CHAR_GET_AREA_RECT_VMA", F_CHAR_GET_AREA_RECT_VMA));
+    fn_mem_malloc = reinterpret_cast<MemMallocFn>(g_base + fn_resolve("F_MEM_MALLOC_VMA", F_MEM_MALLOC_VMA));
+    fn_notifier_add = reinterpret_cast<NotifierAddFn>(g_base + fn_resolve("F_NOTIFIER_ADD_VMA", F_NOTIFIER_ADD_VMA));
+    fn_char_set_direction = reinterpret_cast<CharSetDirectionFn>(g_base + fn_resolve("F_CHAR_SET_DIRECTION_VMA", F_CHAR_SET_DIRECTION_VMA));
+    fn_char_remove_path = reinterpret_cast<CharRemovePathFn>(g_base + fn_resolve("F_CHAR_REMOVE_PATH_VMA", F_CHAR_REMOVE_PATH_VMA));
+    fn_map_set_focus = reinterpret_cast<MapSetFocusFn>(g_base + fn_resolve("F_MAP_SET_FOCUS_VMA", F_MAP_SET_FOCUS_VMA));
+    fn_go_map_link_by_char = reinterpret_cast<GoMapLinkByCharFn>(g_base + fn_resolve("F_GAMEPLAY_GO_MAP_LINK_BY_CHAR_VMA", F_GAMEPLAY_GO_MAP_LINK_BY_CHAR_VMA));
+    fn_char_set_target = reinterpret_cast<CharSetTargetFn>(g_base + fn_resolve("F_CHAR_SET_TARGET_VMA", F_CHAR_SET_TARGET_VMA));
+    fn_char_stop_combat = reinterpret_cast<CharStopCombatFn>(g_base + fn_resolve("F_CHAR_STOP_COMBAT_VMA", F_CHAR_STOP_COMBAT_VMA));
+    fn_char_add_damage = reinterpret_cast<CharAddDamageFn>(
+        g_base + fn_resolve("F_CHAR_ADD_DAMAGE_VMA", F_CHAR_ADD_DAMAGE_VMA));
+    fn_char_update_attr_from_monster = reinterpret_cast<CharUpdateAttrFromMonsterFn>(
+        g_base + fn_resolve("F_CHAR_UPDATE_ATTR_FROM_MONSTER_VMA", F_CHAR_UPDATE_ATTR_FROM_MONSTER_VMA));
+    fn_char_get_party_index = reinterpret_cast<CharGetPartyIndexFn>(
+        g_base + fn_resolve("F_CHAR_GET_PARTY_INDEX_VMA", F_CHAR_GET_PARTY_INDEX_VMA));
+    fn_char_is_active_player_group = reinterpret_cast<CharIsActivePlayerGroupFn>(
+        g_base + fn_resolve("F_CHAR_IS_ACTIVE_PLAYER_GROUP_VMA", F_CHAR_IS_ACTIVE_PLAYER_GROUP_VMA));
+    fn_char_get_summoner = reinterpret_cast<CharGetSummonerFn>(
+        g_base + fn_resolve("F_CHAR_GET_SUMMONER_VMA", F_CHAR_GET_SUMMONER_VMA));
+    fn_consume_item = reinterpret_cast<ConsumeItemFn>(g_base + fn_resolve("F_CONSUME_ITEM_VMA", F_CONSUME_ITEM_VMA));
+    fn_char_use_item_ex = reinterpret_cast<CharUseItemExFn>(g_base + fn_resolve("F_CHAR_USE_ITEM_EX_VMA", F_CHAR_USE_ITEM_EX_VMA));
+    fn_char_process_shortcut = reinterpret_cast<CharProcessShortcutFn>(
+        g_base + fn_resolve("F_CHAR_PROCESS_SHORTCUT_VMA", F_CHAR_PROCESS_SHORTCUT_VMA));
+    fn_player_update_shortcut = reinterpret_cast<PlayerUpdateShortcutFn>(
+        g_base + fn_resolve("F_PLAYER_UPDATE_SHORTCUT_VMA", F_PLAYER_UPDATE_SHORTCUT_VMA));
+    fn_remove_item_direct = reinterpret_cast<RemoveItemDirectFn>(g_base + fn_resolve("F_REMOVE_ITEM_DIRECT_VMA", F_REMOVE_ITEM_DIRECT_VMA));
+    fn_include_party = reinterpret_cast<IncludePartyFn>(g_base + fn_resolve("F_INCLUDE_PARTY_VMA", F_INCLUDE_PARTY_VMA));
+    fn_exclude_party = reinterpret_cast<ExcludePartyFn>(g_base + fn_resolve("F_EXCLUDE_PARTY_VMA", F_EXCLUDE_PARTY_VMA));
+    fn_mercenary_release = reinterpret_cast<MercenaryReleaseFn>(g_base + fn_resolve("F_MERCENARY_RELEASE_VMA", F_MERCENARY_RELEASE_VMA));
+    fn_is_use = reinterpret_cast<ItemIsUseFn>(g_base + fn_resolve("F_ITEMDATA_IS_USE_VMA", F_ITEMDATA_IS_USE_VMA));
+    fn_item_is_real_equip = reinterpret_cast<IsRealEquipFn>(
+        g_base + fn_resolve("F_ITEM_IS_REAL_EQUIP_VMA", F_ITEM_IS_REAL_EQUIP_VMA));
+    fn_item_get_equip_level = reinterpret_cast<ItemGetEquipLevelFn>(
+        g_base + fn_resolve("F_ITEM_GET_EQUIP_LEVEL_VMA", F_ITEM_GET_EQUIP_LEVEL_VMA));
+    // ---- 佣兵徽章使用链（R-63）----
+    fn_is_mercenary_seal = reinterpret_cast<ItemSystemIsMercenarySealFn>(
+        g_base + fn_resolve("F_ITEMSYSTEM_IS_MERCENARY_SEAL_VMA", F_ITEMSYSTEM_IS_MERCENARY_SEAL_VMA));
+    fn_mercenary_is_empty_manager_slot = reinterpret_cast<MercenarySystemIsEmptyManagerSlotFn>(
+        g_base + fn_resolve("F_MERCENARYSYSTEM_IS_EMPTY_MANAGER_SLOT_VMA",
+                            F_MERCENARYSYSTEM_IS_EMPTY_MANAGER_SLOT_VMA));
+    fn_mercenary_make_mercenary = reinterpret_cast<MercenarySystemMakeMercenaryFn>(
+        g_base + fn_resolve("F_MERCENARYSYSTEM_MAKE_MERCENARY_VMA",
+                            F_MERCENARYSYSTEM_MAKE_MERCENARY_VMA));
+    fn_popup_exist = reinterpret_cast<PopupStateExistFn>(g_base + fn_resolve("F_POPUPSTATE_EXIST_VMA", F_POPUPSTATE_EXIST_VMA));
+    fn_button_ok_exe = reinterpret_cast<PopupButtonExeFn>(g_base + fn_resolve("F_BUTTON_OK_EXE_VMA", F_BUTTON_OK_EXE_VMA));
+    fn_button_cancel_exe = reinterpret_cast<PopupButtonExeFn>(g_base + fn_resolve("F_BUTTON_CANCEL_EXE_VMA", F_BUTTON_CANCEL_EXE_VMA));
+    fn_networkstore_set_state = reinterpret_cast<NetworkStoreSetStateFn>(g_base + fn_resolve("F_NETWORKSTORE_SET_STATE_VMA", F_NETWORKSTORE_SET_STATE_VMA));
+    fn_open_item_box = reinterpret_cast<OpenItemBoxFn>(g_base + fn_resolve("F_OPEN_ITEM_BOX_VMA", F_OPEN_ITEM_BOX_VMA));
+    fn_process_unpack = reinterpret_cast<ProcessUnpackFn>(
+        g_base + fn_resolve("F_ITEMSYSTEM_PROCESS_UNPACK_VMA", F_ITEMSYSTEM_PROCESS_UNPACK_VMA));
+    fn_release_sealed = reinterpret_cast<ReleaseSealedFn>(g_base + fn_resolve("F_RELEASE_SEALED_VMA", F_RELEASE_SEALED_VMA));
+    fn_is_dice = reinterpret_cast<IsDiceFn>(g_base + fn_resolve("F_IS_DICE_VMA", F_IS_DICE_VMA));
+    fn_is_sealed = reinterpret_cast<IsSealedFn>(g_base + fn_resolve("F_IS_SEALED_VMA", F_IS_SEALED_VMA));
+    fn_is_item_box = reinterpret_cast<IsItemBoxFn>(g_base + fn_resolve("F_IS_ITEMBOX_VMA", F_IS_ITEMBOX_VMA));
+    fn_is_pack_item = reinterpret_cast<IsPackItemFn>(g_base + fn_resolve("F_IS_PACK_ITEM_VMA", F_IS_PACK_ITEM_VMA));
+    fn_is_use_after_confirm = reinterpret_cast<IsUseAfterConfirmFn>(g_base + fn_resolve("F_IS_USE_AFTER_CONFIRM_VMA", F_IS_USE_AFTER_CONFIRM_VMA));
+    fn_make_item = reinterpret_cast<MakeItemFn>(g_base + fn_resolve("F_MAKE_ITEM_VMA", F_MAKE_ITEM_VMA));
+    fn_create_item = reinterpret_cast<CreateItemFn>(g_base + fn_resolve("F_CREATE_ITEM_VMA", F_CREATE_ITEM_VMA));
+    fn_control_object_get_data = reinterpret_cast<ControlObjectGetDataFn>(g_base + fn_resolve("F_CONTROL_OBJECT_GET_DATA_VMA", F_CONTROL_OBJECT_GET_DATA_VMA));
+    fn_control_object_get_cursor_index = reinterpret_cast<ControlObjectGetCursorIndexFn>(g_base + fn_resolve("F_CONTROL_OBJECT_GET_CURSOR_INDEX_VMA", F_CONTROL_OBJECT_GET_CURSOR_INDEX_VMA));
+    fn_ui_equip_is_apply_stuff = reinterpret_cast<UiEquipIsApplyStuffFn>(g_base + fn_resolve("F_UIEQUIP_IS_APPLY_STUFF_VMA", F_UIEQUIP_IS_APPLY_STUFF_VMA));
+    fn_ui_equip_apply_stuff = reinterpret_cast<UiEquipApplyStuffFn>(g_base + fn_resolve("F_UIEQUIP_APPLY_STUFF_VMA", F_UIEQUIP_APPLY_STUFF_VMA));
+    fn_ui_equip_get_item_slot_index = reinterpret_cast<UiEquipGetItemSlotIndexFn>(g_base + fn_resolve("F_UIEQUIP_GET_ITEM_SLOT_INDEX_VMA", F_UIEQUIP_GET_ITEM_SLOT_INDEX_VMA));
+    fn_ui_equip_refresh_item_area = reinterpret_cast<UiEquipRefreshItemAreaFn>(g_base + fn_resolve("F_UIEQUIP_REFRESH_ITEM_AREA_VMA", F_UIEQUIP_REFRESH_ITEM_AREA_VMA));
+    fn_ui_equip_refresh_bag_area = reinterpret_cast<UiEquipRefreshBagAreaFn>(g_base + fn_resolve("F_UIEQUIP_REFRESH_BAG_AREA_VMA", F_UIEQUIP_REFRESH_BAG_AREA_VMA));
+     fn_ui_store_refresh_inven_bag = reinterpret_cast<UiStoreRefreshInvenBagFn>(g_base + fn_resolve("F_UISTORE_REFRESH_INVEN_BAG_VMA", F_UISTORE_REFRESH_INVEN_BAG_VMA));
+     fn_ui_store_refresh_inven_item = reinterpret_cast<UiStoreRefreshInvenItemFn>(g_base + fn_resolve("F_UISTORE_REFRESH_INVEN_ITEM_VMA", F_UISTORE_REFRESH_INVEN_ITEM_VMA));
+    fn_ui_mix_refresh_inven_item = reinterpret_cast<UiMixRefreshInvenItemFn>(g_base + fn_resolve("F_UIMIX_REFRESH_INVEN_ITEM_VMA", F_UIMIX_REFRESH_INVEN_ITEM_VMA));
+    // ---- UIMix 宝石合成操作优化（gem-craft-optimization 阶段1）----
+    fn_uimix_get_type = reinterpret_cast<UIMixGetTypeFn>(g_base + fn_resolve("F_UIMIX_GET_TYPE_VMA", F_UIMIX_GET_TYPE_VMA));
+    fn_uimix_button_inven_item_select_exe = reinterpret_cast<UIMixButtonInvenItemSelectExeFn>(
+        g_base + fn_resolve("F_UIMIX_BUTTON_INVEN_ITEM_SELECT_EXE_VMA", F_UIMIX_BUTTON_INVEN_ITEM_SELECT_EXE_VMA));
+    fn_uimix_button_menu_list_exe = reinterpret_cast<UIMixButtonMenuListExeFn>(
+        g_base + fn_resolve("F_UIMIX_BUTTON_MENU_LIST_EXE_VMA", F_UIMIX_BUTTON_MENU_LIST_EXE_VMA));
+    fn_uimix_button_recipe_exe = reinterpret_cast<UIMixButtonRecipeExeFn>(
+        g_base + fn_resolve("F_UIMIX_BUTTON_RECIPE_EXE_VMA", F_UIMIX_BUTTON_RECIPE_EXE_VMA));
+    fn_uimix_init_mixing_state = reinterpret_cast<UIMixInitMixingStateFn>(
+        g_base + fn_resolve("F_UIMIX_INIT_MIXING_STATE_VMA", F_UIMIX_INIT_MIXING_STATE_VMA));
+    fn_uimix_reset_stuff_item_control = reinterpret_cast<UIMixResetStuffItemControlFn>(
+        g_base + fn_resolve("F_UIMIX_RESET_STUFF_ITEM_CONTROL_VMA", F_UIMIX_RESET_STUFF_ITEM_CONTROL_VMA));
+    // ---- UIMix 自定义配方 Form 分派（custom-craft-recipe §4.11）----
+    fn_uimix_set_type = reinterpret_cast<UIMixSetTypeFn>(
+        g_base + fn_resolve("F_UIMIX_SET_TYPE_VMA", F_UIMIX_SET_TYPE_VMA));
+    fn_control_object_get_cursor = reinterpret_cast<ControlObjectGetCursorFn>(
+        g_base + fn_resolve("F_CONTROL_OBJECT_GET_CURSOR_VMA", F_CONTROL_OBJECT_GET_CURSOR_VMA));
+    fn_popup_create_ok_from_textdata = reinterpret_cast<UiPopupMsgCreateOkFromTextDataFn>(
+        g_base + fn_resolve("F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA", F_UI_POPUP_MSG_CREATE_OK_FROM_TEXT_DATA_VMA));
+fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_base + fn_resolve("F_UIEQUIP_UPDATE_CHAR_EQUIP_VMA", F_UIEQUIP_UPDATE_CHAR_EQUIP_VMA));
+    fn_sound_system_play = reinterpret_cast<SoundSystemPlayFn>(g_base + fn_resolve("F_SOUNDSYSTEM_PLAY_VMA", F_SOUNDSYSTEM_PLAY_VMA));
+    g_snd_fx = reinterpret_cast<uint8_t*>(g_base + fn_resolve("G_SND_FX_VMA", G_SND_FX_VMA));
+    fn_control_item_set_item = reinterpret_cast<ControlItemSetItemFn>(g_base + fn_resolve("F_CONTROL_ITEM_SET_ITEM_VMA", F_CONTROL_ITEM_SET_ITEM_VMA));
+    fn_control_item_get_item = reinterpret_cast<ControlItemGetItemFn>(g_base + fn_resolve("F_CONTROL_ITEM_GET_ITEM_VMA", F_CONTROL_ITEM_GET_ITEM_VMA));
+    fn_control_object_set_active = reinterpret_cast<ControlObjectSetActiveFn>(g_base + fn_resolve("F_CONTROL_OBJECT_SET_ACTIVE_VMA", F_CONTROL_OBJECT_SET_ACTIVE_VMA));
+    fn_control_object_set_show = reinterpret_cast<ControlObjectSetShowFn>(g_base + fn_resolve("F_CONTROL_OBJECT_SET_SHOW_VMA", F_CONTROL_OBJECT_SET_SHOW_VMA));
+    fn_control_object_get_child = reinterpret_cast<ControlObjectGetChildFn>(g_base + fn_resolve("F_CONTROL_OBJECT_GET_CHILD_VMA", F_CONTROL_OBJECT_GET_CHILD_VMA));
+    fn_touch_handle_delete_control = reinterpret_cast<TouchHandleDeleteControlFn>(g_base + fn_resolve("F_TOUCH_HANDLE_DELETE_CONTROL_VMA", F_TOUCH_HANDLE_DELETE_CONTROL_VMA));
+    fn_touch_handle_reset_moving_control = reinterpret_cast<TouchHandleResetMovingControlFn>(g_base + fn_resolve("F_TOUCH_HANDLE_RESET_MOVING_CONTROL_VMA", F_TOUCH_HANDLE_RESET_MOVING_CONTROL_VMA));
+    fn_touch_handle_reset_selected_control = reinterpret_cast<TouchHandleResetSelectedControlFn>(g_base + fn_resolve("F_TOUCH_HANDLE_RESET_SELECTED_CONTROL_VMA", F_TOUCH_HANDLE_RESET_SELECTED_CONTROL_VMA));
+    fn_control_object_get_user_type = reinterpret_cast<ControlObjectGetUserTypeFn>(g_base + fn_resolve("F_CONTROL_OBJECT_GET_USER_TYPE_VMA", F_CONTROL_OBJECT_GET_USER_TYPE_VMA));
+    fn_control_object_set_control_proc = reinterpret_cast<ControlObjectSetControlProcFn>(g_base + fn_resolve("F_CONTROL_OBJECT_SET_CONTROL_PROC_VMA", F_CONTROL_OBJECT_SET_CONTROL_PROC_VMA));
+    fn_control_object_set_user_type = reinterpret_cast<ControlObjectSetUserTypeFn>(g_base + fn_resolve("F_CONTROL_OBJECT_SET_USER_TYPE_VMA", F_CONTROL_OBJECT_SET_USER_TYPE_VMA));
+    fn_touch_handle_unuse_control_event_move = reinterpret_cast<TouchHandleUnuseControlEventMoveFn>(g_base + fn_resolve("F_TOUCH_HANDLE_UNUSE_CONTROL_EVENT_MOVE_VMA", F_TOUCH_HANDLE_UNUSE_CONTROL_EVENT_MOVE_VMA));
+    fn_touch_handle_use_control_event_on = reinterpret_cast<TouchHandleUseControlEventOnFn>(g_base + fn_resolve("F_TOUCH_HANDLE_USE_CONTROL_EVENT_ON_VMA", F_TOUCH_HANDLE_USE_CONTROL_EVENT_ON_VMA));
+    fn_ui_desc_set_off = reinterpret_cast<UiDescSetOffFn>(g_base + fn_resolve("F_UIDESC_SET_OFF_VMA", F_UIDESC_SET_OFF_VMA));
+    fn_ui_desc_get_data = reinterpret_cast<UiDescGetDataFn>(g_base + fn_resolve("F_UIDESC_GET_DATA_VMA", F_UIDESC_GET_DATA_VMA));
+    fn_ui_equip_make_desc = reinterpret_cast<UiEquipMakeDescFn>(g_base + fn_resolve("F_UIEQUIP_MAKE_DESC_VMA", F_UIEQUIP_MAKE_DESC_VMA));
+    fn_touch_handle_set_cursor = reinterpret_cast<TouchHandleSetCursorFn>(g_base + fn_resolve("F_TOUCHHANDLE_SET_CURSOR_VMA", F_TOUCHHANDLE_SET_CURSOR_VMA));
+    fn_ui_equip_inven_item_control_event_proc = reinterpret_cast<UiEquipInvenItemControlEventProcFn>(g_base + fn_resolve("F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA", F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA));
+    fn_item_draw_porting = reinterpret_cast<ItemDrawPortingFn>(g_base + fn_resolve("F_ITEM_DRAW_PORTING_VMA", F_ITEM_DRAW_PORTING_VMA));
+    fn_make_mix = reinterpret_cast<MakeMixFn>(g_base + fn_resolve("F_MAKE_MIX_VMA", F_MAKE_MIX_VMA));
+    fn_get_cost = reinterpret_cast<GetCostFn>(g_base + fn_resolve("F_GET_COST_VMA", F_GET_COST_VMA));
+    fn_uimix_start_mix = reinterpret_cast<UIMixStartMixFn>(g_base + fn_resolve("F_UIMIX_START_MIX_VMA", F_UIMIX_START_MIX_VMA));
+    fn_save_save_item = reinterpret_cast<SaveSaveItemFn>(g_base + fn_resolve("F_SAVE_SAVE_ITEM_VMA", F_SAVE_SAVE_ITEM_VMA));
+    fn_save_load_item = reinterpret_cast<SaveLoadItemFn>(g_base + fn_resolve("F_SAVE_LOAD_ITEM_VMA", F_SAVE_LOAD_ITEM_VMA));
+    fn_itempool_free = reinterpret_cast<ItemPoolFreeFn>(g_base + fn_resolve("F_ITEMPOOL_FREE_VMA", F_ITEMPOOL_FREE_VMA));
+    fn_ctrl_create = reinterpret_cast<ControlObjectCreateFn>(g_base + fn_resolve("F_CONTROL_OBJECT_CREATE_VMA", F_CONTROL_OBJECT_CREATE_VMA));
+    fn_ctrl_add = reinterpret_cast<ControlObjectAddFn>(g_base + fn_resolve("F_CONTROL_OBJECT_ADD_CONTROL_OBJECT_VMA", F_CONTROL_OBJECT_ADD_CONTROL_OBJECT_VMA));
+    fn_ctrl_set_rect = reinterpret_cast<ControlObjectSetRectFn>(g_base + fn_resolve("F_CONTROL_OBJECT_SET_RECT_VMA", F_CONTROL_OBJECT_SET_RECT_VMA));
+    fn_ctrl_set_event_call_type = reinterpret_cast<ControlObjectSetEventCallTypeFn>(g_base + fn_resolve("F_CONTROL_OBJECT_SET_CONTROL_EVENT_CALL_TYPE_VMA", F_CONTROL_OBJECT_SET_CONTROL_EVENT_CALL_TYPE_VMA));
+    fn_ctrl_set_data = reinterpret_cast<ControlObjectSetDataFn>(g_base + fn_resolve("F_CONTROL_OBJECT_SET_DATA_VMA", F_CONTROL_OBJECT_SET_DATA_VMA));
+    fn_ctrl_btn_create = reinterpret_cast<ControlButtonCreateFn>(g_base + fn_resolve("F_CONTROL_BUTTON_CREATE_VMA", F_CONTROL_BUTTON_CREATE_VMA));
+    fn_ctrl_btn_set_text = reinterpret_cast<ControlButtonSetTextFn>(g_base + fn_resolve("F_CONTROL_BUTTON_SET_TEXT_VMA", F_CONTROL_BUTTON_SET_TEXT_VMA));
+    fn_ctrl_btn_set_draw_type = reinterpret_cast<ControlButtonSetDrawTypeFn>(g_base + fn_resolve("F_CONTROL_BUTTON_SET_DRAW_TYPE_VMA", F_CONTROL_BUTTON_SET_DRAW_TYPE_VMA));
+    fn_ctrl_btn_set_draw_id = reinterpret_cast<ControlButtonSetDrawIDFn>(g_base + fn_resolve("F_CONTROL_BUTTON_SET_DRAW_ID_VMA", F_CONTROL_BUTTON_SET_DRAW_ID_VMA));
+    fn_ctrl_btn_set_draw_sub_id = reinterpret_cast<ControlButtonSetDrawSubIDFn>(g_base + fn_resolve("F_CONTROL_BUTTON_SET_DRAW_SUB_ID_VMA", F_CONTROL_BUTTON_SET_DRAW_SUB_ID_VMA));
+    fn_ctrl_btn_set_draw_proc = reinterpret_cast<ControlButtonSetDrawProcFn>(g_base + fn_resolve("F_CONTROL_BUTTON_SET_DRAW_PROC_VMA", F_CONTROL_BUTTON_SET_DRAW_PROC_VMA));
+    fn_ctrl_scroll_create = resolve_native_ui_function<ControlScrollCreateFn>("F_CONTROL_SCROLL_CREATE_VMA");
+    fn_ctrl_scroll_delete = resolve_native_ui_function<ControlScrollDeleteFn>("F_CONTROL_SCROLL_DELETE_VMA");
+    fn_ctrl_scroll_set_option = resolve_native_ui_function<ControlScrollSetOptionFn>("F_CONTROLSCROLL_SET_OPTION_VMA");
+    fn_ctrl_scroll_set_target_group = resolve_native_ui_function<ControlScrollSetTargetGroupFn>("F_CONTROL_SCROLL_SET_TARGET_GROUP_VMA");
+    fn_ctrl_scroll_set_bar_data = resolve_native_ui_function<ControlScrollSetBarDataFn>("F_CONTROL_SCROLL_SET_BAR_DATA_VMA");
+    fn_ctrl_scroll_set_bar_draw_type = resolve_native_ui_function<ControlScrollSetBarDrawTypeFn>("F_CONTROL_SCROLL_SET_BAR_DRAW_TYPE_VMA");
+    fn_ctrl_scroll_set_min_variation = resolve_native_ui_function<ControlScrollSetMinVariationFn>("F_CONTROL_SCROLL_SET_MIN_VARIATION_VMA");
+    fn_ctrl_scroll_set_key_step_variation = resolve_native_ui_function<ControlScrollSetKeyStepVariationFn>("F_CONTROL_SCROLL_SET_KEY_STEP_VARIATION_VMA");
+    fn_ctrl_scroll_scroll = resolve_native_ui_function<ControlScrollScrollFn>("F_CONTROL_SCROLL_SCROLL_VMA");
+    fn_ctrl_scroll_process = resolve_native_ui_function<ControlScrollProcessFn>("F_CONTROL_SCROLL_PROCESS_VMA");
+    fn_ctrl_scroll_draw = resolve_native_ui_function<ControlScrollDrawFn>("F_CONTROL_SCROLL_DRAW_VMA");
+    fn_ctrl_scroll_reset_result_point = resolve_native_ui_function<ControlScrollResetResultPointFn>("F_CONTROL_SCROLL_RESET_RESULT_POINT_VMA");
+    fn_ctrl_btn_set_scroll_control = resolve_native_ui_function<ControlButtonSetScrollControlFn>("F_CONTROL_BUTTON_SET_SCROLL_CONTROL_VMA");
+    fn_ui_create_group_base_control = resolve_native_ui_function<UiCreateGroupBaseControlFn>("F_UI_CREATE_GROUP_BASE_CONTROL_VMA");
+    fn_touch_handle_event = resolve_native_ui_function<TouchHandleEventFn>("F_TOUCH_HANDLE_EVENT_VMA");
+    fn_popup_create = reinterpret_cast<UiPopupMsgCreateFn>(g_base + fn_resolve("F_UIPOPUPMSG_CREATE_VMA", F_UIPOPUPMSG_CREATE_VMA));
+    fn_instantmsg_add = reinterpret_cast<InstantMsgSystemAddFn>(g_base + fn_resolve("F_INSTANTMSGSYSTEM_ADD_VMA", F_INSTANTMSGSYSTEM_ADD_VMA));
+    fn_popup_create_yesno = reinterpret_cast<UiPopupMsgCreateYesNoFn>(g_base + fn_resolve("F_UIPOPUPMSG_CREATE_YESNO_VMA", F_UIPOPUPMSG_CREATE_YESNO_VMA));
+    fn_popup_create_yesno_from_textdata = reinterpret_cast<UiPopupMsgCreateYesNoFromTextDataFn>(
+        g_base + fn_resolve("F_UIPOPUPMSG_CREATE_YESNO_FROM_TEXTDATA_VMA",
+                            F_UIPOPUPMSG_CREATE_YESNO_FROM_TEXTDATA_VMA));
+    fn_popup_create_from_textdata = reinterpret_cast<UiPopupMsgCreateFromTextDataFn>(g_base + fn_resolve("F_UIPOPUPMSG_CREATE_FROM_TEXTDATA_VMA", F_UIPOPUPMSG_CREATE_FROM_TEXTDATA_VMA));
+    fn_popup_free = reinterpret_cast<UiPopupMsgFreeFn>(g_base + fn_resolve("F_UIPOPUPMSG_FREE_VMA", F_UIPOPUPMSG_FREE_VMA));
+    fn_popup_draw = reinterpret_cast<UiPopupMsgDrawFn>(g_base + fn_resolve("F_UIPOPUPMSG_DRAW_VMA", F_UIPOPUPMSG_DRAW_VMA));
+    fn_popupstate_push = reinterpret_cast<PopupStatePushFn>(g_base + fn_resolve("F_POPUPSTATE_PUSH_VMA", F_POPUPSTATE_PUSH_VMA));
+    fn_map_drawbase = reinterpret_cast<MapDrawBaseFn>(g_base + fn_resolve("F_MAP_DRAWBASE_VMA", F_MAP_DRAWBASE_VMA));
+    fn_grpx_start = reinterpret_cast<GrpxStartFn>(g_base + fn_resolve("F_GRPX_START_VMA", F_GRPX_START_VMA));
+    fn_grpx_end = reinterpret_cast<GrpxEndFn>(g_base + fn_resolve("F_GRPX_END_VMA", F_GRPX_END_VMA));
+    fn_grpx_set_clip = reinterpret_cast<GrpxSetClipFn>(g_base + fn_resolve("F_GRPX_SET_CLIP_VMA", F_GRPX_SET_CLIP_VMA));
+    fn_grpx_reset_clip = reinterpret_cast<GrpxResetClipFn>(g_base + fn_resolve("F_GRPX_RESET_CLIP_VMA", F_GRPX_RESET_CLIP_VMA));
+    fn_grpx_fill_rect = reinterpret_cast<GrpxFillRectFn>(g_base + fn_resolve("F_GRPX_FILL_RECT_VMA", F_GRPX_FILL_RECT_VMA));
+    fn_grpx_fill_rect_alpha = reinterpret_cast<GrpxFillRectAlphaFn>(g_base + fn_resolve("F_GRPX_FILL_RECT_ALPHA_VMA", F_GRPX_FILL_RECT_ALPHA_VMA));
+    fn_grpx_set_font_color = reinterpret_cast<GrpxSetFontColorFn>(g_base + fn_resolve("F_GRPX_SET_FONT_COLOR_VMA", F_GRPX_SET_FONT_COLOR_VMA));
+    fn_grpx_draw_string_with_font = reinterpret_cast<GrpxDrawStringWithFontFn>(g_base + fn_resolve("F_GRPX_DRAW_STRING_WITH_FONT_VMA", F_GRPX_DRAW_STRING_WITH_FONT_VMA));
+    fn_grpx_get_font_height = reinterpret_cast<GrpxGetFontHeightFn>(
+        g_base + fn_resolve("F_GRPX_GET_FONT_HEIGHT_VMA", F_GRPX_GET_FONT_HEIGHT_VMA));
+    fn_grpx_set_font_color_rgb = reinterpret_cast<GrpxSetFontColorRgbFn>(g_base + fn_resolve("F_GRPX_SET_FONT_COLOR_RGB_VMA", F_GRPX_SET_FONT_COLOR_RGB_VMA));
+    fn_grpx_draw_part = reinterpret_cast<GrpxDrawPartFn>(g_base + fn_resolve("F_GRPX_DRAW_PART_VMA", F_GRPX_DRAW_PART_VMA));
+    fn_grpx_draw_part_ex = resolve_native_ui_function<GrpxDrawPartExFn>(
+        "F_GRPX_DRAW_PART_EX_VMA");
+    fn_grpx_draw_part_flip_ex = resolve_native_ui_function<GrpxDrawPartFlipExFn>(
+        "F_GRPX_DRAW_PART_FLIP_EX_VMA");
+    fn_sgl_draw_texture_part_ex = resolve_native_ui_function<SglDrawTexturePartExFn>(
+        "F_SGL_DRAW_TEXTURE_PART_EX_VMA");
+    fn_ui_fill_round_rect = reinterpret_cast<UiFillRoundRectFn>(g_base + fn_resolve("F_UI_FILL_ROUND_RECT_VMA", F_UI_FILL_ROUND_RECT_VMA));
+    fn_ui_fill_round_rect2 = reinterpret_cast<UiFillRoundRectFn>(g_base + fn_resolve("F_UI_FILL_ROUND_RECT2_VMA", F_UI_FILL_ROUND_RECT2_VMA));
+    fn_ui_draw_string_halign = reinterpret_cast<UiDrawStringHAlignFn>(g_base + fn_resolve("F_UI_DRAW_STRING_HALIGN_VMA", F_UI_DRAW_STRING_HALIGN_VMA));
+    fn_ui_draw_string_in_width_with_font = reinterpret_cast<UiDrawStringInWidthWithFontFn>(g_base + fn_resolve("F_UI_DRAW_STRING_IN_WIDTH_WITH_FONT_VMA", F_UI_DRAW_STRING_IN_WIDTH_WITH_FONT_VMA));
+    fn_uidesc_draw = reinterpret_cast<UiDescDrawFn>(g_base + fn_resolve("F_UIDESC_DRAW_VMA", F_UIDESC_DRAW_VMA));
+    fn_mw_graphic_draw_string = reinterpret_cast<MwGraphicDrawStringFn>(g_base + fn_resolve("F_MW_GRAPHIC_DRAW_STRING_VMA", F_MW_GRAPHIC_DRAW_STRING_VMA));
+    fn_grp_save_lcd = reinterpret_cast<GrpSaveLcdFn>(g_base + fn_resolve("F_GRP_SAVE_LCD_VMA", F_GRP_SAVE_LCD_VMA));
+    fn_grp_restore_lcd = reinterpret_cast<GrpRestoreLcdFn>(g_base + fn_resolve("F_GRP_RESTORE_LCD_VMA", F_GRP_RESTORE_LCD_VMA));
+    fn_ui_set_refresh_lcd_flag = reinterpret_cast<UiSetRefreshLcdFlagFn>(g_base + fn_resolve("F_UI_SET_REFRESH_LCD_FLAG_VMA", F_UI_SET_REFRESH_LCD_FLAG_VMA));
+    fn_ui_get_refresh_lcd_flag = reinterpret_cast<UiGetRefreshLcdFlagFn>(g_base + fn_resolve("F_UI_GET_REFRESH_LCD_FLAG_VMA", F_UI_GET_REFRESH_LCD_FLAG_VMA));
+    fn_calc_res_width = reinterpret_cast<CalcResolutionFn>(g_base + fn_resolve("F_CALC_RESOLUTION_WIDTH_VMA", F_CALC_RESOLUTION_WIDTH_VMA));
+    fn_calc_res_height = reinterpret_cast<CalcResolutionFn>(g_base + fn_resolve("F_CALC_RESOLUTION_HEIGHT_VMA", F_CALC_RESOLUTION_HEIGHT_VMA));
+    fn_imgsys_unit_load = reinterpret_cast<ImgsysUnitFn>(g_base + fn_resolve("F_IMGSYS_UNIT_LOAD_VMA", F_IMGSYS_UNIT_LOAD_VMA));
+    fn_imgsys_unit_unload = reinterpret_cast<ImgsysUnitFn>(g_base + fn_resolve("F_IMGSYS_UNIT_UNLOAD_VMA", F_IMGSYS_UNIT_UNLOAD_VMA));
+    fn_imgsys_get_group = reinterpret_cast<ImgsysGetGroupFn>(g_base + fn_resolve("F_IMGSYS_GET_GROUP_VMA", F_IMGSYS_GET_GROUP_VMA));
+    fn_imgsys_get_loc = reinterpret_cast<ImgsysGetLocFn>(g_base + fn_resolve("F_IMGSYS_GET_LOC_VMA", F_IMGSYS_GET_LOC_VMA));
+    fn_get_group_title_img_type = reinterpret_cast<GetGroupTitleImgTypeFn>(g_base + fn_resolve("F_GET_GROUP_TITLE_IMG_TYPE_VMA", F_GET_GROUP_TITLE_IMG_TYPE_VMA));
+    fn_ctrl_get_count = reinterpret_cast<ControlObjectGetCountFn>(g_base + fn_resolve("F_CONTROL_OBJECT_GET_COUNT_VMA", F_CONTROL_OBJECT_GET_COUNT_VMA));
+    fn_ctrl_get_child = reinterpret_cast<ControlObjectGetChildFn>(g_base + fn_resolve("F_CONTROL_OBJECT_GET_CHILD_VMA", F_CONTROL_OBJECT_GET_CHILD_VMA));
+    fn_ctrl_get_data = reinterpret_cast<ControlObjectGetDataFn>(g_base + fn_resolve("F_CONTROL_OBJECT_GET_DATA_VMA", F_CONTROL_OBJECT_GET_DATA_VMA));
+    fn_ctrl_set_active = reinterpret_cast<ControlObjectSetActiveFn>(g_base + fn_resolve("F_CONTROL_OBJECT_SET_ACTIVE_VMA", F_CONTROL_OBJECT_SET_ACTIVE_VMA));
+    fn_ctrl_btn_draw = reinterpret_cast<ControlButtonDrawFn>(g_base + fn_resolve("F_CONTROL_BUTTON_DRAW_VMA", F_CONTROL_BUTTON_DRAW_VMA));
+    // 识别当前 libgame.so 变体/能力（离线表查表）。必须在 qol_log_init() 之后：
+    // 日志 sink 未初始化时发出的日志会被丢弃。
+    // 表匹配用磁盘上的 so 文件 md5，不受模块内存补丁影响，故无需先于补丁执行。
+    qol::game_variant_init();
+    // 启动期常驻指令 patch（bitend ×2 存档位段守卫、monster 兼容、hub 登录跳过）由 host
+    // 注入的 core_patches 安装；直接位读重定向与上限 clamp 由 plugins/stack_limit 的 999 原子组
+    // 按 feature 生命周期安装。必需步骤失败 = fail-closed：
+    // bridge 不就绪且清 g_base（与旧 apply_fixed_stack_layout 失败分支同语义）。
+    if (g_boot_patch_hook == nullptr || !g_boot_patch_hook()) {
+        g_bridge_ready.store(false, std::memory_order_release);
+        g_dl_error = "fixed stack layout patch failed";
+        g_base = 0;
+        return false;
+    }
+    // 功能可用性注入：仓库相关功能依赖存档加解密链是否已解析；其余功能不依赖运行时条件。
+    qol::game_feature_set_usability_fn([](qol::GameFeature feature) -> bool {
+        switch (feature) {
+            case qol::GameFeature::kPersonalWarehouse:
+            case qol::GameFeature::kWarehouseInlineInSave:
+            case qol::GameFeature::kWarehouseCompanionFile:
+                return fn_hub_save_get_key != nullptr && fn_encrypt_process2 != nullptr;
+            case qol::GameFeature::kItemCountUpperBound:
+                return true;
+        }
+        return true;
+    });
+    g_bridge_ready.store(true, std::memory_order_release);
+    return true;
+}
+
+// 槽区刷新状态：g_slots_state = 最近一次观察到的游戏状态（0xFFFF = 尚未观察），
+// g_slots_stale = 槽文件自上次重载后被改动/尚未重载。见 game/access/game_access.h 刷新策略注释。
+static std::atomic<bool> g_slots_stale{true};
+static std::atomic<uint16_t> g_slots_state{0xFFFF};
+
+// 存档槽区重载：先释放三槽已挂接角色对象，再重载。与游戏自身 SaveSlot_Delete 的清理惯用法一致
+// （SAVE_DestroySaveSlot → SAVE_CreateSaveSlot）；原因、副作用与调用约束见 game/access/game_access.h 注释。
+void save_slots_reload() {
+    if (fn_save_destroy_save_slot != nullptr) {
+        qol::game::invalidate_item_handles_for_provider(
+            qol::contracts::kQolItemHandleOwnerGame);
+        fn_save_destroy_save_slot();
+    }
+    if (fn_save_create_save_slot != nullptr) fn_save_create_save_slot();
+    g_slots_stale.store(false, std::memory_order_release);
+}
+
+void save_slots_mark_stale() {
+    g_slots_stale.store(true, std::memory_order_release);
+}
+
+// 仅在本轮主菜单停留内尚未重载、或槽文件被改动后重载。非主菜单（world/过渡态）只记录状态、
+// 不做任何重载——槽区结构在该状态下必须保持只读（重载会覆盖世界态全局）。
+void save_slots_refresh_if_stale() {
+    if (g_state == nullptr || fn_save_create_save_slot == nullptr) return;
+    const uint16_t st = *reinterpret_cast<uint16_t*>(g_state);
+    const uint16_t prev = g_slots_state.exchange(st, std::memory_order_acq_rel);
+    if (st != 4) {
+        // 已离开主菜单：下一次回到主菜单必须重载（世界内保存/删档都发生在这个区间）。
+        g_slots_stale.store(true, std::memory_order_release);
+        return;
+    }
+    if (prev != 4 || g_slots_stale.load(std::memory_order_acquire)) save_slots_reload();
+}
+
+// 当前地图真实 ID（v0.4.28）：GOT 双层解引用 u32 = MAPINFOBASE 记录下标。
+// 来源：MAP_Load(0x1149d4) 写 *(*(0x2f4000+0xe80))（114ae8 str w22,[x1]）。
+uint32_t current_map_id() {
+    if (g_base == 0) return 0;
+    void** slot = reinterpret_cast<void**>(g_base + G_CUR_MAP_ID_GOT_VMA);
+    if (slot == nullptr || *slot == nullptr) return 0;
+    return *reinterpret_cast<uint32_t*>(*slot);
+}

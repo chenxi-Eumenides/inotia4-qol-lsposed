@@ -1,0 +1,832 @@
+#pragma once
+
+// UI 跨边界契约只放 POD 与函数指针，不放 STL、异常或虚函数。
+// QolUiComponents 由 core.custom_ui 实现并提供；QolUiAdapter 由 host 注入。
+// 全部接口仅允许在游戏主线程调用；描述符字符串只需在调用期间有效，组件必须复制。
+// 本头禁止出现 CO_*、CB_*、VMA、game_symbols.h 或游戏对象类型。
+
+#include <cstdint>
+
+#include "result.h"
+#include "item_handle.h"
+
+namespace qol::contracts {
+
+constexpr const char* kUiComponentsCapabilityId = "ui_components";
+constexpr uint16_t kUiContractMajor = 2, kUiContractMinor = 23;
+constexpr uint16_t kUiAdapterMajor = 2, kUiAdapterMinor = 35;
+constexpr const char* kUiStateCapabilityId = "ui.state";
+constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 2;
+constexpr uint32_t kUiStateMaxCustomPanels = 4;
+constexpr uint32_t kUiStateMaxPanelIdBytes = 128;
+constexpr uint32_t kUiStateMaxDialogOptions = 6;
+constexpr uint32_t kUiStateMaxDialogTextBytes = 256;
+constexpr uint32_t kUiStateMaxNameBytes = 64;
+
+struct UiCustomPanelsSnapshot {
+    uint64_t sequence;
+    uint32_t count;
+    const char* const* panel_ids;
+};
+
+struct UiCustomDialogSnapshot {
+    uint64_t sequence;
+    uint64_t generation;
+    const char* type_id;
+    const char* title;
+    const char* const* option_labels;
+    uint32_t option_count;
+};
+
+// UI 层类型：对话框 / 面板 / 其他（原生 screen 等）。
+enum class UiLayerType : uint32_t {
+    kOther = 0,
+    kPanel = 1,
+    kDialog = 2,
+};
+
+// 单层信息：id 由 provider 持有，仅在 visit 调用期间有效。
+struct UiLayerInfo {
+    const char* id;
+    uint32_t type;  // UiLayerType
+};
+
+using QolUiLayerVisitFn = void (*)(const UiLayerInfo* layer, void* user);
+
+// ---- ui.state 1.2：统一状态（name/type/source） ----
+// type: 0 unknown / 1 boot / 2 menu / 3 world / 4 dialog / 5 panel
+// source: 0 unknown / 1 native / 2 module / 3 external / 4 android
+constexpr uint32_t kUiStateTypeUnknown = 0;
+constexpr uint32_t kUiStateTypeBoot = 1;
+constexpr uint32_t kUiStateTypeMenu = 2;
+constexpr uint32_t kUiStateTypeWorld = 3;
+constexpr uint32_t kUiStateTypeDialog = 4;
+constexpr uint32_t kUiStateTypePanel = 5;
+constexpr uint32_t kUiStateSourceUnknown = 0;
+constexpr uint32_t kUiStateSourceNative = 1;
+constexpr uint32_t kUiStateSourceModule = 2;
+constexpr uint32_t kUiStateSourceExternal = 3;
+constexpr uint32_t kUiStateSourceAndroid = 4;
+
+struct QolUiStateSummary {
+    uint32_t struct_size;
+    uint32_t type;
+    uint32_t source;
+    char name[kUiStateMaxNameBytes];
+};
+
+struct QolUiStateTableRow {
+    const char* name;   // 仅在 visit 调用期间有效
+    uint32_t type;
+    uint32_t source;
+    uint32_t stability; // 0 static, 1 session
+};
+
+using QolUiStateTableVisitFn = void (*)(const QolUiStateTableRow* row, void* user);
+
+struct QolUiStateRegistration {
+    uint32_t struct_size;
+    uint32_t type;          // 4 dialog / 5 panel
+    char key[64];           // panel_id 或 dialog_type_id
+    char plugin_id[64];     // 由插件从 PluginContext::plugin_id 复制
+};
+
+struct QolUiExternalSnapshot {
+    uint32_t struct_size;
+    uint32_t active;
+    char name[kUiStateMaxNameBytes]; // "android_agreement"
+};
+
+struct UiStateApi {
+    QolResult (*publish_custom_panels)(const UiCustomPanelsSnapshot* snapshot);
+    QolResult (*publish_custom_dialog)(const UiCustomDialogSnapshot* snapshot);
+    QolResult (*clear_custom_dialog)(uint64_t generation, uint64_t sequence);
+    // v1.1 尾部追加：按栈顶→栈底枚举当前 UI 层。回调在调用线程同步执行，
+    // layer->id 仅在本次回调内有效，消费者需自行复制。
+    QolResult (*read_layers)(QolUiLayerVisitFn visit, void* user);
+    // v1.2 尾部追加：统一状态摘要、状态表、注册与外部 UI 覆盖。
+    // read_state/visit_states 任意线程可调；register_state 在插件 install 阶段调用。
+    QolResult (*read_state)(QolUiStateSummary* out);
+    QolResult (*visit_states)(QolUiStateTableVisitFn visit, void* user);
+    QolResult (*register_state)(const QolUiStateRegistration* registration);
+    QolResult (*unregister_state)(uint32_t type, const char* key);
+    QolResult (*publish_external_ui)(const QolUiExternalSnapshot* snapshot);
+};
+
+enum class UiAlign : uint8_t { kLeft = 0, kRight = 1, kCenter = 2 };
+using QolUiHandle = void*;
+using QolUiClickFn = void (*)(void* user);
+using QolUiPopupEnterFn = void (*)();
+using QolUiChangedFn = void (*)(void* user, int32_t value);
+using QolUiScrollFn = void (*)(void* user, int32_t offset);
+enum class QolUiRootKind : uint32_t {
+    kEquipBagContainer = 0,
+    kEquipItemRoot = 1,
+    kStoreBagContainer = 2,
+    kStoreItemRoot = 3,
+    kMixBagContainer = 4,
+    kMixItemRoot = 5,
+    // 主菜单「更多游戏」按钮的父控件（由 Adapter 的主菜单快照证明存活后返回）。
+    // 用于把入口控件挂在主菜单树里，不替换原按钮。
+    kMainMenuParent = 6,
+};
+
+struct UiRect {
+    int64_t x, y, w, h;
+};
+
+// 基础形状绘制参数。颜色是 RGB565，alpha 使用 GRPX_FillRectAlpha 的 0..100 百分比。
+// border_width=0 表示无边框；圆角矩形半径上限 256，圆形必须是边长不超过 512 的正方形。
+struct UiShapeDesc {
+    UiRect rect;
+    uint32_t fill_rgb565;
+    uint32_t border_rgb565;
+    uint32_t alpha;
+    uint32_t border_width;
+    uint32_t radius;
+};
+
+// Native-textured container with an independent RGB565/alpha interior fill.
+// ornamented selects the shared four-corner overlay; it must be 0 or 1.
+struct UiContainerStyleDesc {
+    UiRect rect;
+    uint32_t fill_rgb565;
+    uint32_t alpha;
+    uint8_t ornamented;
+};
+
+// text_button_create interprets style as a native font choice; button_create keeps its own style.
+enum UiTextButtonStyle : uint32_t {
+    kUiTextButtonFontDefault = 0,
+    kUiTextButtonFontLarger = 1,
+};
+
+struct UiButtonDesc {
+    UiRect rect;
+    const char* text;
+    uint32_t style;
+    QolUiClickFn on_click;
+    void* user;
+};
+
+struct UiMainMenuTextButtonDesc {
+    const char* text;
+    uint32_t style;
+    QolUiClickFn on_click;
+    void* user;
+};
+
+// Explicit appearances do not change UiButtonDesc.style's native-font meaning.
+enum UiTextButtonAppearance : uint32_t {
+    kUiTextButtonCapsule = 1,
+    kUiTextButtonDecorated = 2,
+};
+
+struct UiTextButtonPaintDesc {
+    UiRect visual_rect;          // Absolute logical paint range, independent of hit bounds.
+    uint32_t appearance;         // UiTextButtonAppearance; never inferred from the rect ratio.
+    uint32_t font_style;         // UiTextButtonStyle, unchanged from the legacy font choices.
+    // 0 preserves font_style's size; explicit sizes select game-managed 14/20/24/28/38.
+    // Size is not line height. Other sizes are Unsupported; no private fonts are created.
+    uint32_t font_size;
+};
+
+struct UiTextButtonPaintLayout {
+    UiRect normal_bounds;        // Absolute conservative bounds, including halo/filter guard.
+    UiRect pressed_bounds;
+    UiRect label_bounds;
+};
+
+struct UiMainMenuDecoratedButtonDesc {
+    const char* text;
+    uint32_t font_style;
+    uint32_t font_size;          // Same explicit-size rules as UiTextButtonPaintDesc.
+    // 期望的可见绘制尺寸（逻辑单位），以原生控件中心为锚点；必须为正。
+    // 命中区仍等于原生 snapshot rect，不随可见尺寸变化。
+    uint32_t width;
+    uint32_t height;
+    QolUiClickFn on_click;
+    void* user;
+};
+
+struct UiPanelDesc {
+    UiRect rect, mask_rect;
+    uint32_t panel_color, flags;
+};
+struct UiLabelDesc {
+    UiRect rect;
+    const char* text;
+    uint32_t color;
+    UiAlign align;
+};
+struct UiToggleDesc {
+    UiRect rect;
+    const char* text;
+    uint32_t style;
+    int32_t value;
+    QolUiChangedFn on_changed;
+    void* user;
+};
+struct UiSelectDesc {
+    UiRect rect;
+    const char* const* options;
+    uint32_t option_count;
+    int32_t selected;
+    uint32_t style;
+    QolUiChangedFn on_changed;
+    void* user;
+};
+struct UiScrollViewDesc {
+    UiRect viewport;
+    int32_t content_extent;
+    int32_t offset;
+    int32_t page_size;
+    uint32_t flags;
+    QolUiScrollFn on_scroll;
+    void* user;
+};
+
+using QolUiListItemDrawFn = void (*)(void* user, uint32_t index, QolUiHandle row, uint8_t selected);
+using QolUiListSelectFn = void (*)(void* user, uint32_t index);
+struct UiScrollListDesc {
+    UiRect viewport;
+    int32_t item_height;
+    uint32_t item_count;
+    int32_t initial_selected;  // -1 表示未选中；空列表必须为 -1。
+    QolUiListItemDrawFn draw_item;
+    QolUiListSelectFn on_select;
+    void* user;
+};
+
+struct UiNativeToggleDesc {
+    UiRect rect;
+    int32_t value;
+    uint8_t enabled;
+    QolUiChangedFn on_changed;
+    void* user;
+};
+
+// 自适应导航按钮视觉模式：auto 按面板栈深判定（栈顶仅一层显示 X，多层级显示返回箭头）。
+enum UiNavButtonMode : uint32_t {
+    kUiNavButtonAuto = 0,
+    kUiNavButtonForceClose = 1,
+    kUiNavButtonForceBack = 2,
+};
+
+// X 与返回箭头融合的导航按钮：点击一律请求面板栈弹栈顶（延迟安全；栈顶仅一层时即退出
+// 本页，语义与返回一致）；on_click 为可空的消费者附加通知，不影响弹栈行为。
+struct UiNavButtonDesc {
+    UiRect rect;
+    uint32_t mode;
+    QolUiClickFn on_click;
+    void* user;
+};
+
+enum UiArrowDirection : uint32_t { kUiArrowLeft = 0, kUiArrowRight = 1 };
+struct UiArrowButtonDesc {
+    UiRect rect;
+    uint32_t direction;
+    uint8_t enabled;
+    QolUiClickFn on_click;
+    void* user;
+};
+
+struct UiIconButtonDesc {
+    UiRect rect;
+    int32_t image_unit;
+    int32_t image_loc;
+    int32_t draw_type;
+    uint8_t enabled;
+    const char* fallback_text;
+    QolUiClickFn on_click;
+    void* user;
+    uint8_t show_background;  // 0 draws only the icon/fallback; 1 adds the button base and frame.
+};
+
+// 锚定在游戏控件树上的图标按钮状态。调用方持有并零初始化；字段由实现读写。
+struct QolUiAnchoredButton {
+    void* handle;        // 当前 native 控件；nullptr 表示未挂载
+    void* parent;        // 上次命中的活挂载根（游戏控件树内的容器）
+    uint32_t root_kind;  // QolUiRootKind
+    uint32_t mounted;    // 1=handle 有效
+};
+
+struct UiAnchoredButtonDesc {
+    uint32_t root_kind;       // QolUiRootKind：挂载根由 QolUiAdapter::find_root 实时解析
+    UiIconButtonDesc button;  // rect 由 layout 回调给出；本字段的 rect 仅作首次设置
+};
+
+// 布局回调：parent 是当帧活的挂载根，out_rect 使用 parent 相对坐标。
+using QolUiAnchorLayoutFn = QolResult (*)(QolUiHandle parent, UiRect* out_rect, void* user);
+
+using QolUiControlProcFn = uint64_t (*)(void*, uint64_t, void*, void*);
+
+// 任意原生控件的锚定状态：调用方持有并零初始化；字段由实现读写。
+struct QolUiAnchoredControl {
+    void* handle;         // 当前 native 控件；nullptr 表示未挂载
+    void* parent;         // 上次命中的活挂载根
+    void* control_data;   // 创建时的 ControlObject data 快照（nullptr=该控件无 data）
+    void* expected_proc;  // 创建时的 CO_PROC 期望值（nullptr=不校验）
+    uint32_t root_kind;   // QolUiRootKind
+    uint32_t mounted;     // 1=handle 有效
+    int32_t type;         // 创建时的控件类型
+    int32_t user_type;    // 创建时的 user type
+};
+
+// 创建回调：parent 是当帧活的挂载根；实现负责创建控件（挂到 parent）并回填 rect。
+// 控件创建后由锚定层捕获身份快照；调用方仍需自行处理绘制与业务语义。
+using QolUiAnchorCreateFn = QolResult (*)(QolUiHandle parent, UiRect rect, void* user,
+                                          QolUiHandle* out_control);
+
+struct UiAnchoredControlDesc {
+    uint32_t root_kind;               // QolUiRootKind
+    QolUiControlProcFn expected_proc;  // 非空时要求 CO_CONTROL_PROC 仍是它（可空）
+    QolUiAnchorLayoutFn layout;
+    QolUiAnchorCreateFn create;
+    void* user;                        // 传给 layout/create
+};
+
+using QolUiHelpDetailDrawFn = void (*)(void* user, UiRect right_viewport);
+struct UiHelpOption {
+    void* user;
+    QolUiHelpDetailDrawFn draw_detail;
+};
+struct UiHelpPageDesc {
+    UiRect panel_rect;       // 相对 parent；parent 为空时为屏幕坐标。
+    UiRect left_viewport;    // 相对 panel；框向外扩 8，右侧另留 16 给原生滚动条。
+    UiRect right_viewport;   // 相对 panel；框向外扩 8；右栏不滚动、不裁剪。
+    int32_t item_height;
+    const UiHelpOption* options;  // 创建时复制；user/回调须有效至 destroy/unbind。
+    uint32_t option_count;
+    int32_t initial_selected;    // -1 无选择；空页须为 -1。
+    QolUiListItemDrawFn draw_item;
+    void* user;
+};
+
+struct QolUiComponents {
+    /* 由 core.ui 实现并提供（U11-2）；本 lane 只定义 */
+    uint32_t size;
+    uint16_t major, minor;
+    QolResult (*panel_create)(const UiPanelDesc*, QolUiHandle parent, QolUiHandle* out);
+    QolResult (*button_create)(const UiButtonDesc*, QolUiHandle parent, QolUiHandle* out);
+    QolResult (*label_create)(const UiLabelDesc*, QolUiHandle parent, QolUiHandle* out);
+    QolResult (*toggle_create)(const UiToggleDesc*, QolUiHandle parent, QolUiHandle* out);
+    QolResult (*select_create)(const UiSelectDesc*, QolUiHandle parent, QolUiHandle* out);
+    QolResult (*scroll_view_create)(const UiScrollViewDesc*, QolUiHandle parent, QolUiHandle* out);
+    QolResult (*set_rect)(QolUiHandle, UiRect);
+    QolResult (*button_set_text)(QolUiHandle, const char*);
+    QolResult (*label_set_text)(QolUiHandle, const char*);
+    QolResult (*toggle_set_value)(QolUiHandle, int32_t);
+    QolResult (*select_set_selected)(QolUiHandle, int32_t);
+    QolResult (*scroll_set_offset)(QolUiHandle, int32_t);
+    QolResult (*dispatch_touch)(QolUiHandle root, uint32_t phase, int64_t x, int64_t y);
+    QolResult (*destroy)(QolUiHandle);
+    // 原生列表上限 1024 行、extent <= INT32_MAX；parent 可借用，但不得嵌套 scroll。
+    // destroy 释放 owned native 子树；回调内 destroy 仅置 pending，下一 process 安全点执行。
+    QolResult (*scroll_list_create)(const UiScrollListDesc*, QolUiHandle parent, QolUiHandle* out);
+    QolResult (*scroll_list_process)(QolUiHandle list);
+    QolResult (*scroll_list_draw)(QolUiHandle list);
+    QolResult (*scroll_list_get_offset)(QolUiHandle list, int64_t* out);
+    // root 中所有交互按钮须有 ExecuteProc；不能混用 dispatch_touch。
+    QolResult (*dispatch_native_event)(QolUiHandle root, uint64_t event, uint64_t param,
+                                        uint64_t param2, uint32_t* consumed);
+    // help_page 拥有完整 native 子树；destroy/unbind 通过 Adapter 递归删除一次。
+    // 两栏框均在 panel 内且不得重叠；绘制使用绝对坐标，detail 也收到绝对 viewport。
+    // 消费者加载框图集 0x0f；回调不得同步创建/删除控件，destroy 仅排队。
+    QolResult (*help_page_create)(const UiHelpPageDesc*, QolUiHandle parent, QolUiHandle* out);
+    QolResult (*help_page_process)(QolUiHandle page);
+    QolResult (*help_page_draw)(QolUiHandle page);
+    QolResult (*help_page_set_selected)(QolUiHandle page, int32_t index);
+    QolResult (*help_page_get_selected)(QolUiHandle page, int32_t* out);
+    // 标准返回按钮助手：页面只负责把按钮放进自己的树并定位，返回/关闭语义归面板宿主
+    // （嵌套返回上一级；最外层关闭并归还 popup；宿主负责去重、延迟 pop/restore 与取消）。
+    // back_button_create 创建 0x59 样式按钮：原生事件树页面由助手绑定 ExecuteProc，
+    // 组件/手工命中页面须经 back_button_touch 命中。助手负责加载并借用共享图集 0x59（不卸载）。
+    QolResult (*back_button_create)(QolUiHandle parent, UiRect rect, QolUiHandle* out);
+    // 绘制标准返回按钮外观：原生按钮读 control_pressed，组件按钮读 back_button_touch
+    // 维护的按下态；0x59 不可用时退化自绘。
+    QolResult (*back_button_draw)(QolUiHandle button);
+    // 手工命中页的命中入口：phase 1=按下 / 2=抬起；按下落于按钮内记录按下态，抬起仍在
+    // 按钮内则请求宿主 back，移出取消。仅供组件按钮使用。
+    QolResult (*back_button_touch)(QolUiHandle button, uint32_t phase, int64_t x, int64_t y);
+    // 直接请求宿主 back（f3/f4 等游戏驱动的关闭入口）：与按钮激活同语义，可安全在回调中调用。
+    QolResult (*back_request)();
+    // 不经控件 data 的文本绘制原语：以 control 绝对原点为基准，直接绘制传入字符串。
+    // 原生按钮/标签的文本内联缓冲只有 0x20 字节（含 NUL），ControlButton_SetText 用
+    // strcpy 无界拷贝；超过 31 字节会覆盖 ExecuteProc 槽。长文本必须走此入口自绘，
+    // 不得再写入行按钮内联文本。
+    QolResult (*draw_control_text)(QolUiHandle control, const char* text, int32_t x_offset,
+                                   int32_t y_offset, uint32_t color, int32_t align, int32_t font);
+    // 可缩放原生风格开关（自绘，不依赖原生控件；任意 rect，仅主线程、当前 frame 内绘制）。
+    // rect 为绝对坐标；value != 0 为开（亮），0 为关（暗）。颜色取自 contracts/ui_theme.h。
+    QolResult (*switch_draw)(UiRect rect, int32_t value);
+    // 开关命中：phase 1=按下 / 2=抬起。按下点落在 rect 内时翻转 *inout_value（与组件的
+    // kToggle 一致，按下即切换），并仅作用于 rect 自身，不改变父行其它区域的点击语义。
+    QolResult (*switch_touch)(UiRect rect, uint32_t phase, int64_t x, int64_t y,
+                              int32_t* inout_value);
+    // Native options-style capsule button. The parent may be a borrowed native list row;
+    // that row remains owned by its list and must not be destroyed by the toggle consumer.
+    QolResult (*native_toggle_create)(const UiNativeToggleDesc*, QolUiHandle parent,
+                                      QolUiHandle* out);
+    QolResult (*native_toggle_set_value)(QolUiHandle, int32_t value);
+    QolResult (*native_toggle_get_value)(QolUiHandle, int32_t* out);
+    QolResult (*native_toggle_set_enabled)(QolUiHandle, uint8_t enabled);
+    QolResult (*native_toggle_draw)(QolUiHandle);
+    // Returns a borrowed row button handle for creating list-owned child controls only.
+    QolResult (*scroll_list_get_row)(QolUiHandle list, uint32_t index, QolUiHandle* out_row);
+    // Selection is enabled by default. Disabled lists still dispatch genuine row child buttons,
+    // but never update selected or invoke the list's selection callback.
+    QolResult (*scroll_list_set_selection_enabled)(QolUiHandle list, uint8_t enabled);
+    // Creates a separately hit-tested native button child owned by the scroll list. rect is
+    // relative to the row; text must fit the native inline buffer, so custom labels are drawn
+    // separately with draw_control_text.
+    QolResult (*scroll_row_button_create)(QolUiHandle list, uint32_t row, UiRect rect,
+                                          QolUiClickFn on_click, void* user,
+                                          QolUiHandle* out_button);
+    // 原生底图按钮的公共自定义文本封装；组件持有 UTF-8 标签。parent 也可为列表借用行，
+    // 此时列表拥有按钮子树，工厂将原生按钮绑定到所属 scroll。
+    QolResult (*text_button_create)(const UiButtonDesc*, QolUiHandle parent,
+                                    QolUiHandle* out);
+    QolResult (*text_button_set_enabled)(QolUiHandle, uint8_t enabled);
+    QolResult (*text_button_draw)(QolUiHandle);
+    // 自适应导航按钮：X（unit 0x0f loc 0x3a / 按下叠加 0x34）与返回箭头（unit 0x59 loc 3 /
+    // 按下叠加 loc 2）融合。auto 模式绘制时按面板栈深选图；点击一律延迟请求弹面板栈顶，
+    // on_click 仅作附加通知。模式强制用于特殊页面与演示。
+    QolResult (*nav_button_create)(const UiNavButtonDesc*, QolUiHandle parent,
+                                   QolUiHandle* out);
+    QolResult (*nav_button_set_enabled)(QolUiHandle, uint8_t enabled);
+    QolResult (*nav_button_draw)(QolUiHandle);
+    // Creates a managed text button at the current More Games control's exact rect and parent.
+    // The custom UI component owns the replacement; the game owns the borrowed menu parent.
+    QolResult (*main_menu_text_button_create)(const UiMainMenuTextButtonDesc*,
+                                              QolUiHandle* out_original,
+                                              QolUiHandle* out_replacement);
+    // Reports live only for a replacement whose native owner is still verified by the adapter.
+    // NotReady means unknown; callers must retain its component and callback context.
+    QolResult (*main_menu_text_button_is_live)(QolUiHandle, uint8_t* out_live);
+
+    // Minor 14 append-only slots. Legacy text_button_create retains ratio-driven appearance.
+    // Both explicit factories share text/Enabled/draw/destroy and native event ownership.
+    QolResult (*capsule_text_button_create)(const UiButtonDesc*, QolUiHandle parent,
+                                            QolUiHandle* out);
+    QolResult (*decorated_text_button_create)(const UiButtonDesc*, QolUiHandle parent,
+                                              QolUiHandle* out);
+    // Uses the verified menu parent/identity path. Reject unsafe hit geometry without
+    // hiding the original button; old main_menu_text_button_create keeps its own contract.
+    QolResult (*main_menu_decorated_button_create)(const UiMainMenuDecoratedButtonDesc*,
+                                                    QolUiHandle* out_original,
+                                                    QolUiHandle* out_replacement);
+    // Minor 15 append-only: active is a visual selection state, separate from Enabled.
+    QolResult (*text_button_set_active)(QolUiHandle, uint8_t active);
+    QolResult (*arrow_button_create)(const UiArrowButtonDesc*, QolUiHandle parent,
+                                     QolUiHandle* out);
+    QolResult (*arrow_button_set_enabled)(QolUiHandle, uint8_t enabled);
+    QolResult (*arrow_button_draw)(QolUiHandle);
+    // Minor 16 append-only: compact plain-color text control and scalable game-atlas icon button.
+    QolResult (*flat_text_button_create)(const UiButtonDesc*, QolUiHandle parent,
+                                         QolUiHandle* out);
+    QolResult (*icon_button_create)(const UiIconButtonDesc*, QolUiHandle parent,
+                                    QolUiHandle* out);
+    QolResult (*icon_button_set_enabled)(QolUiHandle, uint8_t enabled);
+    QolResult (*icon_button_draw)(QolUiHandle);
+    // Minor 17 append-only: capsule text paint for compact hit rectangles (<204 logical px).
+    QolResult (*compact_capsule_text_button_create)(const UiButtonDesc*, QolUiHandle parent,
+                                                    QolUiHandle* out);
+    // Minor 19 append-only: 注销组件记录但不删除 native 控件。用于组件挂在游戏控件树上、
+    // native 生命周期归游戏的场景：控件被游戏销毁后句柄失效，既不得 delete_control（命中
+    // 已释放或被复用的地址），也不能保留记录（unbind/destroy 会再次删除该地址）。
+    // 调用方必须先独立证明该句柄已不是在树中的本模块控件；NotFound 表示无记录。
+    QolResult (*forget_native)(QolUiHandle);
+
+    // Minor 20 append-only: 锚定在游戏控件树上的图标按钮（native 生命周期归游戏）。
+    // ensure 每帧按 desc->root_kind 重新解析活挂载根，并证明 state->handle 仍在根的子链表
+    // 且仍是本模块绑定的控件；失效时只注销记录（不删 native）并重建。命中/创建后自动
+    // show=1、enabled=1，并按 layout 回调更新 rect。layout 失败返回 NotReady，不改动句柄。
+    QolResult (*anchored_button_ensure)(QolUiAnchoredButton* state,
+                                        const UiAnchoredButtonDesc* desc,
+                                        QolUiAnchorLayoutFn layout, void* user,
+                                        uint8_t* out_created);
+    // 关闭态：只隐藏仍能证明归属的控件；身份不符则注销记录（不删 native）。
+    QolResult (*anchored_button_set_visible)(QolUiAnchoredButton* state, uint8_t visible);
+    // 卸载：注销组件记录，不删除 native 控件（游戏拥有其生命周期）。
+    QolResult (*anchored_button_release)(QolUiAnchoredButton* state);
+    QolResult (*anchored_button_draw)(const QolUiAnchoredButton* state);
+
+    // Minor 21 append-only: 任意原生控件的锚定（多控件/自定义 CO_PROC/自带 data 的挂载）。
+    // 与 anchored_button 同义：按 root_kind 每帧解析活挂载根，先做子链表指针比对，再用
+    // 创建时快照（type/user_type/data）与 expected_proc（CO_CONTROL_PROC）证明身份；失效只注销
+    // 记录（不删 native）并重建。控件绘制与业务语义由调用方负责。
+    QolResult (*anchored_control_ensure)(QolUiAnchoredControl* state,
+                                         const UiAnchoredControlDesc* desc,
+                                         uint8_t* out_created);
+    QolResult (*anchored_control_set_visible)(QolUiAnchoredControl* state, uint8_t visible);
+    QolResult (*anchored_control_release)(QolUiAnchoredControl* state);
+    // 取回可证明仍存活的句柄并清空状态：out_live=1 时 out_handle 有效，调用方负责删除/接管；
+    // out_live=0 时只清记录，绝不删除 native。
+    QolResult (*anchored_control_detach)(QolUiAnchoredControl* state, QolUiHandle* out_handle,
+                                         uint8_t* out_live);
+
+    // Minor 22 append-only: 可预测的纯色基础形状；不提供抗锯齿。
+    // 圆角半径最大 256、圆形直径最大 512，以限制逐行栅格绘制成本。
+    QolResult (*draw_rect)(const UiShapeDesc*);
+    QolResult (*draw_rounded_rect)(const UiShapeDesc*);
+    QolResult (*draw_circle)(const UiShapeDesc*);
+    // Minor 23 append-only: native-textured container with configurable fill and ornaments.
+    QolResult (*draw_container_styled)(const UiContainerStyleDesc*);
+};
+
+using QolUiDrawFn = void (*)(void* control);
+using QolUiNativeScrollDrawFn = void (*)(QolUiHandle scroll, int64_t displacement);
+using QolUiPopupMsgCallbackFn = void (*)(void* param);
+struct QolUiAdapter;
+using QolUiFrameOverlayDrawFn = bool (*)(void* user, QolUiAdapter* ui, uint64_t token);
+struct UiNativeScrollDesc {
+    UiRect viewport;
+    int64_t content_extent;
+    int64_t max_drag_delta;
+    int64_t drag_threshold;
+    uint8_t show_bar;
+};
+struct QolUiItemIcon {
+    int32_t image_unit;
+    int32_t image_loc;
+    int32_t draw_type;
+    int32_t flip;
+    uint8_t centered;
+};
+using QolUiLoadOptionImagesFn = QolResult (*)();
+using QolUiUnloadOptionImagesFn = QolResult (*)();
+using QolUiDrawBackButtonFn = QolResult (*)(QolUiHandle, uint8_t pressed);
+using QolUiDrawToggleFn = QolResult (*)(QolUiHandle, uint8_t enabled);
+using QolUiDrawItemIconFn = QolResult (*)(QolUiHandle, QolUiItemIcon);
+using QolUiCustomButtonFn = QolResult (*)(QolUiHandle, UiRect, uint32_t, uint32_t, int32_t,
+                                          const char*, uint32_t, int32_t, int32_t);
+struct QolUiAdapter {
+    /* host 注入，背后 game/access/ui_kit|ui_components */
+    uint32_t size;
+    uint16_t major, minor;
+    QolResult (*create_control)(uint32_t kind, QolUiHandle parent, QolUiHandle* out);
+    QolResult (*set_rect)(QolUiHandle, UiRect);
+    QolResult (*get_rect)(const QolUiHandle, UiRect*);
+    QolResult (*set_text)(QolUiHandle, const char*);
+    QolResult (*set_draw_proc)(QolUiHandle, QolUiDrawFn);
+    QolResult (*set_click_proc)(QolUiHandle, QolUiClickFn, void* user);
+    int32_t (*hit_test)(const QolUiHandle, int64_t x, int64_t y, UiRect);
+    QolResult (*draw_control)(QolUiHandle);
+    QolResult (*begin_frame)();
+    QolResult (*fill_rect_alpha)(UiRect, uint32_t color, uint32_t alpha);
+    QolResult (*draw_panel_decor)(UiRect, const int64_t*, uint32_t, uint32_t);
+    QolResult (*draw_vertical_line)(int64_t, int64_t, int64_t, uint32_t, int32_t);
+    QolResult (*draw_text)(QolUiHandle, int32_t, int32_t, uint32_t);
+    QolResult (*draw_text_centered)(QolUiHandle, int32_t, uint32_t);
+    QolResult (*load_image_unit)(int32_t);
+    // 游戏拥有的共享图集 0x0f/0x59/0x4f/0x50 只能确保加载与借用绘制；
+    // 两种 unit 卸载入口及 unload_option_images 均返回 kQolErrBlocked，不释放贴图。
+    QolResult (*unload_image_unit)(int32_t);
+    QolResult (*draw_image_part)(int32_t, int32_t, int32_t, int32_t, int32_t, int32_t);
+    QolResult (*draw_control_image_part)(QolUiHandle, int32_t, int32_t, int32_t, int32_t);
+    QolResult (*draw_control_image_part_centered)(QolUiHandle, int32_t, int32_t, int32_t, int32_t);
+    QolResult (*draw_button_background)(QolUiHandle, UiRect, uint32_t);
+    QolResult (*draw_button_border)(QolUiHandle, UiRect, uint32_t, int32_t);
+    QolResult (*draw_control_alpha_overlay)(QolUiHandle, UiRect, uint32_t, uint32_t);
+    QolResult (*end_frame)();
+
+    // U11-3：面板消费者仍需使用的控件树、原版绘制和弹窗原语。
+    QolResult (*find_child_in_area)(QolUiHandle, UiRect, QolUiHandle*);
+    QolResult (*clone_button_style)(QolUiHandle, QolUiHandle, QolUiClickFn, void*);
+    QolResult (*draw_control_title_image_part)(QolUiHandle, int32_t);
+    QolResult (*show_text_popup)(int32_t);
+    QolResult (*child_count)(QolUiHandle, uint32_t*);
+    QolResult (*child_at)(QolUiHandle, uint32_t, QolUiHandle*);
+    QolResult (*screen_inset_width)(int32_t*);
+    QolResult (*screen_inset_height)(int32_t*);
+    QolResult (*unuse_control_event_move)(QolUiHandle);
+    QolResult (*set_popup_process_info)(int32_t, int32_t);
+    QolResult (*push_popup_state)(uint32_t);
+    QolResult (*uidesc_draw)();
+    QolResult (*set_font_color)(uint32_t);
+    QolResult (*set_font_color_rgb)(int32_t, int32_t, int32_t);
+    QolResult (*draw_string_with_font)(const char*, int32_t, int32_t, int32_t, int32_t);
+    QolResult (*draw_part)(QolUiHandle, int32_t, int32_t, QolUiHandle, int32_t, int32_t);
+    QolResult (*image_unit_load)(int32_t);
+    QolResult (*image_unit_unload)(int32_t);
+    QolResult (*image_group)(int32_t, QolUiHandle*);
+    QolResult (*image_loc)(int32_t, int32_t, QolUiHandle*);
+    QolUiLoadOptionImagesFn load_option_images;
+    QolUiUnloadOptionImagesFn unload_option_images;
+    QolUiDrawBackButtonFn draw_back_button;
+    QolUiDrawToggleFn draw_toggle;
+    QolUiDrawItemIconFn draw_item_icon;
+    QolUiCustomButtonFn draw_custom_button;
+
+    // U11-3：原版背包入口需要的容器定位与控件身份查询。
+    QolResult (*find_original_bag_container)(QolUiHandle*);
+    QolResult (*control_type)(QolUiHandle, int32_t*);
+    QolResult (*control_active)(QolUiHandle, int32_t*);
+    QolResult (*control_data)(QolUiHandle, QolUiHandle*);
+    QolResult (*execute_proc_matches)(QolUiHandle, QolUiClickFn, int32_t*);
+    QolResult (*control_absolute_origin)(QolUiHandle, int64_t*, int64_t*);
+    QolResult (*control_pressed)(QolUiHandle, int32_t*);
+    QolResult (*touch_coordinates)(uint64_t, int64_t*, int64_t*);
+
+    // ABI compatibility slots. Dynamic ExecuteProc binding is unsupported; use managed components.
+    QolResult (*find_main_menu_more_games)(QolUiHandle*);
+    QolResult (*bind_main_menu_more_games)(QolUiClickFn, uint64_t*);
+    QolResult (*unbind_main_menu_more_games)(uint64_t);
+    QolResult (*popup_stack_top_matches)(QolUiPopupEnterFn, int32_t*);
+    QolResult (*clear_control_proc)(QolUiHandle);
+    QolResult (*screen_name)(const char**);
+
+    // G3：扩展背包使用的控件事实与原版物品绘制原语。
+    QolResult (*control_user_type)(QolUiHandle, int32_t*);
+    QolResult (*control_item)(QolUiHandle, QolUiHandle*);
+    QolResult (*control_item_slot)(QolUiHandle, int32_t*);
+    QolResult (*touch_state)(QolUiHandle*, QolUiHandle*, int64_t*, int64_t*);
+    QolResult (*fill_rect)(UiRect, uint32_t);
+    QolResult (*draw_item_porting)(QolUiHandle, int32_t, int32_t, int32_t, int32_t);
+    QolResult (*control_parent)(QolUiHandle, QolUiHandle*);
+    QolResult (*find_root)(QolUiRootKind, QolUiHandle*);
+    // Deprecated: without the current row span this cannot color inline text; retained for ABI
+    // compatibility.
+    QolResult (*insert_inline_color)(void* builder, uint32_t max_text_bytes, uint8_t color_code);
+
+    // 扩展背包运行时控件操作；宿主负责定位游戏控件函数和游戏内存分配器。
+    QolResult (*delete_control)(QolUiHandle);
+    QolResult (*set_control_item)(QolUiHandle, QolUiHandle);
+    QolResult (*set_control_proc)(QolUiHandle, QolUiControlProcFn);
+    QolResult (*set_control_user_type)(QolUiHandle, int32_t);
+    QolResult (*set_control_data)(QolUiHandle, QolUiHandle);
+    QolResult (*allocate_control_data)(uint32_t, QolUiHandle*);
+    QolResult (*set_touch_cursor)(QolUiHandle, QolUiHandle);
+    QolResult (*reset_touch_moving)();
+    QolResult (*reset_touch_selected)();
+    QolResult (*control_is_moving)(QolUiHandle, int32_t*);
+    QolResult (*clear_control_drag_flags)(QolUiHandle);
+    QolResult (*clear_touch_state)();
+    QolResult (*set_touch_release_input)(int64_t, int64_t, uint64_t);
+    QolResult (*clear_touch_drop_event)();
+
+    // Read-only game popup stack snapshot; main-thread only.
+    QolResult (*popup_stack_snapshot)(uint32_t*, uintptr_t*);
+    // 真实 pthread 主线程判定（minor 7 追加）；游戏 popup 读写的权威线程门，
+    // 消费者不得以编译期常量替代。
+    int32_t (*is_main_thread)();
+    QolResult (*image_loc_size)(int32_t unit, int32_t loc, int32_t* out_width,
+                                int32_t* out_height);
+    // 裁剪不支持嵌套；绘制后 reset_clip 复原整屏，不恢复上一层。
+    QolResult (*set_clip)(int32_t x1, int32_t y1, int32_t x2, int32_t y2);
+    QolResult (*reset_clip)();
+    // 原生纵向 scroll：挂树不自动 process/draw；裁剪不可嵌套。
+    QolResult (*scroll_create)(QolUiHandle parent, const UiNativeScrollDesc*,
+                               QolUiNativeScrollDrawFn, QolUiHandle* out);
+    QolResult (*scroll_set_target)(QolUiHandle scroll, QolUiHandle group);
+    QolResult (*button_set_scroll)(QolUiHandle button, QolUiHandle scroll);
+    QolResult (*scroll_process)(QolUiHandle scroll);
+    QolResult (*scroll_draw)(QolUiHandle scroll);
+    QolResult (*scroll_get_offset)(QolUiHandle scroll, int64_t* out);
+    QolResult (*scroll_set_offset)(QolUiHandle scroll, int64_t offset);
+    // 原生事件树中的交互按钮须绑定 ExecuteProc；不得并行手工派发点击。
+    QolResult (*control_tree_event)(QolUiHandle root, uint64_t event, uint64_t param,
+                                    uint64_t param2, uint32_t* consumed);
+    // 使用 Options 原生亮/暗开关贴图等比绘制；rect 是可用范围，pressed 仅叠原生按压态。
+    QolResult (*draw_native_toggle)(UiRect rect, int32_t value, uint8_t pressed);
+    // Returned item handles are registry identities; control handles are frame-local ABI values.
+    QolResult (*control_item_identity)(QolUiHandle control, QolItemHandle* out_item);
+    QolResult (*item_proc_source_control)(QolUiHandle destination, uint64_t event,
+                                          const void* param, QolUiHandle* out_source);
+    // 仅绘制已确认的原版文本按钮背景；不管理标签、事件或业务状态。
+    QolResult (*draw_native_text_button_background)(UiRect rect, uint8_t pressed);
+    QolResult (*set_button_enabled)(QolUiHandle, uint8_t enabled);
+    // 游戏字体测量、字宽预算与居中由 Adapter 执行；文本仍由组件持有。
+    QolResult (*draw_native_text_button_label)(UiRect rect, const char* text, uint32_t color,
+                                              int32_t font);
+    // 仅绘制原生 X 关闭贴图（unit 0x0f loc 0x3a，pressed 叠加 loc 0x34 中心对齐）；
+    // 不管理命中、事件或业务状态。图集由游戏拥有，只确保加载，不卸载。
+    QolResult (*draw_native_close_button)(UiRect rect, uint8_t pressed);
+    // Synchronous craft hook identity check. The native pointer is the current hook argument only;
+    // the adapter compares it with the live UIMix slot children and never retains it.
+    QolResult (*craft_stuff_slot_index)(void* transient_control, int32_t* out_index);
+    // Main-menu replacement only: show state is changed through the native ControlObject API.
+    QolResult (*set_control_show)(QolUiHandle, uint8_t show);
+    // Snapshot returns NotReady unless the current menu tree proves the native control is live.
+    // It reads rect/parent only after that proof and is main-thread only.
+    QolResult (*main_menu_more_games_snapshot)(QolUiHandle* out_button,
+                                               QolUiHandle* out_parent, UiRect* out_rect);
+    // Returns NotReady if replacement ownership cannot be established. out_live=0 is conclusive
+    // only when the current tree or callback binding proves this is no longer our button.
+    QolResult (*main_menu_text_button_is_live)(QolUiHandle original, QolUiHandle replacement,
+                                               QolUiClickFn expected_execute, void* owner,
+                                               int32_t* out_live);
+    // Idempotently removes this owner's binding by handle without dereferencing native memory.
+    // On success this owner can no longer be called; a different or absent owner is left untouched.
+    QolResult (*main_menu_text_button_invalidate_binding)(QolUiHandle replacement, void* owner);
+    // Only updates the current More Games slot after the adapter proves it is the live original.
+    // active accepts 0/1; disabled maps to the native non-dispatchable Active value.
+    QolResult (*main_menu_more_games_set_active)(QolUiHandle original, int32_t active);
+
+    // Minor 21 append-only slots. Layout is read-only and preflights resources/font
+    // availability; it does not allocate private fonts or modify global rendering state.
+    QolResult (*layout_native_text_button)(const UiTextButtonPaintDesc*,
+                                           UiTextButtonPaintLayout* out);
+    // Preflight background and label before drawing either. Uses the same explicit
+    // appearance/layout backend, native alpha sampling, and caller's active clip.
+    QolResult (*draw_native_text_button)(const UiTextButtonPaintDesc*, const char* text,
+                                         uint32_t text_color, uint8_t pressed);
+    // Main-thread native snapshot of the original control's live menu identity, parent
+    // bounds, and non-overlap with other interactive menu entries. out_available=0 is
+    // conclusive rejection; unknown identity/layout returns NotReady, without mutating.
+    QolResult (*main_menu_replacement_rect_available)(QolUiHandle original,
+                                                      UiRect parent_relative_hit_rect,
+                                                      uint8_t* out_available);
+
+    // Minor 22 append-only slots. Offsets are relative to the UIDesc text buffer, never raw addresses.
+    // The [before, after) span must come from backup before/after cursor snapshots of the same
+    // builder. Failed validation leaves the buffer and builder unchanged; successful insertion
+    // advances the cursor by 4 bytes.
+    QolResult (*ui_desc_text_cursor)(void* builder, uint32_t* out_offset);
+    QolResult (*insert_inline_color_span)(void* builder, uint32_t before_offset,
+                                          uint32_t after_offset, uint8_t color_code);
+
+    // Minor 23 append-only slot. draw_part remains the zero-alpha compatibility operation.
+    QolResult (*draw_part_alpha)(QolUiHandle group, int32_t x, int32_t y, QolUiHandle loc,
+                                 int32_t type, int32_t flip, int32_t alpha);
+
+    // Minor 24 append-only slot. Draws an image loc with native SGL percent scaling.
+    // Direction-specific locs should be selected by the caller; flip is reserved for adapters
+    // that can mirror without changing the borrowed game-owned image data.
+    QolResult (*draw_part_scaled)(QolUiHandle group, int32_t x, int32_t y, QolUiHandle loc,
+                                  int32_t type, int32_t flip, int32_t scale_percent);
+
+    // Minor 25 append-only slot. Proves a handle is still the live control this adapter bound
+    // through set_click_proc: native memory readable, ExecuteProc is the adapter trampoline, and
+    // the binding tuple matches expected callback + owner. out_live=1 only on full proof;
+    // out_live=0 is conclusive only together with a live-parent child-list check — callers must
+    // never delete native memory merely because out_live==0. NotReady means unknown (unreadable).
+    QolResult (*click_binding_is_current)(QolUiHandle control, QolUiClickFn expected, void* owner,
+                                          int32_t* out_live);
+
+    // Minor 26 append-only slot. Reads CO_CONTROL_PROC (+0x98, the type event handler written by
+    // set_control_proc) of a main-thread-readable control and compares it with expected.
+    // out_matches=0 is conclusive only for a live control proven by a
+    // parent child-list check; NotReady means the field is unreadable.
+    QolResult (*control_proc_matches)(QolUiHandle control, QolUiControlProcFn expected,
+                                      int32_t* out_matches);
+
+    // Minor 27 append-only implementation slots for core.custom_ui's ui_confirmation provider.
+    // Consumers must use ui_confirmation rather than cache/invoke these callback pointers.
+    // These operate only on global UIPopupMsg state and never expose game addresses.
+    QolResult (*popup_msg_active)(uint8_t* out_active);
+    QolResult (*popup_msg_get_callbacks)(QolUiPopupMsgCallbackFn* out_ok,
+                                         QolUiPopupMsgCallbackFn* out_cancel);
+    // is_ok selects one callback slot; a mismatch leaves it unchanged and reports replaced=0.
+    QolResult (*popup_msg_replace_callback_if)(uint8_t is_ok,
+                                               QolUiPopupMsgCallbackFn expected,
+                                               QolUiPopupMsgCallbackFn replacement,
+                                               uint8_t* out_replaced);
+    // param is a numeric u32 encoded as the native void* callback parameter, not a pointer.
+    QolResult (*popup_msg_create_yesno_from_textdata)(uint32_t text_id,
+                                                       uint32_t display_type,
+                                                       uint32_t format_arg,
+                                                       QolUiPopupMsgCallbackFn ok,
+                                                       QolUiPopupMsgCallbackFn cancel,
+                                                       uint32_t param);
+    // Calls the native cancel/close path only if the active dialog still has both callbacks.
+    QolResult (*popup_msg_close_if_callbacks)(QolUiPopupMsgCallbackFn expected_ok,
+                                               QolUiPopupMsgCallbackFn expected_cancel,
+                                               uint8_t* out_closed);
+
+    // Minor 28 append-only frame overlay seam. A live scope is consumed at most once by
+    // end_frame before GRPX_End. provider is the PanelProviderSpec identity; generation
+    // distinguishes separate opens of the same provider.
+    QolResult (*begin_overlay_scope)(uint64_t token, const void* provider, uint64_t generation);
+    QolResult (*end_overlay_scope)();
+    // Single owner slot: nullptr unregisters only when user matches the registered owner.
+    QolResult (*set_frame_overlay)(QolUiFrameOverlayDrawFn draw, void* user);
+    // Minor 30 tail: draw the active native UIPopupMsg with the game's own renderer.
+    // Callers must verify popup_msg_active() and run only on the main thread.
+    QolResult (*call_ui_popup_msg_draw)();
+    // Minor 31 tail: proactive GRP_SaveLCD snapshot of the current framebuffer, no GRPX
+    // begin/end and no refresh-flag changes.
+    QolResult (*save_lcd)();
+
+    // Minor 32 tail: create a Yes/No popup from an explicit UTF-8 text buffer. The game keeps
+    // referencing text until bOn returns to 0; callers must keep it alive that long. param is
+    // the numeric price encoded as the native callback argument.
+    QolResult (*create_yes_no_text)(const char* text, uint32_t length, uint32_t display_type,
+                                    uint32_t param, QolUiPopupMsgCallbackFn ok,
+                                    QolUiPopupMsgCallbackFn cancel);
+
+    // Minor 33 tail: restore native ControlItem On/MoveOn event eligibility.
+    QolResult (*use_control_event_on)(QolUiHandle);
+
+    // Minor 34 tail: native-textured container frame and one independent interior fill.
+    QolResult (*draw_container_frame)(UiRect, uint32_t fill_rgb565, uint32_t alpha);
+
+    // Minor 35 tail: native help-page option row. selected=1 draws UI_FillRoundRect2
+    // (#695031, 90%); selected=0 draws UI_FillRoundRect (#6F6F6F, 50%). pressed=1 adds the
+    // native unit 0x10 edge parts and the 9-slice highlight used by UIHelp_ButtonMenuListDraw.
+    // Text is not drawn; callers draw it with the normal adapter text functions.
+    QolResult (*draw_help_option_row)(UiRect rect, uint8_t selected, uint8_t pressed);
+};
+
+}  // namespace qol::contracts

@@ -4,23 +4,57 @@
 
 #include <cstdint>
 
-#include "game_access.h"
-#include "game_state.h"
+#include "contracts/game_host.h"
+#include "contracts/host_sdk.h"
+#include "game/access/save.h"
+#include "game/access/ui_choice.h"
+#include "game/access/game_access.h"
+#include "game/state/game_state.h"
 
 uintptr_t g_base = 0;
+
+// plugin_registry host 单测不链接 assembly.cpp，提供与宿主相同布局的空 ABI 表桩。
+namespace qol::host {
+extern const contracts::QolHostSdk g_host_sdk{
+    {sizeof(contracts::QolHostSdk), contracts::kHostSdkMajor, contracts::kHostSdkMinor},
+    {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, nullptr};
+extern const contracts::QolGameHost g_game_host{
+    {sizeof(contracts::QolGameHost), contracts::kGameHostMajor, contracts::kGameHostMinor},
+    {}, {}, {}, {}, {}, {}};
+}  // namespace qol::host
+
+// game/access/patches.cpp 的 kBlRedirectToSymbol 站点经 fn_resolve 解析目标；纯算法测试
+// 不解析真实符号，恒等返回 vma。
+uintptr_t fn_resolve(const char*, uintptr_t vma) { return vma; }
+
+// game/access/ptr_slots.cpp 经 save_slot_delete_hook_target 解析删档槽站点；host 测试不
+// 依赖真实游戏 GOT，返回测试可控的静态槽（test_plugin_registry 等按需设置）。
+namespace qol::game {
+
+void* g_ptr_slot_test_addr = nullptr;
+uintptr_t g_ptr_slot_test_expected = 0;
+bool g_ptr_slot_test_resolvable = false;
+
+bool save_slot_delete_hook_target(void** out_slot, uintptr_t* out_expected) {
+    if (!g_ptr_slot_test_resolvable) return false;
+    if (out_slot != nullptr) *out_slot = g_ptr_slot_test_addr;
+    if (out_expected != nullptr) *out_expected = g_ptr_slot_test_expected;
+    return true;
+}
+
+// UIChoice 按钮槽站点：本组测试不涉及，恒不可解析（ptr_slots.cpp 的登记表仍可链接）。
+bool ui_choice_button_slot_target(void** out_slot, uintptr_t* out_expected) {
+    if (out_slot != nullptr) *out_slot = nullptr;
+    if (out_expected != nullptr) *out_expected = 0;
+    return false;
+}
+
+}  // namespace qol::game
+
+bool game_memory_accessible(const void*, size_t, char) { return true; }
 
 uint32_t current_map_id() { return 0; }
 
 void* lead_member() { return nullptr; }
 
 CharGetAreaRectFn fn_char_get_area_rect = nullptr;
-
-namespace {
-bool g_host_stack_limit_enabled = false;
-}
-
-bool stack_limit_enabled() { return g_host_stack_limit_enabled; }
-
-void set_host_stack_limit_enabled(bool enabled) {
-    g_host_stack_limit_enabled = enabled;
-}

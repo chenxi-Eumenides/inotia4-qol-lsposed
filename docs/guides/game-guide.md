@@ -91,7 +91,7 @@
 1. **生存第一**：角色会**死亡**。全队死亡后回到主菜单，**未保存的进度全部丢失**（回到上次存档点）。所以：① 血少要喝药/逃跑；② 频繁存档。
 2. **战斗是核心玩法**：怪会主动攻击你。**被攻击扣血时不还手会很快被打死**——要么开启自动反击（`set_auto_attack`），要么主动 `attack_target` 进入战斗。
 3. **成长靠三件事**：**推进任务**（获得经验+奖励+解锁内容）、**打怪**（掉装备+升级）、**换装**（穿上更好的武器/防具变强）。三者都重要，别只做一样。
-4. **游戏会随时打断你**：剧情对话（`screen=dialog_story`）、弹窗确认（`screen=dialog_popup`）、死亡面板（`screen=dialog_wipeout`）、药水教学暂停（`screen=tutorial_pause`）都可能突然出现，**阻塞你的操作**。每次行动前都要查当前 `screen`/`dialog`。
+4. **游戏会随时打断你**：剧情对话（`name=game_story`）、弹窗确认（`name=game_popup`）、死亡面板（`name=game_wipeout`）、药水教学暂停（`name=tutorial_pause`）都可能突然出现，**阻塞你的操作**。每次行动前查询 `/api/ui/state`，按 `type` 与 `name` 判断。
 5. **移动是异步的**：`move_to` 只是发起寻路，角色需要几秒走完。**调用后要轮询确认到达**（对比坐标/距离），不能假设立即到达。
 
 ---
@@ -120,7 +120,7 @@ curl http://<手机IP>:8088/api/health
 ### 2.3 安全提示
 
 - **无鉴权**：局域网内任何设备可访问全部**合法**端点。仅在可信局域网使用。
-- **OP 越权端点受 `opEnabled` 全局开关门禁**（默认关闭，未开启返回 403）——见第 8 章；开启后同样无额外鉴权。
+- **API 服务与 OP 权限独立**：服务由 `core.api/api.enabled` 控制（默认开启、General、priority -5；Debug/Release 设置页均显示），需要 OP 的端点由 `module.security/op.enabled` 单独授权（默认关闭、General、priority -4；Debug/Release 均显示，未授权返回 403）——见第 8 章。分类与 priority 不影响服务与权限运行语义。
 - **明文 HTTP**，勿在公共网络使用。
 
 ---
@@ -150,14 +150,14 @@ curl http://<手机IP>:8088/api/health
 
 ### 3.3 操作前置检查（重要！）
 
-- **UI 占据**：`GET /api/ui/screen` 返回 `dialog_*`（对话框类）/`panel_*`（面板类）/`main_menu_*`（主菜单面板）前缀时，UI 被占据，**世界操作（移动/战斗/交互/物品）被阻塞**，返回 `{"ok":false,"error":"ui occupied: <screen>"}`。操作前先查 `screen`，必要时先处理对话/关闭面板。
-- **屏幕状态**：只有 `screen="world"` 才能执行战斗/移动/背包操作；`"main_menu"` 只能做存档操作；`"dialog_story"` 表示剧情对话中（先 `select action=skip`）。
+- **UI 占据**：查询 `GET /api/ui/state`。`type=4` 表示 dialog、`type=5` 表示 panel；`type=2,name="main_menu"` 表示主菜单，`type=1` 表示启动态。世界操作（移动/战斗/交互/物品）要求 `type=3,name="world"`，否则按当前 `name` 处理状态或等待；被 UI 阻塞时服务端返回 `{"ok":false,"error":"ui occupied: <状态名>"}`。
+- **状态判断**：按 `type` 与 `name` 联合判断，不按 `screen` 前缀。`name="game_story"` 表示剧情对话（先 `POST /api/ui/dialog/select` 跳过/推进）；`name="game_wipeout"` 表示死亡面板；`name="android_agreement"` 表示 Android 同意页。
 
 ### 3.4 游玩注意点（AI 必读）
 
 > 这些是 AI 代理游玩时**最容易犯错**的地方，先读完再动手。
 
-1. **随时留意游戏状态，查看当前 screen**：游戏可能随时插入突发事件——剧情对话（`dialog_story`）、确认弹窗（`dialog_popup`）、死亡面板（`dialog_wipeout`）、教学暂停（`tutorial_pause`）。**每次行动前都先 `GET /api/ui/` 看 `screen`**（`dialog_*`/`panel_*`/`main_menu_*` 前缀 = UI 被占据）；行动过程中被打断要立即处理，否则后续操作全部无效或被阻塞。
+1. **随时留意游戏状态**：游戏可能随时插入突发事件——剧情对话（`game_story`）、确认弹窗（`game_popup`）、死亡面板（`game_wipeout`）、教学暂停（`tutorial_pause`）。**每次行动前都先 `GET /api/ui/state`**，依据 `type` 与 `name` 识别状态；行动过程中被打断要立即处理，否则后续操作全部无效或被阻塞。
 
 2. **被攻击扣血时，自动开始战斗**：怪会主动打你，**站着不动会被打死**。做法：
    - 开怪前先 `POST /api/character/combat/{role}/set_auto_attack {"on":true}`（受击自动还击）
@@ -285,20 +285,20 @@ curl -X POST http://<手机IP>:8088/api/system/save
 ### 步骤 8：突发事件处理（随时可能遇到）
 
 ```bash
-# 先看当前界面状态
-curl http://<手机IP>:8088/api/ui/
+# 先看当前统一 UI 状态（name/type/source/info/options）
+curl http://<手机IP>:8088/api/ui/state
 
-# 剧情对话（screen=dialog_story）→ 跳过
+# 剧情对话（type=4,name=game_story）→ 跳过
 curl -X POST http://<手机IP>:8088/api/ui/dialog/select -d '{"action":"skip"}'
 
-# 启动同意页（screen=agreement）→ 同意关闭（异步生效，轮询 screen 直到 main_menu）
+# 启动同意页（type=4,name=android_agreement）→ 同意关闭（异步生效，轮询 state 直到 type=2,name=main_menu）
 curl -X POST http://<手机IP>:8088/api/ui/dialog/select -d '{"action":"ok"}'
 
-# 有阻塞弹窗（screen=dialog_popup）→ 查看内容并选择
-curl http://<手机IP>:8088/api/ui/dialog
+# 有阻塞弹窗（type=4,name=game_popup）→ 查看 info/options 并选择
+curl http://<手机IP>:8088/api/ui/state
 curl -X POST http://<手机IP>:8088/api/ui/dialog/select -d '{"action":"ok"}'
 
-# 死亡（screen=dialog_wipeout）→ 回主菜单后重新进档（回到上次存档点）
+# 死亡（type=4,name=game_wipeout）→ 回主菜单后重新进档（回到上次存档点）
 curl -X POST http://<手机IP>:8088/api/ui/dialog/select -d '{"action":"game_over"}'
 curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 ```
@@ -449,32 +449,37 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 > **过滤语义（v0.5.35 起）**：`/api/world/map/enemies` 返回 `type==1` 的单位（含 NPC 与怪物）；`/api/world/map/interactives` 返回 `type==2` 且可交互的单位。不再按 `status` 过滤。
 > **出口数据（v0.6.5 起）**：`/api/world/map/exits` 为**静态数据源**（`maps/exits.json`），返回 `{x, y, targetMapId, targetX, targetY}`（瓦片坐标 + 目标地图/落点），替代原 native 瓦片矩阵扫描。
 
-### 5.7 GameState（界面状态）
+### 5.7 UI State（统一界面状态）
 
-`GET /api/ui`：
+`GET /api/ui/state`：
 
 ```json
 {
-  "screen": "world",
-  "frame": 12345,
-  "dialog": { "text": "...", "has_ok": false, "has_cancel": false, "buttons": [] }
+  "name": "game_story",
+  "type": 4,
+  "source": 1,
+  "info": { "title": "凯恩", "content": "……" },
+  "options": [
+    {"id": "next", "label": "下一句"},
+    {"id": "skip", "label": "跳过"}
+  ]
 }
 ```
 
-`screen` 是**完整界面枚举**（v0.5.42 重构，`dialog_active` 字段已删除，用前缀判断 UI 是否被占据）：
+| 字段 | 说明 |
+|---|---|
+| `name` | 唯一状态名，程序主键：`world` / `main_menu` / `loading`、`game_*`、`panel_*`、`main_menu_*`、`module_panel_*` / `module_dialog_*`、`android_agreement` |
+| `type` | `0` unknown / `1` boot / `2` menu / `3` world / `4` dialog / `5` panel |
+| `source` | `0` unknown / `1` native / `2` module / `3` external / `4` android |
+| `info` | 数据对象，仅 `title` / `content`；不适用为 `{}` |
+| `options` | 可执行 UI 动作 `[{id,label}]`；无动作为 `[]` |
 
-| 前缀 | screen 取值 | 含义 |
-|---|---|---|
-| `main_menu_` | `main_menu_save_slot` / `main_menu_character_select` / `main_menu_daily_reward` / `main_menu_options` / `main_menu_settings` / `main_menu` | 主菜单面板 |
-| `dialog_` | `dialog_popup`（弹窗） / `dialog_story`（剧情） / `dialog_wipeout`（死亡） / `dialog_quest`（任务完成） / `dialog_npc`（NPC 对话） / `dialog_choice`（选择框） / `dialog_input_count`（数量输入） | **对话框类占据** |
-| `panel_` | `panel_character_info` / `panel_inventory` / `panel_mercenary` / `panel_craft` / `panel_npc_rest` / `panel_npc_revive` / `panel_options` / `panel_quests` / `panel_save_slot` / `panel_character_select` / `panel_shortcut` / `panel_skills` / `panel_shop` / `panel_settings` / `panel_world_map` / `panel_in_app` / `panel_daily_reward` / `panel_ui_panel` | **面板类占据** |
-| 其他 | `world`（自由操作） / `loading`（加载） / `tutorial_pause`（药水教学暂停） / `agreement`（Java 层同意页，仅主菜单前，`dialog/select {"action":"ok"}` 关闭） | 特殊状态 |
-
-**判定规则**（v0.5.42+）：
-- `dialog_` 前缀 = 对话框类占据（`/api/ui/dialog` 的 `active=true` 即由此判断）
-- `panel_` 前缀 = 面板类占据
-- `world` = 可自由操作；`main_menu_*` = 主菜单场景（只能做存档操作）
-- **世界操作（移动/战斗/交互/物品）在 UI 被占据时禁止**，返回 `{"ok":false,"error":"ui occupied: <screen>"}`（v0.5.43）
+**判定规则**：
+- 世界操作（移动/战斗/交互/物品）要求 `type=3` 且 `name="world"`；否则返回 `{"ok":false,"error":"ui occupied: <name>"}`。
+- `type=4` 为对话/弹窗；具体场景看 `name`（`game_story` / `game_popup` / `game_wipeout` 等）。
+- `type=5` 为面板（原生 `panel_*` / `main_menu_*`，模块 `module_panel_*`）。
+- 不再使用 `screen` 前缀判断；旧 `/api/ui`、`/api/ui/screen`、`/api/ui/panel`、`/api/ui/dialog` 已删除。
+- 可用状态枚举见 `GET /api/ui/state/table`。
 
 ### 5.8 Snapshot（全量快照）
 
@@ -501,29 +506,23 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 
 > 装备明细走 `GET /api/character/party/{slot}/equipment`；佣兵走 `GET /api/character/mercenary`。
 
-### 5.9 DialogContent（对话/弹窗内容）
+### 5.9 对话/弹窗状态
 
-`GET /api/ui/dialog` 统一检测返回：
+`type=4` 的状态通过 `GET /api/ui/state` 返回；标题/正文在 `info`，动作在 `options`：
 
-```json
-{
-  "type": "npc", "active": true,
-  "speaker": "商人", "text": "欢迎光临！",
-  "options": [ { "id": "0", "label": "购买物品" }, { "id": "next", "label": "下一句" } ]
-}
-```
-
-| type | 场景 | 可选动作（select 的 action） |
+| name | info | 典型 options |
 |---|---|---|
-| `story` | 剧情对话 | `next` 下一句 / `skip` 跳过 |
-| `npc` | NPC 对话 | `next` 下一句 / `index` 选项选择（`{"index":n}`） |
-| `popup` | 确认弹窗 | `ok` / `cancel` |
-| `npc_quest` | 任务完成面板 | `complete` / `close` |
-| `wipeout` | 死亡面板 | `game_over`（仅此一项） |
-| `save_slot` | 存档槽面板 | `save` / `close` |
-| 面板态 | 其他面板（背包/技能/设置等） | `close` 关闭面板 |
-| `save`/`sell`/`quest` | 各类弹窗 | `confirm` / `quit` / `cancel` |
-| `none` | 无对话 | 空 options |
+| `game_popup` | `content` | `ok` / `cancel` |
+| `game_story` | `title`（说话人）、`content` | `next` / `skip` |
+| `game_npc_dialog` | `title`（说话人）、`content` | NPC 选项、`close` |
+| `game_npc_quest` | `{}` | `complete` / `close` |
+| `game_wipeout` | `{}` | `game_over` |
+| `game_choice` | `{}` | 事件选项 |
+| `game_input_count` | `{}` | `close` |
+| `android_agreement` | `{}` | `ok` |
+| `module_dialog_*` | `title`、`content` | provider 选项 |
+
+`options` 的 `id` 直接用于 `POST /api/ui/dialog/select`；`index` 仅用于 NPC 下标选项。旧的 `DialogContent` 响应（`type`/`active`/`text`/`speaker`）不再返回。
 
 ---
 
@@ -553,7 +552,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 
 **⚠️ enter_slot 注意事项**：
 - 只能在非 world 状态调用（world 中 → `already in game`）
-- 启动同意页（screen=`agreement`）→ `ui occupied: agreement`；先 `POST /api/ui/dialog/select {"action":"ok"}` 关闭后再进档；原生弹窗（screen=`dialog_popup`）→ `ui occupied: dialog_popup`
+- 启动同意页（`name=android_agreement`）→ 进档守卫返回 `ui occupied: agreement`；先 `POST /api/ui/dialog/select {"action":"ok"}` 关闭后再进档；原生弹窗（`name=game_popup`）→ `ui occupied: dialog_popup`
 - 进档调用后 15s 内同意页启动会被模块自动拦截（不会打断读档，也无需处理）；同意页在同意动作完成后的消失动画期间进档是安全的
 - 进入前会在 `enter_slot` 内执行只读完整性检查；缺失、损坏或不兼容存档返回结构化错误，不调用原版进档路径；当前没有独立预检 API。
 
@@ -679,7 +678,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 **移动语义**：
 - `move_to`/`walk_dir` 都是**正常走路**（后台线程逐帧，非瞬移），到达出口区域自动切图
 - 目标不可达 → 走到最近可达点并面向目标
-- 剧情/切图状态（screen=dialog_story 或切图中）时操作自动终止
+- 剧情/切图状态（`name=game_story` 或切图中）时操作自动终止
 
 #### 静态地图（GET）
 
@@ -702,7 +701,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 | GET | `/api/item/inventory` | 背包复合（6 袋×16 槽） | `<Inventory>` |
 | GET | `/api/item/inventory/money` | 金币 | `{"money":72503}` |
 | GET | `/api/item/inventory/items` | 全部物品展平 | `{"items":[...]}` |
-| GET | `/api/item/inventory/bag/{bag}/info` | 袋信息 | `{"bag":0,"capacity":16,"slot_count":13}` |
+| GET | `/api/item/inventory/bag/{bag}/info` | 袋信息 | `{"bag":0,"capacity":16,"occupied_slots":13}` |
 | GET | `/api/item/inventory/bag/{bag}/{slot}` | 袋内指定槽 | `<Item>` 或 `null` |
 
 > ⚠️ `bag/{bag}/{slot}` 按**实际格号**（物品的 `slot` 字段）匹配，不是数组下标。
@@ -757,10 +756,8 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 
 | 方法 | 路径 | 用途 | 返回 |
 |---|---|---|---|
-| GET | `/api/ui/` | 界面状态复合 | `<GameState>` |
-| GET | `/api/ui/screen` | 当前界面名 | `{"screen":"world"}` |
-| GET | `/api/ui/panel` | 当前面板 | `{"panel":"inventory"}` 或 `{"panel":null}` |
-| GET | `/api/ui/dialog` | **统一对话/弹窗检测** | `<DialogContent>`（见 5.9） |
+| GET | `/api/ui/state` | 当前唯一顶层状态 | `{name,type,source,info,options}`（见 5.7） |
+| GET | `/api/ui/state/table` | 可用状态表 | `{"states":[{name,type,source,stability}]}` |
 
 #### 对话与弹窗操作（POST）
 
@@ -782,35 +779,56 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 | 方法 | 路径 | 用途 | 请求 | 返回 |
 |---|---|---|---|---|
 | POST | `/api/ui/go_main_menu` | 回到主菜单 | 无 body | `{"ok":true,"state":<Player>}` |
-| POST | `/api/ui/open_panel` | 打开面板 | `{"panel":"inventory"}` | `{"ok":true,"state":<GameState>}` |
-| POST | `/api/ui/close_panel` | 关闭当前面板 | 无 body | `{"ok":true,"state":<GameState>}` |
+| POST | `/api/ui/open_panel` | 打开面板 | `{"panel":"inventory"}` | `{"ok":true,"state":<action state>}` |
+| POST | `/api/ui/close_panel` | 关闭当前面板 | 无 body | `{"ok":true,"state":<action state>}` |
 
 **面板白名单**（真机验证可 API 打开）：`character_info` / `inventory` / `skills` / `mercenary` / `quests` / `settings`。
 其他面板（shop/craft/npc/options/world_map 等）需游戏内上下文 → `panel requires in-game context`。
 
 ### 6.7 config（模块配置）
 
-> 模块级配置的读取与修改（v0.5.22 新增）。**纯 Kotlin 层能力，不走 ControllerGuard**——native 未就绪时配置端点同样可用（如改端口解决冲突）。
-> 配置持久化于外部文件 `/sdcard/Android/data/<游戏包>/files/config.json`（用户可见可编辑）；`POST /api/config/set` 修改立即持久化；删除该文件即恢复出厂默认。
+> 配置以外部 `config.json` 顶层 `plugin_id → JSON object` 结构保存，每个对象是 `{"enable":bool,"features":{feature_id:bool},"config":{自定义key:任意JSON}}` 三层模型，由 native Host 常驻管理设施读写；设置页/HTTP 插件停用不停止 Store。Kotlin 只透传 HTTP raw body，不读取、解析、缓存或写配置。旧 12 个平铺字段与旧 runtime gate 已退出；未知 root 和未注册 plugin 保留。详见 [API 参考 §7.6](../reference/api-reference.md)。
+> 配置文件位于 `/sdcard/Android/data/<游戏包>/files/config.json`（用户可见可编辑）；删除后下次启动按默认值初始化。
 
 | 方法 | 路径 | 用途 | 请求 | 返回 |
 |---|---|---|---|---|
-| GET | `/api/config/list` | 查看当前配置 | — | `{"listenAddress":"0.0.0.0","listenPort":8088,"stackLimitIncrease":false,"moveMergeEnabled":false,"opEnabled":false}` |
-| POST | `/api/config/set` | 修改配置（**只更新请求中出现的字段**） | `{"opEnabled":true}` 等 | `{"ok":true,"restart":false}` 或 `{"ok":true,"restart":true}` |
+| GET | `/api/config/list` | 查看当前已注册插件对象投影 | — | `{"core.api":{"features":{"api.enabled":true},"config":{"listen_address":"0.0.0.0","listen_port":8088},"enable":true},"module.security":{"features":{"op.enabled":false},"config":{},"enable":true},"module.platform":{"features":{"debug.logging":false},"config":{},"enable":true}}`（示例，仅展示注册项） |
+| POST | `/api/config/set` | 提交单 key feature/config/desired 请求 | `{"plugin_id":"module.security","field":"feature","key":"op.enabled","value":true}` | receipt `{"ok":true,"request_id":N,"revision":R,"admission":"admitted","persistence":"pending","actual":"not_submitted","error_code":0}` |
+| POST | `/api/op/features/lifecycle` | 提交 desired activate/deactivate | `{"id":"world_teleport","action":"deactivate"}` | receipt（结构同上） |
+| GET | `/api/config/receipt/{id}` | 回取异步 receipt | — | receipt 对象；轮询至 `persistence` 为 `persisted`/`failed` |
 
-**可配置项**：
+写入是异步的：`POST` 立即返回 receipt，按其 `request_id` 轮询 `GET /api/config/receipt/{id}` 直到 `persistence` 不再是 `pending`。`field` 取值：`feature`（`value` 为布尔，写已注册 feature）、`config`（`value` 为任意 JSON，写自由键值）、`desired`（`key` 必须为 `enable`，写 Host lifecycle 期望）。请求体必须有且仅有 `plugin_id`/`field`/`key`/`value` 四个成员；错误返回 `{"ok":false,"error_code":N}`。`enable` 是 Host 独占的 lifecycle 期望状态，普通插件不可读写。
 
-| 配置项 | 类型 | 默认 | 说明 |
-|---|---|---|---|
-| `listenAddress` | string | `0.0.0.0` | HTTP 监听地址 |
-| `listenPort` | int | 8088 | HTTP 监听端口（1-65535；越界报 `listenPort must be 1-65535`） |
-| `stackLimitIncrease` | bool | `false` | 堆叠上限提升（变化即时通知 native，无需重启） |
-| `moveMergeEnabled` | bool | `false` | 背包内拖拽同类可堆叠物品时自动合并（变化即时安装或还原 native hook，无需重启） |
-| `pushAllEnabled` | bool | `false` | 推怪（推动增强）：patch `CHAR_Move` 推动分支的两个 blocker 资格闸门，可推开怪物/队友/召唤物；场景设施（NPC/商人）保持不可推（变化即时下发 native，无需重启） |
-| `opEnabled` | bool | `false` | **OP 越权操作全局开关（v0.5.47）**——开启后 `/api/op/*` 可用；关闭时全部 OP 端点返回 403 `op disabled` |
+**Host 配置**按服务与权限 owner 分开保存：
 
-> ⚠️ 修改 `listenAddress`/`listenPort` 后返回 `restart:true` 并**自动重启 HTTP 服务**（延迟约 500ms 先让响应送达）；重启后旧地址/端口连接断开，需按新配置访问。**新端口被占用时自动回退默认端口 8088** 并同步修正配置。
-> `opEnabled` 开启示例：`curl -X POST .../api/config/set -d '{"opEnabled":true}'`（见第 8 章）。
+| owner / 键 | 类型 | 默认 | 说明 |
+|---|---|---:|---|
+| `core.api` / `features["api.enabled"]` | bool | `true` | General API service 开关，描述「允许外部程序控制游戏」；priority -5；Debug/Release 设置页均显示；关闭或恢复 HTTP 服务 |
+| `core.api` / `config["listen_address"]` | string | `"0.0.0.0"` | HTTP 监听地址 |
+| `core.api` / `config["listen_port"]` | number | `8088` | HTTP 监听端口（1-65535） |
+| `module.security` / `features["op.enabled"]` | bool | `false` | General「高级权限」开关，描述「允许不合法的高级操作」；priority -4；Debug/Release 均显示；只授权 endpoint metadata 明确标记需要 OP 的操作 |
+| `module.platform` / `features["debug.logging"]` | bool | `false` | General、priority -3；名称「DEBUG日志」；native logger 的 debug 级别门控 |
+
+`core.api/api.enabled` 与 `module.security/op.enabled` 相互独立：关闭 API 服务不会改写 OP 权限，开启 API 服务也不会授予 OP。两项属于 General，Debug/Release 设置页均显示；Release 只隐藏 Hidden 分类。
+
+**插件功能开关**（写入各插件 `features`，完整 catalog 见 [`settings` 参考](../reference/plugins/settings.md)）：
+
+| feature id | 默认 | 说明 |
+|---|---:|---|
+| `autosell.auto_sell` | `false` | 按照规则自动出售物品 |
+| `move_merge.drag_merge` | `true` | 拖动合并（允许合并同种可堆叠物品） |
+| `push_all.push` | `false` | 能够推动怪物 |
+| `world_tuning.panel` | `false` | 打开「游戏世界调整」面板（entry），调整敌怪血量/伤害/防御倍率 |
+| `custom_recipe.recipes` | `false` | 优化合成并添加更多配方（唯一可见开关） |
+| `craft_ui.custom_crafting` | `true` | 自定义合成界面（hidden，随 `custom_recipe.recipes` 级联） |
+| `extension_bag.extended_bag` | `true` | 额外背包 |
+| `save_backup.open_manager` | `true` | 存档备份并支持跨设备导入导出（entry） |
+| `stack_limit.limit_999` | `false` | 可堆叠物品999上限 |
+| `world_teleport.map_jump` | `true` | 地图边界传送点跳转 |
+
+插件整体 lifecycle 由各 plugin 对象的 `enable`（Host desired）控制，经 `POST /api/op/features/lifecycle` 或 `field="desired"` 写入；`want_run = enable && 任一 feature 开启`。运行态状态仍通过 `/api/system/features` 查询。
+
+修改监听地址/端口会触发 Host runtime projection/effects；`module.security/op.enabled` 开启示例见第 8 章。
 
 ### 6.8 debug（调试）
 
@@ -835,11 +853,11 @@ curl http://<手机IP>:8088/api/system/info
 # 2. 创建新档（或 enter_slot 进已有档）
 curl -X POST http://<手机IP>:8088/api/system/create_slot -d '{"slot":1,"class_idx":2}'
 
-# 3. 跳过初始剧情（screen=dialog_story 时）
+# 3. 跳过初始剧情（name=game_story 时）
 curl -X POST http://<手机IP>:8088/api/ui/dialog/select -d '{"action":"skip"}'
 
 # 4. 确认进入世界
-curl http://<手机IP>:8088/api/ui/screen
+curl http://<手机IP>:8088/api/ui/state
 ```
 
 ### 7.2 移动与探索
@@ -908,11 +926,11 @@ curl -X POST http://<手机IP>:8088/api/world/movement/move_to -d '{"x":<商人x
 
 # 2. 交互 → 查看对话 → 选商店选项
 curl -X POST http://<手机IP>:8088/api/ui/start_interact
-curl http://<手机IP>:8088/api/ui/dialog
+curl http://<手机IP>:8088/api/ui/state
 curl -X POST http://<手机IP>:8088/api/ui/dialog/select -d '{"index":0}'
 
 # 3. 确认进入商店 → 看商品 → 购买
-curl http://<手机IP>:8088/api/ui/screen
+curl http://<手机IP>:8088/api/ui/state
 curl http://<手机IP>:8088/api/item/shop/items
 curl -X POST http://<手机IP>:8088/api/item/shop/buy_item -d '{"slot":0}'
 
@@ -927,7 +945,7 @@ curl -X POST http://<手机IP>:8088/api/ui/close_panel
 ```bash
 # 与 NPC 对话 → 选任务选项 → 查看已接任务
 curl -X POST http://<手机IP>:8088/api/ui/start_interact
-curl http://<手机IP>:8088/api/ui/dialog
+curl http://<手机IP>:8088/api/ui/state
 curl -X POST http://<手机IP>:8088/api/ui/dialog/select -d '{"index":0}'
 curl http://<手机IP>:8088/api/quest/active
 
@@ -983,16 +1001,18 @@ curl -X POST http://<手机IP>:8088/api/system/save
 
 ### 8.0 全局开关（重要！）
 
-**OP 端点受全局开关 `opEnabled` 门禁**（v0.5.47，默认 `false`）：
+**需要 OP 的端点受 `module.security/op.enabled` 门禁**（Hidden、默认 `false`）。API service 由 `core.api/api.enabled` 独立控制；两者不会互相写入或推导。
 
-- **开关关闭（默认）**：所有 `/api/op/*` 端点返回 **403 + `{"ok":false,"error":"op disabled"}`**
-- **开启方式**：`POST /api/config/set` 传 `{"opEnabled":true}`，或编辑外部配置 `config.json` 置 `opEnabled:true`
-- 门禁在 OpApiService 统一入口（controller 无法绕过）；开启后无额外鉴权，仍仅限可信局域网
+- **开关关闭（默认）**：声明需要 OP 的请求返回 **403 + `{"ok":false,"error":"op disabled"}`**；按路由声明判定，不按 `/api/op/` 路径前缀推断。
+- **开启方式**：API 服务运行时，`POST /api/config/set` 传 `{"plugin_id":"module.security","field":"feature","key":"op.enabled","value":true}`，或编辑外部配置 `config.json` 中 `module.security.features["op.enabled"]`。
+- `api.enabled` 与 `module.platform.debug.logging` 均为 General，Debug/Release 设置页均显示；`op.enabled` 为 Hidden，只在 Debug 设置页显示（Release 过滤 Hidden 分类）。OP 开启后仍无额外鉴权，仅限可信局域网。
 
 ```bash
-# 开启 OP（一次即可，持久化到 config.json）
-curl -X POST http://<手机IP>:8088/api/config/set -d '{"opEnabled":true}'
-# {"ok":true,"restart":false,"opEnabled":true,...}
+# 开启 OP（持久化到 config.json 的 module.security features；API 服务需运行）
+curl -X POST http://<手机IP>:8088/api/config/set -H 'Content-Type: application/json' \
+  -d '{"plugin_id":"module.security","field":"feature","key":"op.enabled","value":true}'
+# {"ok":true,"request_id":1,"revision":1,"admission":"admitted","persistence":"pending","actual":"not_submitted","error_code":0}
+# 轮询 GET /api/config/receipt/1 至 persistence 为 persisted
 ```
 
 ### 8.1 可用（10 个）
@@ -1110,16 +1130,17 @@ curl http://<手机IP>:8088/api/system/events
 ```
 1. 感知（GET，并行）
    - /api/system/snapshot      # 全局状态（screen/血量/位置/队伍）
-   - /api/ui/                   # 界面状态（完整 screen 枚举）
+   - /api/ui/state             # 界面状态（name/type/source/info/options）
    - /api/world/map/units       # 周围单位（敌人/NPC）
    - /api/quest/active          # 当前任务
    - /api/system/events/        # 变化事件（扣血/升级/掉东西）
 
 2. 决策（按优先级从上到下，命中即执行）
-   P0 死亡      → screen=dialog_wipeout: 先保存可救→game_over→enter_slot 重进
-   P0 弹窗      → screen=dialog_*（非 wipeout）: 处理对话（GET /api/ui/dialog → select）
-   P0 剧情      → screen=dialog_story: select action=skip
-   P0 教学暂停  → screen=tutorial_pause: 使用药水后恢复
+   P0 死亡      → name=game_wipeout: 先保存可救→game_over→enter_slot 重进
+   P0 弹窗      → type=4 且 name≠game_wipeout: 处理对话（读 state.options → select）
+   P0 剧情      → name=game_story: select action=skip
+   P0 同意页    → name=android_agreement: select action=ok
+   P0 教学暂停  → name=tutorial_pause: 使用药水后恢复
    P1 血量过低  → hp < 30% max: use_item 药水
    P1 正在扣血  → 有敌人攻击: attack_target 反打（见 11.3）
    P1 寻路未完成→ 上一轮 move_to 还没走到: 等待/复查（见 11.3）
@@ -1142,7 +1163,7 @@ curl http://<手机IP>:8088/api/system/events
 ### 11.2 关键原则
 
 1. **状态驱动，绝不次数驱动**：循环条件用"目标是否达成 / 状态是否正常"，不用"已执行 N 次"。固定次数循环遇到弹窗/死亡会卡死。
-2. **每轮先查 screen 与 dialog**：任何行动前 `GET /api/ui/`，突发事件优先处理。
+2. **每轮先查 UI 状态**：任何行动前 `GET /api/ui/state`，突发事件优先处理。
 3. **生存优先**：血量低先喝药；被攻击先反打或逃跑；`set_auto_attack` 常开。
 4. **里程碑必存档**：升级、换装、交任务、拾取好装备之后立即 `POST /api/system/save`——死亡只回退到上次存档点。
 5. **操作后检查 state**：验证行动生效（如移动后坐标变化、用道具后数量变化）。
@@ -1164,28 +1185,33 @@ POST /api/character/combat/0/set_auto_attack {on:true}
 
 # 主循环：状态驱动，每轮最多 1 个行动，避免操作过载
 loop:
-    state = GET /api/ui/                    # ← 每次循环第一件事：看状态
+    state = GET /api/ui/state              # ← 每次循环第一件事：看状态
 
     # P0 突发事件处理（任何情况下优先）
-    if state.screen == "dialog_wipeout":    # 死亡
+    if state.name == "game_wipeout":        # 死亡
         POST ui/dialog/select {action:"game_over"}
         POST /api/system/enter_slot {slot:当前槽}
         POST /api/system/save
         continue
-    if state.screen.startswith("dialog_"):  # 其他对话框占据（弹窗/剧情/NPC/任务等）
-        dlg = GET /api/ui/dialog
-        if dlg.type in (popup, save, sell, quest):  POST select {action:"ok"/"confirm"}
-        elif dlg.type == "npc":                      POST select {index:0}
-        elif dlg.type == "npc_quest":                POST select {action:"complete"}; POST save
-        elif dlg.type == "story":                    POST select {action:"skip"}
+    if state.type == 4:                     # dialog 占据（弹窗/剧情/NPC/任务/同意页）
+        if state.name == "game_story":
+            POST ui/dialog/select {action:"skip"}
+        elif state.name == "game_npc_quest":
+            POST ui/dialog/select {action:"complete"}; POST save
+        elif state.name == "android_agreement":
+            POST ui/dialog/select {action:"ok"}
+        elif state.name == "game_npc_dialog":
+            POST ui/dialog/select {index:0}
+        else:
+            POST ui/dialog/select {action: state.options[0].id}  # popup 等
         continue
-    if state.screen == "tutorial_pause":    # 药水教学暂停
+    if state.name == "tutorial_pause":      # 药水教学暂停
         POST item/inventory/use_item {bag, slot:药水}
         continue
-    if state.screen.startswith("panel_"):   # 面板占据（背包/技能/设置等）
+    if state.type == 5:                     # 面板占据（原生/模块）
         POST ui/close_panel
         continue
-    if state.screen != "world":             # 其他界面（加载/主菜单等）
+    if not (state.type == 3 and state.name == "world"):  # 加载/主菜单等
         sleep 1s; continue
 
     snap = GET /api/system/snapshot
@@ -1243,10 +1269,10 @@ loop:
 
 | 场景 | 检测 | 处理 |
 |---|---|---|
-| 死亡 | `screen=dialog_wipeout` | `select game_over` → 存档 → `enter_slot` 重进 |
-| 剧情打断 | `screen=dialog_story` | `select skip` |
-| 弹窗阻塞 | `screen=dialog_popup` | 读 dialog → `select` 对应动作 |
-| 教学暂停 | `screen=tutorial_pause` | 使用药水 |
+| 死亡 | `name=game_wipeout` | `select game_over` → 存档 → `enter_slot` 重进 |
+| 剧情打断 | `name=game_story` | `select skip` |
+| 弹窗阻塞 | `name=game_popup` | 按 `options` → `select` 对应动作 |
+| 教学暂停 | `name=tutorial_pause` | 使用药水 |
 | 被攻击扣血 | events 有 `hp` 下降 / snapshot hp 变小 | 立即 `attack_target` 反打最近敌人 |
 | 血量过低 | hp < 30% max | `use_item` 药水 |
 | 寻路卡住 | move_to 后坐标长时间不变 | 复查 `distance` 可达性，不可达则换目标 |
@@ -1262,9 +1288,9 @@ loop:
 |---|---|
 | 返回 `{"error":"not ready"}` | 游戏未就绪（刚启动），等 1-2 秒重试 |
 | 返回 `{"error":"not in game"}` | 未进入存档，先 enter_slot / create_slot |
-| 写操作无反应 | 先 `GET /api/ui/dialog` 检查弹窗，处理后再操作 |
+| 写操作无反应 | 先 `GET /api/ui/state` 检查 `type=4/5` 的对话/面板，处理后再操作 |
 | enter_slot 后崩溃 | 新版本会在原版进档前执行内部完整性检查；若仍异常，保留 tombstone 和存档字节快照 |
-| 移动不生效 | 确认 `screen=world`；剧情/切图中操作自动终止 |
+| 移动不生效 | 确认 `type=3,name="world"`；剧情/切图中操作自动终止 |
 | 商店 items 为空 | 需先与商人交互进入商店界面 |
 | attack 返回 `target not found` | target_slot 用 `map/units` 返回的 `slot`（每帧会变，重新查询） |
 | cast 返回 `skill not learned` | action_id 必须是已学技能，先查 `party/{slot}/skills` |
@@ -1273,9 +1299,9 @@ loop:
 
 **安全与风险**：
 - **无鉴权**：合法端点局域网内可访问，勿暴露公网
-- **OP 门禁**：OP 端点默认关闭（`opEnabled=false` → 403）；开启后无额外鉴权，且破坏性大，用前先存档
+- **OP 门禁**：需要 OP 的端点默认受 `module.security/op.enabled=false` 拒绝（403）；开启后无额外鉴权，且破坏性大，用前先存档
 - **OP 破坏性**：直改等级/属性/物品可能损坏存档，用前先存档
-- **死亡处理**：全灭 → `screen=dialog_wipeout`；面板仅提供 `game_over`（回主菜单，可 `enter_slot` 重进档）；`revive`/`special_revive` 走网络链、离线无作用，已不再提供
+- **死亡处理**：全灭 → `name=game_wipeout`；面板仅提供 `game_over`（回主菜单，可 `enter_slot` 重进档）；`revive`/`special_revive` 走网络链、离线无作用，已不再提供
 - **教学状态**：新档可能触发 `tutorial_pause`（药水教学），游戏暂停移动，需使用药水后恢复
 
 ---
@@ -1357,4 +1383,4 @@ loop:
 | `POST /api/character/combat/{role}/set_skill_usage` | ⏳ 未开放 |
 | `GET /api/system/tables/{table}/download`、`/api/system/help`、`/api/system/download` | ⏳ 未开放 |
 | `GET /api/quest/{id}` 单任务详情 | ⏳ 恒 not found |
-| OP 越权端点 | 🔒 默认关闭（`opEnabled=false` → 403）；开启后 ✅ 10 个可用 / ⏳ 11 个未开放 |
+| OP 越权端点 | 🔒 需要 OP 的操作默认受 `module.security/op.enabled=false` 拒绝（403）；开启后 ✅ 10 个可用 / ⏳ 11 个未开放 |

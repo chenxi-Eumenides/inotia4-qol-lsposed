@@ -1,7 +1,7 @@
 # 游戏 UI 系统（Inotia 4 盗版大修 20260704）
 
 > 日期：2026-08-17 ｜ 状态：探索沉淀（结论经反汇编实证，自定义方式待实验验证）
-> 来源：`archive/tmp-exploration/disasm_text.txt`（36 万行反汇编）+ `apk/decompiled/libgame-symbols.txt`（8297 符号）+ `module/app/src/main/cpp/`（既有 UI 域实现）+ `../api-reference.md`（/api/ui 章节）
+> 来源：`archive/tmp-exploration/disasm_text.txt`（36 万行反汇编）+ `apk/decompiled/libgame-symbols.txt`（8297 符号）+ `module/app/src/main/cpp/`（既有 UI 域实现）+ `../api-reference.md`（/api/ui/state 章节）
 > 用途：回答「游戏 UI 面板如何显示、元素如何定义、能否自定义 UI」
 
 ## 1. UI 渲染链路（一句话结论）
@@ -63,8 +63,11 @@ MainActivity（壳，com.com2us.inotia4 仅剩壳类）
 - `G_POPUP_STATE_LIST_GOT_VMA = 0x2f3000+0x4f0`：`g_sPopupStateList`（27 条 × 64B：`id@+0, enter@+0x10, process@+0x18, f3@+0x28, f4@+0x30, event@+0x38`；`POPUPSTATE_Push` 以 `id×0x40` 索引）
 - 打开：`fn_ui_set_popup_process_info(1, state_id)`（`UI_SetPopupProcessInfo` @0xaecc8）；关闭：`(3, 0)`；另有 `(4, 0)`（recover 语义，见 game_patch.cpp）
 - 模块已实现：`data_popup_top_vma()`（栈顶 enter VMA → 面板识别）、`data_ui_screen()`（v0.5.42 统一 screen 枚举；UIPopupMsg 独立于 popup 栈，主菜单弹窗也识别为 `dialog_popup`：loading/main_menu/world/tutorial_pause/dialog_*/panel_*/main_menu_*）
-- Java 层例外：Android 同意页 `AgreementUIActivity` 不经 libgame.so，native 枚举不感知；由 Kotlin 层（`UiActivityTracker` + `InfoApiServiceImpl.gamestateJson()`）覆盖为独立 `screen=agreement`，与 native `dialog_popup` 是两个域（in_world 守卫分界：native 对话仅 world 内，同意页仅主菜单前）
+- Java 层例外：Android 同意页 `AgreementUIActivity` 不经 libgame.so，native 枚举不感知；统一状态接口将其发布为 `name="android_agreement"`、`type=4`、`source=4`，与原生 `game_popup` 状态区分（in_world 守卫分界：native 对话仅 world 内，同意页仅主菜单前）
 - Java 层启动指示框：`com.com2us.wrapper.WrapperUserDefined.ActivityIndicatorOpen/Close()` 显示/关闭一个 `setCancelable(false)` 的 `ProgressDialog("Connecting..")`（`WrapperUserDefined.java:166-198`）。调用方是**游戏主循环**——native `CWrapperKernel.nativeProcess` 经 JNI 反射调用（Java 栈：`CWrapperKernel.onProcess(CWrapperKernel.java:194)` ← `CWrapperTimer$1$1.run(:70)` ← GLThread），native 只把「等待中」状态画出来，不读返回值、Java 侧也无状态写入。关闭完全依赖 native 再次调用 Close（Java 侧无超时/无生命周期兜底），在它显示期间切场景或进存档会让 Close 不再到达、弹窗永久抢占输入；因此模块在 `patch/ActivityIndicatorBlocker.kt` 让 Open 空实现（纯 UI，无副作用）
+- Java 层更新通知弹窗：`ActiveUserUpdateDialog`（AlertDialog，`com.com2us.module.activeuser`）。标题/正文/按钮（title/message/btn_N/numButtons/url_N）全部来自网关 `get_notice` 响应字段，APK 内无静态文案。触发链为 Java 启动序列：`ActiveUser.start()` → `startConfigurationThread()`（get_agreement → 同意页处置）→ `get_did` → `runGetDIDCallback` → `showNoticePopup()` → get_notice → `notice_show==1` 弹窗；native 入口 `CS_UpdateNoticeShowPopup/GetPopupInfo → jniShowNoticePopup/jniGetNoticePopupInfo` 汇入同两个 Java 方法但在本包 libgame.so 无调用者（死代码）。按钮动作：finish 退出 / ACTION_VIEW `url_N`（商店跳转）。模块在 `patch/PopupBlockers.kt` 的 `NoticePopupBlocker` 替换 `showNoticePopup` 为直接回调 `POPUP_STATE.UNSHOWN`（不能吞回调：回调承载启动完成通知，UNSHOWN 走 SUCCESS，不回调会卡启动）；该拦截、内购选择与 Connecting 进度框跟随 `popup_blocker.enabled`（关闭时 `chain.proceed()` 走原版），同意页拦截/自动关闭常驻。`WrapperUserDefined.GetNoticeHttp` 是老 wrapper 的另一条公告 HTTP 通道（native `jRequestNotice` 经 GetStaticMethodID 调用），与该弹窗无关
+- 原生确认框压制（常驻指令 patch）：主菜单 Hub 登录询问确认框（「加入/登录Com2uS Hub进行游戏时，可以使用安全的'Data Backup'功能。现在要登录吗？」，UIPopupMsg 家族 Yes/No 确认框）由 `State_HideModule_MainMenu` 状态机驱动；`game/access/patches.cpp` 的 `P_HUB_LOGIN_SKIP`（owner=host，kWordReplace）改写该函数 +0x48 的 cbz 分支目标，确认框调用分支不再执行。模块自建的原生确认框见 `core.custom_ui` 的 `ui_confirmation` v1.0（单 owner 原生 Yes/No 确认框，同一 UIPopupMsg 家族，属创建而非压制）。Java 层 5 处弹窗压制统一收束在 `patch/PopupBlockers.kt`（更新通知/内购/同意页×2/Connecting 进度框）
+- 弹窗文本索引域与调用点映射（`UIPopupMsg_Create*FromTextData` 首参 = TEXTDATABASE 行号、已解析调用点、选行定点结论、wrapper 层弹窗辅助族）详见 `uipopupmsg.md`；教程系统状态机（pretutorialstate 队列/addstate/getstate/TutorialDescription/教学暂停）与模块处置详见 `tutorial.md`
 
 ## 3. ControlObject 控件系统（元素的定义）
 
@@ -98,6 +101,10 @@ MainActivity（壳，com.com2us.inotia4 仅剩壳类）
 +0x69 u8   Enabled       使能标志（ControlButton_Create 置 1）
 ```
 
+**文本区有界，禁用 set_text 装长文本**：`ControlButton_SetText`（0xaa7dc，反汇编）先把 `data+0x00` 起 0x20 字节清零，再 `strcpy(data, text)`（无界）。文本含 NUL 超过 0x20 字节就会覆盖 `data+0x20` 的 ExecuteProc；绘制不读该槽（显示正常），但点击释放时 `ControlButton_ControlEventProc` 间接调用被文本污染的槽 → `SIGBUS BUS_ADRALN`（跳垃圾地址）。按钮与标签都由 `ControlButton_Create` 创建、共用这段 0x20 内联缓冲，因此：
+- 任何控件文本（含 NUL）必须 ≤ 0x20 字节；`host/ui_adapter.cpp` 的 `set_text` 对超长文本 fail-closed（`kQolErrBlocked`），不调用原生、不静默截断。
+- 需要更长的显示文本时走 `QolUiComponents::draw_control_text`（按控件绝对原点直接用 `GRPX_DrawStringWithFont` 绘制传入字符串），不得写入按钮内联文本。
+
 ### 3.3 控件创建（反汇编实证）
 
 `ControlButton_Create`（0xaa710）：`ControlObject_AddControlObject(parent, type=3)` → `ControlObject_SetControlProc(ControlButton_ControlEventProc)` → `SetUserType(1)` → `MEM_Malloc(0x78)` → `ControlObject_SetData` → 初始化 ExecuteProc(来自 x1 参数)/DrawType=0/DrawID=SubID=-1/State=0/Enabled=1。
@@ -120,6 +127,15 @@ MainActivity（壳，com.com2us.inotia4 仅剩壳类）
 - 其他控件：`ControlItem_*`（物品）、`ControlScroll_*`（滚动条）、`ControlSkill_*`（技能图标）
 - 触摸分发：`TouchHandle_ControlEventProc`（递归控件树）、`TouchHandle_Event/MoveOut/UseControlEventMove/IsControlEventMovePointer/UnuseControlEvent*`
 - 排序：`ControlObject_fpDefaultCompare`（控件排序比较函数指针）
+
+### 3.5 弹窗事件、按压态与 X/返回按钮绘制事实
+
+- 弹窗事件回调用 `PanelCallbacks::event` 接收触摸事件：按下 `0x17`、松开 `0x18`、移动 `0x19`；带 bit63 的系统子事件（如 `0x80000001`/`0x80000004`）在每次按下时到达，不参与手势。回调须自行消费并返回 `1`（返回类型为 `uint32_t`，bit63 约定不可靠，不能以负数透传）。
+- 模块控件不在游戏 InputLayer 树内，不会自行收到触摸事件；回调须按命中选根后调 `dispatch_native_event`，把事件交给游戏原生 `TouchHandle_ControlEventProc` 状态机：按下置态、移出取消、**松开且仍落于按钮内才 ExecuteProc**。
+- 按钮按下态读 `data + 0x68`（CB_State，`== 1` 为选中高亮）；`data + 0x08` 是内联文本区，不是按下态。
+- 原版人物信息页 X 绘制顺序：① `UI_DrawBorderRect(x-0x14, y, w+0x14, h)`（金线圆角框 + 60% 黑底）→ ② unit `0x0f` loc `0x3a` @ `rect+(15,24)` 常态 X → ③ 若 State==1：unit `0x0f` loc `0x34` @ `rect+(3,12)` 橙色底板叠加（亮光）。
+- 原版返回按钮（unit `0x59`）：loc `3` 常态（自带金属框），loc `2` 按下亮光；按下叠加相对常态的偏移为 `(−3, −3)`。原生 X/返回按钮盒尺寸为 `78×86`（`UIGameMenu_InitBackButton` `SetRect(_,6,78,86)`），X 字形 `0x3a` 与按下底板 `0x34` 均按 `1:1` 放置，不随盒缩放。
+- 模块 X/返回统一外观：两者同盒 `78×86`、共用 unit `0x59` loc `3` 金属框（`ui_draw_native_close_button` 只取 loc3 边框分片拼框，跳过左侧开口与中央返回箭头），仅字形不同——X 用 unit `0x0f` loc `0x3a`（38×39 @ `rect+(15,24)`）、按下叠 loc `0x34`（62×61 @ `rect+(3,12)`）；返回用 loc `3`/loc `2`（`+(−3,−3)`）。模块不再使用 `UI_DrawBorderRect` 细线框，也不再按 rect 缩放 X 字形。共享图集 `0x0f`/`0x59` 只 ensure 加载，任何路径不卸载。
 
 ## 4. 对话框系统
 
@@ -157,10 +173,16 @@ MainActivity（壳，com.com2us.inotia4 仅剩壳类）
 ### 5.1 主菜单环境设置资源（v0.6.8 反汇编 + 真机验证）
 
 - `Scene_Init_POPUP_SC_OPTION_MMENU` 会 `IMGSYS_UnitLoad(0x59)`；该单元提供声音图标、语言箭头等 Options 专用静态分片。左上返回正常态为 `loc 0x3`，按下态为 `loc 0x2`，按下态叠加在正常态上并向左偏移 3 逻辑单位。
-- 原版“开/关”胶囊按钮使用 `GetGroupTitleImgType()` 返回的当前语言主题图组，并以 `IMGSYS_GetLoc(group, 0x0f/0x10)` 和 `GRPX_DrawPart(..., type=2, flip=1)` 居中绘制；真机确认 `0x0f=开`、`0x10=关`。非激活胶囊额外居中绘制同图组 `loc 0x9` 的暗态叠加精灵（`UIOption_ButtonListDraw`）。
+- 原版“开/关”开关按钮使用 `GetGroupTitleImgType()` 返回的当前语言主题图组，并以 `IMGSYS_GetLoc(group, 0x0f/0x10)` 和 `GRPX_DrawPart(..., type=2, flip=1)` 居中绘制；真机确认 `0x0f=开`、`0x10=关`。非激活按钮额外居中绘制同图组 `loc 0x9` 的暗态叠加精灵（`UIOption_ButtonListDraw`）。
 - 原版 Options 字体可通过 `GRPX_SetFontColorFromRGB(r,g,b)` + `GRPX_DrawStringWithFont(text,x,y,align,font)` 使用；`UIOption_UIButtonListDraw` 使用 RGB `(0xe2,0x9e,0xcb)`，font=1。
 - 自定义 PopupState 可加载 `IMGSYS_UnitLoad(0x59)` 后复用这些分片；必须先检查 `IMGSYS_GetGroup/GetLoc` 非空。此前 `GRPX_DrawPart` 崩溃的主因是未加载图像单元导致空分片，而非 Process 回调本身不可绘制。
 - `GAMELOADER_DrawBackGround` 是主菜单场景背景调用，不是可独立复用的单张贴图；自定义面板继续以 LCD 保存/恢复后的暗色遮罩作为安全背景路径。
+
+### 5.2 模块 UI 推荐色
+
+`contracts/ui_theme.h` 是模块 UI 推荐色的唯一默认来源，颜色均可由插件按页面自身需求覆盖。推荐视觉沿用原生 Options 的深灰、柔和金线与暖金文字：模块面板/容器用深灰底；普通选项不铺行底色，只用与面框同色的金线分隔；选中项使用轻微提亮的中性深灰，不使用棕金色块。可操作文字始终用 `kTextGold`，不可操作文字用 `kTextDisabled`；`kTextNormal` 留给说明性普通文字。
+
+`kFrameGold` 与 `kDividerGold` 是同值语义别名。插件可直接选用推荐值，也可传入普通颜色参数覆盖，例如为某个列表行传 `kRowSelectedBg`，或按页面布局改用自己的灰色填充；推荐值不构成强制全局主题。`kSwitchTrack*` / `kSwitchThumb*` 仅供插件自绘开关时作 fallback，不会改变 Options 页面使用的原生开关贴图。
 
 ## 6. 自定义 UI 的方式（5 种，实验目标）
 
@@ -211,9 +233,9 @@ MainActivity（壳，com.com2us.inotia4 仅剩壳类）
 
 | 能力 | 端点/函数 | 实现 |
 |---|---|---|
-| 界面状态 | `GET /api/ui`、`/api/ui/screen`、`/api/ui/panel` | game_ui.cpp `data_ui_screen`/`data_top_panel_name` |
-| 对话框 | `GET /api/ui/dialog` | game_dialog.cpp `data_dialog_content_json` |
-| 操作 | `POST /api/ui/dialog/select`、`start_interact`、`go_main_menu`、`open_panel`、`close_panel` | game_ui.cpp/game_dialog.cpp `data_op_*` |
+| 界面状态 | `GET /api/ui/state`、`GET /api/ui/state/table` | `core.ui_state` 统一返回 `{name,type,source,info,options}`，状态表返回 `{states:[{name,type,source,stability}]}`；不再拆分 screen/panel/dialog GET |
+| 对话框 | `GET /api/ui/state` | dialog 为 `type=4`，以 `name` 标识；可选 `info.title` / `info.content` 与 `options:[{id,label}]` 由统一状态接口返回 |
+| 操作 | `POST /api/ui/dialog/select`、`start_interact`、`go_main_menu`、`open_panel`、`close_panel` | owner `core.ui_state`，经声明式 UI/choice ports 在主线程执行 |
 | 调试 | `GET /api/debug/ui` | game_ui.cpp `data_debug_ui_json` |
 
 ## 8. 关联
@@ -221,5 +243,5 @@ MainActivity（壳，com.com2us.inotia4 仅剩壳类）
 - 反汇编全文：`archive/tmp-exploration/disasm_text.txt`
 - 符号表：`apk/decompiled/libgame-symbols.txt`（8297 符号）
 - 既有 UI 域：`module/app/src/main/cpp/game_ui.cpp` / `game_dialog.cpp` / `game_patch.cpp`（按钮注入）/ `game_symbols.h`（CO_/CB_/UIMIX_ 偏移）/ `symbol_registry.h`
-- API 规格：`../api-reference.md` 第六章 /api/ui
-- 实验记录：`../../history/experiments/ui-experiments.md`（实验完成后更新）
+- API 规格：`../api-reference.md` 第六章 `/api/ui/state` 与 `/api/ui/state/table`
+- 实验记录：`../../archive/experiments/ui-experiments.md`（实验完成后更新）

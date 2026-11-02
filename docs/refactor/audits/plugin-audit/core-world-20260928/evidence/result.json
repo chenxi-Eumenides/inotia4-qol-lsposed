@@ -1,0 +1,104 @@
+[
+  {
+    "label": "before",
+    "time": 1790528394.4484575,
+    "raw": {
+      "gameBase": "0x727bc03000",
+      "active": "0x728fcf5464",
+      "member0": "0x728fcf5464",
+      "same": true,
+      "activeHp": 8280,
+      "memberHp": 8280
+    },
+    "party0": 8280
+  },
+  {
+    "label": "write_8000",
+    "ticket": {
+      "ok": true,
+      "ticket": 236,
+      "state": "done",
+      "result": {
+        "ok": true
+      },
+      "result_retained": true
+    }
+  },
+  {
+    "label": "immediate",
+    "time": 1790528394.5937533,
+    "raw": {
+      "gameBase": "0x727bc03000",
+      "active": "0x728fcf5464",
+      "member0": "0x728fcf5464",
+      "same": true,
+      "activeHp": 8280,
+      "memberHp": 8280
+    },
+    "party0": 8280
+  },
+  {
+    "label": "200ms",
+    "time": 1790528394.834457,
+    "raw": {
+      "gameBase": "0x727bc03000",
+      "active": "0x728fcf5464",
+      "member0": "0x728fcf5464",
+      "same": true,
+      "activeHp": 8280,
+      "memberHp": 8280
+    },
+    "party0": 8280
+  },
+  {
+    "label": "1s",
+    "time": 1790528395.6821477,
+    "raw": {
+      "gameBase": "0x727bc03000",
+      "active": "0x728fcf5464",
+      "member0": "0x728fcf5464",
+      "same": true,
+      "activeHp": 8280,
+      "memberHp": 8280
+    },
+    "party0": 8280
+  },
+  {
+    "label": "2s",
+    "time": 1790528396.7302198,
+    "raw": {
+      "gameBase": "0x727bc03000",
+      "active": "0x728fcf5464",
+      "member0": "0x728fcf5464",
+      "same": true,
+      "activeHp": 8280,
+      "memberHp": 8280
+    },
+    "party0": 8280
+  },
+  {
+    "label": "restore_8280",
+    "ticket": {
+      "ok": true,
+      "ticket": 237,
+      "state": "done",
+      "result": {
+        "ok": true
+      },
+      "result_retained": true
+    }
+  },
+  {
+    "label": "restored",
+    "time": 1790528396.873208,
+    "raw": {
+      "gameBase": "0x727bc03000",
+      "active": "0x728fcf5464",
+      "member0": "0x728fcf5464",
+      "same": true,
+      "activeHp": 8280,
+      "memberHp": 8280
+    },
+    "party0": 8280
+  }
+]

@@ -1,0 +1,3050 @@
+#include "host/plugin_registry.h"
+
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+
+#include "infra/log/qol_log.h"
+#include "contracts/commands.h"
+#include "contracts/game_ports/craft_ui_write_port.h"
+#include "contracts/game_ports/custom_recipe_write_port.h"
+#include "contracts/game_ports/recipe_table_port.h"
+#include "contracts/game_ports/craft_lottery_port.h"
+#include "contracts/game_ports/custom_map_resource_port.h"
+#include "contracts/game_ports/craft_port.h"
+#include "contracts/game_ports/character_port.h"
+#include "contracts/game_ports/character_state_port.h"
+#include "contracts/game_ports/choice_port.h"
+#include "contracts/game_ports/character_extras_port.h"
+#include "contracts/game_ports/extension_bag_write_port.h"
+#include "contracts/game_ports/inventory_extras_port.h"
+#include "contracts/game_ports/item_port.h"
+#include "contracts/game_ports/move_merge_port.h"
+#include "contracts/game_ports/item_inventory_state_write_port.h"
+#include "contracts/game_ports/item_extras_port.h"
+#include "contracts/game_ports/quest_port.h"
+#include "contracts/game_ports/save_call_port.h"
+#include "contracts/game_ports/save_port.h"
+#include "contracts/game_ports/world_port.h"
+#include "contracts/ownership.h"
+#include "game/access/patches.h"
+#include "game/access/ptr_slots.h"
+#include "hooks/registry.h"
+#include "hooks/transaction.h"
+#include "host/http_dispatch.h"
+#include "host/http_endpoint_binder.h"
+#include "host/http_registry.h"
+#include "host/http_endpoint_binder.h"
+#include "host/features/production.h"
+#include "host/item_count_facade.h"
+#include "host/owner_identity.h"
+#include "infra/capabilities.h"
+#include "infra/config.h"
+#include "infra/status.h"
+#include "patch/instr_patch.h"
+#include "patch/ptr_slot.h"
+#include "host/save_route.h"
+#if !QOL_KERNEL_ONLY
+#include "game/adapter_ports/character_port.h"
+#include "game/adapter_ports/character_extras_port.h"
+#include "game/adapter_ports/character_http_port.h"
+#include "game/adapter_ports/save_write_port.h"
+#include "game/adapter_ports/movement_input_port.h"
+#include "game/adapter_ports/save_transaction_port.h"
+#include "game/adapter_ports/world_write_port.h"
+#include "game/adapter_ports/choice_write_port.h"
+#include "game/adapter_ports/ui_write_port.h"
+#include "host/item_inventory_state_write_port.h"
+#include "host/character_state_port.h"
+#include "game/adapter_ports/item_money_write_port.h"
+#include "game/adapter_ports/item_dice_write_port.h"
+#include "game/adapter_ports/character_write_ops_port.h"
+#include "game/adapter_ports/craft_port.h"
+#include "game/adapter_ports/craft_ui_write_port.h"
+#include "game/adapter_ports/custom_recipe_write_port.h"
+#include "game/adapter_ports/recipe_table_port.h"
+#include "game/adapter_ports/craft_lottery_port.h"
+#include "game/adapter_ports/custom_map_resource_port.h"
+#include "game/adapter_ports/choice_port.h"
+#include "game/adapter_ports/world_action_port.h"
+#include "game/adapter_ports/extension_bag_write_port.h"
+#include "game/adapter_ports/item_port.h"
+#include "game/adapter_ports/move_merge_port.h"
+#include "game/adapter_ports/item_extras_port.h"
+#include "game/adapter_ports/inventory_extras_port.h"
+#include "game/adapter_ports/quest_port.h"
+#include "game/adapter_ports/save_call_port.h"
+#include "game/adapter_ports/save_port.h"
+#include "game/adapter_ports/system_port.h"
+#include "game/adapter_ports/world_port.h"
+#endif
+
+#if !QOL_KERNEL_ONLY
+namespace qol::game {
+const contracts::QolUiStateReadPort& ui_state_read_port();
+}
+#endif
+
+namespace qol::host {
+
+extern const contracts::QolHostSdk g_host_sdk;
+extern const contracts::QolGameHost g_game_host;
+
+namespace {
+
+constexpr uint32_t kMaxPlugins = 32;
+constexpr uint32_t kMaxPortsPerPlugin = 8;
+constexpr uint32_t kMaxErrorText = 96;
+constexpr uint32_t kNoPlugin = kMaxPlugins;
+
+struct PluginEntry {
+    contracts::PluginDescriptor descriptor{};
+};
+
+PluginEntry g_plugins[kMaxPlugins];
+uint32_t g_plugin_count = 0;
+bool g_http_degraded[kMaxPlugins]{};
+bool g_feature_mode = false;
+bool g_feature_wanted[kMaxPlugins]{};
+FeatureDesiredRequest g_desired_request = nullptr;
+void* g_desired_request_context = nullptr;
+const void* g_plugin_ports[kMaxPlugins][kMaxPortsPerPlugin] = {};
+uint32_t g_plugin_port_count[kMaxPlugins] = {};
+bool g_port_invalid[kMaxPlugins] = {};
+
+void publish_runtime_actual(const char* plugin_id, bool enabled) {
+    if (g_feature_mode) runtime_effects_publish_actual(plugin_id, enabled);
+}
+
+void retire_runtime_observers(const char* plugin_id) {
+    if (g_feature_mode) runtime_effects_unsubscribe_plugin(plugin_id);
+}
+
+// 宿主装配期选定的管理 SDK 副本。普通 g_host_sdk 的 feature_control 恒为 nullptr；
+// 只有 settings 插件 context 使用该副本，管理通道不泄漏给其他插件。
+contracts::QolHostSdk g_management_sdk{};
+bool g_management_sdk_bound = false;
+
+contracts::PluginContext make_plugin_context(const char* plugin_id) {
+    uint32_t index = kMaxPlugins;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (plugin_id != nullptr &&
+            std::strcmp(g_plugins[i].descriptor.id, plugin_id) == 0) {
+            index = i;
+            break;
+        }
+    }
+    const void* const* ports = index == kMaxPlugins ? nullptr : g_plugin_ports[index];
+    const uint32_t port_count = index == kMaxPlugins ? 0 : g_plugin_port_count[index];
+    contracts::QolOwnerToken token = 0;
+    uint64_t generation = 0;
+    if (index != kMaxPlugins) {
+        (void)owner_identity_api().query(&g_plugins[index], &token, &generation);
+    }
+    // The settings plugin is the only context the Host grants management authority; every
+    // other context keeps the ordinary SDK whose feature_control is nullptr.
+    const contracts::QolHostSdk* sdk = &g_host_sdk;
+    if (plugin_id != nullptr && std::strcmp(plugin_id, "settings") == 0 && g_management_sdk_bound) {
+        sdk = &g_management_sdk;
+    }
+    return contracts::PluginContext{sizeof(contracts::PluginContext),
+                                    g_host_sdk.abi.major,
+                                    g_host_sdk.abi.minor,
+                                    sdk,
+                                    &g_game_host,
+                                    plugin_id,
+                                    ports,
+                                    port_count,
+                                    token};
+}
+
+void refresh_http_degraded_status(const char* owner);
+void refresh_all_http_degraded_status();
+void set_http_provider_available(bool available);
+
+void bind_http_endpoints(const contracts::PluginDescriptor& plugin) {
+    // HTTP is an optional capability: binder failure changes only the owner's HTTP health.
+    (void)http_endpoint_binder_owner_enabled(plugin);
+    refresh_http_degraded_status(plugin.id);
+}
+
+void begin_http_endpoint_stop(const contracts::PluginDescriptor& plugin) {
+    if (plugin.id != nullptr) http_endpoint_binder_owner_stop_begin(plugin.id);
+}
+
+constexpr uint32_t kMaxResourcesPerPlugin = 32;
+// 装配依赖：feature_registry_prepare 时存入本 TU 静态，供事务引擎推进安装/还原的
+// 受限回调失败撤回（以及 release 复用同一 hook/unhook 原语）；assembly.cpp 已在装配期传入。
+HostDeps g_install_deps{};
+extern char g_error_text[kMaxPlugins][kMaxErrorText];
+
+struct AvailablePort {
+    contracts::QolPortId id;
+    QolVersion version;
+    const void* iface;
+};
+
+bool available_port(contracts::QolPortId id, AvailablePort* out) {
+#if !QOL_KERNEL_ONLY
+    if (id == contracts::QolPortId::QOL_PORT_QUEST) {
+        const auto& port = qol::game::quest_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_WORLD) {
+        const auto& port = qol::game::world_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_ITEM) {
+        const auto& port = qol::game::item_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_MOVE_MERGE) {
+        const auto& port = qol::game::move_merge_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_CHARACTER_EXTRAS) {
+        const auto& port = qol::game::character_extras_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_INVENTORY_EXTRAS) {
+        const auto& port = qol::game::inventory_extras_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_ITEM_EXTRAS) {
+        const auto& port = qol::game::item_extras_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_CHARACTER) {
+        const auto& port = qol::game::character_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_EXTENSION_BAG_WRITE) {
+        const auto& port = qol::game::extension_bag_write_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_CHOICE) {
+        const auto& port = qol::game::choice_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_WORLD_ACTION) {
+        const auto& port = qol::game::world_action_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_SAVE) {
+        const auto& port = qol::game::save_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_SAVE_CALL) {
+        const auto& port = qol::game::save_call_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_CRAFT) {
+        const auto& port = qol::game::craft_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_CRAFT_UI_WRITE) {
+        const auto& port = qol::game::craft_ui_write_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_CUSTOM_RECIPE_WRITE) {
+        const auto& port = qol::game::custom_recipe_write_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_RECIPE_TABLE) {
+        const auto& port = qol::game::recipe_table_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_CRAFT_LOTTERY_WRITE) {
+        const auto& port = qol::game::craft_lottery_write_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_CUSTOM_MAP_RESOURCE) {
+        const auto& port = qol::game::custom_map_resource_port();
+        if (out != nullptr)
+            *out = AvailablePort{id, QolVersion{port.abi.major, port.abi.minor}, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_SYSTEM) {
+        const auto& port = qol::game::system_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_CHARACTER_HTTP) {
+        const auto& port = qol::game::character_http_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_SAVE_WRITE) {
+        const auto& port = qol::game::save_write_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_SAVE_TRANSACTION) {
+        const auto& port = qol::game::save_transaction_port();
+        if (out != nullptr)
+            *out = AvailablePort{id, QolVersion{port.abi.major, port.abi.minor}, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_WORLD_WRITE) {
+        const auto& port = qol::game::world_write_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_MOVEMENT_INPUT) {
+        const auto& port = qol::game::movement_input_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_CHOICE_WRITE) {
+        const auto& port = qol::game::choice_write_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_UI_WRITE) {
+        const auto& port = qol::game::ui_write_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_UI_STATE_READ) {
+        const auto& port = qol::game::ui_state_read_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_ITEM_INVENTORY_STATE_WRITE) {
+        const auto& port = item_inventory_state_write_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE) {
+        const auto& port = qol::game::item_money_write_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_ITEM_DICE_WRITE) {
+        const auto& port = qol::game::item_dice_write_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_CHARACTER_WRITE_OPS) {
+        const auto& port = qol::game::character_write_ops_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_CHARACTER_STATE) {
+        const auto& port = character_state_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+#else
+    (void)id;
+    (void)out;
+#endif
+    return false;
+}
+
+bool resolve_plugin_ports(uint32_t index) {
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    g_plugin_port_count[index] = 0;
+    if (plugin.port_count == 0) return true;
+    if (plugin.ports == nullptr || plugin.port_count > kMaxPortsPerPlugin) return false;
+    for (uint32_t i = 0; i < plugin.port_count; ++i) {
+        const contracts::QolPortRequirement& requirement = plugin.ports[i];
+        if (requirement.id == contracts::QolPortId::QOL_PORT_EXTENSION_BAG_WRITE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "extension_bag") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        // QOL_PORT_MOVE_MERGE 双 owner 兼容：新 owner 是 extension_bag（拖拽合并
+        // wrapper 自 core.item 迁入）；core.item 旧描述符过渡期仍允许，便于回退。
+        // 其他插件不得注入。
+        if (requirement.id == contracts::QolPortId::QOL_PORT_MOVE_MERGE &&
+            (plugin.id == nullptr || (std::strcmp(plugin.id, "core.item") != 0 &&
+                                      std::strcmp(plugin.id, "extension_bag") != 0))) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_CHOICE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.custom_ui") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_WORLD_ACTION &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "world_teleport") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_CUSTOM_MAP_RESOURCE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "custom_map") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        // 库存状态写 / 金钱写端口为双 owner：core.inventory 承接跨空间 transfer 与
+        // money 写（inventory.transfer），core.item 仍保留 use/sell/equip 等原生写。
+        // 其他插件不得注入；dice 写仍为 core.item 独占。
+        if (requirement.id == contracts::QolPortId::QOL_PORT_ITEM_INVENTORY_STATE_WRITE &&
+            (plugin.id == nullptr ||
+             (std::strcmp(plugin.id, "core.item") != 0 &&
+              std::strcmp(plugin.id, "core.inventory") != 0))) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE &&
+            (plugin.id == nullptr ||
+             (std::strcmp(plugin.id, "core.item") != 0 &&
+              std::strcmp(plugin.id, "core.inventory") != 0))) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_ITEM_DICE_WRITE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.item") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_CHARACTER_WRITE_OPS &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.character") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_CHARACTER_STATE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.character") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_SAVE_CALL &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "save_backup") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_CRAFT &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.craft") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_CRAFT_UI_WRITE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "custom_recipe") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_CUSTOM_RECIPE_WRITE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "custom_recipe") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        // 存档写端口为 core.save owner 私有：其他插件不得注入，避免绕过 owner 直接写档。
+        if (requirement.id == contracts::QolPortId::QOL_PORT_SAVE_WRITE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.save") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        // 保存事务端口为 core.save owner 私有：Adapter 是受控原版转换/保存/evidence 面，
+        // 泄漏给其他插件即可绕过协调器直调原版保存。
+        if (requirement.id == contracts::QolPortId::QOL_PORT_SAVE_TRANSACTION &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.save") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        // 世界写端口为 core.world owner 私有：其他插件不得注入，避免绕过 owner 直接写世界态。
+        if (requirement.id == contracts::QolPortId::QOL_PORT_WORLD_WRITE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.world") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        // 移动输入端口为 better_move 私有：输入 hook 与 CHAR_Move 调用点只允许该插件声明。
+        if (requirement.id == contracts::QolPortId::QOL_PORT_MOVEMENT_INPUT &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "better_move") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        // 对话写端口为 core.ui_state owner 私有：避免绕过 owner 直接写对话态。
+        if (requirement.id == contracts::QolPortId::QOL_PORT_CHOICE_WRITE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.ui_state") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        // 面板写端口为 core.ui_state owner 私有：避免绕过 owner 直接改游戏面板栈。
+        if (requirement.id == contracts::QolPortId::QOL_PORT_UI_WRITE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.ui_state") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_UI_STATE_READ &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.ui_state") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        // Character HTTP reads expose the character projection only to its domain owner.
+        if (requirement.id == contracts::QolPortId::QOL_PORT_CHARACTER_HTTP &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.character") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        AvailablePort port{};
+        if (!available_port(requirement.id, &port) || port.iface == nullptr) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "unsupported port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (!contracts::satisfies(port.version, requirement.range)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "unsupported port version: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        g_plugin_ports[index][i] = port.iface;
+        ++g_plugin_port_count[index];
+    }
+    return true;
+}
+
+// 失败文本静态存储：infra/status 只保存指针，生命周期须 ≥ 进程。
+char g_error_text[kMaxPlugins][kMaxErrorText];
+// 门禁应用失败（fail-soft）的 degraded 记录；安装事务成功终态清除（§3.2）。
+bool g_gate_degraded[kMaxPlugins];
+bool g_cascade_degraded[kMaxPlugins];
+// Feature-mode 逐资源安装失败记录。与 g_gate_degraded 分开：安装事务成功终态会清
+// g_gate_degraded，但软失败的资源仍未安装，原因必须保留到此资源重装成功或重新转换。
+char g_resource_error_text[kMaxPlugins][kMaxErrorText];
+bool g_resource_install_failed[kMaxPlugins];
+bool g_resource_error_present[kMaxPlugins];
+
+void clear_resource_install_error(uint32_t index) {
+    if (index >= kMaxPlugins) return;
+    g_resource_install_failed[index] = false;
+    g_resource_error_present[index] = false;
+    g_resource_error_text[index][0] = '\0';
+}
+
+void record_resource_install_error(uint32_t index, const char* resource_id, const char* reason) {
+    if (index >= kMaxPlugins) return;
+    g_resource_install_failed[index] = true;
+    g_resource_error_present[index] = true;
+    std::snprintf(g_resource_error_text[index], sizeof(g_resource_error_text[index]),
+                  "resource %s: %s", resource_id != nullptr ? resource_id : "?",
+                  reason != nullptr ? reason : "install failed");
+}
+
+// 启动期 ownership（RECIPEBASE/MIXTUREBASE 注入）NotReady 的定向恢复状态。
+// deferred：产生 NotReady 的 activation owner token（旧 activation 的隔离凭据）；
+// save_ready：最近一次 SaveEnter 锁存的当前 owner token（0 = 未武装/已消费）。
+// 仅这两个字段；不新增 generation 计数、不新增事务类型。
+contracts::QolOwnerToken g_deferred_ownership_token[kMaxPlugins] = {};
+contracts::QolOwnerToken g_save_ready_token[kMaxPlugins] = {};
+
+// 清 owner 的恢复信号与 pending：新 activation、stop/cleanup、reset 均调用。
+// 旧 token 因此失效——后续 SaveEnter 锁存的新 token 与 deferred 不再一致即被拒绝。
+void clear_ownership_retry_state(uint32_t index) {
+    if (index >= kMaxPlugins) return;
+    g_deferred_ownership_token[index] = 0;
+    g_save_ready_token[index] = 0;
+    if (index >= g_plugin_count) return;
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    for (uint32_t r = 0; r < plugin.resources_count; ++r) {
+        const contracts::ResourceClaim& claim = plugin.resources[r];
+        if (claim.mechanism != contracts::ResourceMechanism::kOwnership) continue;
+        hooks::retry_pending_set(claim.id, false);
+    }
+}
+
+void refresh_degraded_status(uint32_t index) {
+    if (index >= g_plugin_count) return;
+    infra::status_set_degraded(g_plugins[index].descriptor.id,
+                               g_gate_degraded[index] || g_cascade_degraded[index] ||
+                                   g_http_degraded[index] ||
+                                   g_resource_install_failed[index]);
+}
+
+void refresh_http_degraded_status(const char* owner) {
+    if (owner == nullptr) return;
+    for (uint32_t index = 0; index < g_plugin_count; ++index) {
+        if (std::strcmp(g_plugins[index].descriptor.id, owner) != 0) continue;
+        g_http_degraded[index] = http_endpoint_binder_owner_http_degraded(owner);
+        refresh_degraded_status(index);
+        return;
+    }
+}
+
+void refresh_all_http_degraded_status() {
+    for (uint32_t index = 0; index < g_plugin_count; ++index)
+        refresh_http_degraded_status(g_plugins[index].descriptor.id);
+}
+
+void set_http_provider_available(bool available) {
+    http_endpoint_binder_set_provider_available(available);
+    for (uint32_t index = 0; index < g_plugin_count; ++index) {
+        const char* owner = g_plugins[index].descriptor.id;
+        g_http_degraded[index] = http_endpoint_binder_owner_http_degraded(owner);
+        refresh_degraded_status(index);
+    }
+}
+
+void clear_cascade_degraded_for_capability(const char* capability_id) {
+    if (capability_id == nullptr) return;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (!g_cascade_degraded[i]) continue;
+        const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
+        bool matches_capability = false;
+        bool optional_missing = false;
+        for (uint32_t o = 0; o < plugin.optional_count; ++o) {
+            const contracts::CapabilityRequirement& requirement = plugin.optional_requires[o];
+            if (requirement.id == nullptr) continue;
+            if (std::strcmp(requirement.id, capability_id) == 0) matches_capability = true;
+            if (infra::require_capability(requirement.id, requirement.range) == nullptr)
+                optional_missing = true;
+        }
+        if (!matches_capability || optional_missing) continue;
+        g_cascade_degraded[i] = false;
+        refresh_degraded_status(i);
+    }
+}
+
+// 依赖图由描述符构建。注册顺序只决定描述符进入图的时机，不决定业务安装顺序；
+// g_install_order 是确定性的拓扑结果，provider 必须在 consumer 前完成 install/publish。
+uint32_t g_install_order[kMaxPlugins];
+uint32_t g_install_order_count = 0;
+bool g_dependency_invalid[kMaxPlugins];
+bool g_dependency_cycle[kMaxPlugins];
+
+uint32_t provider_for_requirement(const contracts::CapabilityRequirement& req,
+                                  bool* out_id_found) {
+    if (out_id_found != nullptr) *out_id_found = false;
+    if (req.id == nullptr) return kNoPlugin;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        const contracts::PluginDescriptor& candidate = g_plugins[i].descriptor;
+        for (uint32_t p = 0; p < candidate.provides_count; ++p) {
+            const contracts::CapabilityProvisionRef& provision = candidate.provides[p];
+            if (provision.id == nullptr || std::strcmp(provision.id, req.id) != 0) continue;
+            if (out_id_found != nullptr) *out_id_found = true;
+            if (contracts::satisfies(provision.version, req.range)) return i;
+        }
+    }
+    return kNoPlugin;
+}
+
+void set_dependency_error(uint32_t index, const char* prefix, const char* capability_id) {
+    std::snprintf(g_error_text[index], sizeof(g_error_text[index]), "%s: %s", prefix,
+                  capability_id != nullptr ? capability_id : "<null>");
+}
+
+// required 边优先，避免同一对插件同时声明 required 与 optional 时误降级 required。
+void dependency_edges_build(bool edges[kMaxPlugins][kMaxPlugins],
+                            bool optional_edge[kMaxPlugins][kMaxPlugins],
+                            const char* optional_capability[kMaxPlugins][kMaxPlugins],
+                            uint32_t* out_edge_count) {
+    *out_edge_count = 0;
+    for (uint32_t consumer = 0; consumer < g_plugin_count; ++consumer) {
+        if (g_dependency_invalid[consumer]) continue;
+        const contracts::PluginDescriptor& plugin = g_plugins[consumer].descriptor;
+        for (uint32_t r = 0; r < plugin.requires_count; ++r) {
+            const uint32_t provider = provider_for_requirement(plugin.requires[r], nullptr);
+            if (provider == kNoPlugin || g_dependency_invalid[provider]) continue;
+            if (!edges[provider][consumer]) {
+                edges[provider][consumer] = true;
+                optional_edge[provider][consumer] = false;
+                optional_capability[provider][consumer] = nullptr;
+                ++*out_edge_count;
+            }
+        }
+    }
+    for (uint32_t consumer = 0; consumer < g_plugin_count; ++consumer) {
+        if (g_dependency_invalid[consumer]) continue;
+        const contracts::PluginDescriptor& plugin = g_plugins[consumer].descriptor;
+        for (uint32_t o = 0; o < plugin.optional_count; ++o) {
+            const contracts::CapabilityRequirement& requirement = plugin.optional_requires[o];
+            const uint32_t provider = provider_for_requirement(requirement, nullptr);
+            if (provider == kNoPlugin || g_dependency_invalid[provider] || provider == consumer) {
+                continue;
+            }
+            if (!edges[provider][consumer]) {
+                edges[provider][consumer] = true;
+                optional_edge[provider][consumer] = true;
+                optional_capability[provider][consumer] = requirement.id;
+                ++*out_edge_count;
+            }
+        }
+    }
+}
+
+// 按拓扑边发射插件；同一时刻可选节点按 id 字典序取最小者。
+bool topo_emit(const bool edges[kMaxPlugins][kMaxPlugins],
+               const bool optional_edge[kMaxPlugins][kMaxPlugins], bool include_optional) {
+    uint32_t indegree[kMaxPlugins] = {};
+    uint32_t eligible_count = 0;
+    g_install_order_count = 0;
+    bool emitted[kMaxPlugins] = {};
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (g_dependency_invalid[i]) continue;
+        ++eligible_count;
+        for (uint32_t provider = 0; provider < g_plugin_count; ++provider) {
+            if (!edges[provider][i] || (!include_optional && optional_edge[provider][i])) continue;
+            ++indegree[i];
+        }
+    }
+
+    for (;;) {
+        uint32_t selected = kNoPlugin;
+        for (uint32_t i = 0; i < g_plugin_count; ++i) {
+            if (g_dependency_invalid[i] || emitted[i] || indegree[i] != 0) continue;
+            if (selected == kNoPlugin ||
+                std::strcmp(g_plugins[i].descriptor.id, g_plugins[selected].descriptor.id) < 0) {
+                selected = i;
+            }
+        }
+        if (selected == kNoPlugin) break;
+        emitted[selected] = true;
+        g_install_order[g_install_order_count++] = selected;
+        for (uint32_t consumer = 0; consumer < g_plugin_count; ++consumer) {
+            if (edges[selected][consumer] &&
+                (include_optional || !optional_edge[selected][consumer]) && indegree[consumer] > 0) {
+                --indegree[consumer];
+            }
+        }
+    }
+
+    return g_install_order_count == eligible_count;
+}
+
+bool find_cycle_dfs(uint32_t node, const bool edges[kMaxPlugins][kMaxPlugins],
+                    const bool emitted[kMaxPlugins], uint8_t state[kMaxPlugins],
+                    uint32_t parent[kMaxPlugins], uint32_t cycle_nodes[kMaxPlugins],
+                    uint32_t* out_cycle_count) {
+    state[node] = 1;
+    bool visited_neighbor[kMaxPlugins] = {};
+    for (;;) {
+        uint32_t consumer = kNoPlugin;
+        for (uint32_t i = 0; i < g_plugin_count; ++i) {
+            if (visited_neighbor[i] || !edges[node][i] || emitted[i] ||
+                g_dependency_invalid[i]) {
+                continue;
+            }
+            if (consumer == kNoPlugin ||
+                std::strcmp(g_plugins[i].descriptor.id,
+                            g_plugins[consumer].descriptor.id) < 0) {
+                consumer = i;
+            }
+        }
+        if (consumer == kNoPlugin) break;
+        visited_neighbor[consumer] = true;
+        if (state[consumer] == 0) {
+            parent[consumer] = node;
+            if (find_cycle_dfs(consumer, edges, emitted, state, parent, cycle_nodes,
+                               out_cycle_count)) {
+                return true;
+            }
+        } else if (state[consumer] == 1) {
+            uint32_t reverse_path[kMaxPlugins] = {};
+            uint32_t path_count = 0;
+            uint32_t current = node;
+            while (current != consumer && path_count < kMaxPlugins) {
+                reverse_path[path_count++] = current;
+                current = parent[current];
+                if (current == kNoPlugin) return false;
+            }
+            if (current != consumer || path_count >= kMaxPlugins) return false;
+            reverse_path[path_count++] = consumer;
+            for (uint32_t i = 0; i < path_count; ++i) {
+                cycle_nodes[i] = reverse_path[path_count - 1 - i];
+            }
+            *out_cycle_count = path_count;
+            return true;
+        }
+    }
+    state[node] = 2;
+    return false;
+}
+
+bool find_unemitted_cycle(const bool edges[kMaxPlugins][kMaxPlugins],
+                          const bool emitted[kMaxPlugins], uint32_t cycle_nodes[kMaxPlugins],
+                          uint32_t* out_cycle_count) {
+    uint8_t state[kMaxPlugins] = {};
+    uint32_t parent[kMaxPlugins];
+    for (uint32_t i = 0; i < kMaxPlugins; ++i) parent[i] = kNoPlugin;
+    bool visited_root[kMaxPlugins] = {};
+    for (;;) {
+        uint32_t root = kNoPlugin;
+        for (uint32_t i = 0; i < g_plugin_count; ++i) {
+            if (visited_root[i] || emitted[i] || g_dependency_invalid[i] || state[i] != 0) {
+                continue;
+            }
+            if (root == kNoPlugin ||
+                std::strcmp(g_plugins[i].descriptor.id, g_plugins[root].descriptor.id) < 0) {
+                root = i;
+            }
+        }
+        if (root == kNoPlugin) return false;
+        visited_root[root] = true;
+        if (find_cycle_dfs(root, edges, emitted, state, parent, cycle_nodes,
+                           out_cycle_count)) {
+            return true;
+        }
+    }
+}
+
+struct DowngradedOptionalEdge {
+    uint32_t provider;
+    uint32_t consumer;
+    const char* capability_id;
+};
+
+bool dependency_order_fail_required_cycle(const bool edges[kMaxPlugins][kMaxPlugins],
+                                          const bool optional_edge[kMaxPlugins][kMaxPlugins]) {
+    // required-only 图决定硬失败时的发射集合，避免 optional 下游边扩大 cycle 标记范围。
+    (void)topo_emit(edges, optional_edge, /*include_optional=*/false);
+    bool emitted[kMaxPlugins] = {};
+    for (uint32_t i = 0; i < g_install_order_count; ++i) {
+        emitted[g_install_order[i]] = true;
+    }
+    bool valid = true;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (g_dependency_invalid[i]) {
+            valid = false;
+            continue;
+        }
+        if (!emitted[i]) {
+            g_dependency_invalid[i] = true;
+            g_dependency_cycle[i] = true;
+            set_dependency_error(i, "dependency cycle", g_plugins[i].descriptor.id);
+            valid = false;
+        }
+    }
+    return valid;
+}
+
+bool dependency_order_build() {
+    g_install_order_count = 0;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        g_dependency_invalid[i] = g_port_invalid[i];
+        g_dependency_cycle[i] = false;
+    }
+
+    // 先标记缺失/版本不兼容的 required，避免它们污染环检测结果。
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (g_dependency_invalid[i]) continue;
+        const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
+        for (uint32_t r = 0; r < plugin.requires_count; ++r) {
+            bool id_found = false;
+            const uint32_t provider = provider_for_requirement(plugin.requires[r], &id_found);
+            if (provider != kNoPlugin) continue;
+            g_dependency_invalid[i] = true;
+            set_dependency_error(i, id_found ? "incompatible required capability"
+                                             : "missing required capability",
+                                 plugin.requires[r].id);
+            break;
+        }
+    }
+
+    bool edges[kMaxPlugins][kMaxPlugins] = {};
+    bool optional_edge[kMaxPlugins][kMaxPlugins] = {};
+    const char* optional_capability[kMaxPlugins][kMaxPlugins] = {};
+    uint32_t edge_count = 0;
+    dependency_edges_build(edges, optional_edge, optional_capability, &edge_count);
+    DowngradedOptionalEdge downgraded[kMaxPlugins * kMaxPlugins] = {};
+    uint32_t downgraded_count = 0;
+
+    // 只切除实际闭合环的 optional 边，环外排序偏好保持不变。
+    for (uint32_t attempt = 0; attempt <= edge_count; ++attempt) {
+        if (topo_emit(edges, optional_edge, /*include_optional=*/true)) {
+            for (uint32_t i = 0; i < downgraded_count; ++i) {
+                const DowngradedOptionalEdge& edge = downgraded[i];
+                QOL_LOG_WARN(QolDomain::kCore,
+                             "optional edge downgraded to avoid cycle: provider=%s consumer=%s "
+                             "capability=%s",
+                             g_plugins[edge.provider].descriptor.id,
+                             g_plugins[edge.consumer].descriptor.id,
+                             edge.capability_id != nullptr ? edge.capability_id : "<null>");
+            }
+            return true;
+        }
+
+        bool emitted[kMaxPlugins] = {};
+        for (uint32_t i = 0; i < g_install_order_count; ++i) {
+            emitted[g_install_order[i]] = true;
+        }
+        uint32_t cycle_nodes[kMaxPlugins] = {};
+        uint32_t cycle_count = 0;
+        if (!find_unemitted_cycle(edges, emitted, cycle_nodes, &cycle_count)) {
+            return dependency_order_fail_required_cycle(edges, optional_edge);
+        }
+
+        uint32_t cut_provider = kNoPlugin;
+        uint32_t cut_consumer = kNoPlugin;
+        for (uint32_t i = 0; i < cycle_count; ++i) {
+            const uint32_t provider = cycle_nodes[i];
+            const uint32_t consumer = cycle_nodes[(i + 1) % cycle_count];
+            if (!optional_edge[provider][consumer]) continue;
+            if (cut_consumer == kNoPlugin ||
+                std::strcmp(g_plugins[consumer].descriptor.id,
+                            g_plugins[cut_consumer].descriptor.id) < 0 ||
+                (std::strcmp(g_plugins[consumer].descriptor.id,
+                             g_plugins[cut_consumer].descriptor.id) == 0 &&
+                 std::strcmp(g_plugins[provider].descriptor.id,
+                             g_plugins[cut_provider].descriptor.id) < 0)) {
+                cut_provider = provider;
+                cut_consumer = consumer;
+            }
+        }
+        if (cut_provider == kNoPlugin || downgraded_count >= edge_count) {
+            return dependency_order_fail_required_cycle(edges, optional_edge);
+        }
+
+        // 同环候选按 consumer、provider id 排序，避免注册顺序改变被降级的软边。
+        downgraded[downgraded_count++] = {
+            cut_provider, cut_consumer, optional_capability[cut_provider][cut_consumer]};
+        edges[cut_provider][cut_consumer] = false;
+        optional_edge[cut_provider][cut_consumer] = false;
+        optional_capability[cut_provider][cut_consumer] = nullptr;
+    }
+
+    return dependency_order_fail_required_cycle(edges, optional_edge);
+}
+
+bool descriptor_valid(const contracts::PluginDescriptor& plugin) {
+    if (plugin.id == nullptr || plugin.id[0] == '\0') return false;
+    if (plugin.version == nullptr) return false;
+    if (plugin.install == nullptr) return false;
+    if (plugin.resources_count > kMaxResourcesPerPlugin) return false;
+    if (plugin.resources_count > 0 && plugin.resources == nullptr) return false;
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        const contracts::ResourceClaim& claim = plugin.resources[i];
+        if (claim.symbol != nullptr &&
+            std::strncmp(claim.symbol, "elf-export:", 11) == 0 &&
+            (claim.mechanism != contracts::ResourceMechanism::kEntryHook ||
+             claim.symbol[11] == '\0')) return false;
+    }
+    if (plugin.http_query_count > 0 && plugin.http_queries == nullptr) return false;
+    if (plugin.requires_count > 0 && plugin.requires == nullptr) return false;
+    if (plugin.optional_count > 0 && plugin.optional_requires == nullptr) return false;
+    if (plugin.provides_count > 0 && plugin.provides == nullptr) return false;
+    if (plugin.jni_count > 0 && plugin.jni == nullptr) return false;
+    if (plugin.port_count > kMaxPortsPerPlugin) return false;
+    if (plugin.port_count > 0 && plugin.ports == nullptr) return false;
+    if (!http_endpoint_binder_validate_descriptor(plugin)) return false;
+    return true;
+}
+
+// 检查 required + fail-closed 资源的目标是否可解析，且不调用 install 或修改资源。
+const char* preflight_plugin_resources(const contracts::PluginDescriptor& plugin,
+                                       const HostDeps& deps,
+                                       const char** out_claim_id = nullptr) {
+    if (out_claim_id != nullptr) *out_claim_id = nullptr;
+    uintptr_t preflight_entries[kMaxResourcesPerPlugin] = {};
+    const char* preflight_ids[kMaxResourcesPerPlugin] = {};
+    uint32_t preflight_count = 0;
+    auto fail = [out_claim_id](const contracts::ResourceClaim& claim, const char* reason) {
+        if (out_claim_id != nullptr) *out_claim_id = claim.id;
+        return reason;
+    };
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        const contracts::ResourceClaim& claim = plugin.resources[i];
+        if (claim.requirement != contracts::ResourceRequirement::kRequired ||
+            claim.failure != contracts::ResourceFailure::kFailClosed) continue;
+        if (claim.mechanism == contracts::ResourceMechanism::kEntryHook) {
+            bool followed = false;
+            const uintptr_t entry =
+                deps.resolve_entry != nullptr ? deps.resolve_entry(claim.symbol, &followed) : 0;
+            if (entry == 0) return fail(claim, "symbol unresolved");
+            if (hooks::entry_target_conflicts(entry, claim.id)) {
+                return fail(claim, "entry target already occupied");
+            }
+            for (uint32_t prior = 0; prior < preflight_count; ++prior) {
+                if (entry == preflight_entries[prior] &&
+                    std::strcmp(claim.id, preflight_ids[prior]) != 0) {
+                    return fail(claim, "duplicate entry target");
+                }
+            }
+            preflight_entries[preflight_count] = entry;
+            preflight_ids[preflight_count] = claim.id;
+            ++preflight_count;
+        } else if (claim.mechanism == contracts::ResourceMechanism::kCallPatch) {
+            qol::game::PatchSite site{};
+            if (!qol::game::patch_site(claim.symbol, &site)) {
+                return fail(claim, "required patch unresolved");
+            }
+        } else if (claim.mechanism == contracts::ResourceMechanism::kPtrSlot) {
+            qol::game::PtrSlotSite site{};
+            if (!qol::game::ptr_slot_site(claim.symbol, &site)) {
+                return fail(claim, "required slot unresolved");
+            }
+        } else if (claim.mechanism == contracts::ResourceMechanism::kOwnership) {
+            const contracts::OwnershipOps* ops = contracts::ownership_ops(claim.handler);
+            if (ops == nullptr || ops->acquire == nullptr) {
+                return fail(claim, "ownership ops missing");
+            }
+        }
+    }
+    return nullptr;
+}
+
+// requires 缺失判定；返回 nullptr 表示全部满足，否则为静态错误文本。
+const char* check_requires(const contracts::PluginDescriptor& plugin, uint32_t plugin_index) {
+    for (uint32_t i = 0; i < plugin.requires_count; ++i) {
+        const contracts::CapabilityRequirement& req = plugin.requires[i];
+        if (infra::require_capability(req.id, req.range) == nullptr) {
+            set_dependency_error(plugin_index, "missing required capability", req.id);
+            return g_error_text[plugin_index];
+        }
+    }
+    return nullptr;
+}
+
+// optional 依赖（install 时）：仍可取用则通过；图中不存在有效 provider 才判
+// degraded（provider 后装的场景由 feature 模式转换路径重查，不在本函数暂缓）。
+const char* check_optional_requires(const contracts::PluginDescriptor& plugin, uint32_t plugin_index) {
+    for (uint32_t i = 0; i < plugin.optional_count; ++i) {
+        const contracts::CapabilityRequirement& req = plugin.optional_requires[i];
+        if (infra::require_capability(req.id, req.range) != nullptr) continue;
+        const uint32_t provider = provider_for_requirement(req, nullptr);
+        if (provider != kNoPlugin && !g_dependency_invalid[provider]) {
+            continue;
+        }
+        set_dependency_error(plugin_index, "missing optional capability", req.id);
+        return g_error_text[plugin_index];
+    }
+    return nullptr;
+}
+
+// 非入口机制的同步安装（kCallPatch / kPtrSlot / kOwnership）；成功后登记运行期地址。
+// out_backup 为非 nullptr 时回填「原函数入口」：kPtrSlot 为其槽期望值（供 §3.3 backup 交还），
+// 其余机制为 nullptr。返回 nullptr 成功，否则静态错误文本。
+const char* install_non_entry_claim(const contracts::ResourceClaim& claim, uintptr_t* out_target,
+                                    void** out_backup, int32_t* out_code = nullptr) {
+    if (out_backup != nullptr) {
+        *out_backup = nullptr;
+    }
+    if (out_code != nullptr) {
+        *out_code = 1;
+    }
+    // kOwnership：claim.handler 指向 OwnershipOps，不经 patch 站点。
+    if (claim.mechanism == contracts::ResourceMechanism::kOwnership) {
+        const contracts::OwnershipOps* ops = contracts::ownership_ops(claim.handler);
+        if (ops == nullptr || ops->acquire == nullptr) return "ownership ops missing";
+        const int32_t acquire_code = contracts::ownership_acquire(ops, claim.id);
+        if (acquire_code != 0) {
+            // 保留 acquire 原始码：host 只对 NotReady 做定向恢复，不靠错误文本推断。
+            if (out_code != nullptr) *out_code = acquire_code;
+            return "ownership acquire rejected";
+        }
+        if (out_code != nullptr) *out_code = 0;
+        if (out_target != nullptr) {
+            *out_target = 0;
+        }
+        return nullptr;
+    }
+    // kPtrSlot：槽站点由 game/access/ptr_slots 解析（禁止裸地址），机制体在 patch/ptr_slot。
+    if (claim.mechanism == contracts::ResourceMechanism::kPtrSlot) {
+        qol::game::PtrSlotSite site{};
+        if (!qol::game::ptr_slot_site(claim.symbol, &site)) {
+            return "slot not found";
+        }
+        const qol::patch::Outcome outcome = qol::patch::install_claim(claim, site);
+        if (outcome.ok != 0) {
+            return outcome.error != nullptr ? outcome.error : "install failed";
+        }
+        hooks::runtime_set(claim.id, site.slot_addr, site.expected_value);
+        if (out_target != nullptr) {
+            *out_target = site.slot_addr;
+        }
+        if (out_backup != nullptr) {
+            *out_backup = site.expected_value;
+        }
+        if (out_code != nullptr) *out_code = 0;
+        return nullptr;
+    }
+    qol::game::PatchSite site{};
+    if (!qol::game::patch_site(claim.symbol, &site)) {
+        return "symbol unresolved";
+    }
+    const qol::patch::Outcome outcome = qol::patch::install_claim(claim, site.addr);
+    if (outcome.ok != 0) {
+        return outcome.error != nullptr ? outcome.error : "install failed";
+    }
+    hooks::runtime_set(claim.id, site.addr, nullptr);
+    if (out_target != nullptr) {
+        *out_target = site.addr;
+    }
+    if (out_code != nullptr) *out_code = 0;
+    return nullptr;
+}
+
+// 非入口机制的物理还原：kOwnership 调 ops->release（幂等）；kCallPatch/kPtrSlot 站点
+// 由 game/access 重新解析（符号地址在进程内稳定）。
+bool release_non_entry_claim(const contracts::ResourceClaim& claim) {
+    if (claim.mechanism == contracts::ResourceMechanism::kOwnership) {
+        contracts::ownership_release(contracts::ownership_ops(claim.handler), claim.id);
+        return true;
+    }
+    if (claim.mechanism == contracts::ResourceMechanism::kPtrSlot) {
+        qol::game::PtrSlotSite site{};
+        if (!qol::game::ptr_slot_site(claim.symbol, &site)) {
+            return false;
+        }
+        const qol::patch::Outcome outcome = qol::patch::release_claim(claim, site);
+        return outcome.ok == 0;
+    }
+    hooks::ResourceRuntime runtime{};
+    const uintptr_t target = hooks::runtime_of(claim.id, &runtime) ? runtime.resolved_entry : 0;
+    const qol::patch::Outcome outcome = qol::patch::release_claim(claim, target);
+    return outcome.ok == 0;
+}
+
+// 逆序回滚本插件已安装资源：
+// resumable==false 或释放失败 → kTombstone，成功 → kFree（§4.2 物理归还）。
+bool rollback_resources(const contracts::ResourceClaim* const* claims,
+                        const uintptr_t* entries, uint32_t count,
+                        const HostDeps& deps) {
+    bool released_all = true;
+    for (uint32_t i = count; i > 0; --i) {
+        const contracts::ResourceClaim& claim = *claims[i - 1];
+        bool released = false;
+        if (claim.resumable) {
+            if (claim.mechanism == contracts::ResourceMechanism::kEntryHook) {
+                released = deps.unhook_fn != nullptr &&
+                           deps.unhook_fn(reinterpret_cast<void*>(entries[i - 1])) == 0;
+            } else {
+                released = release_non_entry_claim(claim);
+            }
+        }
+        if (released) {
+            hooks::runtime_clear(claim.id);
+            hooks::set_state(claim.id, contracts::ResourceState::kFree);
+        } else {
+            released_all = false;
+            hooks::set_state(claim.id, contracts::ResourceState::kTombstone);
+            hooks::isolated_set(claim.id, true);
+        }
+    }
+    return released_all;
+}
+
+// 撤回单条已安装资源（§3.3 受限回调失败路径）：成功 → kFree + runtime 清除；
+// 失败 → kTombstone + 隔离（保留占用，禁止重试直到进程重启）。
+bool revoke_resource(const char* resource_id, const HostDeps& deps) {
+    const contracts::ResourceClaim* claim = hooks::find_claim(resource_id);
+    if (claim == nullptr) return false;
+    bool released = false;
+    if (claim->mechanism == contracts::ResourceMechanism::kEntryHook) {
+        hooks::ResourceRuntime runtime{};
+        const uintptr_t entry =
+            hooks::runtime_of(resource_id, &runtime) ? runtime.resolved_entry : 0;
+        released = claim->resumable &&
+                   hooks::release_claim_entry_hook(*claim, entry, deps.unhook_fn).ok == 0;
+    } else {
+        released = claim->resumable && release_non_entry_claim(*claim);
+    }
+    if (released) {
+        hooks::set_state(resource_id, contracts::ResourceState::kFree);
+        hooks::runtime_clear(resource_id);
+    } else {
+        hooks::set_state(resource_id, contracts::ResourceState::kTombstone);
+        hooks::isolated_set(resource_id, true);
+    }
+    return released;
+}
+
+// 逆序撤回一组已记录资源（§3.2 语义 5：禁止半装对外可见）。
+bool rollback_installed(const contracts::ResourceClaim* const* claims, uint32_t count,
+                        const HostDeps& deps) {
+    bool released_all = true;
+    for (uint32_t i = count; i > 0; --i) {
+        if (!revoke_resource(claims[i - 1]->id, deps)) released_all = false;
+    }
+    return released_all;
+}
+
+// 逆序撤回插件当前处于已装态（live/disabled）的全部资源；用于还原事务启动失败时的同步兜底。
+void revoke_installed_resources(const contracts::PluginDescriptor& plugin, const HostDeps& deps) {
+    for (uint32_t i = plugin.resources_count; i > 0; --i) {
+        const contracts::ResourceClaim& claim = plugin.resources[i - 1];
+        const contracts::ResourceState state = hooks::state_of(claim.id);
+        if (state == contracts::ResourceState::kLive ||
+            state == contracts::ResourceState::kDisabled) {
+            revoke_resource(claim.id, deps);
+        }
+    }
+}
+
+bool plugin_has_atomic_claims(const contracts::PluginDescriptor& plugin) {
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        if (plugin.resources[i].atomic) return true;
+    }
+    return false;
+}
+
+bool atomic_group_satisfied(const contracts::PluginDescriptor& plugin) {
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        const contracts::ResourceClaim& claim = plugin.resources[i];
+        if (claim.atomic && hooks::state_of(claim.id) != contracts::ResourceState::kLive) {
+            return false;
+        }
+    }
+    return true;
+}
+
+const contracts::ResourceClaim* atomic_claim_by_id(const contracts::PluginDescriptor& plugin,
+                                                   const char* resource_id) {
+    if (resource_id == nullptr) return nullptr;
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        if (plugin.resources[i].atomic && std::strcmp(plugin.resources[i].id, resource_id) == 0) {
+            return &plugin.resources[i];
+        }
+    }
+    return nullptr;
+}
+
+bool atomic_group_want(const contracts::PluginDescriptor& plugin) {
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        const contracts::ResourceClaim& claim = plugin.resources[i];
+        if (claim.atomic && claim.gate != nullptr &&
+            !infra::config_get_bool(claim.gate, false)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// 原子组失败时释放组内所有已占用成员，而不是只释放本轮新装成员。这样上一轮
+// 已 live 的成员也不会在组失败时继续对外提供部分功能。
+void rollback_atomic_group(const contracts::PluginDescriptor& plugin, const HostDeps& deps,
+                           bool* out_mechanism_failed) {
+    for (uint32_t i = plugin.resources_count; i > 0; --i) {
+        const contracts::ResourceClaim& claim = plugin.resources[i - 1];
+        if (!claim.atomic) continue;
+        const contracts::ResourceState state = hooks::state_of(claim.id);
+        if (state == contracts::ResourceState::kLive ||
+            state == contracts::ResourceState::kDisabled) {
+            revoke_resource(claim.id, deps);
+        }
+        const contracts::ResourceState final_state = hooks::state_of(claim.id);
+        if (final_state == contracts::ResourceState::kFree) {
+            hooks::retry_pending_set(claim.id, true);
+        } else if (final_state == contracts::ResourceState::kTombstone) {
+            if (out_mechanism_failed != nullptr) *out_mechanism_failed = true;
+        }
+    }
+}
+
+// 以一条同步事务安装同一插件的原子组。返回 true 表示本轮出现失败；失败后组成员
+// 已统一回到 free（物理回滚失败则保留 tombstone），并通过 retry_pending 进入逐帧重试。
+bool install_atomic_group(const contracts::PluginDescriptor& plugin,
+                          contracts::PluginContext& ctx, const HostDeps& deps,
+                          const contracts::ResourceClaim** installed_claims,
+                          uintptr_t* installed_entries, uint32_t* installed_count,
+                          bool* out_mechanism_failed, const char** out_failed_id,
+                          const char** out_error) {
+    if (!plugin_has_atomic_claims(plugin)) return false;
+
+    const bool group_want = atomic_group_want(plugin);
+    const char* failed_id = nullptr;
+    const char* error = nullptr;
+    bool failed = false;
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        const contracts::ResourceClaim& claim = plugin.resources[i];
+        if (!claim.atomic) continue;
+        const contracts::ResourceState state = hooks::state_of(claim.id);
+        if (state == contracts::ResourceState::kLive ||
+            state == contracts::ResourceState::kDisabled) {
+            continue;
+        }
+        // 非入口资源在门禁关闭时没有空转态；整组保持 free，待门禁开启后再尝试。
+        if (!group_want && claim.mechanism != contracts::ResourceMechanism::kEntryHook) {
+            continue;
+        }
+        if (state != contracts::ResourceState::kFree) {
+            failed = true;
+            failed_id = claim.id;
+            error = "resource not free";
+            break;
+        }
+
+        if (claim.mechanism == contracts::ResourceMechanism::kEntryHook) {
+            bool followed = false;
+            const uintptr_t entry = deps.resolve_entry != nullptr
+                                        ? deps.resolve_entry(claim.symbol, &followed)
+                                        : 0;
+            if (entry == 0) {
+                failed = true;
+                failed_id = claim.id;
+                error = "symbol unresolved";
+                break;
+            }
+            if (hooks::entry_target_conflicts(entry, claim.id)) {
+                failed = true;
+                failed_id = claim.id;
+                error = "entry target already occupied";
+                break;
+            }
+            const hooks::InstallOutcome outcome = hooks::install_claim_entry_hook(
+                claim, entry, deps.hook_fn, deps.unhook_fn, false);
+            if (outcome.ok != 0) {
+                failed = true;
+                failed_id = claim.id;
+                error = outcome.error != nullptr ? outcome.error : "install failed";
+                break;
+            }
+            hooks::runtime_set(claim.id, entry, outcome.backup);
+            if (plugin.on_resource_ready != nullptr &&
+                plugin.on_resource_ready(ctx, claim.id, outcome.backup) != 0) {
+                failed = true;
+                failed_id = claim.id;
+                error = "resource_ready_failed";
+                break;
+            }
+            if (installed_claims != nullptr && installed_entries != nullptr &&
+                installed_count != nullptr) {
+                installed_claims[*installed_count] = &claim;
+                installed_entries[*installed_count] = entry;
+                ++*installed_count;
+            }
+            continue;
+        }
+
+        uintptr_t target = 0;
+        void* backup = nullptr;
+        const char* install_error = install_non_entry_claim(claim, &target, &backup);
+        if (install_error != nullptr) {
+            failed = true;
+            failed_id = claim.id;
+            error = install_error;
+            break;
+        }
+        // 非入口机制没有空转态；原子组仍先保持非 live 登记，待全部成员完成后统一
+        // 发布，失败路径由 rollback_atomic_group 物理释放。
+        hooks::set_state(claim.id, contracts::ResourceState::kDisabled);
+        hooks::retry_pending_set(claim.id, false);
+        if (installed_claims != nullptr && installed_entries != nullptr &&
+            installed_count != nullptr) {
+            installed_claims[*installed_count] = &claim;
+            installed_entries[*installed_count] = target;
+            ++*installed_count;
+        }
+    }
+
+    if (failed) {
+        rollback_atomic_group(plugin, deps, out_mechanism_failed);
+        if (out_failed_id != nullptr) *out_failed_id = failed_id;
+        if (out_error != nullptr) *out_error = error;
+        return true;
+    }
+
+    // 门禁从关闭切换为开启时，entry hook 已可能处于 disabled；只有整组走到这里
+    // 才把它们统一切为 live，避免中间态触发功能 wrapper。
+    if (group_want) {
+        for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+            const contracts::ResourceClaim& claim = plugin.resources[i];
+            if (claim.atomic && hooks::state_of(claim.id) == contracts::ResourceState::kDisabled) {
+                hooks::set_state(claim.id, contracts::ResourceState::kLive);
+            }
+            if (claim.atomic) hooks::retry_pending_set(claim.id, false);
+        }
+    }
+    return false;
+}
+
+// 常驻（gate==nullptr）fail-soft/optional 资源失败后的定向重试（§8：保持 free、可重试）。
+// 安装语义与同步安装路径一致：入口 hook 安装成功后 runtime_set（顺带清除
+// retry_pending）并把 backup 交还所有者（wrapper 依赖该 backup 重放原函数）；非入口机制
+// 走 install_non_entry_claim。返回 nullptr 成功，否则静态错误文本。
+// 受限回调失败：物理安装已成立但 backup 未交还，wrapper 不可用，故撤回本条并保持待重试。
+const char* retry_resident_claim(const contracts::PluginDescriptor& plugin,
+                                 contracts::PluginContext& ctx,
+                                 const contracts::ResourceClaim& claim, const HostDeps& deps,
+                                 int32_t* out_code = nullptr) {
+    if (out_code != nullptr) {
+        *out_code = 1;
+    }
+    if (claim.mechanism == contracts::ResourceMechanism::kEntryHook) {
+        bool followed = false;
+        const uintptr_t entry =
+            deps.resolve_entry != nullptr ? deps.resolve_entry(claim.symbol, &followed) : 0;
+        if (entry == 0) return "symbol unresolved";
+        if (hooks::entry_target_conflicts(entry, claim.id)) return "entry target already occupied";
+        const hooks::InstallOutcome outcome =
+            hooks::install_claim_entry_hook(claim, entry, deps.hook_fn, deps.unhook_fn, true);
+        if (outcome.ok != 0) {
+            return outcome.error != nullptr ? outcome.error : "install failed";
+        }
+        hooks::runtime_set(claim.id, entry, outcome.backup);
+        if (plugin.on_resource_ready != nullptr &&
+            plugin.on_resource_ready(ctx, claim.id, outcome.backup) != 0) {
+            revoke_resource(claim.id, deps);
+            if (hooks::state_of(claim.id) == contracts::ResourceState::kFree) {
+                hooks::retry_pending_set(claim.id, true);
+            }
+            return "resource_ready_failed";
+        }
+        return nullptr;
+    }
+    uintptr_t target = 0;
+    void* backup = nullptr;
+    int32_t code = 1;
+    const char* error = install_non_entry_claim(claim, &target, &backup, &code);
+    if (error != nullptr) {
+        // 保留 acquire 原始码：调用方据此区分 NotReady（可等待下一次信号）与永久错误。
+        if (out_code != nullptr) *out_code = code;
+        return error;
+    }
+    // 非入口机制成功：置 live；kOwnership 无运行期记录，标记显式清除。
+    hooks::set_state(claim.id, contracts::ResourceState::kLive);
+    hooks::retry_pending_set(claim.id, false);
+    if (out_code != nullptr) *out_code = 0;
+    if (backup != nullptr && plugin.on_resource_ready != nullptr &&
+        plugin.on_resource_ready(ctx, claim.id, backup) != 0) {
+        revoke_resource(claim.id, deps);
+        if (hooks::state_of(claim.id) == contracts::ResourceState::kFree) {
+            hooks::retry_pending_set(claim.id, true);
+        }
+        return "resource_ready_failed";
+    }
+    return nullptr;
+}
+
+// ---- 生命周期事务跟踪（主线程唯一执行器；每插件至多一个在途事务）----
+
+struct LifecycleTx {
+    bool in_use = false;
+    bool ready_failed = false;  // 受限回调失败已置 failed：终态不再覆盖
+    bool cascade = false;       // 级联撤销：成功后保持 installed_disabled，不调用 deactivate
+    uint64_t tx_id = 0;
+    uint32_t plugin_index = 0;
+    hooks::TxKind kind = hooks::TxKind::kInstall;
+    bool owner_drain_pending = false;
+    bool was_enabled = false;
+    bool failed_cleanup = false;
+    bool quarantine_pending = false;
+    contracts::QolOwnerToken stopped_token = 0;
+    bool stop_preparing = false;
+    bool capabilities_revoke_pending = false;
+    bool provider_drain_pending = false;
+};
+
+// 槽位与插件同容量：事务引擎保证每插件至多一个未终态事务。
+LifecycleTx g_lifecycle_txs[kMaxPlugins];
+
+uint32_t plugin_index_of(const char* plugin_id) {
+    if (plugin_id == nullptr) return kMaxPlugins;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (std::strcmp(g_plugins[i].descriptor.id, plugin_id) == 0) return i;
+    }
+    return kMaxPlugins;
+}
+
+bool plugin_has_active_tx(const char* plugin_id) {
+    if (plugin_id == nullptr) return false;
+    for (const LifecycleTx& slot : g_lifecycle_txs) {
+        if (!slot.in_use) continue;
+        if (std::strcmp(g_plugins[slot.plugin_index].descriptor.id, plugin_id) == 0) return true;
+    }
+    return false;
+}
+
+// 数量扩展模式策略（Host-owned）：仅当 stack_limit 资源组整组 live 且插件 enabled 时
+// 才视为已应用。请求开启但未落地时保持 NotReady，不伪装关闭；策略不读 feature bool
+// 直接当已应用。由 feature 模式的生命周期步进/转换点驱动。
+void sync_item_count_policy() {
+    if (!g_feature_mode) return;
+    static constexpr char kItemCountOwner[] = "stack_limit";
+    const uint32_t index = plugin_index_of(kItemCountOwner);
+    if (index == kNoPlugin) {
+        host_item_count_set_extended_mode(qol::game::ItemCountExtendedMode::kOff);
+        return;
+    }
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    infra::FeatureStatus status{};
+    // 整组真正应用：插件 enabled、组内全部 atomic 成员 live，且没有在途安装/撤销事务
+    // （撤销开始时事务已存在，立即退出 applied，满足 revoke 起点取消）。
+    const bool applied = !plugin_has_active_tx(plugin.id) && infra::status_get(plugin.id, &status) &&
+                         status.state == infra::FeatureState::kEnabled && status.enabled &&
+                         atomic_group_satisfied(plugin);
+    if (applied) {
+        host_item_count_set_extended_mode(qol::game::ItemCountExtendedMode::kApplied);
+    } else if (g_feature_wanted[index]) {
+        host_item_count_set_extended_mode(qol::game::ItemCountExtendedMode::kNotReady);
+    } else {
+        host_item_count_set_extended_mode(qol::game::ItemCountExtendedMode::kOff);
+    }
+}
+
+bool plugin_isolated(const contracts::PluginDescriptor& plugin) {
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        if (hooks::isolated_get(plugin.resources[i].id)) return true;
+    }
+    return false;
+}
+
+bool feature_stop(uint32_t index, bool failed_cleanup) {
+    if (index >= g_plugin_count) return false;
+    const auto& plugin = g_plugins[index].descriptor;
+    if (plugin_has_active_tx(plugin.id)) return false;
+    // 停止/撤销：作废待恢复信号与 pending，后续 SaveEnter 的旧 token 不再被接受。
+    clear_ownership_retry_state(index);
+    const auto stopped_token = owner_token_of(plugin.id);
+    LifecycleTx* slot = nullptr;
+    for (auto& candidate : g_lifecycle_txs) if (!candidate.in_use) { slot = &candidate; break; }
+    if (!slot) return false;
+    infra::FeatureStatus status{};
+    infra::status_get(plugin.id, &status);
+    *slot = LifecycleTx{};
+    slot->in_use = true;
+    slot->plugin_index = index;
+    slot->kind = hooks::TxKind::kRelease;
+    slot->stop_preparing = true;
+    slot->was_enabled = status.enabled;
+    slot->failed_cleanup = failed_cleanup;
+    slot->stopped_token = stopped_token;
+    return true;
+}
+
+// 全部声明资源是否都已物理安装（kLive/kDisabled）；软失败保持 kFree 时返回 false。
+bool plugin_resources_all_installed(const contracts::PluginDescriptor& plugin) {
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        const contracts::ResourceState state = hooks::state_of(plugin.resources[i].id);
+        if (state != contracts::ResourceState::kLive &&
+            state != contracts::ResourceState::kDisabled) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// 全部带 gate 资源是否都开启；无 gate 资源视为开（与 install 路径一致）。
+bool plugin_all_gates_want(const contracts::PluginDescriptor& plugin) {
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        const contracts::ResourceClaim& claim = plugin.resources[i];
+        if (claim.gate == nullptr) continue;
+        if (!infra::config_get_bool(claim.gate, false)) return false;
+    }
+    return true;
+}
+
+// ---- 能力注册与撤销级联（§3.4.1 / §3.4.4）----
+
+enum class CapRegistration : uint8_t { kNone = 0, kRegistered = 1, kRevoking = 2 };
+CapRegistration g_cap_registration[kMaxPlugins];
+bool g_http_stop_pending[kMaxPlugins]{};
+bool g_http_disabled_pending[kMaxPlugins]{};
+bool g_http_caps_pending[kMaxPlugins]{};
+bool g_http_provider_drain_pending[kMaxPlugins]{};
+bool g_cascade_release_pending[kMaxPlugins]{};
+
+struct CascadeContext {
+    bool visited[kMaxPlugins] = {};
+};
+
+bool plugin_provides_capability(const contracts::PluginDescriptor& plugin) {
+    return plugin.provides_count > 0 && plugin.provides != nullptr;
+}
+
+bool plugin_provides_http_transport(const contracts::PluginDescriptor& plugin) {
+    if (!plugin_provides_capability(plugin)) return false;
+    bool registry = false;
+    bool dispatch = false;
+    for (uint32_t index = 0; index < plugin.provides_count; ++index) {
+        const char* id = plugin.provides[index].id;
+        if (id == nullptr) continue;
+        registry = registry || std::strcmp(id, contracts::kHttpRegistryCapabilityId) == 0;
+        dispatch = dispatch || std::strcmp(id, contracts::kHttpDispatchCapabilityId) == 0;
+    }
+    return registry && dispatch;
+}
+
+void refresh_http_provider_availability() {
+    const bool registry = infra::require_capability(
+        contracts::kHttpRegistryCapabilityId,
+        QolVersionRange{contracts::kHttpRegistryVersion.major,
+                        contracts::kHttpRegistryVersion.minor}) != nullptr;
+    const bool dispatch = infra::require_capability(
+        contracts::kHttpDispatchCapabilityId,
+        QolVersionRange{contracts::kHttpDispatchVersion.major,
+                        contracts::kHttpDispatchVersion.minor}) != nullptr;
+    set_http_provider_available(registry && dispatch);
+}
+
+// 进入 enabled 时注册（§3.4.4；幂等：已注册跳过）。
+void register_provided_capabilities(uint32_t index) {
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    if (!plugin_provides_capability(plugin)) return;
+    if (g_cap_registration[index] == CapRegistration::kRegistered) return;
+    for (uint32_t i = 0; i < plugin.provides_count; ++i) {
+        const contracts::CapabilityProvisionRef& ref = plugin.provides[i];
+        if (ref.id == nullptr || ref.iface == nullptr) continue;
+        // 重复注册（同 id）返回 false，视为已注册；容量满/非法同样只记录、不阻断。
+        infra::register_capability(infra::CapabilityProvision{ref.id, ref.version, ref.iface});
+        clear_cascade_degraded_for_capability(ref.id);
+    }
+    g_cap_registration[index] = CapRegistration::kRegistered;
+    refresh_http_provider_availability();
+}
+
+void unregister_provided_capabilities(uint32_t index) {
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    if (!plugin_provides_capability(plugin)) return;
+    if (plugin_provides_http_transport(plugin))
+        set_http_provider_available(false);
+    for (uint32_t i = 0; i < plugin.provides_count; ++i) {
+        if (plugin.provides[i].id != nullptr) {
+            infra::unregister_capability(plugin.provides[i].id);
+        }
+    }
+    g_cap_registration[index] = CapRegistration::kNone;
+}
+
+void cascade_dependents(const char* capability_id, CascadeContext& context);
+
+bool schedule_release(uint32_t index, bool cascade) {
+    if (index >= g_plugin_count) return false;
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    LifecycleTx* slot = nullptr;
+    for (LifecycleTx& candidate : g_lifecycle_txs) {
+        if (!candidate.in_use) {
+            slot = &candidate;
+            break;
+        }
+    }
+    if (slot == nullptr) return false;
+    const uint64_t tx_id = hooks::tx_begin(plugin.id, hooks::TxKind::kRelease);
+    if (tx_id == 0) return false;
+    slot->in_use = true;
+    slot->ready_failed = false;
+    slot->cascade = cascade;
+    slot->tx_id = tx_id;
+    slot->plugin_index = index;
+    slot->kind = hooks::TxKind::kRelease;
+    return true;
+}
+
+void defer_http_stop(uint32_t index, bool call_on_disabled, bool revoke_capabilities,
+                     bool provider_revoke, bool cascade_release) {
+    if (index >= g_plugin_count) return;
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    if (provider_revoke) set_http_provider_available(false);
+    http_endpoint_binder_owner_stop_begin(plugin.id);
+    g_http_stop_pending[index] = true;
+    g_http_disabled_pending[index] = g_http_disabled_pending[index] || call_on_disabled;
+    g_http_caps_pending[index] = g_http_caps_pending[index] || revoke_capabilities;
+    g_http_provider_drain_pending[index] =
+        g_http_provider_drain_pending[index] || provider_revoke;
+    g_cascade_release_pending[index] = g_cascade_release_pending[index] || cascade_release;
+}
+
+uint32_t poll_http_stops() {
+    uint32_t completed = 0;
+    const bool provider_drained = http_endpoint_binder_provider_drain_poll();
+    for (uint32_t index = 0; index < g_plugin_count; ++index) {
+        if (!g_http_stop_pending[index]) continue;
+        const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+        if (!http_endpoint_binder_owner_stop_poll(plugin.id)) continue;
+        if (g_http_provider_drain_pending[index] && !provider_drained) continue;
+        contracts::PluginContext ctx = make_plugin_context(plugin.id);
+        if (g_http_disabled_pending[index] && plugin.on_disabled != nullptr)
+            plugin.on_disabled(ctx);
+        g_http_disabled_pending[index] = false;
+        g_http_stop_pending[index] = false;
+        if (g_cascade_release_pending[index]) {
+            g_cascade_release_pending[index] = false;
+            if (!schedule_release(index, true)) {
+                infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                                     "cascade release unavailable",
+                                     infra::FeatureFailureStage::kOther);
+            }
+        }
+        ++completed;
+    }
+    if (http_endpoint_binder_all_stops_drained()) {
+        for (uint32_t index = 0; index < g_plugin_count; ++index) {
+            if (!g_http_caps_pending[index] ||
+                (g_http_provider_drain_pending[index] && !provider_drained)) continue;
+            unregister_provided_capabilities(index);
+            g_http_caps_pending[index] = false;
+            g_http_provider_drain_pending[index] = false;
+            ++completed;
+        }
+    }
+    refresh_all_http_degraded_status();
+    return completed;
+}
+
+// 级联停用 required 消费者（§3.4.1 第 3 条）：关消费者门禁 → 释放资源 →
+// 递归撤销其自身提供的能力 → 置 installed_disabled + reason=cascade_stopped。
+void cascade_stop_plugin(uint32_t index, CascadeContext& context) {
+    if (index >= g_plugin_count || context.visited[index]) return;
+    context.visited[index] = true;
+    owner_suspend(&g_plugins[index]);
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    const bool revoke_caps = g_cap_registration[index] == CapRegistration::kRegistered;
+    const bool provider_revoke = revoke_caps && plugin_provides_http_transport(plugin);
+    defer_http_stop(index, plugin.on_disabled != nullptr, revoke_caps, provider_revoke,
+                    plugin.resources_count != 0);
+    // Route admission and callbacks are drained by the frame poll before release starts.
+    if (plugin.resources_count == 0) {
+        infra::status_update(plugin.id, infra::FeatureState::kInstalledDisabled, false,
+                             "cascade_stopped");
+    } else {
+        infra::status_update(plugin.id, infra::FeatureState::kDeactivating, false, nullptr);
+    }
+    publish_runtime_actual(plugin.id, false);
+    // 消费者自身提供的能力：注销并继续级联（递归即逆拓扑序）。
+    if (revoke_caps) {
+        g_cap_registration[index] = CapRegistration::kRevoking;
+        for (uint32_t i = 0; i < plugin.provides_count; ++i) {
+            cascade_dependents(plugin.provides[i].id, context);
+        }
+    }
+}
+
+// 依赖失效级联：requires 命中 → 逆拓扑停用；optional_requires 命中 → degraded 标记。
+void cascade_dependents(const char* capability_id, CascadeContext& context) {
+    if (capability_id == nullptr) return;
+    // 依赖图的逆拓扑序保证更深层 consumer 先于 provider 侧 consumer 进入撤销事务；
+    // 每层仍由 capability_id 精确筛选，避免 optional 依赖被 required 级联停用。
+    for (uint32_t order_pos = g_install_order_count; order_pos > 0; --order_pos) {
+        const uint32_t i = g_install_order[order_pos - 1];
+        const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
+        bool required = false;
+        for (uint32_t r = 0; r < plugin.requires_count; ++r) {
+            if (plugin.requires[r].id != nullptr &&
+                std::strcmp(plugin.requires[r].id, capability_id) == 0) {
+                required = true;
+                break;
+            }
+        }
+        if (required) {
+            infra::FeatureStatus st{};
+            if (infra::status_get(plugin.id, &st) &&
+                (st.state == infra::FeatureState::kEnabled ||
+                 st.state == infra::FeatureState::kInstalledDisabled)) {
+                cascade_stop_plugin(i, context);
+            }
+            continue;
+        }
+        for (uint32_t o = 0; o < plugin.optional_count; ++o) {
+            if (plugin.optional_requires[o].id != nullptr &&
+                std::strcmp(plugin.optional_requires[o].id, capability_id) == 0) {
+                g_cascade_degraded[i] = true;
+                refresh_degraded_status(i);
+            }
+        }
+    }
+}
+
+// 提供者撤销（§3.4.4）：关闭提供者门禁（撤销期拒绝新调用）→ 级联 → 注销。
+void begin_revoke_provider(uint32_t index) {
+    owner_suspend(&g_plugins[index]);
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    if (!plugin_provides_capability(plugin)) return;
+    const bool revoke_caps = g_cap_registration[index] == CapRegistration::kRegistered;
+    defer_http_stop(index, plugin.on_disabled != nullptr, revoke_caps,
+                    revoke_caps && plugin_provides_http_transport(plugin), false);
+    publish_runtime_actual(plugin.id, false);
+    if (!revoke_caps) return;
+    g_cap_registration[index] = CapRegistration::kRevoking;
+    CascadeContext context{};
+    context.visited[index] = true;
+    for (uint32_t i = 0; i < plugin.provides_count; ++i) {
+        cascade_dependents(plugin.provides[i].id, context);
+    }
+}
+
+// 同步完成一个已通过 required 校验的插件安装。装配期与 blocked 重评估共用这条路径，
+// 保持资源安装、受限回调失败回滚、门禁落态和能力发布语义一致。
+bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
+    if (!owner_resume(&g_plugins[index])) return false;
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    contracts::PluginContext ctx = make_plugin_context(plugin.id);
+
+    const char* preflight_claim = nullptr;
+    const char* preflight_error =
+        preflight_plugin_resources(plugin, deps, &preflight_claim);
+    if (preflight_error != nullptr) {
+        QOL_LOG_ERROR(QolDomain::kCore,
+                      "plugin %s install unsupported resource=%s: %s", plugin.id,
+                      preflight_claim != nullptr ? preflight_claim : "?", preflight_error);
+        infra::status_update(plugin.id, infra::FeatureState::kUnsupported, false,
+                             preflight_error);
+        publish_runtime_actual(plugin.id, false);
+        return false;
+    }
+
+    if (plugin.install(ctx) != 0) {
+        QOL_LOG_ERROR(QolDomain::kCore,
+                      "plugin %s install failed: plugin install returned nonzero", plugin.id);
+        infra::status_update(plugin.id, infra::FeatureState::kFailed, false, "install failed",
+                             infra::FeatureFailureStage::kInstall);
+        publish_runtime_actual(plugin.id, false);
+        return false;
+    }
+
+    const contracts::ResourceClaim* installed_claims[kMaxResourcesPerPlugin];
+    uintptr_t installed_entries[kMaxResourcesPerPlugin];
+    uint32_t installed_count = 0;
+    bool all_gates_on = true;
+    bool resource_failed = false;
+    bool plugin_aborted = false;  // 受限回调失败已置 failed，跳过统一回滚分支
+    bool degraded = false;
+    const char* failed_claim_id = nullptr;
+    const char* resource_error = nullptr;
+    const char* degraded_claim_id = nullptr;
+    const char* degraded_error = nullptr;
+
+    // 返回 true = 该资源失败必须整体回滚（required + fail-closed）。
+    auto handle_claim_failure = [&](const contracts::ResourceClaim& claim,
+                                    const char* error) -> bool {
+        const bool fail_closed_required =
+            claim.requirement == contracts::ResourceRequirement::kRequired &&
+            claim.failure == contracts::ResourceFailure::kFailClosed;
+        if (fail_closed_required) {
+            resource_failed = true;
+            failed_claim_id = claim.id;
+            resource_error = error;
+            return true;
+        }
+        // 常驻（gate==nullptr）fail-soft/optional 失败：资源保持 free，置 retry_pending
+        // 供 ownership 恢复路径按标记定向重装（带 gate 资源由事务路径自行重试，无需标记）。
+        // 资源已被登记为非 free（如空 backup 撤销失败留下的 tombstone）时不得武装重试。
+        if (claim.gate == nullptr &&
+            hooks::state_of(claim.id) == contracts::ResourceState::kFree) {
+            hooks::retry_pending_set(claim.id, true);
+        }
+        degraded = true;
+        degraded_claim_id = claim.id;
+        degraded_error = error;
+        return false;
+    };
+
+    // 原子组先作为一个整体尝试；组内失败由专用回滚处理，避免后续普通资源路径
+    // 把已经回滚的成员再次当作本轮已装资源释放。
+    if (plugin_has_atomic_claims(plugin)) {
+        const bool atomic_failed = install_atomic_group(
+            plugin, ctx, deps, installed_claims, installed_entries, &installed_count,
+            &resource_failed, &failed_claim_id, &resource_error);
+        if (atomic_failed) {
+            const bool rollback_failed = resource_failed;
+            installed_count = 0;
+            if (!rollback_failed) {
+                degraded = true;
+                degraded_claim_id = failed_claim_id;
+                degraded_error = resource_error;
+                failed_claim_id = nullptr;
+                resource_error = nullptr;
+            }
+        }
+    }
+
+    for (uint32_t r = 0; r < plugin.resources_count; ++r) {
+        const contracts::ResourceClaim& claim = plugin.resources[r];
+        const bool gate_on =
+            claim.gate != nullptr ? infra::config_get_bool(claim.gate, false) : true;
+        if (claim.gate != nullptr && !gate_on) all_gates_on = false;
+
+        // 原子成员已由上面的组事务处理；组失败时不得落入逐条安装路径。
+        if (claim.atomic) continue;
+
+        // 非入口机制（call patch / ptr slot / ownership）不支持空转：门禁关闭不安装，
+        // 登记保持 free。
+        if (claim.mechanism != contracts::ResourceMechanism::kEntryHook) {
+            if (claim.gate != nullptr && !gate_on) continue;
+            uintptr_t target = 0;
+            void* backup = nullptr;
+            const char* error = install_non_entry_claim(claim, &target, &backup);
+            if (error != nullptr) {
+                if (handle_claim_failure(claim, error)) break;
+                continue;
+            }
+            hooks::set_state(claim.id, contracts::ResourceState::kLive);
+            installed_claims[installed_count] = &claim;
+            installed_entries[installed_count] = target;
+            ++installed_count;
+            // kPtrSlot 的原函数入口 = 槽期望值，立即交还所有者；其余机制无 backup。
+            if (backup != nullptr && plugin.on_resource_ready != nullptr &&
+                plugin.on_resource_ready(ctx, claim.id, backup) != 0) {
+                const bool rollback_succeeded =
+                    rollback_installed(installed_claims, installed_count, deps);
+                infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                                     "resource_ready_failed",
+                                     rollback_succeeded ? infra::FeatureFailureStage::kInstall
+                                                        : infra::FeatureFailureStage::kOther);
+                publish_runtime_actual(plugin.id, false);
+                QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s",
+                             plugin.id, claim.id);
+                plugin_aborted = true;
+                break;
+            }
+            continue;
+        }
+
+        bool followed = false;
+        const uintptr_t entry =
+            deps.resolve_entry != nullptr ? deps.resolve_entry(claim.symbol, &followed) : 0;
+        if (entry == 0) {
+            if (handle_claim_failure(claim, "symbol unresolved")) break;
+            continue;
+        }
+        if (hooks::entry_target_conflicts(entry, claim.id)) {
+            if (handle_claim_failure(claim, "entry target already occupied")) break;
+            continue;
+        }
+
+        const hooks::InstallOutcome outcome =
+            hooks::install_claim_entry_hook(claim, entry, deps.hook_fn, deps.unhook_fn, gate_on);
+        if (outcome.ok != 0) {
+            if (handle_claim_failure(
+                    claim, outcome.error != nullptr ? outcome.error : "install failed")) {
+                break;
+            }
+            continue;
+        }
+        hooks::runtime_set(claim.id, entry, outcome.backup);
+        // backup 交还失败按逆序同步撤回本插件全部已装资源，禁止半装对外可见。
+        if (plugin.on_resource_ready != nullptr &&
+            plugin.on_resource_ready(ctx, claim.id, outcome.backup) != 0) {
+            installed_claims[installed_count] = &claim;
+            installed_entries[installed_count] = entry;
+            ++installed_count;
+            const bool rollback_succeeded =
+                rollback_installed(installed_claims, installed_count, deps);
+            infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                                  "resource_ready_failed",
+                                  rollback_succeeded ? infra::FeatureFailureStage::kInstall
+                                                     : infra::FeatureFailureStage::kOther);
+            publish_runtime_actual(plugin.id, false);
+            QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s", plugin.id,
+                         claim.id);
+            plugin_aborted = true;
+            break;
+        }
+        installed_claims[installed_count] = &claim;
+        installed_entries[installed_count] = entry;
+        ++installed_count;
+    }
+
+    if (plugin_aborted) return false;
+
+    if (resource_failed && failed_claim_id == nullptr && installed_count == 0) {
+        // 原子组物理回滚失败时已完成状态落盘，直接保持 failed。
+        infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                              "atomic group rollback failed",
+                              infra::FeatureFailureStage::kOther);
+        publish_runtime_actual(plugin.id, false);
+        return false;
+    }
+
+    if (resource_failed) {
+        const bool rollback_succeeded =
+            rollback_resources(installed_claims, installed_entries, installed_count, deps);
+        std::snprintf(g_error_text[index], sizeof(g_error_text[index]), "resource %s: %s",
+                      failed_claim_id != nullptr ? failed_claim_id : "?",
+                      resource_error != nullptr ? resource_error : "failed");
+        infra::status_update(plugin.id, infra::FeatureState::kFailed, false, g_error_text[index],
+                             rollback_succeeded ? infra::FeatureFailureStage::kInstall
+                                                : infra::FeatureFailureStage::kOther);
+        publish_runtime_actual(plugin.id, false);
+        QOL_LOG_WARN(QolDomain::kCore, "plugin %s install failed: %s", plugin.id,
+                     g_error_text[index]);
+        return false;
+    }
+
+    // 全部成功（含 fail-soft 跳过）：带 gate 的资源全开 → enabled；否则 installed_disabled。
+    const char* optional_error = check_optional_requires(plugin, index);
+    if (optional_error != nullptr) {
+        degraded = true;
+        // check_optional_requires 已把诊断文本写入 g_error_text；避免用同一缓冲区
+        // 作为 snprintf 的 source/destination，保留 capability id。
+        if (degraded_claim_id == nullptr) degraded_error = nullptr;
+    }
+    const bool enabled = all_gates_on && atomic_group_satisfied(plugin);
+    const char* status_error = nullptr;
+    if (degraded) {
+        if (degraded_claim_id != nullptr) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]), "resource %s: %s",
+                          degraded_claim_id, degraded_error != nullptr ? degraded_error : "failed");
+        } else if (g_error_text[index][0] == '\0') {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]), "%s",
+                          degraded_error != nullptr ? degraded_error : "degraded");
+        }
+        status_error = g_error_text[index];
+        // 记录由本路径置位，供安装事务成功终态清除标记。
+        g_gate_degraded[index] = true;
+        refresh_degraded_status(index);
+        QOL_LOG_WARN(QolDomain::kCore, "plugin %s degraded on %s: %s", plugin.id,
+                     degraded_claim_id != nullptr ? degraded_claim_id : "?", status_error);
+    }
+    infra::status_update(plugin.id,
+                         enabled ? infra::FeatureState::kEnabled
+                                 : infra::FeatureState::kInstalledDisabled,
+                         enabled, status_error);
+    if (enabled) {
+        if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
+        bind_http_endpoints(plugin);
+        register_provided_capabilities(index);
+        publish_runtime_actual(plugin.id, true);
+    } else {
+        owner_suspend(&g_plugins[index]);
+        defer_http_stop(index, plugin.on_disabled != nullptr, false, false, false);
+        (void)poll_http_stops();
+        publish_runtime_actual(plugin.id, false);
+    }
+    return true;
+}
+
+}  // namespace
+
+void bind_management_sdk(const contracts::QolHostSdk& sdk) {
+    g_management_sdk = sdk;
+    g_management_sdk_bound = true;
+}
+
+bool register_plugin(const contracts::PluginDescriptor& plugin) {
+    if (g_feature_mode) return false;
+    if (!descriptor_valid(plugin)) return false;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (std::strcmp(g_plugins[i].descriptor.id, plugin.id) == 0) return false;
+    }
+    if (g_plugin_count >= kMaxPlugins) return false;
+
+    // 资源登记在声明期完成（一资源一安装者）；登记失败即视为描述符非法。
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        if (!hooks::register_claim(plugin.resources[i])) return false;
+    }
+
+    g_plugins[g_plugin_count].descriptor = plugin;
+    if (!owner_register(&g_plugins[g_plugin_count], plugin.id)) return false;
+    if (!http_endpoint_binder_register_owner(g_plugins[g_plugin_count].descriptor)) return false;
+    ++g_plugin_count;
+    return true;
+}
+
+bool bind_plugin_store(const contracts::PluginDescriptor& plugin, const char* store_namespace) {
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (std::strcmp(g_plugins[i].descriptor.id, plugin.id) == 0 &&
+            std::strcmp(g_plugins[i].descriptor.version, plugin.version) == 0) {
+            return owner_bind_store(&g_plugins[i], store_namespace);
+        }
+    }
+    return false;
+}
+
+bool bind_plugin_slot_operation(const contracts::PluginDescriptor& plugin) {
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (std::strcmp(g_plugins[i].descriptor.id, plugin.id) == 0 &&
+            std::strcmp(g_plugins[i].descriptor.version, plugin.version) == 0) {
+            return owner_bind_slot_operation(&g_plugins[i]);
+        }
+    }
+    return false;
+}
+
+bool bind_plugin_save_route(const contracts::PluginDescriptor& plugin) {
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (std::strcmp(g_plugins[i].descriptor.id, plugin.id) == 0 &&
+            std::strcmp(g_plugins[i].descriptor.version, plugin.version) == 0) {
+            return owner_bind_save_route(&g_plugins[i]);
+        }
+    }
+    return false;
+}
+
+static bool lifecycle_apply_actual(const char* plugin_id, int32_t action) {
+    const contracts::PluginDescriptor* plugin = find_plugin(plugin_id);
+    if (plugin == nullptr) return false;
+    if (action == contracts::kFeatureLifecycleDeactivate && !plugin->deactivate_allowed) {
+        QOL_LOG_ERROR(QolDomain::kCore,
+                      "lifecycle: deactivate rejected id=%s reason=legacy consumers",
+                      plugin->id);
+        return false;
+    }
+    // 前置拒绝：同插件在途事务 / 任一资源已隔离（隔离后禁止重试，直到进程重启）。
+    if (plugin_has_active_tx(plugin->id)) return false;
+    if (plugin_isolated(*plugin) &&
+        !(g_feature_mode && action == contracts::kFeatureLifecycleDeactivate)) return false;
+
+    infra::FeatureStatus status{};
+    if (!infra::status_get(plugin->id, &status)) return false;
+
+    contracts::PluginContext ctx = make_plugin_context(plugin->id);
+    switch (action) {
+        case contracts::kFeatureLifecycleEnable:
+        case contracts::kFeatureLifecycleDisable:
+            // 开关语义归配置门禁（/api/config/set），本端点为单一写者：不接受 enable/disable。
+            return false;
+
+        case contracts::kFeatureLifecycleDeactivate: {
+            if (g_feature_mode) {
+                if (status.state != infra::FeatureState::kEnabled &&
+                    status.state != infra::FeatureState::kInstalledDisabled) return false;
+                const uint32_t index = plugin_index_of(plugin->id);
+                if (!feature_stop(index, false)) return false;
+                return true;
+            }
+            if (status.state != infra::FeatureState::kEnabled &&
+                status.state != infra::FeatureState::kInstalledDisabled) {
+                return false;
+            }
+            const infra::FeatureState previous = status.state;
+            // §9 冻结生命周期：存在未决转换/未决保存事务时 prepare_stop Busy，宿主
+            // 停用操作明确失败，不伪装停用成功。无 binding（NotFound）与无 save_route
+            // 授权（Blocked）都表示该 owner 没有领域回调在途，不构成停用前置。
+            {
+                const contracts::QolOwnerToken owner = owner_token_of(plugin->id);
+                if (owner != 0) {
+                    const QolResult stop_gated = save_route::prepare_stop(owner);
+                    if (stop_gated.code == kQolErrBusy) {
+                        infra::status_update(plugin->id, previous,
+                                             previous == infra::FeatureState::kEnabled, nullptr);
+                        return false;
+                    }
+                }
+            }
+            infra::status_update(plugin->id, infra::FeatureState::kDeactivating, false, nullptr);
+            LifecycleTx* slot = nullptr;
+            for (LifecycleTx& candidate : g_lifecycle_txs) {
+                if (!candidate.in_use) {
+                    slot = &candidate;
+                    break;
+                }
+            }
+            if (slot == nullptr) {
+                infra::status_update(plugin->id, previous,
+                                     previous == infra::FeatureState::kEnabled, nullptr);
+                return false;
+            }
+            const uint32_t index = plugin_index_of(plugin->id);
+            *slot = LifecycleTx{};
+            slot->in_use = true;
+            slot->plugin_index = index;
+            slot->kind = hooks::TxKind::kRelease;
+            slot->owner_drain_pending = true;
+            slot->stopped_token = owner_token_of(plugin->id);
+            const bool revoke_caps = g_cap_registration[index] == CapRegistration::kRegistered &&
+                                     plugin_provides_capability(*plugin);
+            if (revoke_caps) {
+                begin_revoke_provider(index);
+                slot->was_enabled = false;  // deferred provider revoke owns on_disabled/cap revoke
+                slot->provider_drain_pending = plugin_provides_http_transport(*plugin);
+            } else {
+                slot->was_enabled = previous == infra::FeatureState::kEnabled;
+                owner_suspend_begin(&g_plugins[index]);
+                http_endpoint_binder_owner_stop_begin(plugin->id);
+            }
+            return true;
+        }
+
+        case contracts::kFeatureLifecycleActivate: {
+            if (g_feature_mode && g_dependency_invalid[plugin_index_of(plugin->id)]) {
+                const uint32_t invalid_index = plugin_index_of(plugin->id);
+                QOL_LOG_WARN(QolDomain::kCore, "plugin %s activation skipped: %s", plugin->id,
+                             g_error_text[invalid_index][0] != '\0'
+                                 ? g_error_text[invalid_index]
+                                 : "dependency invalid");
+                return false;
+            }
+            // §3.2：inactive → resolving 为幂等重入；blocked/failed → resolving 为重试
+            // （隔离态已在函数前置拒绝中拦截，未隔离的失败可安全重装）。
+            // 级联停用复用 installed_disabled，但由 cascade_stopped 标记区分门禁关闭态；
+            // 显式 activate 必须重新进入同一安装事务路径。
+            const bool cascade_stopped =
+                status.state == infra::FeatureState::kInstalledDisabled &&
+                status.error != nullptr &&
+                std::strcmp(status.error, "cascade_stopped") == 0;
+            if (status.state != infra::FeatureState::kInactive &&
+                status.state != infra::FeatureState::kBlocked &&
+                status.state != infra::FeatureState::kFailed && !cascade_stopped &&
+                !(g_feature_mode && status.state == infra::FeatureState::kUnsupported)) {
+                return false;
+            }
+            infra::status_update(plugin->id, infra::FeatureState::kResolving, false, nullptr);
+            const uint32_t index = plugin_index_of(plugin->id);
+            // 新一次转换重新开始逐资源安装：清上一轮的 resource-install 失败记录，
+            // 并使上一次 activation 的 ownership 恢复信号失效（旧 token 不再匹配）。
+            if (g_feature_mode) {
+                clear_resource_install_error(index);
+                clear_ownership_retry_state(index);
+                refresh_degraded_status(index);
+            }
+            const char* blocked_error = check_requires(*plugin, index);
+            if (blocked_error != nullptr) {
+                QOL_LOG_WARN(QolDomain::kCore, "plugin %s blocked at activation: %s",
+                             plugin->id, blocked_error);
+                infra::status_update(plugin->id, infra::FeatureState::kBlocked, false,
+                                     blocked_error);
+                publish_runtime_actual(plugin->id, false);
+                return false;
+            }
+            const char* preflight_claim = nullptr;
+            const char* preflight_error =
+                preflight_plugin_resources(*plugin, g_install_deps, &preflight_claim);
+            if (preflight_error != nullptr) {
+                QOL_LOG_ERROR(QolDomain::kCore,
+                              "plugin %s install unsupported resource=%s: %s", plugin->id,
+                              preflight_claim != nullptr ? preflight_claim : "?",
+                              preflight_error);
+                infra::status_update(plugin->id, infra::FeatureState::kUnsupported, false,
+                                       preflight_error);
+                publish_runtime_actual(plugin->id, false);
+                if (g_feature_mode) {
+                    owner_suspend_begin(&g_plugins[index]);
+                    (void)owner_suspend_poll(&g_plugins[index]);
+                }
+                return false;
+            }
+            // §3.3：install 只做插件自身初始化（幂等重入）；失败即 failed，不启动事务。
+            if (!(g_feature_mode ? owner_resume_poll(&g_plugins[index]) : owner_resume(&g_plugins[index]))) {
+                publish_runtime_actual(plugin->id, false);
+                return false;
+            }
+            ctx = make_plugin_context(plugin->id);
+            if (plugin->install != nullptr && plugin->install(ctx) != 0) {
+                QOL_LOG_ERROR(QolDomain::kCore,
+                              "plugin %s install failed: plugin install returned nonzero",
+                              plugin->id);
+                infra::status_update(plugin->id, infra::FeatureState::kFailed, false,
+                                      "plugin install failed",
+                                      infra::FeatureFailureStage::kActivation);
+                publish_runtime_actual(plugin->id, false);
+                if (g_feature_mode) feature_stop(index, true);
+                return false;
+            }
+            if (plugin->resources_count == 0) {
+                const bool enabled = g_feature_mode || plugin_all_gates_want(*plugin);
+                infra::status_update(
+                    plugin->id,
+                    enabled ? infra::FeatureState::kEnabled
+                            : infra::FeatureState::kInstalledDisabled,
+                    enabled, nullptr);
+                if (enabled) {
+                    if (plugin->on_enabled != nullptr) plugin->on_enabled(ctx);
+                    bind_http_endpoints(*plugin);
+                    register_provided_capabilities(plugin_index_of(plugin->id));
+                    publish_runtime_actual(plugin->id, true);
+                } else {
+                    owner_suspend(&g_plugins[index]);
+                    defer_http_stop(index, plugin->on_disabled != nullptr, false, false, false);
+                    (void)poll_http_stops();
+                    publish_runtime_actual(plugin->id, false);
+                }
+                return true;
+            }
+            const uint64_t tx_id = hooks::tx_begin(plugin->id, hooks::TxKind::kInstall);
+            if (tx_id == 0) {
+                infra::status_update(plugin->id, infra::FeatureState::kInactive, false, nullptr);
+                if (g_feature_mode) feature_stop(index, true);
+                return false;
+            }
+            for (LifecycleTx& slot : g_lifecycle_txs) {
+                if (slot.in_use) continue;
+                slot.in_use = true;
+                slot.ready_failed = false;
+                slot.cascade = false;
+                slot.tx_id = tx_id;
+                slot.plugin_index = index;
+                slot.kind = hooks::TxKind::kInstall;
+                return true;
+            }
+            return false;  // 槽位与插件同容量，正常不可达
+        }
+
+        default:
+            return false;
+    }
+}
+
+bool lifecycle_apply(const char* plugin_id, int32_t action) {
+    if (!g_feature_mode) return lifecycle_apply_actual(plugin_id, action);
+    if (!find_plugin(plugin_id) || !g_desired_request) return false;
+    if (action != contracts::kFeatureLifecycleActivate &&
+        action != contracts::kFeatureLifecycleDeactivate) return false;
+    const contracts::PluginDescriptor* plugin = find_plugin(plugin_id);
+    if (action == contracts::kFeatureLifecycleDeactivate &&
+        plugin != nullptr && !plugin->deactivate_allowed) {
+        QOL_LOG_ERROR(QolDomain::kCore,
+                      "lifecycle: deactivate rejected id=%s reason=legacy consumers",
+                      plugin->id);
+        return false;
+    }
+    return g_desired_request(g_desired_request_context, plugin_id,
+                            action == contracts::kFeatureLifecycleActivate);
+}
+
+bool feature_registry_prepare(const HostDeps& deps) {
+    if (g_feature_mode) return false;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        const auto& plugin = g_plugins[i].descriptor;
+        if (!plugin.features || !plugin.feature_count || plugin_has_active_tx(plugin.id)) return false;
+        for (uint32_t r = 0; r < plugin.resources_count; ++r) {
+            // A migrated descriptor has no second gate truth or preinstalled resources.
+            if (plugin.resources[r].gate || hooks::state_of(plugin.resources[r].id) !=
+                                             contracts::ResourceState::kFree) return false;
+        }
+        infra::FeatureStatus status{};
+        if (infra::status_get(plugin.id, &status) && status.state != infra::FeatureState::kRegistered) return false;
+    }
+    g_install_deps = deps;
+    owner_save_route_stopped_try_handler(&save_route::owner_stopped_poll);
+    std::memset(g_port_invalid, 0, sizeof(g_port_invalid));
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        clear_resource_install_error(i);
+        clear_ownership_retry_state(i);
+        infra::status_register(g_plugins[i].descriptor.id, g_plugins[i].descriptor.version);
+        if (!resolve_plugin_ports(i)) g_port_invalid[i] = true;
+    }
+    (void)dependency_order_build();
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        owner_suspend_begin(&g_plugins[i]);
+        (void)owner_suspend_poll(&g_plugins[i]);
+        if (g_dependency_invalid[i]) {
+            QOL_LOG_ERROR(QolDomain::kCore, "plugin %s blocked at assembly: %s",
+                          g_plugins[i].descriptor.id,
+                          g_error_text[i][0] != '\0' ? g_error_text[i]
+                                                      : "dependency invalid");
+        }
+        infra::status_update(g_plugins[i].descriptor.id,
+                             g_dependency_invalid[i] ? infra::FeatureState::kBlocked
+                                                     : infra::FeatureState::kInactive,
+                             false, g_dependency_invalid[i] ? g_error_text[i] : nullptr);
+    }
+    g_feature_mode = true;
+    sync_item_count_policy();
+    return true;
+}
+
+void feature_registry_bind_desired_request(FeatureDesiredRequest request, void* context) {
+    g_desired_request = request;
+    g_desired_request_context = context;
+}
+
+uint32_t feature_registry_order(const char** ids, uint32_t capacity) {
+    if (!ids || capacity < g_plugin_count) return 0;
+    uint32_t count = 0;
+    bool emitted[kMaxPlugins]{};
+    for (uint32_t i = 0; i < g_install_order_count; ++i) {
+        const auto index = g_install_order[i];
+        emitted[index] = true;
+        ids[count++] = g_plugins[index].descriptor.id;
+    }
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (!emitted[i]) ids[count++] = g_plugins[i].descriptor.id;
+    }
+    return count;
+}
+
+bool feature_registry_dependencies_wanted(const char* id, FeatureWants wants, void* context) {
+    const auto index = plugin_index_of(id);
+    if (!g_feature_mode || index == kNoPlugin || g_dependency_invalid[index] || !wants) return false;
+    const auto& plugin = g_plugins[index].descriptor;
+    for (uint32_t r = 0; r < plugin.requires_count; ++r) {
+        const auto provider = provider_for_requirement(plugin.requires[r], nullptr);
+        if (provider == kNoPlugin || !wants(context, g_plugins[provider].descriptor.id)) return false;
+    }
+    return true;
+}
+
+bool feature_registry_dependencies_ready(const char* id) {
+    const auto index = plugin_index_of(id);
+    return g_feature_mode && index != kNoPlugin && !g_dependency_invalid[index] &&
+           check_requires(g_plugins[index].descriptor, index) == nullptr;
+}
+bool feature_registry_busy(const char* id) { return plugin_has_active_tx(id); }
+bool feature_registry_has_pending_work() {
+    for (const LifecycleTx& slot : g_lifecycle_txs) {
+        if (slot.in_use) return true;
+    }
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (g_http_stop_pending[i] || g_http_caps_pending[i] ||
+            g_http_provider_drain_pending[i] || g_cascade_release_pending[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+bool feature_registry_active(const char* id) {
+    infra::FeatureStatus status{};
+    bool blocking_tx = false;
+    for (const auto& slot : g_lifecycle_txs) {
+        if (slot.in_use && id && std::strcmp(g_plugins[slot.plugin_index].descriptor.id, id) == 0 &&
+            !slot.stop_preparing) blocking_tx = true;
+    }
+    return id && infra::status_get(id, &status) && status.state == infra::FeatureState::kEnabled &&
+           status.enabled && owner_token_of(id) != 0 && !blocking_tx;
+}
+bool feature_registry_transition(const char* id, bool activate) {
+    if (!g_feature_mode) return false;
+    const auto index = plugin_index_of(id);
+    if (index == kNoPlugin || (activate && !g_feature_wanted[index])) return false;
+    const bool result = lifecycle_apply_actual(id, activate ? contracts::kFeatureLifecycleActivate
+                                                            : contracts::kFeatureLifecycleDeactivate);
+    sync_item_count_policy();
+    return result;
+}
+bool feature_registry_context(const char* id, contracts::PluginContext* out) {
+    if (!out || !feature_registry_active(id)) return false;
+    *out = make_plugin_context(id);
+    return true;
+}
+bool feature_registry_owner_ready(const char* id) {
+    const auto index = plugin_index_of(id);
+    if (!g_feature_mode || index == kNoPlugin) return false;
+    if (owner_token_of(id)) return true;
+    if (!owner_suspend_poll(&g_plugins[index])) return false;
+    return owner_resume_poll(&g_plugins[index]);
+}
+void feature_registry_set_wanted(const char* id, bool wanted) {
+    const auto index = plugin_index_of(id);
+    if (index != kNoPlugin) g_feature_wanted[index] = wanted;
+}
+
+static uint32_t lifecycle_step_engine() {
+    uint32_t advanced = poll_http_stops();
+    for (LifecycleTx& slot : g_lifecycle_txs) {
+        if (!slot.in_use) continue;
+        const contracts::PluginDescriptor& plugin = g_plugins[slot.plugin_index].descriptor;
+        bool publish_enabled_actual = false;
+
+        if (g_feature_mode && slot.stop_preparing) {
+            if (slot.stopped_token && save_route::prepare_stop_poll(slot.stopped_token).code == kQolErrBusy)
+                continue;
+            slot.stop_preparing = false;
+            slot.owner_drain_pending = true;
+            owner_suspend_begin(&g_plugins[slot.plugin_index]);
+            slot.capabilities_revoke_pending =
+                g_cap_registration[slot.plugin_index] == CapRegistration::kRegistered;
+            slot.provider_drain_pending = slot.capabilities_revoke_pending &&
+                plugin_provides_http_transport(plugin);
+            if (slot.provider_drain_pending) set_http_provider_available(false);
+            http_endpoint_binder_owner_stop_begin(plugin.id);
+            for (uint32_t r = 0; r < plugin.resources_count; ++r) {
+                if (hooks::state_of(plugin.resources[r].id) == contracts::ResourceState::kLive)
+                    hooks::set_state(plugin.resources[r].id, contracts::ResourceState::kDisabled);
+            }
+            infra::status_update(plugin.id, infra::FeatureState::kDeactivating, false, nullptr);
+            publish_runtime_actual(plugin.id, false);
+        }
+
+        if (g_feature_mode && slot.quarantine_pending) {
+            bool drained = true;
+            for (uint32_t r = 0; r < plugin.resources_count; ++r)
+                if (hooks::in_flight_count(plugin.resources[r].id)) drained = false;
+            if (!drained) continue;
+            auto ctx = make_plugin_context(plugin.id);
+            retire_runtime_observers(plugin.id);
+            if (plugin.deactivate) plugin.deactivate(ctx);
+            infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                                  "resource release failed; remaining resources released or isolated",
+                                  infra::FeatureFailureStage::kOther);
+            publish_runtime_actual(plugin.id, false);
+            slot = LifecycleTx{};
+            ++advanced;
+            continue;
+        }
+
+        if (slot.owner_drain_pending) {
+            // No callback, resource operation, or wait occurs until both admission domains drain.
+            if (!owner_suspend_poll(&g_plugins[slot.plugin_index]) ||
+                !http_endpoint_binder_owner_stop_poll(plugin.id)) continue;
+            refresh_http_degraded_status(plugin.id);
+            if (slot.provider_drain_pending &&
+                !http_endpoint_binder_provider_drain_poll()) continue;
+            if (slot.capabilities_revoke_pending &&
+                !http_endpoint_binder_all_stops_drained()) continue;
+            if (slot.capabilities_revoke_pending) {
+                unregister_provided_capabilities(slot.plugin_index);
+                slot.capabilities_revoke_pending = false;
+            }
+            if (slot.stopped_token && !save_route::owner_stopped_poll(slot.stopped_token)) continue;
+            bool resources_drained = true;
+            for (uint32_t r = 0; r < plugin.resources_count; ++r) {
+                if (hooks::in_flight_count(plugin.resources[r].id) != 0) resources_drained = false;
+            }
+            if (!resources_drained) continue;
+            auto ctx = make_plugin_context(plugin.id);
+            if (slot.was_enabled && plugin.on_disabled) plugin.on_disabled(ctx);
+            slot.owner_drain_pending = false;
+            if (plugin.resources_count == 0) {
+                retire_runtime_observers(plugin.id);
+                if (plugin.deactivate) plugin.deactivate(ctx);
+                infra::status_update(plugin.id, slot.failed_cleanup ? infra::FeatureState::kFailed
+                                                                    : infra::FeatureState::kInactive,
+                                      false, slot.failed_cleanup ? "activation failed; cleaned up" : nullptr,
+                                      slot.failed_cleanup ? infra::FeatureFailureStage::kActivation
+                                                          : infra::FeatureFailureStage::kNone);
+                publish_runtime_actual(plugin.id, false);
+                slot = LifecycleTx{};
+                ++advanced;
+                continue;
+            }
+            slot.tx_id = hooks::tx_begin(plugin.id, hooks::TxKind::kRelease);
+            if (!slot.tx_id) {
+                revoke_installed_resources(plugin, g_install_deps);
+                retire_runtime_observers(plugin.id);
+                if (plugin.deactivate) plugin.deactivate(ctx);
+                infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                                     "release unavailable", infra::FeatureFailureStage::kOther);
+                publish_runtime_actual(plugin.id, false);
+                slot = LifecycleTx{};
+                ++advanced;
+                continue;
+            }
+        }
+
+        hooks::TxStep out{};
+        hooks::tx_step(slot.tx_id, &out);
+        ++advanced;
+
+        // 生命周期事务跨帧推进时，原子成员即使已物理安装也先保持非 live 登记；
+        // 下一成员失败或事务仍在途时，能力与 wrapper 不得观察到部分组。
+        // 只对真实安装成功的资源（kLive）转 kDisabled：软失败步保持 kFree，不得伪装已装。
+        if (slot.kind == hooks::TxKind::kInstall && out.resource_id != nullptr && out.ok == 0 &&
+            (g_feature_mode || atomic_claim_by_id(plugin, out.resource_id) != nullptr) &&
+            hooks::state_of(out.resource_id) == contracts::ResourceState::kLive) {
+            hooks::set_state(out.resource_id, contracts::ResourceState::kDisabled);
+        }
+        // 软失败步（事务继续、资源保持自由）不伪造安装；单独记录原因供终态状态使用。
+        if (g_feature_mode && slot.kind == hooks::TxKind::kInstall && out.resource_id != nullptr &&
+            out.ok != 0) {
+            const char* step_error = out.error != nullptr ? out.error : "unknown";
+            if (out.ok == kQolErrNotReady) {
+                QOL_LOG_WARN(QolDomain::kCore,
+                             "plugin %s resource install deferred resource=%s code=%d: %s",
+                             plugin.id, out.resource_id, out.ok, step_error);
+            } else {
+                QOL_LOG_ERROR(QolDomain::kCore,
+                              "plugin %s resource install failed resource=%s code=%d: %s",
+                              plugin.id, out.resource_id, out.ok, step_error);
+            }
+            record_resource_install_error(slot.plugin_index, out.resource_id, out.error);
+            // 启动期 ownership 注入只在 SaveEnter（world 就绪）后成功：NotReady 时保持 Free
+            // 并武装一次性恢复，等下一次 SaveEnter 信号在既有主帧点定向重试。
+            // 只武装 ownership × fail-soft × 明确 NotReady；其他资源/错误不自动武装。
+            if (out.ok == kQolErrNotReady) {
+                const contracts::ResourceClaim* failed_claim = hooks::find_claim(out.resource_id);
+                if (failed_claim != nullptr &&
+                    failed_claim->mechanism == contracts::ResourceMechanism::kOwnership &&
+                    failed_claim->failure == contracts::ResourceFailure::kFailSoft &&
+                    hooks::state_of(out.resource_id) == contracts::ResourceState::kFree) {
+                    hooks::retry_pending_set(out.resource_id, true);
+                    const uint32_t pindex = slot.plugin_index;
+                    g_deferred_ownership_token[pindex] = owner_token_of(plugin.id);
+                }
+            }
+        }
+
+        // 安装步成功：宿主把原函数入口交还所有者（§3.3 backup 交还）。
+        // backup 非空是「本步真实安装」的判据：幂等跳过步 backup 为 null，交还会把
+        // 插件已持有的有效入口覆盖成 null（wrapper 随即 fail-closed），故跳过。
+        bool switched_to_release = false;
+        if (slot.kind == hooks::TxKind::kInstall && out.resource_id != nullptr &&
+            out.backup != nullptr) {
+            if (slot.ready_failed) {
+                // 已进入回滚：安装事务后续步新装出的资源立即撤回，禁止半装对外可见。
+                revoke_resource(out.resource_id, g_install_deps);
+            } else if (plugin.on_resource_ready != nullptr) {
+                contracts::PluginContext ctx = make_plugin_context(plugin.id);
+                if (plugin.on_resource_ready(ctx, out.resource_id, out.backup) != 0) {
+                    const contracts::ResourceClaim* ready_claim =
+                        hooks::find_claim(out.resource_id);
+                    const bool soft_ready =
+                        ready_claim != nullptr &&
+                        ready_claim->failure == contracts::ResourceFailure::kFailSoft;
+                    if (soft_ready && revoke_resource(out.resource_id, g_install_deps)) {
+                        // 软失败：资源安全撤回为 kFree，不置 failed，记录原因后继续其余资源。
+                        record_resource_install_error(slot.plugin_index, out.resource_id,
+                                                      "resource_ready_failed");
+                        QOL_LOG_WARN(QolDomain::kCore,
+                                     "plugin %s resource_ready_failed (soft) on %s", plugin.id,
+                                     out.resource_id);
+                    } else {
+                        // 受限回调失败：置 failed。若安装事务仍在途，先中止它（禁止后续步继续
+                        // 安装，尤其末尾 ownership acquire 造成 table 短暂发布），再走清理。
+                        infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                                             "resource_ready_failed",
+                                             infra::FeatureFailureStage::kActivation);
+                        QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s",
+                                     plugin.id, out.resource_id);
+                        slot.ready_failed = true;
+                        if (hooks::tx_abort_install(slot.tx_id, out.resource_id,
+                                                    "resource_ready_failed")) {
+                            // 安装事务已中止并回滚（Failed + 终态）：直接进入 failed cleanup，
+                            // 不启动还原事务、不重复回滚。
+                            if (g_feature_mode) {
+                                const auto index = slot.plugin_index;
+                                clear_resource_install_error(index);
+                                refresh_degraded_status(index);
+                                slot = LifecycleTx{};
+                                feature_stop(index, true);
+                            } else {
+                                slot.in_use = false;
+                                slot.ready_failed = false;
+                                slot.cascade = false;
+                                slot.tx_id = 0;
+                            }
+                            continue;
+                        }
+                        // 事务已终态：沿用既有还原事务 / 同步兜底清理路径。
+                        const uint64_t release =
+                            hooks::tx_begin(plugin.id, hooks::TxKind::kRelease);
+                        if (release != 0) {
+                            slot.tx_id = release;
+                            slot.kind = hooks::TxKind::kRelease;
+                            switched_to_release = true;
+                        } else {
+                            revoke_installed_resources(plugin, g_install_deps);
+                        }
+                    }
+                }
+            }
+        }
+        if (switched_to_release) continue;
+        if (!out.finished) continue;
+
+        if (slot.ready_failed) {
+            // 已因受限回调置 failed：保留 failed 态，不执行终态状态/回调覆盖。
+            if (g_feature_mode) {
+                const auto index = slot.plugin_index;
+                // Failed 插件不保留逐资源 degraded 标记，避免把失败态误报成 partial degraded。
+                clear_resource_install_error(index);
+                refresh_degraded_status(index);
+                slot = LifecycleTx{};
+                feature_stop(index, true);
+                continue;
+            }
+            slot.in_use = false;
+            slot.ready_failed = false;
+            slot.cascade = false;
+            slot.tx_id = 0;
+            continue;
+        }
+
+        hooks::TxStatus status{};
+        const bool have_status = hooks::tx_query(slot.tx_id, &status);
+        const bool succeeded = have_status && status.state == hooks::TxState::kSucceeded;
+        contracts::PluginContext ctx = make_plugin_context(plugin.id);
+        if (succeeded) {
+            if (slot.kind == hooks::TxKind::kInstall) {
+                if (g_feature_mode && (!g_feature_wanted[slot.plugin_index] ||
+                                      check_requires(plugin, slot.plugin_index) != nullptr)) {
+                    const auto index = slot.plugin_index;
+                    slot = LifecycleTx{};
+                    feature_stop(index, false);
+                    continue;
+                }
+                if (plugin_all_gates_want(plugin)) {
+                    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+                        const contracts::ResourceClaim& claim = plugin.resources[i];
+                        if ((g_feature_mode || claim.atomic) &&
+                            hooks::state_of(claim.id) == contracts::ResourceState::kDisabled) {
+                            hooks::set_state(claim.id, contracts::ResourceState::kLive);
+                        }
+                    }
+                }
+                const bool enabled = (g_feature_mode || plugin_all_gates_want(plugin)) && atomic_group_satisfied(plugin);
+                const uint32_t plugin_index = slot.plugin_index;
+                if (enabled && g_gate_degraded[plugin_index]) {
+                    g_gate_degraded[plugin_index] = false;
+                    refresh_degraded_status(plugin_index);
+                }
+                // feature-mode：事务成功不等于全部资源已安装。软失败保持 kFree；此时保留
+                // 单独记录的 resource-install 原因（不用会被成功终态清除的 g_gate_degraded）。
+                bool resource_degraded = false;
+                if (g_feature_mode) {
+                    if (plugin_resources_all_installed(plugin)) {
+                        clear_resource_install_error(plugin_index);
+                    } else {
+                        resource_degraded = true;
+                    }
+                    refresh_degraded_status(plugin_index);
+                }
+                const char* terminal_error =
+                    resource_degraded
+                        ? (g_resource_error_present[plugin_index] ? g_resource_error_text[plugin_index]
+                                                                  : "resource install degraded")
+                        : nullptr;
+                infra::status_update(
+                    plugin.id,
+                    enabled ? infra::FeatureState::kEnabled
+                            : infra::FeatureState::kInstalledDisabled,
+                    enabled, terminal_error);
+                if (enabled) {
+                    if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
+                    bind_http_endpoints(plugin);
+                    // §3.4.4：install 成功后进入 enabled 时注册能力。
+                    register_provided_capabilities(slot.plugin_index);
+                    publish_enabled_actual = true;
+                } else {
+                    owner_suspend(&g_plugins[slot.plugin_index]);
+                    defer_http_stop(slot.plugin_index, plugin.on_disabled != nullptr,
+                                    false, false, false);
+                    (void)poll_http_stops();
+                    publish_runtime_actual(plugin.id, false);
+                }
+            } else if (slot.cascade && !g_feature_mode) {
+                infra::status_update(plugin.id, infra::FeatureState::kInstalledDisabled, false,
+                                     "cascade_stopped");
+            } else {
+                // §3.3：deactivate 只做插件自身清理（幂等）；资源已逆序还原，随后置 inactive。
+                // kRelease 事务路径与零资源快速路径一致：先置路由墓碑再清理，停用态错误语义唯一。
+                if (!g_feature_mode) begin_http_endpoint_stop(plugin);
+                retire_runtime_observers(plugin.id);
+                if (plugin.deactivate != nullptr) plugin.deactivate(ctx);
+                infra::status_update(plugin.id, slot.failed_cleanup ? infra::FeatureState::kFailed
+                                                                    : infra::FeatureState::kInactive,
+                                      false, slot.failed_cleanup ? "activation failed; cleaned up" : nullptr,
+                                      slot.failed_cleanup ? infra::FeatureFailureStage::kActivation
+                                                          : infra::FeatureFailureStage::kNone);
+                publish_runtime_actual(plugin.id, false);
+            }
+        } else {
+            if (g_feature_mode) {
+                const auto index = slot.plugin_index;
+                const auto kind = slot.kind;
+                if (kind == hooks::TxKind::kInstall) {
+                    // 安装事务失败：插件置 Failed，清逐资源 degraded 记录避免残留误报。
+                    QOL_LOG_ERROR(QolDomain::kCore, "plugin %s activation failed: %s",
+                                  plugin.id,
+                                  g_resource_error_present[index] &&
+                                          g_resource_error_text[index][0] != '\0'
+                                      ? g_resource_error_text[index]
+                                      : "resource install transaction failed");
+                    clear_resource_install_error(index);
+                    refresh_degraded_status(index);
+                }
+                slot = LifecycleTx{};
+                if (kind == hooks::TxKind::kInstall) feature_stop(index, true);
+                else {
+                    // The transaction terminates on its first failed inverse step. Sweep
+                    // every remaining installed claim with the existing release/quarantine
+                    // primitive before retiring the plugin's business state.
+                    revoke_installed_resources(plugin, g_install_deps);
+                    slot.in_use = true;
+                    slot.plugin_index = index;
+                    slot.kind = hooks::TxKind::kRelease;
+                    slot.quarantine_pending = true;
+                }
+                continue;
+            }
+            // 失败原因取事务记录；两者均无则用固定静态文本。
+            const char* error =
+                have_status && status.error != nullptr
+                    ? status.error
+                    : (have_status && status.failed_resource_id != nullptr
+                           ? status.failed_resource_id
+                           : "lifecycle transaction failed");
+            const contracts::ResourceClaim* failed_atomic =
+                plugin_has_atomic_claims(plugin)
+                    ? atomic_claim_by_id(plugin, have_status ? status.failed_resource_id : nullptr)
+                    : nullptr;
+            if (failed_atomic != nullptr) {
+                bool rollback_failed = false;
+                rollback_atomic_group(plugin, g_install_deps, &rollback_failed);
+                if (!rollback_failed) {
+                    std::snprintf(g_error_text[slot.plugin_index],
+                                  sizeof(g_error_text[slot.plugin_index]), "resource %s: %s",
+                                  failed_atomic->id, error != nullptr ? error : "failed");
+                    g_gate_degraded[slot.plugin_index] = true;
+                    refresh_degraded_status(slot.plugin_index);
+                    infra::status_update(plugin.id, infra::FeatureState::kInstalledDisabled,
+                                         false, g_error_text[slot.plugin_index]);
+                    QOL_LOG_WARN(QolDomain::kCore, "plugin %s atomic group deferred: %s", plugin.id,
+                                 g_error_text[slot.plugin_index]);
+                } else {
+                    infra::status_update(plugin.id, infra::FeatureState::kFailed, false, error,
+                                         infra::FeatureFailureStage::kOther);
+                    publish_runtime_actual(plugin.id, false);
+                    QOL_LOG_WARN(QolDomain::kCore, "plugin %s lifecycle failed: %s", plugin.id,
+                                 error);
+                }
+            } else {
+                infra::status_update(plugin.id, infra::FeatureState::kFailed, false, error,
+                                     slot.kind == hooks::TxKind::kInstall
+                                         ? infra::FeatureFailureStage::kActivation
+                                         : infra::FeatureFailureStage::kOther);
+                publish_runtime_actual(plugin.id, false);
+                QOL_LOG_WARN(QolDomain::kCore, "plugin %s lifecycle failed: %s", plugin.id,
+                             error);
+            }
+        }
+        slot.in_use = false;
+        slot.cascade = false;
+        slot.tx_id = 0;
+        if (publish_enabled_actual) publish_runtime_actual(plugin.id, true);
+    }
+    return advanced;
+}
+
+uint32_t feature_registry_step() {
+    if (!g_feature_mode) return 0;
+    const uint32_t advanced = lifecycle_step_engine();
+    sync_item_count_policy();
+    return advanced;
+}
+
+// SaveEnter 信号锁存：只记录当前有效 activation owner token（installing 期间 token 已存在，
+// 因此信号早于安装末步失败到达也不会丢）。不安装资源、不调用插件、不做任何游戏访问。
+void feature_registry_notify_save_ready() {
+    if (!g_feature_mode) return;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        const contracts::QolOwnerToken token = owner_token_of(g_plugins[i].descriptor.id);
+        if (token != 0) g_save_ready_token[i] = token;
+    }
+}
+
+// 资源是否已处于「已安装」终态（live/disabled）。
+bool resource_installed(contracts::ResourceState state) {
+    return state == contracts::ResourceState::kLive ||
+           state == contracts::ResourceState::kDisabled;
+}
+
+// 第一条仍未安装（free/tombstone）的资源；全部安装时返回 nullptr。
+const contracts::ResourceClaim* first_uninstalled_claim(
+    const contracts::PluginDescriptor& plugin) {
+    for (uint32_t r = 0; r < plugin.resources_count; ++r) {
+        const contracts::ResourceClaim& claim = plugin.resources[r];
+        if (!resource_installed(hooks::state_of(claim.id))) return &claim;
+    }
+    return nullptr;
+}
+
+// 现有 error 记录是否已指向某条未安装资源（按既有 "resource <id>: ..." 文案前缀判定）。
+bool record_names_uninstalled(uint32_t index, const contracts::PluginDescriptor& plugin) {
+    if (index >= kMaxPlugins || !g_resource_error_present[index]) return false;
+    char needle[160];
+    for (uint32_t r = 0; r < plugin.resources_count; ++r) {
+        const contracts::ResourceClaim& claim = plugin.resources[r];
+        if (resource_installed(hooks::state_of(claim.id))) continue;
+        std::snprintf(needle, sizeof(needle), "resource %s:", claim.id);
+        if (std::strstr(g_resource_error_text[index], needle) != nullptr) return true;
+    }
+    return false;
+}
+
+// 恢复结果确定后统一 status error 口径（复用既有 infra::status 与错误文本缓冲，不新增框架）：
+//   · 记录已指向实际未装资源 → 保留该原文（含 resource_ready_failed / 隔离原因）；
+//   · 否则重写为实际第一条未装资源；
+//   · 全部已装 → 清除本路径写过的 error，且不抹其他来源（依赖/级联）的文案。
+void sync_restore_resource_error(uint32_t index) {
+    if (index >= g_plugin_count) return;
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    infra::FeatureStatus status{};
+    if (!infra::status_get(plugin.id, &status)) return;
+    if (record_names_uninstalled(index, plugin)) {
+        infra::status_update(plugin.id, status.state, status.enabled, g_resource_error_text[index]);
+        return;
+    }
+    const contracts::ResourceClaim* uninstalled = first_uninstalled_claim(plugin);
+    if (uninstalled != nullptr) {
+        record_resource_install_error(index, uninstalled->id, "install failed");
+        infra::status_update(plugin.id, status.state, status.enabled, g_resource_error_text[index]);
+        return;
+    }
+    clear_resource_install_error(index);
+    // 仅清本路径写过的指针（指向本缓冲或为空），不覆盖其他 owner 设置的 error 文案。
+    if (status.error != nullptr && status.error != g_resource_error_text[index]) return;
+    infra::status_update(plugin.id, status.state, status.enabled, nullptr);
+}
+
+// 定向 ownership 恢复：每个 SaveEnter 信号对每个 owner 最多尝试一次。
+// 消费时机遵循生产帧序（frame_step → 本函数）：信号在安装事务仍在途（同 token）时保留，
+// 只有事务终态、准入通过且确实选出待恢复 claim 才消费；停止/旧 token/永久不适用即清除。
+// 失败不逐帧重试：NotReady 保持武装等下一次自然 SaveEnter；其他码视为永久错误并解除武装。
+uint32_t feature_registry_retry_pending_ownership() {
+    if (!g_feature_mode) return 0;
+    uint32_t attempts = 0;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (g_save_ready_token[i] == 0) continue;
+        const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
+        const contracts::QolOwnerToken signal_token = g_save_ready_token[i];
+        const contracts::QolOwnerToken current = owner_token_of(plugin.id);
+
+        // (1) 信号已无意义：desired 关闭 / owner 失活 / 旧 activation token / 已隔离 → 清除。
+        if (!g_feature_wanted[i] || current == 0 || current != signal_token ||
+            plugin_isolated(plugin)) {
+            g_save_ready_token[i] = 0;
+            continue;
+        }
+        // (2) 同 token 的初始安装仍在途：保留信号，等安装终态后再消费（不丢本次进档信号）。
+        if (plugin_has_active_tx(plugin.id)) continue;
+        // (3) 终态准入。
+        if (g_deferred_ownership_token[i] != current) {
+            // 无待恢复 ownership（未武装或属旧 activation）：信号无目标，清除。
+            g_save_ready_token[i] = 0;
+            continue;
+        }
+        if (check_requires(plugin, i) != nullptr) {
+            g_save_ready_token[i] = 0;
+            continue;
+        }
+        infra::FeatureStatus status{};
+        if (!infra::status_get(plugin.id, &status) || !status.enabled ||
+            status.state != infra::FeatureState::kEnabled) {
+            g_save_ready_token[i] = 0;
+            continue;
+        }
+        // (4) 选出仍待恢复的那一条 ownership claim；选不到说明无需恢复 → 清除信号。
+        const contracts::ResourceClaim* target = nullptr;
+        for (uint32_t r = 0; r < plugin.resources_count; ++r) {
+            const contracts::ResourceClaim& claim = plugin.resources[r];
+            if (claim.mechanism != contracts::ResourceMechanism::kOwnership) continue;
+            if (claim.failure != contracts::ResourceFailure::kFailSoft) continue;
+            if (!hooks::retry_pending_get(claim.id)) continue;
+            if (hooks::state_of(claim.id) != contracts::ResourceState::kFree) continue;
+            target = &claim;
+            break;
+        }
+        if (target == nullptr) {
+            g_save_ready_token[i] = 0;
+            continue;
+        }
+        // (5) 消费信号并尝试一次。
+        g_save_ready_token[i] = 0;
+        ++attempts;
+        contracts::PluginContext ctx = make_plugin_context(plugin.id);
+        int32_t code = 1;
+        const char* error = retry_resident_claim(plugin, ctx, *target, g_install_deps, &code);
+        if (error != nullptr) {
+            record_resource_install_error(i, target->id, error);
+            if (code == kQolErrNotReady) {
+                // 表仍未就绪：保持 Free 与武装，等下一次自然 SaveEnter。
+                hooks::retry_pending_set(target->id, true);
+                QOL_LOG_WARN(QolDomain::kCore,
+                             "plugin %s ownership retry deferred (not ready) on %s", plugin.id,
+                             target->id);
+            } else {
+                // 永久错误：解除武装，不再等待后续信号，状态与错误如实上报。
+                hooks::retry_pending_set(target->id, false);
+                g_deferred_ownership_token[i] = 0;
+                QOL_LOG_WARN(QolDomain::kCore, "plugin %s ownership retry failed on %s: %s",
+                             plugin.id, target->id, error);
+            }
+            sync_restore_resource_error(i);
+            refresh_degraded_status(i);
+            continue;
+        }
+        // 成功：acquire→Live→清 pending 已由 helper 完成；先通知 owner，再统一写 status。
+        g_deferred_ownership_token[i] = 0;
+        if (plugin.on_resource_ready != nullptr &&
+            plugin.on_resource_ready(ctx, target->id, nullptr) != 0) {
+            // 通知失败：撤回到事实状态（free 或隔离），不留下 Live 假象。
+            const bool revoked = revoke_resource(target->id, g_install_deps);
+            const contracts::ResourceState after = hooks::state_of(target->id);
+            if (after == contracts::ResourceState::kFree) {
+                hooks::retry_pending_set(target->id, true);
+                record_resource_install_error(i, target->id, "resource_ready_failed");
+            } else {
+                // 撤回失败 → 按事实写隔离（不谎报 free/可重试）。
+                (void)revoked;
+                record_resource_install_error(i, target->id, "resource isolated after ready failure");
+            }
+            QOL_LOG_WARN(QolDomain::kCore, "plugin %s ownership ready notify failed on %s",
+                         plugin.id, target->id);
+        } else {
+            QOL_LOG_INFO(QolDomain::kCore, "plugin %s ownership restored on %s", plugin.id,
+                         target->id);
+        }
+        // 先按恢复结果统一写 status error（可能清除本路径记录），再复评 degraded，
+        // 避免用已清除的 resource-install 标记把 degraded 留在 true。
+        sync_restore_resource_error(i);
+        refresh_degraded_status(i);
+    }
+    return attempts;
+}
+
+const contracts::PluginDescriptor* find_plugin(const char* id) {
+    if (id == nullptr) return nullptr;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (std::strcmp(g_plugins[i].descriptor.id, id) == 0) {
+            return &g_plugins[i].descriptor;
+        }
+    }
+    return nullptr;
+}
+
+contracts::QolOwnerToken owner_token_of(const char* id) {
+    if (id == nullptr) return 0;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (std::strcmp(g_plugins[i].descriptor.id, id) != 0) continue;
+        contracts::QolOwnerToken token = 0;
+        uint64_t generation = 0;
+        if (contracts::succeeded(owner_identity_api().query(&g_plugins[i], &token, &generation)))
+            return token;
+        return 0;
+    }
+    return 0;
+}
+
+uint32_t plugin_count() {
+    return g_plugin_count;
+}
+
+void plugin_registry_reset_for_test() {
+    owner_identity_reset_for_test();
+    http_dispatch_reset_for_test();
+    http_registry_reset_for_test();
+    http_endpoint_binder_reset_for_test();
+    g_plugin_count = 0;
+    g_install_deps = HostDeps{};
+    g_feature_mode = false;
+    g_management_sdk = contracts::QolHostSdk{};
+    g_management_sdk_bound = false;
+    std::memset(g_feature_wanted, 0, sizeof(g_feature_wanted));
+    g_desired_request = nullptr;
+    g_desired_request_context = nullptr;
+    qol::game::item_count_set_extended_mode(qol::game::ItemCountExtendedMode::kOff);
+    for (LifecycleTx& slot : g_lifecycle_txs) {
+        slot = LifecycleTx{};
+    }
+    for (uint32_t i = 0; i < kMaxPlugins; ++i) {
+        g_cap_registration[i] = CapRegistration::kNone;
+        g_http_stop_pending[i] = false;
+        g_http_disabled_pending[i] = false;
+        g_http_caps_pending[i] = false;
+        g_http_provider_drain_pending[i] = false;
+        g_cascade_release_pending[i] = false;
+        g_http_stop_pending[i] = false;
+        g_http_disabled_pending[i] = false;
+        g_http_caps_pending[i] = false;
+        g_http_provider_drain_pending[i] = false;
+        g_cascade_release_pending[i] = false;
+        g_gate_degraded[i] = false;
+        g_cascade_degraded[i] = false;
+        g_http_degraded[i] = false;
+        g_deferred_ownership_token[i] = 0;
+        g_save_ready_token[i] = 0;
+        clear_resource_install_error(i);
+    }
+}
+
+}  // namespace qol::host

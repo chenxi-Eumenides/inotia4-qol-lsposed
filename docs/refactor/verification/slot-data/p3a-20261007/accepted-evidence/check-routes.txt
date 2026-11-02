@@ -1,0 +1,9 @@
+controller unique: 146
+api-reference unique: 146
+native frozen: 146 (unique 146)
+owner distribution: {'autosell': 2, 'core.api': 6, 'core.character': 41, 'core.craft': 1, 'core.custom_ui': 3, 'core.data': 12, 'core.feature': 1, 'core.item': 21, 'core.quest': 8, 'core.save': 3, 'core.settings': 6, 'core.system': 5, 'core.ui_state': 9, 'core.world': 12, 'extension_bag': 8, 'legacy.debug': 3, 'module.config': 1, 'save_backup': 4}
+duplicates: 0
+controller -> native missing: 0
+native -> controller extra: 0
+api-reference -> native missing: 0
+native -> api-reference extra: 0

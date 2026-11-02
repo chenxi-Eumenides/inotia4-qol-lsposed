@@ -1,15 +1,13 @@
-// host 单测（自动出售阶段 A / 统一帧任务纯逻辑）：
-//   1) frame_task 按帧去重/节流/到期辅助 frame_task_detail::should_dispatch /
-//      normalize_interval / is_due
-//   2) save_enter 触发判定 save_enter_detail::should_fire
-//   3) 数据层 item_is_equip 的编码分支 item_count_encoding_from_flags（注入假类别表）
+// host 单测（自动出售阶段 A / 帧任务纯逻辑）：
+//   1) save_enter 触发判定 save_enter_detail::should_fire
+//   2) 数据层 item_is_equip 的编码分支 item_count_encoding_from_flags（注入假类别表）
 // 纯头文件逻辑，不依赖 Android/游戏内存。
+// 帧调度的去重/interval/count 语义由 test_infra_scheduler.cpp 覆盖。
 
-#include "core/native/frame_task.h"
-#include "core/native/save_enter.h"
-#include "core/native/save_exit.h"
-#include "core/native/stack_codec.h"
-#include "data/native/item_class.h"
+#include "patch/save_enter.h"
+#include "patch/save_exit.h"
+#include "contracts/game_host.h"
+#include "game/read/item_class.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -22,10 +20,10 @@ static int g_fail = 0;
     else { ++g_fail; std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
 } while (0)
 
-using stack_codec::CountEncoding;
+using qol::contracts::QolItemCountEncoding;
 
-// save_exit 无纯逻辑可测；此处仅以编译性断言保证主机端可包含该头。
-static_assert(sizeof(SaveExitFn) > 0, "SaveExitFn must be complete");
+// save_exit 无纯逻辑可测；此处仅以编译性断言保证主机端可包含该头（声明式资源入口存在）。
+static_assert(sizeof(&save_exit_claim_count) > 0, "save_exit claims accessor must be declared");
 
 namespace {
 
@@ -34,48 +32,6 @@ uint16_t type_flags_for(int category) {
 }
 
 }  // namespace
-
-static void test_frame_task_dedup() {
-    // 帧号无效（<=0）不派发。
-    CHECK(!frame_task_detail::should_dispatch(0, -1));
-    CHECK(!frame_task_detail::should_dispatch(-5, -1));
-    CHECK(!frame_task_detail::should_dispatch(0, 0));
-
-    // 首帧派发。
-    CHECK(frame_task_detail::should_dispatch(1, -1));
-
-    // 同一帧号重复调用只派发一次。
-    CHECK(!frame_task_detail::should_dispatch(1, 1));
-    CHECK(!frame_task_detail::should_dispatch(42, 42));
-
-    // 下一帧恢复派发。
-    CHECK(frame_task_detail::should_dispatch(2, 1));
-    CHECK(frame_task_detail::should_dispatch(43, 42));
-
-    // 帧号回退（异常/重启）视为不同帧，不静默丢弃。
-    CHECK(frame_task_detail::should_dispatch(2, 3));
-}
-
-static void test_frame_task_scheduling() {
-    // interval 归一：0/负值 → 1（每帧）。
-    CHECK(frame_task_detail::normalize_interval(0) == 1);
-    CHECK(frame_task_detail::normalize_interval(-3) == 1);
-    CHECK(frame_task_detail::normalize_interval(1) == 1);
-    CHECK(frame_task_detail::normalize_interval(60) == 60);
-
-    // is_due：未 armed（首个派发周期）必触发。
-    CHECK(frame_task_detail::is_due(1, 0, false));
-    CHECK(frame_task_detail::is_due(100, 500, false));
-    CHECK(frame_task_detail::is_due(0, 0, false));
-
-    // is_due：frame >= next_frame 触发。
-    CHECK(frame_task_detail::is_due(10, 10, true));
-    CHECK(frame_task_detail::is_due(11, 10, true));
-
-    // is_due：frame < next_frame 不触发。
-    CHECK(!frame_task_detail::is_due(9, 10, true));
-    CHECK(!frame_task_detail::is_due(0, 10, true));
-}
 
 static void test_save_enter_should_fire() {
     // 仅「已发起 且 已进入 world」为真；其余三组合为假。
@@ -94,39 +50,42 @@ static void test_item_is_equip_encoding() {
     const uint8_t stride = 8;
 
     CHECK(item_count_encoding_from_flags(type_flags_for(0), table, stride) ==
-          CountEncoding::kNotEncoded);
+          QolItemCountEncoding::kNotEncoded);
     CHECK(item_count_encoding_from_flags(type_flags_for(1), table, stride) ==
-          CountEncoding::kEncoded);
+          QolItemCountEncoding::kEncoded);
     CHECK(item_count_encoding_from_flags(type_flags_for(2), table, stride) ==
-          CountEncoding::kEncoded);
+          QolItemCountEncoding::kEncoded);
     CHECK(item_count_encoding_from_flags(type_flags_for(3), table, stride) ==
-          CountEncoding::kNotEncoded);
+          QolItemCountEncoding::kNotEncoded);
 
     // item_is_equip 口径：仅 kNotEncoded 是装备；kEncoded/kUnknown 均非装备。
     for (int c = 0; c < 4; ++c) {
         const bool equip =
             item_count_encoding_from_flags(type_flags_for(c), table, stride) ==
-            CountEncoding::kNotEncoded;
+            QolItemCountEncoding::kNotEncoded;
         CHECK(equip == (c == 0 || c == 3));
     }
 
     // rarity 位（bit2-5）与低位不影响 category 解析。
     const uint16_t with_rarity = static_cast<uint16_t>(type_flags_for(1) | (0x3 << 2));
-    CHECK(item_count_encoding_from_flags(with_rarity, table, stride) == CountEncoding::kEncoded);
+    CHECK(item_count_encoding_from_flags(with_rarity, table, stride) ==
+          QolItemCountEncoding::kEncoded);
 
     // 表不可用：base=nullptr / stride=0 一律 fail-closed 为 kUnknown -> 非装备。
     CHECK(item_count_encoding_from_flags(type_flags_for(0), nullptr, stride) ==
-          CountEncoding::kUnknown);
+          QolItemCountEncoding::kUnknown);
     CHECK(item_count_encoding_from_flags(type_flags_for(0), table, 0) ==
-          CountEncoding::kUnknown);
+          QolItemCountEncoding::kUnknown);
     CHECK(!(item_count_encoding_from_flags(type_flags_for(1), nullptr, stride) ==
-            CountEncoding::kNotEncoded));
+            QolItemCountEncoding::kNotEncoded));
 
     // 不同 stride 下定位公式 category*stride+6 正确。
     uint8_t table4[8 * 4] = {};
     table4[5 * 4 + 6] = 0x01;
-    CHECK(item_count_encoding_from_flags(type_flags_for(5), table4, 4) == CountEncoding::kEncoded);
-    CHECK(item_count_encoding_from_flags(type_flags_for(6), table4, 4) == CountEncoding::kNotEncoded);
+    CHECK(item_count_encoding_from_flags(type_flags_for(5), table4, 4) ==
+          QolItemCountEncoding::kEncoded);
+    CHECK(item_count_encoding_from_flags(type_flags_for(6), table4, 4) ==
+          QolItemCountEncoding::kNotEncoded);
 }
 
 static void test_item_is_backpack_encoding() {
@@ -158,8 +117,6 @@ static void test_item_is_backpack_encoding() {
 }
 
 int main() {
-    test_frame_task_dedup();
-    test_frame_task_scheduling();
     test_save_enter_should_fire();
     test_item_is_equip_encoding();
     test_item_is_backpack_encoding();

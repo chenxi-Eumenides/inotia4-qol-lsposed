@@ -1,0 +1,105 @@
+#pragma once
+
+#include <cstdint>
+#include <string>
+
+#include "../../contracts/game_host.h"
+#include "../../contracts/host_sdk.h"
+#include "../../contracts/save_facts.h"
+#include "../../contracts/world_facts.h"
+#include "../../contracts/game_ports/save_call_port.h"
+
+// 存档管理器备份 feature（save-backup）：
+// .qol.bak bundle（旧 .qol_save 兼容）的导出/导入/列表/删除全部收口本层（文件 IO + 游戏加解密 + 事务回滚），
+// 返回值即 HTTP 响应 JSON（{"ok":true,...} / {"ok":false,"error":"..."}）。
+// 依赖方向：feature → Host SDK（结果与 sidecar 容器）+ save.facts + save_call port；
+// Game Host 仅保留 warehouse companion 文件状态查询，不承载存档域语义。
+
+// 幂等初始化：记录 dataDir（原版存档根目录）与 externalFilesDir（备份/sidecar 根目录）。
+// 末尾执行一次删除事务恢复（trash → 原位）；启动失败不阻断。
+void save_backup_init(const char* data_dir, const char* external_files_dir);
+// 恢复上次删除事务留下的 trash 文件：解析 backups/.trash-<id>.index，
+// 按条目把文件 rename 回原位；无 index 的 sidecar trash 按文件名还原到 saves/。
+// 目标已存在时跳过并保留 trash（不覆盖用户数据），供下次启动继续处理。
+void save_backup_recover_deletes();
+
+// 游戏主线程刷新 0..2 槽的 exists/hero_index/hero_level/hero_class 快照；HTTP/绘制线程只读缓存。
+void save_backup_refresh_slot_meta_cache();
+
+// 只构包/落盘到指定目录：不去重、不取 lease、不产生 HTTP JSON；调用方保证线程与串行。
+// dir 内以 file_name 原子覆盖写入（tmp+rename，失败保留旧文件）。
+bool save_backup_export_slot_to_dir(int32_t slot, const char* dir, const char* file_name,
+                                    std::string* out_error);
+
+// save.pre_save 观察者入口：主线程导出当前槽到 backups/autobackup/autosave_s<N>.qol.bak
+//（旧 .qol_save 继续读取/导入）。每槽 1 份原子覆盖；失败只记 WARN，不阻断保存。
+void save_backup_autobackup_pre_save(int32_t slot);
+
+// 插件装配期注入 Host SDK / Game Host；业务回调通过该上下文访问宿主适配面。
+// owner_token 为宿主按注册身份注入的 token（PluginContext.owner_token 原样透传），
+// 槽操作前置门以该 token 申请 lease；停用/解绑传 0。
+void save_backup_bind_context(const qol::contracts::QolHostSdk* sdk,
+                              const qol::contracts::SaveFactsApi* save_facts,
+                              const qol::contracts::QolSaveCallPort* save_call,
+                              const qol::contracts::QolGameHost* game,
+                              qol::contracts::QolOwnerToken owner_token);
+// 主菜单判定依赖 world.facts；未绑定时回退 save.facts.current_slot。
+void save_backup_bind_world_facts(const qol::contracts::WorldFactsApi* world_facts);
+const qol::contracts::QolHostSdk* save_backup_host_sdk();
+const qol::contracts::QolGameHost* save_backup_game_host();
+const qol::contracts::SaveFactsApi* save_backup_save_facts();
+const qol::contracts::QolSaveCallPort* save_backup_save_call();
+std::string save_backup_result_ok();
+std::string save_backup_result_error(const char* message);
+
+// 启动期 Kotlin 一次性下发 MAPINFOBASE 编译产物（map_id → 中文名 JSON）。
+// 内部按需替换内存表，entry_json 输出会携带 map_name；map_name 缺省空串。
+// 空串视为清空（用于解绑/卸载场景）；非法 JSON 容错为空表。
+void save_backup_set_map_names(const char* json);
+
+// 原版存档目录中 save{slot}.dat 是否存在（只读目录扫描 + lstat，不打开/不解密、不建目录）。
+// 备份面板用它区分「空槽」与「文件存在但不可读」；dataDir 未初始化时返回 false。
+bool save_backup_slot_file_exists(int32_t slot);
+
+// map_id → 中文名查询（上表内存）；未命中返回空串。
+// 供 UI 层显示存档槽/备份条目地图名，避免上层复制一份映射表。
+std::string save_backup_map_name(int map_id);
+
+// class_idx（0-5）→ 职业中文名；非法/未知返回空串。表为编译期常量（无锁、无共享状态），
+// 可在持有任意锁的 UI DrawProc/后台解析路径安全调用。名称口径与游戏 CHARCLASSBASE 文本一致
+// （0=黑暗骑士 1=忍者 2=黑魔导 3=祭司 4=暗影猎手 5=狂战士）。
+const char* save_backup_class_name(int class_idx);
+
+// GET /api/system/backup/list 响应体。
+std::string save_backup_list_json();
+
+// 仅枚举 backups/ 顶层文件名与 stat 元信息（不打开/不解析 bundle），供面板逐帧解析。
+std::string save_backup_list_files_json();
+// 解析 backups/ 下的单个直接文件名；校验 payload checksum 后返回与列表一致的 entry。
+std::string save_backup_entry_json(const char* name);
+
+// POST /api/system/backup/export 响应体（去重命中时额外带 "deduplicated":true）。
+std::string save_backup_export_json(int slot);
+
+// POST /api/system/backup/import 响应体（按 checksum 定位，还原 save{slot}.dat + sidecar）。
+std::string save_backup_import_json(const char* checksum, int slot);
+
+// 左侧选中槽的自动备份条目；不存在返回 {"ok":true,"backup":null}。
+std::string save_backup_auto_entry_json(int slot);
+
+// 把 source_slot 的自动备份导入到 target_slot；与手动导入共用校验/门禁/回滚。
+// 自动备份不存在 → backup not found；其余错误文案与手动导入一致。
+std::string save_backup_import_auto_json(int source_slot, int target_slot);
+
+// POST /api/system/backup/delete 响应体。
+std::string save_backup_delete_json(const char* checksum);
+
+// 游戏删档回调（SaveSlot_Delete）PtrHook wrapper 的 sidecar 同步体：
+// 游戏内存档面板删档确认后，按槽删除模块 sidecar（slot-{n}.qol-save + .last-good）并标记槽区 stale。
+// 由插件删档 PtrHook wrapper 在原函数返回后调用（锁序 file_mutex → store）；slot 越界直接返回。
+void save_backup_slot_deleted_sync(int32_t slot);
+
+// 删除指定槽的游戏存档（原版 save{slot}.dat + 模块 sidecar slot-{slot}.qol-save/.last-good）。
+// 只作用于该 slot 的精确文件名，不触碰其它槽；未找到任何目标文件返回结构化错误。
+// 与 save_backup_delete_json 同风格（HTTP 风格 {"ok":true,...}/{"ok":false,"error":"..."}）。
+std::string save_backup_delete_slot_json(int slot);

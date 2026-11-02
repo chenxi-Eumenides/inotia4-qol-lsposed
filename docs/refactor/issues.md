@@ -1,0 +1,327 @@
+# 问题台账（issues）
+
+> 本文件**只记录缺陷问题**：插件审计与真机事件调查中确认的问题条目。每条记录归属（所属插件/模块组件）、证据与状态。
+> 分工：验收证据欠账（待补真机日志的 VM 卡）唯一登记处是 `verification.md` §5，本文件不重复；本文件登记的是**缺陷本身**。
+> 维护纪律：新问题按所属组件追加条目，编号不复用、不重排；修复后更新状态并把条目移入文末「已修复」附录（正文只留确实存在的问题）。
+> 排序：正文 §1–§8、§11–§12 为开放/挂账问题（§9 文档漂移、§10 无法验证项）；已修复条目在文末附录存证。
+> 严重度：P1 行为错误或契约破坏；P2 风险/缺陷；P3 质量/演进项。
+> 范围记录：插件逐个审计（core.world → core.item → core.character → …）与真机验证中产生的问题均入此账。
+
+## 1. core.world（开放）
+
+| ID | 级 | 问题 | 证据 | 状态 |
+|---|---|---|---|---|
+| WLD-01 | P2 | 快照更新失败时保留旧快照：暂态（切图/reader 失败）内 7 条 GET 返回上一帧数据且无 stale 标记；响应是否加标记属冻结面变更 | `plugins/core.world/plugin.cpp` update_snapshot；审计 W-04 | 开放（观测用限速 warn 已随 `39b90e4e` 加入；响应语义待裁决） |
+| WLD-02 | P3 | `on_enabled` 中 scheduler.add 失败仅告警，无重登记通路（插件无后续生命周期钩子可重试） | 审计 W-06 | 开放（引擎提供重试面前保持 warn） |
+| WLD-03 | P3 | 写面 `move_to` 的票据 result 不区分「可达」与「不可达→走最近可达点」；调用方仅能事后读坐标或先调 distance 预检（读面有 found/nearest 完整表达） | 审计讨论 + 真机 T1-T3；`game/access/world.cpp` world_move | 开放（契约演进项：候选=票据附 found/nearest 或文档固化预检模式） |
+| WLD-04 | P3 | distance 在 HTTP 线程整块拷贝快照（~137KB）+ BFS 栈上 ~53KB scratch，无栈预算文档 | 审计 I-05；`contracts/nav_bfs.h` | 开放（性能观察项） |
+
+## 2. core.item（开放）
+
+| ID | 级 | 问题 | 证据 | 状态 |
+|---|---|---|---|---|
+| ITM-01 | P1 | 读面丢失任务袋 bag5：owner 逐袋用 `item_ref_at`（实现拒绝 bag>=5），legacy 读面含 bag5 → 有任务物品的存档 `/api/item/inventory`、`/items`、`/bag/5/*` 读不到（旧版可读）；既有真机证据存档 bag5 恰为空漏检 | `game/state/game_state.cpp:306`、审计 F-01、fixture 无 bag5（T-01） | 代码已实现（只读放开：`inventory_item_ref_at`/逐袋遍历允许 bag5、16 槽；写面 `inventory_item_at` 仅拒绝 bag5、逻辑袋 6..10 解析不受影响；capacity 输出与迁移前逐字一致）；真机证据（含任务物品存档读面）待统一批 |
+| ITM-02 | P1 | `character.state` 运行时 `capabilities.require` 未在 descriptor requires/optional 声明（equip 族+accept_dice 投影）：停 core.character 时 core.item 不级联、不 degraded，依赖图/装配不可见 | `plugins/core.item/plugin.cpp:214-228,285-295`；审计 F-02=CHR 侧 F5 | 代码已实现（descriptor optional_requires 补 character.state；registry host 用例覆盖 provider 在场/缺失两态，optional 边拓扑 provider 先行）；真机证据 VM-K2-02/VM-K2-03 降级可见性待统一批 |
+| ITM-03 | P1 | EB move 结果缓冲 `char[4096]`：真机实测 result 紧凑长度 3753B（91.6%）；provider 先落库后判超限返回 0 → 「移动已发生但票据 failed」，重试可能反向移动；成功判定用子串 `find("\"ok\":false")` | `plugins/core.item/plugin.cpp:1334-1349`、`plugins/extension_bag/extension_bag_port.cpp:224-229`；审计 F-03 | 代码已实现（EB move 结果缓冲提至 262144 heap、provider 报告完整长度不再先落库后判败、core.item 判定改 `{"ok":false` 前缀）；超限结算语义并入 ITM-05；真机 VM-D2D-01/02、VM-T2O-01 待统一批 |
+| ITM-04 | P1 | 背包快照内部缓冲 64KB（契约/读取端按 256KB 设计）：超限 `serialize_inventory_json` 失败 → update_snapshot 静默 return，快照永久停更且无告警 | `plugins/core.item/plugin.cpp:32,626-639`；审计 F-04 | 代码已实现（`kInventoryCapacity`=契约 262144，工作缓冲改 thread_local vector；失败路径限速 WARN）；满背包真机证据待统一批 |
+| ITM-05 | P1 | 票据结果上限 16KB 双重语义：owner 结果超限时 return false → 票据 failed，「游戏写已成功却报失败」；api-reference §7.9 规定超限应 `done + result_retained=false` 未实现。同型：core.item 9 条附 state 写路由、core.character 全部附 state 写路由（party 满配可超 16KB，真机现值 ~7.7KB） | `infra/command_queue.h:53`、`plugins/core.item/plugin.cpp:1112-1321`、审计 F-05/F-4/F-14 | v1 已实现（done+超位+`result_retained:false`，`45805105`）。**用户新裁决替代 A/B**：①result 只返回与该操作相关的数据（不再全量 state）；②单结果上限按瘦身结果重新规划（候选 4KiB，待逐路由真机量测后冻结；本轮 infra 暂保持 16KiB）；③仍超限→票据终态照成功 done/ok，result=合成摘要 `{"ok":true,"truncated":true,"reason":"result_limit_exceeded"}`（失败命令为 ok:false 版本；不再任意截断字节）。规格=`.tmp/itm15-result-slimming/spec.md`（§2 逐路由瘦身表=公开契约变更逐条标注；§5 按 owner 分批+验证门/VM 卡）。infra 批已实现（超限改用合成摘要，上限暂保 16KiB/512KiB；host 79/79、check_arch/routes/build 全绿）；真机统一批欠账。用户定案（2026-09-30）：单结果上限**暂保 16KiB**，逐路由真机量测后再定值；串行顺序=**ITM-05 全链 → ITM-08 全链**；§2 逐路由瘦身 schema 已全部获用户批准并落地：infra `edb818e5`；批① core.item `7b374815`；批② core.character 11 条（withdraw 经 item.state 尾追加 kEnrichedInventory 1.0→1.1 前后快照差分，只过滤/拷贝不重组=ADR 0002 合规；退化登记：能力缺失/解析失败省略 inventory；attack_target 生产读面不发布 target_slot/combat→实际只回 `{"ok":true}` 受理不伪造；cast_skill/switch_player/add_stat/add_skill/reset_skill 读面不可用时省略对应键或退化 `{"ok":true}`；set_auto_attack 回传受理值非读回）；批③ core.world move_to/walk_dir/interact→player{map_id,x,y}（tile→px 既有换算，不承诺已到达）+core.save save→{slot,sidecar:"ensured"}/enter→{slot,entered:true}/create→{slot,created:true}（延迟结算/settlement timeout/失败体逐字不变）。host 79/79、check_arch、routes 143/143、build 复验通过。单结果上限暂保 16KiB（候选 4KiB 待真机逐路由量测定值）。真机统一批欠账（VM-K5-04b/04c/04e/06x/08h、VM-T2O-01、VM-D2D-01/02 等）NOT_ACCEPTED |
+| ITM-06 | P2 | `json_lite` 数字解析忽略指数/小数（`1e2`→1、`1.5`→1），Kotlin 传输层 org.json 语义为 100/截断：校验放行后 native 可能操作错误 bag/slot/money | `plugins/core.item/json_lite.cpp:77-99`；审计 F-06 | 代码已实现（parse_number 按 JSON 文法完整识别，小数/指数/前导 `+`/文法非法/超 int32 →解析失败走既有 400，负整数仍合法；守卫收紧口径同 `39b90e4e` 先例——较迁移前 org.json 强转语义**更严**（`1e2`/`+1`/`1.5` 由接受改为拒绝），属有意收紧）；host dispatch 拒绝体字节断言已加；真机证据待统一批 |
+| ITM-07 | P2 | 路径参数数字累加无位数/上限保护（`value*10+digit` int64 可溢出 UB）；query 解析负数无范围校验 | `plugin.cpp:918-924`、`:682-699`；审计 F-07/F-13；core.character `char_path_int`（plugin.cpp:1024-1044）同型（审计 CHR F3） | 代码已实现（item `parse_path_int`/`write_path_int` 与 character `parse_path_int`/`char_path_int` 全部改位数≤10+逐位 INT32 溢出界守卫；负数/非数字/超界→既有 400/404 格式，较迁移前 parseInt 语义收紧属有意（守卫批口径同 `39b90e4e`）；dispatch host 两文件补拒绝体字节断言）；真机证据待统一批 |
+| ITM-08 | P2 | `item.facts` 跨插件暴露游戏内存裸指针（`physical_item_at`/`detail_context`/`item_ref_at`），违背「窄接口不暴露游戏指针」；仅主线程安全靠约定 | `contracts/item_facts.h:23-28`；审计 F-08 | **用户裁决=本批直接做 typed handle**（不备案、不分阶段）。规格=`.tmp/itm08-typed-handle/spec.md`：slot 表+代际号防 ABA、物品/UI 句柄分类型空间、失效挂钩点全清单（§3，实现前置门=全仓 free/槽写扫描）、读面=按字段族 typed view+语义操作（禁通用 write_field）、ABI 各 major（item.facts/ItemPort/inventory_extension→2.0、EB capability→3.0）、四批切分（句柄核心+挂钩→EB→hooks→detail_context）、固定容量满表 fail-closed。用户已裁串行序=ITM-05 全链→ITM-08 全链（ITM-05 已落地 `edb818e5/7b374815/d0e53892/710f0ce0`）；**detail_context=原子详情槽查询（A 案）**。**批 1 已实现**（本提交）：`contracts/item_handle.h`（物品/UI 分型 POD slot+generation，禁地址编码）+ `game/access/item_handle_registry`（1024 固定容量、满表 fail-closed、回绕退休、provider 身份校验、主线程约束）+ 生命周期挂钩全链接管（终版 free 审计表：EB 物化/所有权退役/延迟释放、hooks RemoveItem 提交-回滚事务与 merge 消费源失效/adopt 重绑保留、sell/discard 事务、save_slots_reload 仅 Native provider 失效、enter 转场挂起-提交失效；fn_mem_free/save_mem_free=buffer 非池对象、character_write 无池 free、fn_popup_free 无调用点=不可达证明）+ EB/hooks 经 **Host SDK 尾追加 `QolItemHandleApi`（minor 11→12）**注入登记/失效/重绑通道（不向插件暴露 resolve→void*，跨插件契约消费者表面零改动=留批 2-4）+ R-44 锁用例（持锁 register/invalidate 刷新计数 0）。host 80/80、arch 新增 0、routes 143/143、JNI 146/146、build 通过；真机未部署=NOT_ACCEPTED。**批 2 已实现（规格=`.tmp/itm08-typed-handle/spec-batch2-v2.md`，用户终裁逐点二分支①/②）**：item.facts/Item Port/inventory_extension→2.0、EB capability→3.0，Ref/参数/回调全 handle 化，删 `native_item` 与插件面 resolve（契约静态红线测试 `item_handle_contract_redline` 防回归）；core.item provider 物品经 handle-keyed typed view 序列化（golden 逐字节复绿）；autosell/attribute_quality/craft_ui/custom_recipe/special_equip/world_teleport/inventory_trade/inventory_hooks 调用面迁移；EB 私有 custody 表定性=**已批准②（限 provider 自有物化对象持有，逐点举证+`item_handle_custody_tests` 八规则失败注入）**，指针不出 EB 实现；Host SDK minor 终值 14（旧尺寸 fail-closed）。host 82/82、arch 新增 0、routes 143/143、JNI 146/146、build 复验通过；真机未部署=NOT_ACCEPTED。**批 2 已知欠账（B2 残留登记表）**：inventory_hooks 原版 ABI 槽位指针访问三处 fail-closed（`native_inventory_hook.cpp:187/255-276/540`，归批 3 私有 hook bridge，相关原版查找/槽扫描行为未宣称等价）；detail_context/UI 控件指针留批 4 原子详情槽；game_host item ops/write port/extras/craft 契约裸签名按表归后续专项（②不授权）。**批 3 已实现（主代理复验）**：game 层新增 handle 键 Game dispatch 原语（`game_host.h`/`game/access/inventory.h/.cpp`/`game_host_port.cpp`：`game_original_find_item_slot`/物品身份查询**只回结果不回物品指针**，现场指针仅限当帧 hook ABI 入参栈内即弃）；inventory_hooks 三处 fail-closed 回退（原 `:187/:255-276/:540`）删除并重接原版查找/槽扫描/装备/消费/R-55/R-63 链（R-20/21/44/55/63 → VM-43/44/P4-07/T2O-01 真机欠账）；EB port sell-price handle 路径与 original-only 门控延续；红线 cmake 断言覆盖 hooks 迁移面。host 82/82、arch 新增 0、routes 143/143、JNI 146/146、build-debug 通过（d8ce04b73401）、diff --check、旧 fail-closed helper grep 绝迹；真机未部署=**NOT_ACCEPTED**。**批 4 已实现（主代理复验，本提交）**：detail_context 按 A 案原子化——`item.facts`/Item Port **3.0**（`detail_item_context(out desc_type,out bag,out slot,out handle)` 一次性快照，`physical_item_at`/`detail_context`/`cursor_index(control)` 与控件指针出入参全删，红线 cmake 断言防回归含 `void* control`/`out_control` 禁止式）；R-55 预演保存原子上下文、确认时重查比较 desc/袋/槽/handle 任一不一致走既有 backup/fail-safe（test_inventory_hook_stage4 新增不一致断言）；EB 拖拽 session 记录源袋+槽+identity token，提交与原版源删除前复核 handle 身份（B-04/B-05 语义未改）；Game Adapter 内私有读控件解析槽位（game/access/inventory 允许面）。旧 major 拒绝用例+消费者共享常量协商更新（autosell/EB/inventory_hooks/attribute_quality/custom_recipe/craft_ui/special_equip/world_teleport/core.item）。主代理复验 host 82/82、arch 新增 0、routes 143/143、JNI 146/146、diff --check、红线扩展通过；build-debug 成功（9d973725c990）；真机未部署=**NOT_ACCEPTED**。**ITM-08 物品对象主线宣告收口**：插件契约/能力/callback 无物品裸指针出入参；剩余控制面命中三处均为游戏 UI 事件/hook ABI 控件参数（`extension_bag.h:117-119` equip 事件、`host_sdk.h:229` hooks call-original、`ui.h:100` 绘制回调），指针方向=插件↔游戏 ABI 同帧入参，属「hook ABI 私有边界」允许面而非物品契约泄漏，如需进一步句柄化另立 UI 对象专项；B2 残留契约专项（game_host item ops/write port/extras/craft 裸签名）仍为独立后续 |
+| ITM-09 | P2 | `update_snapshot` 各失败路径静默 return（无 warn），快照停更不可观测 | `plugin.cpp:605-651`；审计 F-12 | 代码已实现（update_snapshot 各失败分支一次性 WARN；EB 段沿用既有限速；随容量批落地） |
+| ITM-10 | P3 | `enrich_shop_items` 白名单重放（slot/category/count/price），上游新增字段被静默丢弃 | `response.cpp:396-407`；审计 F-15 | 用户裁决「接受现状不动」：仅重放 `slot/category/count/price` 并追加 `name`；消费方 `InfoItemQueries.shopItems()`、`ShopController.kt`、`NativeBridge.nativeShopItems()`；作为已知行为登记，不单修 |
+| ITM-11 | P3 | `fill_status` 在 installed_disabled 仍报 enabled=true 且无消费者（与 core.world I-01 及全局同型） | `plugin.cpp:1596-1599`；审计 F-11 | 并入 ENG-04 全局 status 语义统一处置；core.item 不单修 |
+| ITM-12 | P2 | core→feature 依赖方向倒置：`core.item` optional_requires `stack_limit.item_count`（enabled 门控+canonical 解码双需求），而 **optional 边参与安装拓扑**（registry `topo_build(include_optional)`），使 feature 插件 stack_limit 必然先于 core owner 安装；check_layers 只校验 include 面，capability 边的方向违例静态不可见。行为当前正确，问题在架构方向与次序。候选 A：解码走既有 host facade、enabled 改由宿主状态面查询，能力边删除；候选 B：堆叠编码语义下沉 game 层归口物品域，stack_limit 仅保留 clamp 资源与开关 | `plugins/core.item/plugin.cpp:129-144,280-285`、`plugins/stack_limit/plugin.cpp:263`（facade set-once 常驻）、`contracts/item_count.h`、`host/plugin_registry.cpp:420-465` | 代码已实现（port 路由+驻留 active probe：facts 经 `read.cumulate_count` gate-aware 路由、序列化经新 port 成员 `effective_cumulate_count`（Item Port 1.2 尾部追加）；`stack_limit.item_count` 能力类型/provides/optional 边已删除，core.item 不再 include item_count.h；game 层直接 facade 消费者的 gate 无关语义未动）；真机证据 VM-P1-S2/VM-P6-01/VM-K2-02/VM-K5-04c 待统一批后销账 |
+| ITM-13 | P2 | 扩展袋知识散落在模块与 core.item（违背「模块/核心插件不得知道扩展背包」裁决）：core.item 知道逻辑袋 6..10 并直调 `extension_bag` 能力（`write_item_move_result` 的 `extension_requested` 分支、`append_extension_inventory_bags`、快照 EB 段与 R-47b 修正）；game 层同样直接取能力——`game/ops/item_inventory_state_write.cpp:255-266`（move 的 EB 分支）、`game/state/game_state.cpp:285-310`（ref_at 的 kExtension 分支）、`core/native/inventory_trade.cpp:26-33`。用户裁决：全部扩展袋语义收归 `extension_bag` 插件，core.item 与模块只经**中立扩展点**（物品域自有的扩展 provider 槽，同 f811d916 count facade 型），EB install 时注册 | 上列四处 + 本批过渡修复提交（缓冲提额只治容量，未去知识） | 批 1 已实现（中立 provider 通道：`contracts/inventory_extension.h` 13 成员表 + game facade set-once + host 转发 + resident/available 双 probe；core.item 与 game 物品路径 EB 感知红线 grep 清零；写端口签名中立化 1.0→1.1、Item Port 1.3、`kExtension`→`kProvider`（wire 字符串不变）；EB install 注册 provider、deactivate 置 unavailable、disable 不注销、provides 保留；R-47b 唯一实现点移入 provider。host 77/77、143/143、check_arch、Debug 构建通过；真机统一批 NOT_ACCEPTED）。批 2（v2 通用参与者机制，规格=`.tmp/itm13-extension-reversal/spec-batch2-v2.md`）已实现：新增 `contracts/lifecycle_participant.h`+host 注册表+game facade（assembly 注入；Host SDK 尾追加 minor 10→11）；save enter/create 与 ui_state 四点位迁移（冻结文案逐字保持、无参与者=旧能力缺失路径）；legacy_read 扩展段改 provider `inventory_json_fragment` 唯一实现点（T2h-B0 逐字节 golden）；provider 尾追加 `use_item` 1.0→1.1 并接 host 写端口与 bridge domain_operations；EB install 最末双独立注册（provider+participant，失败登记部分注册态）；删 `contracts/extension_bag_port.h`/`host/extension_bag_port.inc`（逐符号复核，EB 内部直连符号保留）；红线 grep 清零面 0 命中；autosell/inventory_hooks feature↔feature 消费与 EB capability provides 保留。host 78/78、check_arch 零新增、routes 143/143、JNI 156/156、Debug 构建通过；真机未部署=NOT_ACCEPTED。证据缺口（如实）：save.cpp 无 host target（enter/create 外层 JSON 字节、动态 `not in main menu (state=…)`、`save_preflight_for_enter` 完整 JSON、回滚链仅真机可锁→VM-26/VM-K5-06i）；`state_id` 回退扫描与 main-menu 成功路径仅单元级覆盖；EB install 注册失败分支与 Host SDK 旧尺寸运行时 fail-closed 无集成用例。批 1 文案偏离 `"provider move unavailable"` 已裁决不还原不扩散。VM-43 引用错位更正：EB 册 VM-43=monster 数量上界（R-59）、重构册 VM-43=商店部分出售，均不得作 ITM-13 证据；ITM-13 真机卡=VM-26/VM-K5-06i/VM-D2D-01/02/VM-P4-07/VM-K4-03。与 ITM-08 typed handle 同族 |
+| ITM-14 | P3 | bridge 扩展袋 JNI 收口（用户裁决「零调用即删；在用若非仅 Kotlin 可行则搬 cpp」）：实扫 10 个扩展袋导出中 9 个 Kotlin 零调用（含反射/字符串检索两轮零命中），已删声明+实现+专用 helper（`data_virtual_bag_ui_status_json`）；check_jni 基线 156→147。在用 2 个：`nativeExtensionBagStatusJson` 与 `nativeSetExtensionBagEnabled` | `NativeBridge.kt`、`bridge/native/gamebridge_extension_bag.cpp`、`gamebridge_settings.cpp`、`plugins/extension_bag/*`、`docs/refactor/baseline.md` | 死导出已删（`eb077827`）；statusJson 已搬 cpp（EB 声明式 native query handler：路由 143 面 owner 不变、启用态成功响应逐字节一致、JNI 147→146、host 79/79、构建 `66ad011d1a19`。**停用态行为差异（登记）**：EB installed_disabled/inactive 时 handler 随 owner 撤销，旧 JNI 仍返回 `enabled=false` 状态 JSON，现改 owner 不可用响应——**已裁决：接受 owner 撤销语义**，旧 JNI 停用态特例不保留）。setEnabled **保留**，exp-1 事实更正此前表述：Kotlin 门禁传导=六个功能插件同型「命令队列专用 JNI setter」（stack_limit/simple_mode/autosell/push_all/moveMerge/extension_bag 均如此，`gamebridge_domain_operations.cpp:443-488` 等），仅 `customRecipeEnabled` 直写+同步事件例外（`:490-495`）；启用状态机本就在 native（`commands_drain→lifecycle_step→sync_gates`），JNI 只是设置值传导通道，EB 非特例。是否把六个专用 setter 归一为通用 gate-set 属**模块级议题**（非 EB 收口范围）——待裁决 |两批真机统一批欠账 VM-P4-07/VM-K4-03=NOT_ACCEPTED |
+| ITM-15 | P1 | 扩展背包设置页开关无效：用户报告设置页中的 EB 开关不生效，依赖 EB 的 item 功能因此无法按预期测试 | 用户报告（2026-10-01）；验收登记见 `docs/refactor/audits/plugin-audit/core-item-20261001/verification-log.md` §2 | **设备复验通过（2026-10-18）**：模块设置页「扩展背包」开关 off → `inactive`/0 live，on → `enabled`/20 live；当前构建不再复现。证据见 `docs/refactor/audits/plugin-audit/extension-bag-20261018/verification-log.md` §3 |
+| ITM-16 | P2 | `inventory.action.sell` 对 EB logical bag 走通用删除，bag6/7 item 移除失败并退款；direct API 原先也经 `fn_remove_item` 失败 | `plugins/inventory_hooks/plugin.cpp`、`core/native/inventory_trade.cpp`、`contracts/{extension_bag.h,inventory_extension.h}`；修复前 monster v31 bag6 direct sell→`sell failed`，bag0 对照 done/price=14 | **已提交 `9de19e01`（2026-10-10）**：EB 3.1 sale callback + neutral provider v2.1 direct API 分流；Host 124/124；当前 monster fixed build direct bag6 slot2（price 2229）、bag7 slot0（price 11）及 autosell bag6 slot9 均 done，保存/重进状态正确。完整 extension-bag UI 卡因 EB-01 延后；不得据限定 API 子路径宣告 VM-17/18/30 完整通过 |
+
+> **ITM-06/07 补记（2026-10-01）**：数字字段错误语义细化为「字段缺失 → 原 `... required`；字段存在但非有效 int32（小数/指数/前导 `+`/超 int32/超长）→ HTTP 400 `bad value for <field>`；整包 JSON 非法/非对象 → `bad request`」。native：`json_lite` 增 `integer_valid`（`as_int` 要求有效整数），`item_write_command` 各写路由对相关字段先判「存在但非法」。**传输层**：`InventoryActionController.kt`/`ShopController.kt` 原有「兼容校验」用 org.json `optInt` 预解析（如 `move_item` 的 `bag>10`），把 `1e2` 归一化为 100 后抢先返回聚合 required，屏蔽 native 语义；按用户裁决**去除 Kotlin 重复业务校验、原样透传**，native 为唯一校验源。真机 VM-K5-08h：28 项守卫请求全部 400 且不产生票据（含各字段的指数/小数/溢出/前导+）、6 项写回归 ticket 均 done、保护备份恢复后 money/bag0/party 与写前一致；`bag6 slot11` 写前态因 EB 关闭未能记录（无法验证项）。其余 controller（`PartyController`/`CharacterController`/`CombatController`/`OpController`/`SaveController`/`QuestController`/`UiActionController`）含同型重复字段校验，待各插件审计批处理。
+
+> **ITM-10/11 与传输层余留（2026-10-01）**：ITM-10 用户裁决「接受现状不动」：`enrich_shop_items` 仅重放 `slot/category/count/price` 并追加 `name`，消费方为 `InfoItemQueries.shopItems()`、`ShopController.kt`、`NativeBridge.nativeShopItems()`；登记为已知行为。ITM-11 并入 ENG-04 全局 status 语义，不在 core.item 单修。其余 Controller 的重复字段校验登记为 ENG-09；`MovementController`/`DebugController` 为解析后转发，均待后续按插件处理。
+
+> **ITM-05 键序审计补记（HEAD `5aaa7f51`）**：按 `.tmp/itm15-result-slimming/spec.md` §2 对账，21 个 item/character 表项及 world/save 六条结果均已逐路由核对；发现并校正 1 处键序偏差：`/api/item/shop/buy_item` 实码原序 `ok,price,slots,money`，按批准形状改为 `ok,price,money,slots`。此前“偏差：无”更正。字段集/语义差异另行列出，不用键序修改替代语义裁决。**三条语义差异用户裁决（2026-10-01）**：① `move_item` 的 slots=diff 全部真实变化槽（堆叠合并/分裂时多于源/目的两格）→ **按实码认可**（信息更全更准；操作前快照读失败以空基线比较会多报格子，后续可加 WARN，本批不动）；② `set_auto_attack` 回传请求值（非执行后读回）→ **回显认可**（与「只回受理不伪造」族语义一致，纯指令开关）；③ `reset_skill` → **已按裁决改码**：result 瘦身为 `{"ok":true,"skill_points":N}`（重置后其余字段均为默认值不回传），core.character kSkillReset builder + 两处字节 golden + api-reference §7.10/端点段同步，host 全绿。
+
+> **ITM-08 批4边界补记**：`ExtensionBagApi` 的 `is_inventory_enter`、`prepare_main_menu`、`prepare_save_slot_load`、`inventory_state_id` 成员在 save/ui_state 迁到 lifecycle participant 后，当前仓库消费者搜索为零（provider 仍填表）。作为 frozen `extension_bag` provides ABI 成员保留；登记 B2 残留契约表，后续清理批处理，本小批不动其契约。
+
+## 3. core.character（开放）
+
+| ID | 级 | 问题 | 证据 | 状态 |
+|---|---|---|---|---|
+| CHR-01 | P1 | `POST /api/op/character/{role}/hp` 无效：`ops::set_hp` 写 `ch+0x1F0`（C_HP）成功且票据 done，但该字段是引擎每帧按权威来源重写的**镜像**——真机 10ms 高频采样确认「写入瞬时可见、≤1 帧内被覆盖」；战斗中回血不能维持生存（436 次维持写入仍阵亡）；金钱写入（不同函数链 `fn_minus_money`）对照有效。`set_mp` 按同字段体系推定同型（待取证）。读路径同患：战斗中 party hp 为帧缓存值（滞后 ~1s，观测到读 0 而 raw 4772） | `.tmp/hp-write-probe/`（poke/trace/hifreq/slots 系列）、`game/ops/character_write.cpp:56-69`、`game_symbols.h:20,73-76` | 已修复（`98a63af1`）：`set_hp`/`set_mp` 改为读当前值→clamp→按 `目标−当前` 调游戏 `CHAR_AddLife`(0xEA184)/`CHAR_AddMana`(0xE0958)（真机确认周期恢复链 `CHARSYSTEM_Process→CHARSYSTEM_ProcessAttributeRegen→CHAR_AddLife/AddMana`），不再直写字段。真机 VM-K5-04e 专项 **PASS**（写后不再被拉满、regen 正常、上限钳制正确）。残余未定：匿名写候选 0x184210/0x185A50、跨变体 |
+| CHR-03 | P1 | 6 条 Kotlin `notImpl()` 占位路由（skill-point/skill-level/heal/rest/revive/hate）`op_gated=1` 实际失效：501 抛于 op 门禁之前，op 开/关两态不可区分，与 api-reference §8 门控口径矛盾 | `plugins/core.api/routes.inc:85-95`、`OpController.kt`；审计 F2；smoke 基线仅记 501 | 开放（候选：迁 native dispatch 占位/改文档口径/Kotlin 补门禁） |
+| CHR-11 | P3 | 写后读己写：GET 快照节拍 15 帧（≈250ms）内返回旧值，契约未声明该窗口 | `plugin.cpp:400-426`；审计 F17 | 开放（文档声明或事件化刷新） |
+| CHR-12 | P2 | `add_stat` 剩余能力点双判定：HTTP 线程用 15 帧查询快照预判（陈旧时误拒合法请求），主线程 result handler 又用 state port 判一次，两份真相与两份文案 | `plugins/core.character/plugin.cpp` 原 `char_write_command` kAddStat 分支；`test_character_facts_dispatch.cpp` 原 400 断言 | 代码已实现（写面判定单点化：HTTP 仅语法/范围校验，主线程 `QolCharacterStateParty` 唯一权威）。**API 语义变更（用户授权，不做迁移）**：超点数由 HTTP 400 `no status point` 改为 200 + 票据 `failed`。测试与 `api-reference` §add_stat 已同步。本批只跑静态检查，Host CTest/真机证据欠账 |
+| CHR-13 | P2 | 路由三处声明（`kRoutes` 35 / `routes.inc` 41 / `kHttpRouteMetadata` 6）无一致性约束；`initialize_http_routes` 匹配失败 `continue`，漏配表现为路由静默消失，无日志无断言 | `plugins/core.character/plugin.cpp` 原 `:2005-2031` | 代码已实现（编译期计数断言 `35+6==41`；运行期逐条唯一匹配 + 全量覆盖校验后才填充；任一不符 `install` 失败并记 `http route table mismatch`）。路由集合静态核对仍 137/137、`core.character=41` 不变 |
+| CHR-14 | P3 | 查询快照每次 GET 零初始化 + memcpy 115KB 到栈对象（`kAddStat` 分支另有一份）；`parse_path_int` 与 `char_path_int` 逐字重复，加固时需双改 | `plugins/core.character/plugin.cpp` 原 `:522-544`、`:1091-1114`、`:562` | 代码已实现（`Snapshot::ReadView` RAII 只读视图替代整块拷贝，附对齐断言；删除 `parse_path_int` 统一走 `char_path_int`）。Host CTest 未运行 |
+
+### core.quest（阶段 7 登记）
+
+| ID | 级 | 问题 | 证据 | 状态 |
+|---|---|---|---|---|
+| QST-03 | P2 | quest/world/inventory 读面逐字节 frozen 对比尚未完成，迁移后读面行为保持证据不足 | VM-T2O-01；阶段 7 审计 | **NOT_ACCEPTED**：仍欠真机逐字节 frozen 对比；证据欠账以 `verification.md` §5 为准 |
+
+### core.system（阶段 7 登记）
+
+本批 SYS-01/02/03/04/06 均已修复（提交 `a30f699e`，快照并发归 `867b0974`/`a225ebcc`）；SYS-05/SYS-07 文档漂移见 §9 DOC-06/DOC-07。关联真机 VM-K5-04d 已复验通过。
+
+## 4. core.ui_state / core.custom_ui（开放）
+
+| ID | 级 | 问题 | 证据 | 状态 |
+|---|---|---|---|---|
+| UIS-01 | P2 | wipeout `game_over` 后的 YesNo 确认弹窗（TextData 0x14）缺正确的「Yes」推进 handler：`game_over`（`F_WIPEOUT_BUTTON_GAMEOVER_VMA`，game_symbols.h:926）弹出该确认。**并非无法识别**：screen 实测由 `dialog_wipeout` 变为 `dialog_popup`；popup 栈顶仍为 wipeout 入口（FIX-03 的 fail-closed 判定与 `ok` 被拒均已实测）。`GET /api/ui/dialog` 的弹窗分支可输出 `type:popup`、文本、`G_POPUP_FPOK/FPCANCEL` 对应的选项，但该确认弹窗的具体响应尚未真机取证；问题是通用 `F_BUTTON_OK_EXE` 不适用该弹窗（误用即 FIX-03 崩溃根因），游戏原生点按正常 → 其自身 button 链存在、待定位并接入 | `game_symbols.h:924-926`、`game/access/ui_state.cpp:522-540`；真机受控实验 | 开放（先捕获此弹窗的 `GET /api/ui/dialog` 内容，再定位 YesNo 按钮 handler 并新增 action；修复前死亡恢复流程需人工一次点按） |
+| CUI-01 | P3 | `native_choice_open` 在 push 进入外部调用后的并发交错（close/disable 与 push 同时发生）仅有 generation 门禁，真机长时观察未覆盖 | FIX-01 修复报告风险项 | 挂账（真机统一批观察） |
+
+## 5. core.settings / 配置链路（本轮已收口）
+
+SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前配置合同为 native Host 常驻管理设施持有的外部 `config.json` 三层模型（`enable`/`features`/`config`）：schema、Store、读写与管理 API 全部归 Host，`settings` 降级为普通成品页插件（id=`settings`），只渲染 Host feature catalog 并调用 Host 常驻管理 API，不再拥有配置语义；Kotlin 仅传输 raw body。旧 12 个平铺字段、旧 runtime gate 与旧 settings `bool` 桥已退出。合同见 `ARCHITECTURE.md` §2.2/§7.1/§7.2/§8.2、API 参考 §7.6 与审计记录 `docs/refactor/audits/core.settings-20261010/verification-log.md`（含 Stage1–3 Host 定向测试与 Debug 构建登记）。本轮未登记新增代码缺陷；验收范围和未执行项目见 `verification.md` §5.9。
+
+**SET-03（已修复，2026-10-21）**：设置页「打开调试面板」点击后面板不出现且界面失去输入。真机日志链条：设置页进程内调用 `ui_panels_open("debug_components")` → `panel enter` → `build_text_buttons` 的**装饰文本按钮**在无标题图集上下文返回 NotReady（`get_group_title_img_type()` 不可用）→ `create_components` 失败（`create result=6`）；宿主仍把未激活面板压栈，其 `panel_event` 对未激活状态返回 1，吞掉全部触摸。修复：①装饰按钮创建失败回退胶囊按钮（演示页可开）；②宿主在嵌套 `invoke_enter` 后复核 `active()`，失败立即出栈并恢复父面板；③调试面板未激活时不消费输入；④`ui_panels_open` 在组件点击回调内改为记录请求、由帧泵在安全点执行（防止回调内创建被拒）。
+
+## 6. 引擎 / host / extension_bag（开放）
+
+| ID | 级 | 问题 | 证据 | 状态 |
+|---|---|---|---|---|
+| EB-01 | P1 | monster v31 真机打开商店页后 SIGSEGV：`LINKEDLISTITEM_getData`←`UIEquip_DrawInvenBag+68`←EB `store_draw_inven_bag_group_wrapper`←`Scene_Draw_POPUP_SC_STORE+124`；栈经过 EB store bag draw wrapper，具体无效 linked-list 所有权/状态根因尚未确认 | 本地 `.tmp/it16-device-20261009/shop-crash-logcat.txt`、`shop-tombstone.txt`；模块 SHA `5dc50f2a2cc6…`；符号化 module frames：`game/adapter_ports/extension_bag_write_port.cpp:230-237`、`plugins/extension_bag/extension_bag_store.inc:619-637`；当时 log 有 `store tabs installed` 于崩溃前约1秒 | **用户确认已修复（2026-10-18），未复核；移出本次审阅范围。** VM-17/18 与所有涉及 EB UI 的真机卡是否恢复由设备批决定 |
+| EB-02 | P1 | 详情按钮 hook 按固定 panel index 绑定，不核验当前按钮/data 与实际 execute-slot，未按 slot 去重（R-64） | `plugins/extension_bag/extension_bag_equip.inc:393-450,771-862,1139-1160`；审阅 D-03 | **已修复（2026-10-18）**：Host SDK v1.27 `QolDescHookApi` V2（`ccf17c41`）+ EB 迁移（`5aae1cdd`）；真机 index=8 同 execute slot 去重、点击 index=1 正确路由 bag0 slot2；证据见审计登记 §3 |
+| EB-AUDIT-01 | — | extension_bag 专项审阅（2026-10-18）：去重 39 条（P1 8/P2 25/P3 6）；除 A-01/D-03 外已修并提交 | `docs/refactor/audits/plugin-audit/extension-bag-20261018/verification-log.md` | 静态/构建面收口；设备面见审计 §2 未验证项 |
+| ENG-01 | P1 | 级联停用（cascade_stopped）不调用 owner 的 `deactivate`，仅 unregister_http_queries+on_disabled：写面 owner（core.character/item/save/world/ui_state/quest/EB）自注册的 typed result handler 残留，窗口内已接受命令可经残留 handler 用未清理的 ops 上下文执行（违反「停用后无业务副作用」判据） | `host/plugin_registry.cpp:1361-1388,2099-2101`；审计 character F6；core.world deactivate 实测消费者不自动恢复 | 开放（引擎统一修复：cascade 终态调 deactivate；关联 VM-K2-01/VM-FIX-01） |
+| ENG-02 | P2 | `http_dispatch.unregister_owner` 与 registry `sdk_unregister_owner` 在主线程条件变量等 inflight/lease 归零**无超时**：任一 handler 挂起即卡死生命周期（hooks 有帧预算，dispatch 面无） | `host/http_dispatch.cpp:241-247`、`host/http_registry.cpp:111-122`；审计 item-G02/char-G02 | 开放（加帧预算/超时+失败语义） |
+| ENG-03 | P2 | `http_dispatch.register_handler` 对 `unregister_pending && 同 owner` 的槽直接重置，不等待该槽 inflight 归零（现由生命周期串行不可达；并发注册场景会丢计数/悬挂 selected 指针） | `host/http_dispatch.cpp:178-187`；审计 world-G-01 | 开放（重置前检查 inflight==0+断言注释） |
+| ENG-04 | P2 | `PluginDescriptor.fill_status` 回调 host 侧**零调用点**，全项目 60+ 插件维护实现且部分语义错误（installed_disabled 报 enabled） | `contracts/plugin.h:155`；审计 I-01/F-11/F-10 | 开放（统一裁决：接线或删除；删除即全项目清理批） |
+| ENG-05 | P3 | POST 路由响应超初始容量不触发扩容重派发（仅 GET 有 `body_size>capacity` 扩派）；owner 超容量直接 500 | `host/http_dispatch.cpp:389-425`；审计 world-G-03 | 开放 |
+| ENG-06 | P3 | `HttpQueryHandlerDescriptor.ctx` 为 `void*`，声明式插件被迫 const_cast（core.world 7 处等） | `contracts/http.h:72-91`；审计 world-G-02 | 开放（契约级 `const void*` 统一裁决） |
+| ENG-07 | P3 | registry 与 dispatch 两层 owner 停用文案不一致（`http registry inactive` / `http owner inactive`），且 registry 注销删槽 vs dispatch 注销留墓碑，语义分层无文档 | `host/http_registry.cpp:123-125` vs `http_dispatch.cpp:248-256`；审计 world-G-05 | 开放（文档+测试区分） |
+| ENG-08 | P3 | `check_http_routes.py` 不交叉核对各插件 descriptor 的 `http_query_count` 与 routes.inc owner 计数（core.character 35 handler vs 41 路由的差值长期不被发现） | `scripts/maintenance/check_http_routes.py:39-50`；审计 char-G-03 | 开放（工具补校验） |
+| ENG-09 | P3 | Kotlin Controller 中存在同型重复字段校验；部分 Controller 为解析后转发，传输层校验/转发形态尚未按插件统一登记 | `PartyController`、`CharacterController`、`CombatController`、`OpController`、`SaveController`、`QuestController`、`UiActionController`、`MovementController`、`DebugController`；ITM-06/07 补记 | Quest 实例已修复：`QuestController` 不再预解析并原样透传，`b48d5ab6`；其余 Debug/AutoSell/Movement/Party/Save/Op/Character/UiAction/Combat 仍待后续按插件处理。本批 core.item `InventoryActionController`/`ShopController` 已去除重复业务校验 |
+
+## 7. infra / game 适配层（开放）
+
+| ID | 级 | 问题 | 证据 | 状态 |
+|---|---|---|---|---|
+| INF-01 | P1 | stack_limit 驻留（residency）风险：开启期间存档写入 >99 堆叠后关闭开关，观察到 enter_slot `slot corrupt` / 无法进档（stage load_data）；SET-01 门禁翻转时 slot0 无法进入，重开门禁+重启进程后恢复。**关闭后 slot corrupt 的具体触发链尚未证实**；回滚通道=门禁开或存档回档，两者均未在开关语义中提示。 | 真机（tickets 18/23/26 failed vs 28 done）；VM-P6-01；stack_limit 审计 `verification-log.md` §2 | 开放（触发链待确认；策略待裁决：关闭前 clamp/禁止关/关闭态预检豁免并声明） |
+| INF-02 | P2 | `game_cache` 惰性槽在**请求线程持 `g_cache_mtx` 调 builder**，builder 内 `wait_frame_boundary` 以 1ms sleep 轮询：HTTP 线程可被长时间阻塞；若任何持 `g_virtual_bag_mtx` 的路径触达缓存刷新即重入 `for_each_logical_item` 死锁——现靠「EB 的 op_ok 全在锁外」约定维持，无机制校验 | `core/native/game_cache.cpp:101-119,143-164`；审计 item-G-03；AGENTS 锁规则 | 开放（校验手段：断言/测试或锁序文档化） |
+| INF-03 | P2 | `frame_cache_force_refresh` 每次 op_ok/卖店/丢弃全量重建 12 个缓存槽（含地图/玩家/队伍），且写结果已即时序列化一次，重复成本高 | `game_cache.cpp:185-195`；审计 item-G-05 | 开放（性能项） |
+| INF-05 | P3 | `item_count_facade` 裸指针 `g_provider` set-once 无原子、deactivate 不清除（stack_limit 刻意常驻）；契约未记录该约束 | `game/adapter_ports/item_count_facade.cpp`；审计 item-G-06；stack_limit 审计 `SL-08` | 源码已变更，旧风险不再适用；待用户确认销账 |
+| INF-06 | P3 | `capabilities.require` 无锁：注册/撤销在主线程，契约未禁止 HTTP 线程 require（数据竞争窗口） | `infra/capabilities.cpp:68-81`；审计 char-G-05 | 开放（契约声明线程约束+断言） |
+| INF-07 | P3 | 注册容量 `kMaxHandlers=128`、`kMaxPending=1024` 无余量诊断，冲突/超限错误仅落装配日志 | `http_dispatch.cpp:17`、`command_queue.cpp:22`；审计 char-G-06 | 开放 |
+| INF-08 | P3 | handler 全局唯一 id（如 `0x57540001`）依赖前缀约定，无中央登记表，新增 owner 有碰撞风险 | `plugins/core.world/plugin.cpp` kWorldWriteHandlerId；审计 I-08 | 开放（contracts 集中登记） |
+| INF-09 | P3 | result handler 自注册模式（core.feature 等）与声明式 `http_queries` 并存无统一约定；部分注册失败的 `unregister_owner` 回滚影响面大于失败项 | `host/http_dispatch.cpp:431-449`；审计 char-G-08/G-09 | 开放（约定文档化） |
+| INF-10 | P3 | optional-cycle 降级日志用「全图未发射」的两端筛选，环的下游节点亦未发射 → 日志会把「依赖环下游」的边误报为「该边参与环」；诊断不可靠 | `host/plugin_registry.cpp:669-685`；attribute_range_display 审计批 G-01 | 已修复：环内定向切除 optional 边；日志只记录实际被切边 |
+| INF-11 | P3 | `ui_adapter` 的 `insert_inline_color` 以调用方 `max_text_bytes` 为 `strnlen` 上界，插件传 4096，而 UIDesc 文本缓冲实为 `0x200`；无 512 字节内 NUL 时会越过真实缓冲搜索，越界读风险在 Adapter 边界 | `host/ui_adapter.cpp:74-91`、`game/symbols/game_symbols.h:606-607`；attribute_range_display 审计批 G-02 | **已缓解/部分关闭**（`7f5c06e8`）：新增 `ui_desc_text_cursor`/`insert_inline_color_span` 按 `0x200` 边界与游标一致校验，插件改用新槽；旧 `insert_inline_color` 已标注 deprecated、无消费者。旧槽本身的上界缺陷保留（仅 ABI 兼容，未删除） |
+| INF-12 | P3 | 启动同意页（Java 层）：`POST /api/ui/dialog/select {"action":"ok"}` 返回 `close_dispatched` 后同意页仍占用，`POST /api/system/enter_slot` 持续 `ui occupied: agreement`（本次两批各约 20 次轮询未解除），需时间异步生效（用户观测）；期间 `GET /api/ui/screen` 返回 `main_menu`，与实际占用不一致，调用方无法据此判断解除时机 | 2026-10-17 attribute_range_display 部署批 1/2（`.tmp/attribute-range-display-deploy2/`、`.tmp/attribute-range-display-phase4/`）；api-reference §7.10 同意页分支 | 开放（提供同意页关闭完成信号或让 screen 反映 agreement） |
+| INF-13 | P3 | dispatch resource group 不回收：全局仅 8 个 resource group，`dispatch_unsubscribe` 只移除消费者并减计数、不清空空 group；持续订阅不同 resource ID 可能耗尽 group 槽 | `hooks/dispatch.cpp:15,26-30,135-147`；character_panel_i18n 审计批 G（无饱和证据，未处理） | 开放（空 group 回收或扩容 + 诊断） |
+
+## 8. 工具链 / 验证设施（开放）
+
+| ID | 级 | 问题 | 证据 | 状态 |
+|---|---|---|---|---|
+| TL-01 | P2 | `smoke_all.py` 响应体记录截断 400 字符（routes 20000）：长读面「与基线 diff=0」结论不成立——bag5 读回归（ITM-01）即因此逃逸既有验收 | `scripts/verification/smoke_all.py:343-345`；审计 item F-16 | 开放（改完整 body/哈希记录并重录基线；影响所有读面既有 PASS 证据口径） |
+| TL-02 | P2 | `smoke_all.py` 无副作用隔离：动作面直打致真机 party 团灭（本会话实测 `dialog_wipeout`，靠备份导入恢复） | 真机 smoke 记录 + backup 恢复流程 | 开放（只读模式或写面白名单+危险动作排除） |
+| TL-03 | P3 | `check_arch.py` 不覆盖运行时 `capabilities.require` 依赖边（ITM-02 类错漏静态不可见） | `scripts/maintenance/check_arch.py` + 审计 char-G-04 | 开放（descriptor 静态可解析部分可校验） |
+| TL-04 | P3 | `arch_exemptions.json` 存量条目指向已不存在路径 `plugins/core.ui/panels/settings.cpp:*`，陈旧豁免可能未来误匹配 | 审计 world-G-06 | 开放（清理；未随 FIX 批做因属工具独立小改） |
+| TL-05 | P3 | 设备环境漂移：文档记录 frida-server 17.16.4 已部署，实测设备 `/data/local/tmp/frida-server` 缺失（本会话重推恢复）；frida 直写/采样是 HP 缺陷定位的唯一手段，环境项需固化 | 真机操作记录 | 开放（文档或开机脚本固化） |
+| TL-06 | P2 | 工作树既有欠账导致三项 host 测试失败：`core_api_lifecycle_tests`（`test_core_api_lifecycle.cpp:141,166` 断言 `features[0].category == kHidden` 与实现不符）、`debug_two_column_tests`（`test_debug_two_column.cpp:381` 断言 `g_provider->active()`）、`core_settings_config_store_tests`（`test_core_settings_config_store.cpp:424` `mkdtemp` 返回空，属环境项） | 2026-10-16 device_probe 审阅批实测；测试构建不编译 `host/assembly.cpp`，与该批删除无关；`core_api_lifecycle_tests` 已于 `docs/refactor/verification.md` §5.14（2026-10-15）记为红项（当时全量 141/143，红项含该测试） | 开放（归属 config platform service / UI 字体在途批次，随该批收口） |
+| TL-07 | P3 | `docs/refactor/baseline.md` 与 `docs/refactor/map.md` 的 `--check` 已不一致：两文件为脚本生成（禁止手工编辑），统计漂移来自工作树在途批次 | 2026-10-16 实测 `gen_baseline_doc.py --check` 与 `gen_map_doc.py --check` 均报不一致 | 开放（在途批次提交后统一重跑两个生成脚本；重生成前不得手工编辑） |
+
+## 9. 文档漂移（各插件验收后统一更新）
+
+| ID | 归属 | 问题 |
+|---|---|---|
+| DOC-01 | api-reference × core.world | `/map/id` 示例键名 `id` 实际 `map_id`；distance 示例含 `in_map`、`nearest:null(found=true)` 与实现不符；「drops 恒为空」被真机非空证据证伪；4 条写端点章节仍描述同步响应应改票据契约并交叉引用 §7.10 |
+| DOC-02 | api-reference × core.item | `/items` 每项「附 bag 字段」实际无；EB 容量「16/8/4/0/0」实际按袋派生 [16,16,12,12,12] |
+| DOC-03 | api-reference + game_symbols.h × core.character | §2 章首「设计草案（代码待实现）」过时；装备「position」字段实际为 `slot`；`max_level` 标注「待实现」实际已输出；`set_skill_usage` 仍需将用户裁决的 501 占位/不实现语义同步到文档（关联 CHR-02）；`game_symbols.h` bit0-2 注释实际 bit0-3 |
+| DOC-04 | build-and-deploy × 全局 | 真机流程补充：阵亡恢复链（wipeout→game_over→**人工一次点按**→enter_slot，API 无法推进 UIS-01）；smoke 写副作用警示（TL-02）；配置契约现已同步到 ARCHITECTURE、API reference、core.settings reference 与 game-guide。build-and-deploy 无配置 schema 内容；DOC-04 仍因真机流程和 smoke 副作用警示未收口而保持开放 |
+| DOC-05 | api-reference × core.character | API 文档记载「33 条票据路由」与当前实际 41 条 `core.character` owner 路由不符；其中 35 条 native handler、6 条 Kotlin 501 占位。CHR-A7 |
+| DOC-06 | api-reference × core.system | `/api/system/info` 示例含实现不存在的 `game` 字段；`game_frame` 采样语义与旧地址描述不准确。SYS-05 |
+| DOC-07 | health 文档 × core.api / Kotlin host | health 的 `ready` 按 Kotlin `ControllerGuard` 窄定义判断，当前恒真；不得将其描述成游戏世界或插件就绪保证。SYS-07 |
+| DOC-10 | api-reference × simple_mode | §7.7 `GET /api/system/features` 示例把 `simple_mode.requires` 写成 `[]`，实际为 `character.facts` v1.0；已于 2026-10-22 修正示例。插件审计批见 `audits/plugin-audit/simple-mode-20261022/verification-log.md` |
+
+> DOC-06/07 的具体文档段落和应采用的完整措辞尚未在本批核对；本次只登记漂移，不更新 api-reference 或 health 文档。
+
+## 10. 无法验证项（用户确认后登记，不再主动验收）
+
+| ID | 归属 | 项 | 原因 |
+|---|---|---|---|
+| UNVER-01 | core.world（写执行链 game/access/world.cpp 的 `tutorial_block_error` 分支） | 教学态拦截：药水教学激活时 world 写面被拒绝、读面暂态语义 | 无教学存档可进入教学态（用户 2026-09-28 确认）；不再主动验收，代码保持现状 |
+| UNVER-02 | core.item / extension_bag | 掷骰；镶嵌；强化；商店购买；ITM-01 bag5 任务袋读取；`bag6 slot11` 写入前态 | 无 pending dice、背包无宝石、无原版强化卷轴且 EB 关闭、商店为空、任务袋为空；EB 关闭无法读取 `bag6 slot11` 写前态。用户确认留到后续其它插件审阅时再测，此后不再主动验收 |
+| UNVER-03 | inventory_hooks | c18 `85%` / overhaul `70%` 倍率仅静态金标；任务袋透传无物品可测；调试门禁关闭分支跳过；autosell 路径并入 autosell 审阅 | 设备仅有 monster v29；用户 2026-10-18 确认：monster 真机覆盖 70% 与详情页出售，其余按静态金标/后续插件审阅处理 |
+| UNVER-04 | extension_bag | 设备批剩余：FIX-07 失败注入/源释放失败复核；C1-01 容量读写失败注入；D-01 真实触摸窗口延迟释放压力 | 2026-10-18 设备批已完成部署、设置页开关、扩展视图、正常跨袋移动、生命周期、保存重进与 D-03 R-64；失败注入未执行。EB-01 用户确认已修复，未复核 |
+| UNVER-05 | special_equip | VM-P4-06 行为面：普通队友/主角穿脱专属位装备；特殊 NPC 穿脱限制；出售门禁；两 hook 两态 | 用户 2026-10-21 决定本批不做真机验证；静态 12 条已修，设备项全部 NOT_ACCEPTED。登记见 `audits/plugin-audit/special-equip-20261021/verification-log.md` §2 |
+| UNVER-06 | simple_mode | 设备行为面：VM-P2-01/VM-P3-01/VM-P3-03 启停、半血与票据；SM-01 阵营失败分支；SM-02 部分安装窗口；SM-03 隔离残留；SM-06 hook-time 写语义；SM-07 停用后保持半血 | 用户 2026-10-22 决定本轮只做修复 + Host 验证，不做真机；设备项全部 NOT_ACCEPTED，此后不再主动验收。登记见 `audits/plugin-audit/simple-mode-20261022/verification-log.md` §2 |
+
+> QST-03 的逐字节 frozen 对比仍为 **NOT_ACCEPTED**，属于 `verification.md` §5 的待补真机证据，不作为用户确认后永久不再验收的 UNVER 条目。
+
+## 11. 功能插件（push_all / world_teleport）（开放）
+
+（无开放项）
+
+## 12. stack_limit（审计开放项与裁决）
+
+| ID | 级 | 问题/裁决 | 证据 | 状态 |
+|---|---|---|---|---|
+| SL-01/SL-02 | P2 | `item_count` 维持 Host 常驻窄适配面；架构文字已由同批文档任务修订。记录的是归属裁决，不是行为验收结论。 | `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md` §1 | 已裁决；不表示验收通过 |
+| SL-04 | P2 | 关闭时 `kOff` 先于资源物理撤销，存在过渡窗口，需真机验证。 | 同上 §2；VM-P4-08/VM-P6-01 | 开放，NOT_ACCEPTED |
+| SL-05 | P3 | 停用期 `g_enabled` 与 Host status 可能分叉。 | 同上 §1；ENG-04 | 并入 ENG-04 处置，开放 |
+| SL-07 | P2 | 验收卡/规则册曾使用旧口径：6 条资源、插件拥有 S2、`stack_codec_impl.h`、重定向“常驻”。 | 同上 §1；`docs/refactor/verification.md` VM-P4-08/VM-P1-S2；`docs/refactor/extension-bag/rulebook.md` R-51 | 当前文档口径已由同批任务修订；不改写历史验收结论 |
+| SL-08 | P3 | 旧审计描述的 `g_provider` 裸指针已不存在，当前为静态 `const kFacade`。 | 同上 §1；INF-05 | 源码已变更，旧风险不再适用；待用户确认销账 |
+| SL-09 | P2 | 关闭态 `effective`/`view_from_canonical` 曾夹 99，导致 107 显示为 99。裁决 A3：关闭态读取 b（0–127）不夹 99；写回交还原版，`s2_writeback_gate` 要求 999 已应用。 | `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md` §1/§3 | 已由 `5013aba6` 修复；SL-09 专项真机 PASS，VM-P4-08/VM-P1-S2/VM-P6-01 整卡仍 NOT_ACCEPTED |
+
+## 13. inventory_hooks（审阅批 2026-10-18）
+
+审阅登记：`audits/plugin-audit/inventory-hooks-20261018/verification-log.md`；参考说明：`reference/plugins/inventory_hooks.md`。
+
+本批已修复（提交 `db923a56`、`a362621f`、`2d9a1389`）：
+
+- IH-01 UI 出售分流改为按物品实际编码（`canonical ≤ 127` 走原生，S2 才接管）。
+- IH-02 变体倍率模型（original/unknown 0%、overhaul/monster 70%、c18 85%）。
+- IH-03/04 三入口统一 `item.facts.quote`，API/autosell 跟随详情出售倍率；商店手动 100%。
+- IH-05 退款失败状态透传（`kRollbackFailed`）与真实日志。
+- IH-09 wrapper 空 backup 守卫。
+- IH-10 任务袋一律不由模块接管（UI 透传，API/autosell/slot 拒绝）。
+- IH-11 `caller` 伪地址与节流语义修正。
+- IH-12 保留为 `kHidden` 真实调试门禁（关闭时 wrapper 透传；合并 `core.item` 后删除）。
+- IH-07 宿主实际拒绝 deactivate（`PluginDescriptor.deactivate_allowed=false`）。
+- IH-08 逐变体符号矩阵：24/24 × original/overhaul/monster/c18 全部可解析且 VMA 一致（`audits/plugin-audit/inventory-hooks-20261018/evidence/symbol-matrix.md`）。
+
+开放项：
+
+| ID | 级 | 问题 | 状态 |
+|---|---|---|---|
+| IH-06 | P2 | `MoveItem`/`RemoveItemData`/`Divide` 原版失败或半写后仍可能回写 | 开放；需先逆向冻结原版返回值语义，再补失败注入 |
+| G-2 | P2 | 替换后的 FindItem handler 未登记 in-flight | 开放；host/dispatch 边界补登记并做 release 等待测试 |
+
+无法验证：c18/overhaul 倍率仅静态金标；退款失败日志未真机触发；`inventory.slot` 生产消费者为 custom_recipe（`custom_recipe/plugin.cpp`）；调试门禁关闭分支未真机逐条触发；任务袋透传无物品可测；autosell 路径并入 autosell 审阅。
+
+## 14. autosell（审阅批 2026-10-20）
+
+审阅登记：`audits/plugin-audit/autosell-20261020/verification-log.md`；参考说明：`reference/plugins/autosell.md`。
+
+本批已修复（提交 `527a2a5b`、`c4b9a971`、`a5314a46`、`665f9ebd`、`685c80e4`）：
+
+- AS-01 无活动存档 POST 拒绝且不改运行态；save-exit 失效 slot-data session；JNI 返回实际提交结果。
+- AS-02 slot-data complete 不再在回调内重入 provider；较新 revision 交 retry task。
+- AS-03/AS-18 UI 占用门禁改为 required `ui.state` 的 `read_layers`，独立于 EB；EB 关闭时物理袋继续、逻辑袋跳过；修复 EB 启用时 `inventory_state_id=20` 导致恒 `ui_busy` 的回归（真机 EB 两态扫描均推进）。
+- AS-04/AS-05 声明 `ui_panels`；install/on_enabled 重新获取 world.facts/item.facts/slot_data/ui.state，on_disabled/deactivate 清空指针。
+- AS-06/AS-07 删除扫描私有锁；tick 入口捕获取消纪元，关闭/save-exit 取消当前轮次，任务注册锁内复核。
+- AS-08 POST 类型/范围/special 严格校验 400；无存档 409。AS-09 档 5 统一 99。AS-10 面板文案修正。AS-11 缺 rarity 记 -1、规则 fail-closed。AS-12 遍历/action 不可用限速 WARN。AS-14 API 参考补 schema。
+- AS-19 背包入口按钮与扩展背包页签重合/崩溃：游戏在切页或关闭背包页时销毁袋容器的控件子树，入口句柄失效；旧实现把复用同一地址的扩展页签当成入口按钮 `set_rect`（页签被移到入口位置、触摸归页签），并在容器变化分支对失效句柄调用 `components->destroy` → 游戏 `LINKEDLISTITEM_getData` 空指针 SIGSEGV（真机 tombstone 2026-10-21 00:24，`autosell_on_equip_draw` 栈帧）。现在每帧先做容器子链表指针比对，命中后校验安装时写入的入口 user type 标记 `0x51` + 类型 + data 指针；失效/不符时只注销组件记录并重建，不再 delete。**机制化（AS-19 后续）**：`ui_components` 1.20 新增锚定按钮（`anchored_button_ensure/set_visible/release/draw`）与 1.19 `forget_native`，Host adapter 1.25 新增 `click_binding_is_current`；autosell 入口改为只提供布局回调，句柄存活/身份校验/重建全部由框架承担。真机 monster v29（模块 `c913d2108270`）：切页与关闭/重开背包页 10+ 次，入口保持原位、EB 页签列完整、齿轮点击可开面板、进程无 FATAL/SIGSEGV；日志 `entry handle stale ... in_tree=1 -> reinstall` 证实失效句柄地址确被 EB 页签复用。
+- AS-19 后续（2026-10-21）：`ui_components` 1.21 新增任意原生控件锚定（`anchored_control_ensure/set_visible/release/detach`）+ Adapter 1.26 `control_proc_matches`；`extension_bag` 装备/商店/合成器页签全部迁移（optional 依赖 `ui_components`），autosell 入口沿用 1.20 锚定按钮。主菜单替换保留既有 `main_menu_text_button_is_live` 等价证明；挂载规则写入 `docs/reference/plugins/core.custom_ui.md` §控件挂载归属与生命周期规则。C 方案审计：只挂 `0xa3c04` 覆盖不全（不递归子控件），推荐 `ControlObject_Delete @0x9eb3c` 入口；装备页袋容器整树释放链 UNPROVEN，见 `docs/refactor/audits/ui-handle-lifecycle-20261021/delete-path-audit.md`。
+- AS-20 背包页入口按钮点击无效（面板不出现）：`bcc15dd2` 面板迁移 PopupHost 时，入口点击改为 Host SDK `panels.open("autosell")`；该 API 仅查注册表后直接调 `provider->open()`（只有启用门禁），不经过 `ui_panels` 容器，因此无 popup 栈 push、无 `PopupHost::open`、无 `panel enter`。真机日志（`.tmp/qol-自动出售按钮打开失败.log` 2026-10-23 04:11、adb 拉取的 `qol.log` 2026-10-23 23:44）均为每次点击只出现 `provider open accepted`，无 `panel enter` 与 PopupHost 日志。修复：入口点击改取 `core.custom_ui` 发布的 `ui_panels` 能力并调 `UiPanelsApi::open`（组件回调内延迟打开由容器处理）。与 AS-19（触摸被扩展页签抢占）与 SET-03（enter 内组件创建失败吞输入）不同类。
+
+开放项：
+
+| ID | 级 | 问题 | 状态 |
+|---|---|---|---|
+| AS-13 | P2 | feature 关闭不注销 panel provider；`block_reason` 恒 nullptr | 开放；provider 无枚举接口，`open` 已由门禁拒绝；是否停用时撤销待裁决 |
+| AS-16 | P3 | descriptor `jni_count=0`，存在 4 个 autosell JNI 导出 | 开放；JNI 三向绑定表 P5 未落地 |
+| AS-17 | P3 | `autosell_store_persist` 无生产调用者，保留旧 pending 写路径 | 开放；未删除 |
+| G-AS-1 | P2 | `core.save` 的 `slot_data_save_finish` 持 `g.mutex` 调参与者 `complete` | 基础设施观察；本批 autosell 侧已规避，provider 锁纪律另立 |
+| G-AS-2 | P3 | `infra::scheduler` remove 不等待已开始 callback | 基础设施观察；本批用取消纪元处理 |
+
+无法验证：AS-02 真实保存并发路径未复现（host fake 覆盖不重入）；AS-06/07 在途出售取消未逐帧捕获；AS-10/11 面板视觉待用户目视；AS-12 WARN 未触发；scan/panel/JNI 集成测试仍缺；全量 smoke 未跑。详见审阅登记 §2。
+
+## 15. special_equip（审阅批 2026-10-21）
+
+审阅登记：`audits/plugin-audit/special-equip-20261021/verification-log.md`；参考说明：`reference/plugins/special_equip.md`。阶段 1 共 12 条 finding（P1 2 / P2 7 / P3 3），静态已全部修复（`ec90f718`）；设备行为未验收。
+
+| 编号 | 组件 | 问题 | 处置 / 状态 |
+|---|---|---|---|
+| SE-01 | special_equip | 重放 ① 用数量未编码判据代替 `ITEM_IsRealEquip` | 已修；反汇编确证不等价，改用 `item.facts.is_real_equip`。真机未验收 |
+| SE-02 | special_equip | 需求等级用 `ITEM_GetAbilityLevel` 而非原版 `ITEM_GetEquipLevel` | 已修；改用 `read_only.item.equip_level`。chaos/裁剪物品真机未验收 |
+| SE-03 | special_equip × core.item | 出售门禁拦特殊 NPC 装备详情中的全部装备，超出 VM-P4-06 字面范围 | 用户裁决保持现范围；VM-P4-06 已注记。真机目视未做 |
+| SE-04 | special_equip | 出售谓词登记失败仅 WARN，漏拦不可见 | 已修：登记失败即安装失败 |
+| SE-05 | special_equip | 未知正 `desc_type` fail-open | 已修：只接受 0/1/2，补测试 |
+| SE-06 | special_equip | 装备 wrapper 不检查业务门禁，释放失败隔离时仍覆写 | 已修：原版拒绝后检查 `g_gate` |
+| SE-07 | special_equip | 释放失败隔离后 `can_unequip_wrapper` 解引用已清空 port，可空指针崩溃 | 已修：补空值守卫与 `InFlightGuard`；失败注入未做 |
+| SE-08 | special_equip | 注释声称 HTTP 线程可安全进入，实际 item handle 仅主线程 | 已修注释并加在途保护；未发现跨线程调用点 |
+| SE-09 | special_equip | install 失败分支未就地清理全局 | 已修：统一清理函数 |
+| SE-10 | special_equip | `character.facts` 仅诊断却为 required | 已修：改为 optional |
+| SE-11 | special_equip | 「常开无开关」与 Hidden toggle 冲突 | 已修注释；保留 Debug 禁用口 |
+| SE-12 | special_equip tests | 测试注释与断言相反 | 已修注释并补未知 `desc_type` 用例 |
+
+## 附录：已修复问题（存证）
+
+| ID | 归属 | 问题 | 修复与复验 |
+|---|---|---|---|
+| INV-01 | inventory_hooks | 审阅批 12 条 findings：IH-01/02/03/04/05/07/09/10/11/12 已修复；IH-08 逐变体符号验证通过 | 提交 `db923a56`、`a362621f`、`2d9a1389`、`e90937c4`、`9ac53b88`；Host 145/145、真机装配/API 出售/任务袋守卫/deactivate 拒绝通过；详见 `audits/plugin-audit/inventory-hooks-20261018/verification-log.md` |
+| SAV-01 | infra/store（旧 SDK/JNI/Kotlin 存储入口共用） | primary 与 last-good 双损坏退化为 NotFound，ensure_slot 随后写入空容器，可清空玩家模块数据 | **P3a 已修复**：strict 状态与持久未决 marker 阻止 quarantine 后误当新槽，ensure/read 明确返回 Corrupt；quarantine 证据保留。Host `infra_store_tests::test_strict_states`、`test_last_good_and_quarantine` 验证损坏、fallback 与重复初始化；`test_reset_delete_unlink_failures` 验证删旧 last-good/marker 失败不假成功。修复子项（不另编号）：`test_preflight_and_reservation` + `host_adapter_tests` 校验 generation/revision，旧凭据不能释放或撤在途引用；`save_journal_tests::test_evidence_atomic_replacement` 验证 dat 路径原子替换时拒绝旧 inode。oracle 三项 P1 复审通过。真机原版 1.3.2/槽 0 的 VM-K4-04b、VM-K5-06i **受影响正常读面/同槽进档范围**通过：88/88 raw body 相同、35 文件 SHA 不变、无新增 WARN/崩溃；**没有真机损坏注入或完整旧卡重验**。记录与安全证据见 `docs/refactor/verification/slot-data/p3a-20261007/README.md`，损坏路径由 Host 覆盖，journal 生产协调留 P3b。 |
+| SAV-02 | `game/access/save_transaction` evidence path | `SAVE_GetSaveFileName` 返回应用目录内含目录段的相对路径；旧 validator 只接受纯文件名，原版 dat 已写而联合保存进入 degraded，sidecar 不提交 | **已修复**：`48fc9d44` 支持应用目录内相对路径与绝对路径，逐字节 root 前缀与路径段校验拒绝越界、`.`、`..`、空段、`//`、超长。Host path tests 通过；original v1.3.2 与 monster v31 真机保存均 ticket `done`，dat/sidecar 同事务提交且 journal 清除。范围与证据见 `docs/refactor/verification/slot-data/p3c-20261008/verification-log.md`。 |
+| SAV-03 | extension_bag 面板生命周期/slot_data capture | P3c 移除 `ensure_state_loaded_locked()` 惰性恢复后，旧 draw-end 清理把 inventory PopupState=4 当作主菜单，`prepare_main_menu_locked()` 清空完整 EB state；后续 coordinator 会合法 capture/提交空态 | **已修复**：`26b19fb8` 以可靠 `world_facts.state` 识别真正主菜单/离开世界，并在未准入时保留状态；面板 popup 不再触发生命周期清理。新增 Host 面板边沿/capture regressions；monster fixed build 真机打开/关闭面板后 types、capacities、33格物品及 capture `3584B/nonempty=1` 保持；EB API 修改、保存、重进后 payload 保留。证据见 `docs/refactor/verification/slot-data/p3c-20261008/verification-log.md`。 |
+| UIS-02 | core.ui_state / core.custom_ui | 自定义 PanelProvider stack 与原生 screen/dialog 分离，既有 GET 无法识别任意 panel_id/dialog type | **已实现**：`039c4043` 提供单向 `ui.state` 发布并由 central panel stack 自动发布；`41c2f473` 修复 custom dialog 只替换顶层 type、pending close 不提前清栈、native snapshot 失败不返回旧成功数据。Host `core_ui_state_tests`、`core_ui_panels_tests` 等通过；monster v31 非EB真机 settings panel `panel_settings` 与 `world_teleport.confirm` dialog type 映射通过，screen及原生 dialog其余字段保持。EB panel真机测试按用户暂停要求未执行。 |
+| DOC-08 | api-route-map × core.craft | `/api/op/craft/mix-direct` 的 `routes.inc` owner 与 API reference 均为 `core.craft`，`api-route-map.md` 曾写 `custom_recipe`；端点仍为 501 占位，`core.craft` descriptor 无该 native handler | 已修正 `docs/refactor/api-route-map.md` owner 记录；端点仍按现有占位事实记录。 |
+| DOC-09 | api-reference × core.ui_state | `routes.inc` 与 api-route-map 将 UI GET owner 标为 `core.ui_state`，API reference 曾写 `core.ui` | 已修正 API reference owner 与 Kotlin/native query transport说明；同一行也记录 `/api/ui` composite 仍是 Kotlin legacy。 |
+| SET-01 | core.settings / 配置链路 | 原有 GET 配置镜像与写入门禁状态源分离，HTTP/list 曾可能返回旧配置；旧 ModuleConfig 语义不能表达 plugin namespace ownership | **已收口**：改为 native Store/config.json 唯一读写，旧字段只作迁移输入；registered namespace GET projection 和 owner-token single-key POST 更新。Host/route/build Gate 结论及未执行项见 `docs/refactor/audits/core.settings-20261010/verification-log.md` §3。 |
+| SET-02 | core.settings / 配置链路 | 配置 `enable` 与插件 lifecycle、功能 gate 语义未区分 | **已收口**：Host 独占 `enable`（lifecycle 期望状态），feature 为插件功能布尔，`config` 为自由键值；`want_run = enable && any(feature=true)`，旧七个 legacy gate 映射已退出。`custom_recipe.recipes` 与 `craft_ui.custom_crafting` 单开关级联。合同见 API reference §7.6 与 `ARCHITECTURE.md` §8.2。 |
+| FIX-01 | core.custom_ui（触发面 world_teleport 及一切 ui_choice 消费者） | `native_choice_open()` 持 `g_mutex` 调用游戏 `POPUPSTATE_Push`，游戏同线程同步回调 `choice_init_wrapper` 再取同一锁 → GLThread 自锁（点世界地图入口必死锁） | 两阶段 open（锁内准备、锁外 push、generation 回滚）：`d89d272c`；host `native_choice_tests` 含同步重入用例；真机点图弹窗/取消/选择三步 PASS |
+| FIX-02 | patch/（call_patch、instr_patch、claims；元数据 game/access/patches；载体资源 world_teleport `patch:UIPlay_CallMapName`） | branch-return 型 call patch 的 revert 回写编译期常量（原版 `mov x0,#1`）而非安装时实际观测指令；monster v29 停用后大修原生 `B` 指令被覆盖 → 点图呈原版行为且大修指令丢失（需进程重启恢复） | install 保存 saved_word、revert 写回保存值、缺失 fail-closed：`c1e136bc`；真机停用→monster 原生行为、启用→弹窗恢复三步 PASS |
+| FIX-03 | core.ui_state（`game/access/ui_state.cpp` dialog 路径） | `dialog_select` 中 `G_POPUP_ON` 通用分支先于 wipeout 判定：阵亡后对 wipeout 子弹窗发 `ok` → 调通用 `F_BUTTON_OK_EXE` → wipeout 场景控制对象失效 → 下一帧 `ControlScroll_Process` 空指针 SIGSEGV（fault 0x58，libgame.so；同签名崩溃 tombstone_25/26/27，受控实验定位触发步） | wipeout 判定前移 + `dialog_ok/cancel` 防御纵深 fail-closed：`8cf061ef`；真机复验 `ok`→`no such option in wipeout` 且无新 tombstone；人工点击弹窗游戏正常（引出 UIS-01） |
+| FIX-04 | core.world + game/nav + contracts | BFS 双实现（插件私有 `navigation_bfs` 与 `game/nav/nav_bfs` 重复约 80 行，修复需双改）；写面输入无 INT32/溢出守卫、快照端口检查缺口、message_len 31/30 不一致 | 统一为无状态纯函数 `contracts/nav_bfs.h`（game 与插件共用）+ 守卫/限速告警：`39b90e4e`；新增 `nav_bfs_tests` 与写路径 host 用例；行为差异点（越界目标不再索引别名伪 found→走最近可达）已真机目视 PASS |
+| FIX-05 | contracts/world_facts + core.world + core.item + world_teleport | money 经 `world.facts` 重复暴露（与 `core.item` 金钱 owner 冲突，违背领域归口） | 迁移：world.facts 2.0 移除 money、item.facts 1.1 追加、world_teleport 查钱改 item.facts（fail-closed）：`9e2c2384`；真机传送扣费/余额不足路径 PASS。备注：`tutorial_state` 经用户裁决保留于 world.facts（暂停世界的游戏状态） |
+| FIX-06 | host/frame_source+assembly + game/access/inventory + core.item 序列化 | ITM-08 typed handle 批后背包读面回归：game 主线程身份误绑 bootstrap 线程 → ItemHandle 登记 wrong-thread 错误被折叠成「空槽」→ owner 序列化把 NotReady 当空槽发布伪空库存（v29 真机游戏 UI 有物品、API 六袋 slot_count=0；money/party 正常、无 serialize WARN=逐槽读取全失败） | 主线程身份改绑 MainProcess 逻辑帧 hook；inventory.cpp 保留错误类型不折叠；序列化仅 kQolErrNotFound=空槽、其它失败中止快照保留上一帧；host 两项回归用例（真 adapter 路径）先红后绿：`60915d94`；真机复验 bag0 slot_count=5 与游戏 UI 一致（v29+HEAD 模块现网核验） |
+| FIX-07 | host/plugin_registry + extension_bag（transaction/runtime/virtbag/custody） | 真机批两缺陷：①EB 跨袋 move（extension→original）返回 `move failed` 却留下目标副本（源不清除、无回滚）+ count=1 被忽略移动整组——根因=新入库对象未登记到 EB Provider handle custody，校验（handle 解析）认不出刚插入目标即判失败，失败路径无目标清理；②级联置位的 optional degraded 在 provider 恢复后不清除（core.item 需重启才恢复 degraded=false） | ①入库前登记并绑定 Provider handle、以 handle 定位目标、失败先删已识别目标槽再释放/移交（先阻止可见摘除→失效→释放，八规则回滚条目）；count 按契约整堆移动；host custody/回滚顺序/count 用例先红后绿，真机同参数复现=源清/目标 count=2/恢复逐字节一致，红线 grep EB 侧零 native_item_at；②registry 分离 g_cascade_degraded 与 g_gate_degraded，provider 全恢复才清级联位：本提交；真机同进程 deactivate→activate 链复验通过；**2026-10-18 EB 审阅发现 C1-02/C1-03 残留路径（回滚只按 handle、恢复只清票据），已修 `59ebda74`；按用户裁决需重新真机复核后关闭** |
+| FIX-08 | extension_bag plugin + host lifecycle participant registry | EB 每次 activate 重走 participant 注册点，host registry set-once 拒绝同一参与者重复注册 → 后续 activate 全部失效，**只有进程重启清注册表才恢复**（真机复现两次） | 按 spec-batch2-v2 §4.1「重复 activate 复用同一静态注册项」：EB 侧注册幂等守卫（lifecycle_registration.h 首次成功置静态标志，后续 activate 跳过且视为成功；不放宽 host「不同实例仍拒绝」规则）；host 连续 activate+直接重复注册拒绝两侧用例先红后绿：与 FIX-07 同提交；真机 EB 连续两轮 deactivate/activate 均收敛 enabled、无 registration failure 日志 |
+| FIX-09 | extension_bag render/runtime + draw 读态快照 | **背包面板冻结**（真机事故 14:32:53，GLThread 栈顶 `MutexLockWithTimeout`←`Scene_Draw_POPUP_SC_EQUIP+528`）：hook 入口 `P_EXT_INVEN_DRAW_END`（`F_SCENE_DRAW_EQUIP_VMA+0x210`）的 `virtual_bag_draw_end_wrapper` 持 `g_virtual_bag_mtx` 后调 `virtual_bag_inventory_state_id` 重取同非递归 mutex=GLThread 同线程自锁 | 锁外先读状态快照（改走 `world_facts.state`+`draw_state_lock.h`），锁内只做快照消费；新增重入回归 `test_extension_bag_draw_lock.cpp`；host 83/83、check_arch/routes/diff/build+patch 3/3；真机物理触摸开关面板 10/10 轮无冻结（首因实证）；证据 `.tmp/panel-freeze/`。（状态源改动 `world_facts.state` 已由 FIX-10 回退为读 acquire 设置的 `g_state_entry`） |
+| FIX-10 | extension_bag render/model/public_runtime + tests | 扩展背包面板打开后**每帧重建风暴**并 SIGSEGV：draw-end 清理分支（`extension_bag_render.inc`）对持续非 5 状态每帧调 `prepare_main_menu_locked()` → 重置加载态并递增页签 generation，下一帧绘制 wrapper 重载 sidecar、重装页签 → 原生 `ControlButton_Create` 拿到空控件后 `ControlObject_SetUserType` 空指针（真机 API 打开面板 15s 内 generation 2→227、sidecar 226 次）。FIX-09 的状态源改动使面板打开读到全局 state（实测 4）而非背包 PopupState，放大该误判，但 revert 单独不能消除风暴 | ①`virtual_bag_inventory_state_id()` 恢复读 `g_state_entry`（保留 `with_snapshot_then_lock` 锁外快照 + 锁内消费结构）；②新增 `model/main_menu_cleanup_edge.h`，draw-end 清理改**边沿/幂等**触发（仅状态变化或上次清理失败重试时执行）。host `extension_bag_draw_lock_tests` 19 passed、全量 83/83、check_arch/routes/diff 通过；真机 API 路径 sidecar 仅加载 1 次、无逐帧重装、8 轮开关无崩溃、FATAL/SIGSEGV=0。**物理触摸路径与扩展页签点击待人工复验（VM-23/VM-24/VM-29）** |
+| FIX-11 | core.character + tests | `add_stat` 的 `attrs` / `set_attr` 的 `stats` 数值经 `char_opt_int` 复刻 `JSONObject.optInt` 语义被**静默截断**（`1.5`→`1` 并加点），与 Kotlin 迁移前逐字一致但存在无声数据变更隐患（对应 ITM-06 数字解析面） | `char_parse_points` 取值处新增非整数校验：数值解析为 double 后含小数部分 → 400 `bad value for $k (must be integer)`；整数值 double（如 `2.0`、`1e2`）保持接受；未改动 `char_opt_int`/`char_parse_android_*`（其它字段仍依赖 optInt 逐字语义），既有 `must be positive`/`(0-255)` 文案不变。host `character_facts_dispatch_tests` 先红（4 断言）后绿；api-reference §7.9/§7.10 错误面同步。**真机 VM-K5-08h 待复验** |
+| CRF-01 | core.craft / craft_ui / custom_recipe / Game Adapter | `craft.facts`、`craft_result` 及 craft 读写 port 曾在跨插件输入/输出中传递游戏 item/control 裸指针，缺少 owner/generation 有效期表达 | `contracts/craft_facts.h`、`contracts/craft_result.h`、`contracts/game_ports/craft_port.h`、`craft_ui/feature.cpp`、`custom_recipe/feature.cpp` | **接口迁移已实现**：craft facts/result/typed command 与 craft 专用读写 port 的物品身份改为 `QolItemHandle`；材料槽 control 不再跨 facts 传递，改用可用性事实与 Game Adapter 同步 slot-index 查询；Game Adapter 未登记对象只在物理槽内证实后登记为 Game owner，未知/provider 对象不伪造 Game owner；创建产品统一返回 handle，释放先使旧 handle stale。Host 证据：`craft_facts_plugin_tests`、`host_adapter_tests`（owner/slot/control/product 生命周期）、`custom_recipe_handle_chain_tests`（Place/Prepare/Execute/MakeItem）、`craft_ui_handle_identity_tests`（slot identity fresh query 与 typed command）、`item_handle_registry_tests`（stale/wrong-owner/wrong-thread）。`craft.facts` 保持 v1.0；**本轮 VM-46 按用户要求跳过，整批行为验收仍 `NOT_ACCEPTED`**：扩展背包错误导致既有宝石不可用于测试。仅观察到合成器“合成/宝石升阶”入口；向宝石升阶槽尝试添加普通背包 bag0/slot5/category65 短剑时显示“只有宝石道具才可以”，API 回读该槽仍为 count=1；空槽点击“组合”仅提示“材料不足。无法进行合成”，不构成 94 未命中断言。未完成三格成功合成、未验证 94/105、未消耗材料；未执行扩展背包测试。 |
+| INF-04 | infra + core.world/core.character/core.quest/core.system/core.item | 五插件私有 seqlock 使用非原子 `data_` 并发读写，构成 C++ 数据竞争/未定义行为；单写者约定不能保护 HTTP 读线程 | 五插件本地 `snapshot.h`；阶段 7 静态审计；host/TSan 证据随 `867b0974`/`a225ebcc` | 已修复：Host SDK 快照 API minor 15，infra 改为 immutable `shared_ptr` 快照实现；五插件 character/item/quest/system/world 迁移并删除本地 `snapshot.h`。提交：`867b0974`、`a225ebcc`；Host/TSan 证据按对应提交验证记录。关联 CHR-08、QST-01、SYS-01 |
+| CHR-02 / CHR-A8 | core.character | `set_skill_usage` 不具备旧规划所需的单技能/action_id 档位控制；native 只有全局位域开关 | `game/ops/character_write.h:39-42`；阶段 7 静态审计 | 用户裁决保持 501 占位、不实现；路由 owner/占位行为按现状保留 |
+| CHR-04/05/06/07/08/09/10 | core.character | `set_exp` 窄化、`add_stat` 无上界、json_slice 缺测、HTTP port owner/线程守卫、快照失败无告警/并发风险、not-in-game 文案比较、路由表索引对齐 | 阶段 7 静态审计 | 修复批 `e743e6a1`；快照并发项由 INF-04 的 `867b0974`/`a225ebcc` 修复。monster v31 `set_exp` INT32_MAX 合法完成、越界/负值 400 且无票据；`add_stat` 超剩余点数拒绝且无部分加点，合法差分正确（`.tmp/triple-device-verify/`） |
+| QST-01/QST-02 | core.quest | 私有快照并发读写不安全；`quit_quest` 对 `quest_id` 宽松解析，可能将非法输入归一化为有效任务 ID | `plugins/core.quest/snapshot.h`、`game/access/quest.cpp`、`QuestController.kt`；阶段 7 静态审计；真机复验 `.tmp/quest-verify2/` | QST-01 随 INF-04 修复（`867b0974`/`a225ebcc`）；QST-02 native 严格解析 `95b2d004` + Kotlin 原样透传 `b48d5ab6`。monster v31 非法值均 400 `questId required` 且无票据，合法 ID ticket done |
+| SYS-01/02/03/04/06 | core.system | 私有快照并发读写；events handler 绕过 owner/dispatch；身份并发发布；快照失败无告警；测试缺口 | `plugins/core.system/*`、`routes.inc`、`EventsController.kt`；阶段 7 静态审计；真机 `.tmp/triple-device-verify/` | SYS-01 随 INF-04 修复（`867b0974`/`a225ebcc`）；其余由 `a30f699e` 修复。monster v31 验证 events owner、停用 5 条 system 路由 503 `http owner inactive`、启用恢复、events body SHA `24de1c4…`、identity version/package 正确 |
+| ARD-01 | attribute_range_display | `on_resource_ready` 对匹配入口 hook 的空 backup 不拒绝；空 backup 时两个 wrapper 跳过原函数调用，与资源 `kFailClosed` 声明相悖 | **已修复**（`cf09019d`）：空 backup 清对应指针、`set_active(false)`、返回非零（镜像 `attribute_quality` provider）；测试补两 id 空 backup 用例与未知 id 保活用例。同批（插件审计 2026-10-17）：D1 删除未消费 `QOL_PORT_ITEM_EXTRAS` 声明、D2 `attribute.quality` optional→required、ARD-03 删除未消费 `g_game`。Host 3/3、`check_arch` 全绿、路由 147 零漂移、`build-debug.sh` 成功、`git diff --check` 通过。真机（阶段 6 修复后二次部署 `be9690ae…`）用户目视 **PASS**。登记见 `docs/refactor/audits/plugin-audit/attribute-range-display-20261017/verification-log.md`。 |
+| ARD-06 | host/ui_adapter × attribute_range_display | 游戏 `UIDesc` builder 首字段是**行尾写游标**，旧 `insert_inline_color(builder, max_text_bytes, code)` 把它当**行首**取 span，`strnlen` 得不到本行区间 → 返回 `NotReady` → 插件**静默不插色**；自 `80070952` 重构起该功能未工作。 | **已修复**（`7f5c06e8`）：`QolUiAdapter` 尾部追加 `ui_desc_text_cursor` / `insert_inline_color_span`（minor 21→22，offset 相对 UIDesc 文本缓冲、不暴露游戏地址），旧槽标注 deprecated；`host/ui_adapter.cpp` 做 `0x200` 边界与游标/span 一致性校验，失败不写、成功游标 +4；插件改为 backup 前后快照游标后按 span 插入；`game/access` 增只读缓冲基址访问器。host 5/5、`check_arch` 全绿、路由 147 零漂移、`build-debug` 成功；真机部署 `be9690ae…` 后用户目视 **PASS（颜色正确）**。根因取证（frida）与设计见 `docs/refactor/audits/plugin-audit/attribute-range-display-20261017/verification-log.md` §1b。关联 INF-11。 |
+| I18N-02（宿主侧） | hooks × character_panel_i18n | EntryHook 原语返回 0 但未交还原函数入口时，宿主仍判安装成功 → 无 backup 的 wrapper 会跳过原调用（绘制/调用缺失）且资源记为 live | `hooks/install.cpp:37-47`、`hooks/transaction.cpp:341-360`；character_panel_i18n 审计批 | **已修复**（`d051a1d7`）：先撤销再失败——撤销成功 `resource_ready_failed`、撤销失败登记 tombstone + isolated 返回 `native unhook failed`；事务路径同语义；宿主 4 处调用点传入 `unhook_fn`；插件侧同步拒绝空 backup（`c909a476`）；补 registry/transaction host 用例。详见 `docs/refactor/audits/plugin-audit/character-panel-i18n-20261017/verification-log.md` |
+| PRB-01 | device_probe_export_failure（Debug-only 探针） | 该探针声明一条永远解析不到的 required+fail-closed entry hook（`elf-export:QOL_Preflight_Missing_Export`），意图作为 preflight 回归哨兵；但 `provides_count=0`、全仓无消费者、无消费者 stub、无专属 host 测试 target，且其断言的行为已被两处现有覆盖：`tests/test_plugin_registry.cpp:1514-1530` 的 `test_required_entries_preflight_before_plugin_install`（断言 `install_calls==0`、`hook_calls==0`、资源 `kFree`、状态 `kUnsupported`）与 host 侧 `probe_entry_export_resolution()`（真实 ELF 解析器正例 `GRPX_Start` / 负例缺失符号）。作为「插件」的存在依据不成立，只在 probe 构建增加 `registered`/`install_failed` 计数、一条常驻 WARN 与一个 Hidden 空开关。文档已记为退役的 `device_probe_provider` / `device_probe_consumer` 两个空目录亦在源码树残留。 | **已删除**（`09695c93`）：删除插件目录与两个空目录；`host/assembly.cpp` 清理 include、descriptor 注册项与 `infra::status_get` WARN 块（含已无引用的 `#include "infra/status.h"`）。保留 `QOL_ENABLE_DEVICE_PROBE` 开关、`probe_entry_export_resolution()` 函数与其调用点、`core.custom_ui` 的 probe 条件分支——开关仍被探针函数与该分支依赖并承担 Release 禁令，探针函数是防止「解析器整体失效」被误读为通过的阳性对照，`core.custom_ui` 分支是 `elf-export:` 真实业务导出路径的真机证据来源（本插件全仓零依赖，探针开关对该分支的影响是只换一个 symbol 常量、不改任何钩子与状态机）。`plugins/CMakeLists.txt` 的 `^device_probe_` 跳过规则在探针插件归零后条件恒假，已作为死代码删除；该处留注释记明约束：`QOL_ENABLE_DEVICE_PROBE` 的 Release 禁令只在 option 置 ON 时触发，default OFF 兜不住日后新增的 probe 目录，届时须恢复前缀跳过。同批更正 `core.custom_ui/CMakeLists.txt` 指向 `feature.cpp` 的过时注释（分支实际在 `plugin.cpp`）。无能力缺口。host CTest 140/143（3 项为 TL-06 既有欠账，测试构建不编译 `host/assembly.cpp`）、`check_arch.py` 全部通过、`check_http_routes.py` 147 零漂移、`build-debug.sh` BUILD SUCCESSFUL、`git diff --check` 通过。真机 probe 行为 NOT_ACCEPTED（未构建 probe 包、未安装）。证据见 `docs/refactor/audits/plugin-audit/device-probe-export-failure-20261016/verification-log.md`。 |
+| PSH-04 | push_all × character_extras 端口 | `read.party_index` 把「不在队伍」（`CHAR_GetPartyIndex == -1`）判成 `not_ready`；push_all 的 fail-closed 查询据此 `return -1` → 怪物恒不可推，推怪功能失效（回归引入 `9cdc3d27`，`b9ef63cc` 迁至 extras 端口后保持；2026-09-17 的 VM-P4-01 真机确认早于该回归） | **已修复**（`0cabd5fc`，方案 A）：`-1` 作为合法值以 `ok` 返回、`not_ready` 仅表未解析；`kQolPortCharacterExtrasVersion` 1.1→1.2；决策与影响面见 `docs/refactor/adr/0003-character-extras-party-index-semantics.md`。host 143/143、`check_arch`/`check_http_routes`(147)/`build-debug`/`diff --check` 全绿；真机（monster v29，模块 `10b218e703f9…`）用户确认**推怪正常 PASS**。登记见 `docs/refactor/audits/plugin-audit/push-all-20261017/verification-log.md` |
+| PSH-01 | push_all × JNI 兼容面 / 文档 | `nativeSetPushAllEnabled` 为冻结兼容空实现（恒 `JNI_FALSE`、不写配置、Kotlin 无调用点）；参考说明曾把它描述为有效开关通道 | **已修复**（文档）：`docs/reference/plugins/push_all.md` 改正为「遗留兼容空实现」并指向 `POST /api/config/set` 的 `field=feature, key=push_all.push` 契约 |
+| PSH-02/PSH-03 | push_all | install 失败分支未清全局；wrapper 测试缺口 | **已修复**（`a26a97a7`）：失败分支统一清空 `g_sdk`/`g_game`/`g_character_extras`；新增 `push_all_feature_tests`（怪物/主控/队友/非队伍决策、空指针、安装失败、门禁透传、descriptor↔资源绑定）。host 145/145；真机推怪回归 PASS。登记见 `docs/refactor/audits/plugin-audit/push-all-20261017/verification-log.md` |
+| WT-01/WT-02 | world_teleport | 直接消费聚合 `QolGameHost::world_action`；未校验 Game Host ABI | **已修复**（`a26a97a7`，WT-01 选 B）：新增私有 `QOL_PORT_WORLD_ACTION`（契约 + provider + registry 私有约束），插件脱离 `ctx.game`；WT-02 的 `g_game->abi` 校验随依赖删除而取代，版本保障由端口 `abi_version` 承担。残留：`extension_bag` 仍用 `cancel_tutorial`（另行裁决） |
+| WT-03/WT-04 | world_teleport | 扣费后切图失败无退款、`create_yesno` 结果被忽略；停用后已排队任务仍可执行 | **已修复**（`a26a97a7`，WT-03 选 B）：切图失败 `add_money(cost)` 退款并提示（退款失败单独提示）；`create_yesno` 失败不记已打开；`invalidate_operations()` 停用代次使帧任务与游戏回调失效 |
+| WT-05/WT-07 | world_teleport | `target_map_id` 溢出；状态/业务测试缺口 | **已修复**（`a26a97a7`）：`int64_t` 计算 + 越界 fail-closed；状态测试驱动真实 descriptor，补退款/停用/余额不足/无效目标用例，删除未接入的 `InstallDisposition`。host 145/145；真机点击小地图传送 PASS。登记见 `docs/refactor/audits/plugin-audit/world-teleport-20261017/verification-log.md` |
+| WT-06 | `core.ui_state` / `world_teleport` | 诊断依赖 `QOL_PORT_CHOICE` 会阻断 `world_teleport` install | **已修复**（`2140e9d3`）：`ui.state` 升至 v1.1 并新增 `read_layers`，按栈顶至栈底回调 UI 层 id/type；`world_teleport` 移除必需的 `QOL_PORT_CHOICE`，改用可选 `ui.state` 记录顶层诊断。Host 145/145；真机 PASS（用户确认，2026-10-17，模块 `36baf50ae8ea…`）。验收记录见 `docs/refactor/audits/plugin-audit/world-teleport-20261017/verification-log.md`。 |
+| SL-03 | Host 常驻 `item_count` facade | facade 每次操作曾读取两次模式快照 | **已修复**（`e307fdce`）：每次操作只读一次模式快照；Host 用例覆盖，真机不适用。登记见 `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md`。 |
+| SL-06 | `stack_limit` descriptor / codec tests | 测试未覆盖真实 16 条 descriptor 与 codec 边界矩阵 | **已修复**：`6d05cddf`/`644d27f6` 补入对应测试；真机行为验收仍欠账，不能据 Host 用例宣告通过。登记见 `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md`。 |
+| SL-BITEND | Host 常驻 bitend claims | 两条存档 bitend 曾随 `stack_limit` 999 原子组撤销，且归属/掩码范围表述过宽 | **已修复**（`644d27f6`）：bitend ×2 迁为 Host 常驻；机制是袋槽容量掩码 `GetBitValue(24→21)`，不涵盖全部物品子项。登记见 `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md`。 |
+| SL-09 | `stack_limit` 关闭态数量读/写 | `effective`/`view_from_canonical` 关闭态夹 99，导致 107 显示为 99 | **已修复**（`5013aba6`，裁决 A3）：关闭态读 b（0–127）不夹 99；写回由原版接管，`s2_writeback_gate` 要求 999 已应用。Host CTest 145/145；`check_arch.py`/`check_http_routes.py` 通过；Debug APK `output/inotia4_qol_lsposed_debug_2610172122_e17c53c5b138.apk`，SHA-256 `e17c53c5b138235b8f30c705d85e8511401d45141a0a846480ccc6efaa04f075`。用户真机（2026-10-17，集成包 SHA-256 `ed0400df25a4bef4df9104c5a149a8bf328a20c92e4a19e5080e41ca1f0dbf23`）专项四项 PASS：关闭 107→107、关闭 206→78、107 拆 1→106、206 拆 1→b 77（重开 canonical 205），重开数量不变。仅 SL-09 专项通过；VM-P4-08/VM-P1-S2/VM-P6-01 整卡仍 NOT_ACCEPTED。详情见 `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md`。 |
+
+## 14. core.item 库存域合并（2026-10-20）
+
+合并登记：`inventory_hooks` + `move_merge` → `core.item`，提交 `73cf0918`、`6cc08cde`；验收登记见 `audits/plugin-audit/inventory-merge-20261020/verification-log.md`。用户裁决：两个插件一并、24 条 hook 保持 required+fail-closed、`MOVE_MERGE_GOT` optional+fail-closed、`world.facts` optional、删除 `inventory_support` 调试 feature、`drag_merge` 关闭时整 wrapper 透传。
+
+| 编号 | 组件 | 问题 | 处置 |
+|---|---|---|---|
+| MERGE-01 | core.item inventory | 真实 24 条 claims 目前只有 `inventory_hook_native_compile` 编译覆盖；`item_facts_plugin_tests` 使用 `tests/stubs/core_item_inventory_stub.cpp` 的 24 条假 claim，无法运行断言 ID/symbol 唯一、owner、策略与 FindItem 特例 | 开放（P2）：补真实 claims host 测试；当前静态核对通过 |
+| MERGE-02 | core.item status | optional `inventory.merge_projection` 失败会把 `core.item` 标 degraded，即使 `item.facts`/24 hook 完全可用；基础 provider 健康状态被纯消费者失败污染 | 开放（P2）：确认是否接受；若否则拆分 merge 子域 degraded 口径 |
+| MERGE-03 | core.item merge | 拖拽合并 UI、EB 投影拖放、S2 999 交互未做真机人工目视；仅验证资源 live、feature 开关与 host 用例 | 开放（P2）：待真机人工验收；不得据本批状态面证据宣告 VM-43/VM-D2D 行为通过 |
+| MERGE-04 | scripts/verification | `test_core_feature_exposure.test_host_feature_display_categories_and_priorities` 在合并前已因分类/优先级基线不一致失败（`production.cpp` 未在本批修改） | 开放（P3）：由 feature catalog 维护方修正基线 |
+
+## 16. simple_mode（2026-10-22 审计）
+
+审阅登记：`docs/refactor/audits/plugin-audit/simple-mode-20261022/verification-log.md`。阶段 1 共 12 条 finding（P1 4 / P2 4 / P3 4）；阶段 2 用户裁决 5 项；修复提交 `f41a48bf`、`804f9669`。设备面统一 NOT_ACCEPTED（UNVER-06）。
+
+### 16.1 已修（Host/静态）
+
+| ID | 级别 | 处置 |
+|---|---|---|
+| SM-01 | P1 | 阵营判定改三态；查询失败/超深/自环归未知，不缩放、不减半；player/active-group 命中短路。 |
+| SM-02 | P1 | install 不再开门禁，只在 `on_enabled` 开门，消除两个 hook 的非原子生效窗口。 |
+| SM-03 | P1 | 两个 wrapper 增加 `InFlightGuard`；接口指针取局部并判空；残留 hook 不空指针。 |
+| SM-04 | P2 | backup 判空提前到分类之前；保留 fail-closed 不转发。 |
+| SM-05 | P2 | feature `on_toggle(0)` 立即关门禁；lifecycle deactivate 仍由 on_disabled/deactivate 关门。 |
+| SM-08 | P2 | 新增 `simple_mode_feature_tests`，覆盖 descriptor、安装失败、门禁、伤害/生命矩阵、未知阵营、幂等、残留 wrapper 与 InFlight。 |
+| SM-09 | P3 | 统一 `clear_install_state()`，覆盖所有 install 失败出口。 |
+| SM-10 | P3 | 阵营与伤害分类短路；victim 为玩家时不再分类 attacker。 |
+| SM-12 | P2 | `api-reference.md` §7.7 示例改为 `character.facts`；插件参考说明按最终实现同步。 |
+
+### 16.2 开放 / 已裁决
+
+| ID | 级别 | 状态 |
+|---|---|---|
+| SM-06 | P1 | 用户裁决为受限例外：入口 hook wrapper 在游戏主线程可为语义所需字段同步调用 write 面。`contracts/game_host.h` 注释已更新；属性脏位/血条/死亡通知等真机语义 NOT_ACCEPTED。 |
+| SM-07 | P2 | 用户裁决接受停用后既有怪物保持半血，不增加恢复逻辑；槽复用幂等判据保留；真机未验。 |
+| SM-11 | P3 | 已删除仅测试使用的 `max_hp_percent`；空 settings contribution 与 `kCharPoolSlots` 重复保留，后续维护清理，无行为影响。 |
+| SM-08 设备面 | P2 | Host 覆盖已补，真实 hook ABI/符号、drain 时序与游戏内行为 NOT_ACCEPTED。 |
+| DOC-10 | P3 | 已修（api-reference 示例）；登记于 §9。 |

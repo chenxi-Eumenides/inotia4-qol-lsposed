@@ -12,10 +12,11 @@
 2. 校验：仅对 A 类，用注册符号名在 SO 符号表查地址并与常量比对。
 
 映射单一来源：cpp/symbol_registry.h（X-macro 注册表，SYM(宏名, 符号名) 行）。
-用法：uv run python scripts/maintenance/check_symbols.py [libgame.so 路径]
+用法：uv run python scripts/maintenance/check_symbols.py [--all] [libgame.so 路径]
 """
 from __future__ import annotations
 
+import argparse
 import re
 import subprocess
 import sys
@@ -24,8 +25,8 @@ from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SO = ROOT / "apk" / "decoded" / "overhaul" / "lib" / "arm64-v8a" / "libgame.so"
-HEADER = ROOT / "module" / "app" / "src" / "main" / "cpp" / "data" / "native" / "game_symbols.h"
-REGISTRY = ROOT / "module" / "app" / "src" / "main" / "cpp" / "data" / "native" / "symbol_registry.h"
+HEADER = ROOT / "module" / "app" / "src" / "main" / "cpp" / "game" / "symbols" / "game_symbols.h"
+REGISTRY = ROOT / "module" / "app" / "src" / "main" / "cpp" / "game" / "symbols" / "symbol_registry.h"
 READELF = (
     ROOT / "tools" / "ndk" / "android-ndk-r26d" / "toolchains" / "llvm"
     / "prebuilt" / "linux-x86_64" / "bin" / "llvm-readelf"
@@ -143,8 +144,13 @@ def fmt_value(const: Constant) -> str:
     return "无法求值" if const.value is None else f"0x{const.value:x}"
 
 
-def main() -> None:
-    so = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_SO
+def main() -> int:
+    parser = argparse.ArgumentParser(description="校验 game_symbols.h 中注册符号的 VMA")
+    parser.add_argument("so", nargs="?", type=Path, default=DEFAULT_SO, help="目标 libgame.so 路径")
+    parser.add_argument("--all", action="store_true", help="输出全部分类和符号比对结果")
+    args = parser.parse_args()
+    so = args.so
+
     constants = read_constants(HEADER)
     registry = load_registry()
     registered_macros = {macro for macros in registry.values() for macro in macros}
@@ -155,23 +161,23 @@ def main() -> None:
         counts[classify(const, registered_macros)] += 1
     count_b = counts[CAT_B_GOT] + counts[CAT_B_STATIC]
 
-    print("== 分类汇总 ==")
+    print("== 分类统计 ==")
     print(f"A 地址·具名（可动态解析）: {counts[CAT_A]}")
     print(f"B 地址·静态（无符号名）: {count_b}"
           f"（GOT 槽 {counts[CAT_B_GOT]} + 其他静态地址 {counts[CAT_B_STATIC]}）")
     print(f"C 布局/枚举（非地址，不参与符号比对）: {counts[CAT_C]}")
     print(f"合计: {counts[CAT_A] + count_b + counts[CAT_C]}")
-    print()
 
-    print("== 分类明细 ==")
-    for const in constants:
-        print(f"[{classify(const, registered_macros)}] {const.name} = {fmt_value(const)} ({const.ctype})")
+    if args.all:
+        print("\n== 分类明细 ==")
+        for const in constants:
+            print(f"[{classify(const, registered_macros)}] {const.name} = {fmt_value(const)} ({const.ctype})")
 
     if not so.exists():
         print()
         print(f"libgame.so 不存在: {so}")
         print("分类已完成；符号校验需提供有效 libgame.so 路径。")
-        sys.exit(1)
+        return 1
 
     syms = read_symbols(so)
 
@@ -183,27 +189,37 @@ def main() -> None:
 
     print()
     print(f"== A 类符号校验（libgame.so: {so}，符号表 {len(syms)} 个）==")
-    print(f"{'符号':28s} {'cpp 当前':>12s} {'新版本':>12s} {'状态'}")
+    if args.all:
+        print(f"{'符号':28s} {'cpp 当前':>12s} {'新版本':>12s} {'状态'}")
+    matched = 0
     changed = 0
+    missing = 0
     for symbol, macros in registry.items():
         new_addr = syms.get(symbol)
         for macro in macros:
             const = const_by_name.get(macro)
             if const is None or const.value is None:
+                missing += 1
                 print(f"{symbol:28s} {'缺失':>12s} {'-':>12s} ❌ 常量缺失({macro})")
                 continue
             cur_addr = const.value
             if new_addr is None:
+                missing += 1
                 print(f"{symbol:28s} {'0x%x' % cur_addr:>12s} {'-':>12s} ❌ 符号不存在")
                 continue
             if cur_addr != new_addr:
                 changed += 1
                 print(f"{symbol:28s} {'0x%x' % cur_addr:>12s} {'0x%x' % new_addr:>12s} ⚠️ 需更新")
             else:
-                print(f"{symbol:28s} {'0x%x' % cur_addr:>12s} {'0x%x' % new_addr:>12s} ✅ 一致")
+                matched += 1
+                if args.all:
+                    print(f"{symbol:28s} {'0x%x' % cur_addr:>12s} {'0x%x' % new_addr:>12s} ✅ 一致")
+    total = matched + changed + missing
+    print(f"\n比对统计：共 {total} 项，一致 {matched}，地址不一致 {changed}，缺失 {missing}")
     if changed:
         print(f"\n⚠️ {changed} 个符号地址变化：更新 game_symbols.h 中对应 _VMA 常量后重新构建")
+    return 1 if changed or missing else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -1,0 +1,71 @@
+#pragma once
+
+// 插件/功能状态登记表（ARCHITECTURE.md §3.2 状态机、§9.1 最小诊断接口）。
+// 结构为纯数据；P1 最小诊断接口输出 id/state/enabled/error 四项。
+
+#include <cstdint>
+
+namespace qol::infra {
+
+// 与 §3.2 生命周期状态机一一对应（10 态）；数值仅为诊断/内部表示，不作跨边界契约。
+// degraded 不是生命周期态，而是正交健康标记（见 FeatureStatus.degraded）。
+enum class FeatureState : int32_t {
+    kRegistered = 0,
+    kResolving = 1,
+    kBlocked = 2,
+    kUnsupported = 3,
+    kInvalid = 4,
+    kInstalledDisabled = 5,
+    kEnabled = 6,
+    kDeactivating = 7,
+    kInactive = 8,
+    kFailed = 9,
+};
+
+// Internal cause for lifecycle failures; never crosses a public ABI boundary.
+enum class FeatureFailureStage : uint8_t {
+    kNone = 0,
+    kInstall,
+    kActivation,
+    kOther,
+    kUnspecified,
+};
+
+const char* feature_state_name(FeatureState state);
+
+struct FeatureStatus {
+    const char* id = nullptr;      // 静态字符串
+    const char* version = nullptr; // 静态字符串，可为 nullptr
+    bool enabled = false;
+    FeatureState state = FeatureState::kRegistered;
+    const char* error = nullptr;   // 静态字符串或持久错误；nullptr 表示无错误
+    uint32_t resource_count = 0;
+    // 正交健康标记（§3.2）：optional_requires 缺失/可选依赖失效时置位，生命周期态不变。
+    bool degraded = false;
+    FeatureFailureStage failure_stage = FeatureFailureStage::kNone;
+};
+
+// 注册（幂等：同 id 重复注册返回 false）；id/version 必须为静态存储。
+bool status_register(const char* id, const char* version);
+
+// 更新状态；未注册 id 返回 false。error 必须为静态字符串或 nullptr。
+// kUnspecified 在状态仍为 failed 时保留已有阶段；离开 failed 会清除阶段。
+bool status_update(const char* id, FeatureState state, bool enabled, const char* error,
+                   FeatureFailureStage failure_stage = FeatureFailureStage::kUnspecified);
+
+// 设置正交健康标记 degraded（§3.2）；未注册 id 返回 false。
+bool status_set_degraded(const char* id, bool degraded);
+
+uint32_t status_count();
+
+// 按 id 读取单条状态；未注册返回 false（不改写 out）。
+// 供宿主门禁监督比较当前状态与目标状态（reconciler 的 desired/actual 对齐）。
+bool status_get(const char* id, FeatureStatus* out);
+
+// 按注册顺序写出至多 capacity 条；written 为实际写出条数。
+bool status_snapshot(FeatureStatus* out, uint32_t capacity, uint32_t* written);
+
+// 测试用。
+void status_reset_for_test();
+
+}  // namespace qol::infra

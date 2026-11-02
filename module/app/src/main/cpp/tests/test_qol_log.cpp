@@ -1,10 +1,17 @@
 // host 单测：统一日志系统 P0 纯格式化与限流原语。
-// 编译 core/native/qol_log.cpp，Android 专属头由 stubs/ 覆盖；不依赖设备与 I/O。
-#include "core/native/qol_log.h"
+// 编译 infra/log/qol_log.cpp，Android 专属头由 stubs/ 覆盖；不依赖设备与 I/O。
+#include "infra/log/qol_log.h"
+#include "infra/log/qol_crash.h"
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <string>
+#include <vector>
+
+#include <signal.h>
+#include <unistd.h>
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -90,13 +97,13 @@ static void test_domain_tokens() {
         QolDomain::kExtensionBag, QolDomain::kSave,      QolDomain::kSaveBackup,
         QolDomain::kAutosell,   QolDomain::kCraft,    QolDomain::kAttrRange,
         QolDomain::kUi,         QolDomain::kConfig,      QolDomain::kCatalog,
-        QolDomain::kSimpleMode,
+        QolDomain::kWorldTuning,
     };
     const char* tokens[] = {
         "platform", "core",  "http",   "api",        "op",
         "inventory", "extension_bag", "save", "save_backup", "autosell",
         "craft", "attr_range", "ui", "config", "catalog",
-        "simple_mode",
+        "world_tuning",
     };
     const size_t count = sizeof(domains) / sizeof(domains[0]);
     CHECK(count == 16);
@@ -112,6 +119,24 @@ static void test_basename() {
     CHECK(std::strcmp(qol_log_basename("/a/b/c.cpp"), "c.cpp") == 0);
     CHECK(std::strcmp(qol_log_basename("c.cpp"), "c.cpp") == 0);
     CHECK(std::strcmp(qol_log_basename("C:\\a\\b.cpp"), "b.cpp") == 0);
+}
+
+// 落盘 src 恒为 basename:line：绝对构建路径既不泄漏也不允许被转发方缓冲截成半截名。
+static void test_normalize_src() {
+    char out[64];
+    qol_log_normalize_src(out, sizeof(out), "/home/dev/proj/module/app/src/x.cpp:42");
+    CHECK(std::strcmp(out, "x.cpp:42") == 0);
+    qol_log_normalize_src(out, sizeof(out), "C:\\proj\\x.cpp:7");
+    CHECK(std::strcmp(out, "x.cpp:7") == 0);
+    qol_log_normalize_src(out, sizeof(out), "extension_bag");
+    CHECK(std::strcmp(out, "extension_bag") == 0);
+    qol_log_normalize_src(out, sizeof(out), nullptr);
+    CHECK(out[0] == '\0');
+
+    char tiny[5];
+    const int required = qol_log_normalize_src(tiny, sizeof(tiny), "/a/abcdefgh");
+    CHECK(required == 8);                          // 完整所需长度
+    CHECK(std::strcmp(tiny, "abcd") == 0);         // cap-1 截断且 NUL 终止
 }
 
 static void test_format_ts_shape() {
@@ -244,6 +269,123 @@ static void test_debug_flag_and_sink_host() {
     CHECK(!qol_log_file_ready());   // host 无文件 sink
 }
 
+namespace {
+
+std::vector<std::string> g_sink_lines;
+
+void collect_sink(QolLogLevel, QolDomain, const char* line) {
+    g_sink_lines.emplace_back(line != nullptr ? line : "");
+}
+
+}  // namespace
+
+// INFO 单帧单域预算：超限只留一行封顶标记，其余丢弃；换帧恢复；其他级别不受限。
+static void test_info_per_frame_cap() {
+    qol_log_set_host_sink(&collect_sink);
+    qol_log_set_frame_provider(&test_frame_provider);
+
+    g_test_frame = 500;
+    g_sink_lines.clear();
+    for (uint32_t i = 0; i < kQolLogInfoPerFrameCap + 3; ++i) {
+        qol_log_write_kotlin(QolLogLevel::kInfo, QolDomain::kUi, "x.kt:1", "tick");
+    }
+    CHECK(g_sink_lines.size() == kQolLogInfoPerFrameCap + 1);
+    CHECK(g_sink_lines.back().find("log INFO cap reached domain=ui frame=500") !=
+          std::string::npos);
+
+    // 换帧后预算重置。
+    g_test_frame = 501;
+    g_sink_lines.clear();
+    qol_log_write_kotlin(QolLogLevel::kInfo, QolDomain::kUi, "x.kt:1", "tick");
+    CHECK(g_sink_lines.size() == 1);
+    CHECK(g_sink_lines[0].find("cap reached") == std::string::npos);
+
+    // 预算按域独立：另一域不受 ui 已用额度影响。
+    g_sink_lines.clear();
+    for (uint32_t i = 0; i < kQolLogInfoPerFrameCap; ++i) {
+        qol_log_write_kotlin(QolLogLevel::kInfo, QolDomain::kSave, "x.kt:1", "tick");
+    }
+    CHECK(g_sink_lines.size() == kQolLogInfoPerFrameCap);
+
+    // WARN / ERROR / DEBUG 不占 INFO 预算也不被截断。
+    g_sink_lines.clear();
+    for (int i = 0; i < 40; ++i) {
+        qol_log_write_kotlin(QolLogLevel::kWarn, QolDomain::kUi, "x.kt:1", "w");
+        qol_log_write_kotlin(QolLogLevel::kError, QolDomain::kUi, "x.kt:1", "e");
+    }
+    CHECK(g_sink_lines.size() == 80);
+
+    // SDK 转发的绝对路径落盘为 basename。
+    g_sink_lines.clear();
+    qol_log_write_kotlin(QolLogLevel::kInfo, QolDomain::kCore, "/proj/a/b.cpp:9", "m");
+    CHECK(g_sink_lines.size() == 1);
+    CHECK(g_sink_lines[0].find(" b.cpp:9 m") != std::string::npos);
+    CHECK(g_sink_lines[0].find("/proj/") == std::string::npos);
+
+    qol_log_set_host_sink(nullptr);
+    qol_log_set_frame_provider(nullptr);
+}
+
+// 崩溃处理器读的是缓存帧号：不能回调游戏帧源（崩溃时可能持有未释放的锁）。
+static void test_last_known_frame() {
+    qol_log_set_host_sink(&collect_sink);
+    qol_log_set_frame_provider(&test_frame_provider);
+    g_sink_lines.clear();
+
+    g_test_frame = 777;
+    qol_log_write_kotlin(QolLogLevel::kInfo, QolDomain::kSave, "x.kt:1", "tick");
+    CHECK(qol_log_last_known_frame() == 777);
+
+    qol_log_set_frame_provider(nullptr);
+    CHECK(qol_log_last_known_frame() == 777);  // 帧源摘除后保留最后已知值
+
+    qol_log_set_host_sink(nullptr);
+}
+
+// 崩溃现场：信号/寄存器/maps/日志尾部四段都要落盘，且 agent 能离线符号化。
+static void test_crash_capture() {
+    char dir_template[] = "./qol_crash_test_XXXXXX";
+    char* dir = ::mkdtemp(dir_template);
+    CHECK(dir != nullptr);
+    if (dir == nullptr) return;
+
+    const std::string log_path = std::string(dir) + "/qol.log";
+    std::FILE* log_file = std::fopen(log_path.c_str(), "w");
+    CHECK(log_file != nullptr);
+    if (log_file != nullptr) {
+        std::fputs("last-line-before-crash\n", log_file);
+        std::fclose(log_file);
+    }
+
+    qol_crash_init(dir, log_path.c_str());
+    CHECK(qol_crash_simulate(SIGSEGV, SEGV_MAPERR, 0x1234));
+
+    const std::string crash_path = std::string(dir) + "/qol-crash.log";
+    std::string content;
+    std::FILE* crash_file = std::fopen(crash_path.c_str(), "r");
+    CHECK(crash_file != nullptr);
+    if (crash_file != nullptr) {
+        char buf[4096];
+        size_t n = 0;
+        while ((n = std::fread(buf, 1, sizeof(buf), crash_file)) > 0) content.append(buf, n);
+        std::fclose(crash_file);
+    }
+
+    CHECK(content.find("=== qol crash ===") != std::string::npos);
+    CHECK(content.find("signal=11 SIGSEGV code=1 (SEGV_MAPERR) fault=0x1234") !=
+          std::string::npos);
+    CHECK(content.find("pid=") != std::string::npos);
+    CHECK(content.find("frame=") != std::string::npos);
+    CHECK(content.find("--- maps ---") != std::string::npos);
+    CHECK(content.find("qol_log_tests") != std::string::npos);  // 可执行文件必须在 maps 里
+    CHECK(content.find("--- log tail ---") != std::string::npos);
+    CHECK(content.find("last-line-before-crash") != std::string::npos);
+
+    std::remove(crash_path.c_str());
+    std::remove(log_path.c_str());
+    ::rmdir(dir);
+}
+
 int main() {
     test_format_info_exact_line();
     test_level_chars();
@@ -251,6 +393,7 @@ int main() {
     test_frame_missing();
     test_domain_tokens();
     test_basename();
+    test_normalize_src();
     test_format_ts_shape();
     test_buffer_truncation();
     test_throttle_frames();
@@ -258,6 +401,9 @@ int main() {
     test_kotlin_write_debug_gate();
     test_throttle_frame_rollback();
     test_debug_flag_and_sink_host();
+    test_info_per_frame_cap();
+    test_last_known_frame();
+    test_crash_capture();
 
     std::printf("qol_log_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

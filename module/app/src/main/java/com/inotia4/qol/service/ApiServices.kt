@@ -1,6 +1,8 @@
 package com.inotia4.qol.service
 
 import com.inotia4.qol.service.action.ActionApiServiceImpl
+import com.inotia4.qol.service.contract.ActionApiService
+import com.inotia4.qol.service.contract.InfoApiService
 import com.inotia4.qol.service.info.InfoApiServiceImpl
 
 /**
@@ -12,8 +14,6 @@ object ApiServices {
     val info: InfoApiService by lazy { InfoApiServiceImpl() }
 
     val action: ActionApiService by lazy { ActionApiServiceImpl() }
-
-    val op: OpApiService by lazy { OpApiServiceImpl() }
 
     val config: ConfigApiService by lazy { ConfigApiServiceImpl() }
 }

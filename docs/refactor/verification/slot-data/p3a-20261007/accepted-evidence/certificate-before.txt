@@ -1,0 +1,4 @@
+V2 Signer: certificate DN: EMAILADDRESS=android@android.com, CN=Android, OU=Android, O=Android, L=Mountain View, ST=California, C=US
+V2 Signer: certificate SHA-256 digest: a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc
+V2 Signer: certificate SHA-1 digest: 61ed377e85d386a8dfee6b864bd85b0bfaa5af81
+V2 Signer: certificate MD5 digest: e89b158e4bcf988ebd09eb83f5378e87

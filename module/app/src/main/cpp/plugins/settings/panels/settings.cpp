@@ -1,0 +1,1170 @@
+#include "settings.h"
+
+#include <atomic>
+#include <cstddef>
+#include <cstdio>
+#include <cstring>
+#include <cstdint>
+#include <mutex>
+#include <string>
+#include <vector>
+
+#include "../../../contracts/game_host.h"
+#include "../../../contracts/panels.h"
+#include "../../../contracts/ui.h"
+#include "../../../contracts/ui_theme.h"
+#include "log.h"
+#include "settings_binding.h"
+#include "settings_model.h"
+#include "feature_model.h"
+#include "../feature.h"
+
+namespace qol::features::core_ui {
+namespace {
+using contracts::QolUiHandle;
+using contracts::UiRect;
+using contracts::FeatureCategory;
+using contracts::FeatureType;
+constexpr int64_t kPanelW = 960, kPanelH = 640;
+constexpr int64_t kLeftX = 24, kLeftY = 100, kLeftW = 300, kLeftH = 444;
+constexpr int64_t kRightX = 364, kRightY = 100, kRightW = 572, kRightH = 444;
+constexpr int32_t kLeftRowH = 73;
+constexpr int32_t kLeftOptionHeight = 50;
+constexpr int32_t kLeftOptionWidth = 284;
+// 左面板框相对列表视口左右各外扩 8/24。284 宽让选项右边缘对齐视口右边缘，
+// 避免按下贴片被滚动列表裁切；同时两侧相对面板框各留 24，滚动条落在右侧留白内。
+constexpr int32_t kLeftOptionX =
+    (static_cast<int32_t>(kLeftW) + 8 + 24 - kLeftOptionWidth) / 2 - 8;
+constexpr int32_t kLeftOptionY = (kLeftRowH - kLeftOptionHeight) / 2;
+constexpr int32_t kLeftOptionTextHeight = 24;
+constexpr int32_t kRightRowH = settings_model::kMinimumRightRowHeight;
+constexpr int64_t kBackAbsX = contracts::ui_theme::kNavBoxAbsX;
+constexpr int64_t kBackAbsY = contracts::ui_theme::kNavBoxAbsY;
+constexpr int64_t kBackW = contracts::ui_theme::kNavBoxW;
+constexpr int64_t kBackH = contracts::ui_theme::kNavBoxH;
+constexpr size_t kFeatureControlReadActualSize =
+    offsetof(contracts::QolFeatureControlApi, read_actual) +
+    sizeof(((contracts::QolFeatureControlApi*)nullptr)->read_actual);
+constexpr size_t kFeatureControlOwnerAvailabilitySize =
+    offsetof(contracts::QolFeatureControlApi, read_owner_availability) +
+    sizeof(((contracts::QolFeatureControlApi*)nullptr)->read_owner_availability);
+constexpr size_t kFeatureControlChoiceSize =
+    offsetof(contracts::QolFeatureControlApi, request_set_choice) +
+    sizeof(((contracts::QolFeatureControlApi*)nullptr)->request_set_choice);
+constexpr size_t kArrowComponentsSize =
+    offsetof(contracts::QolUiComponents, arrow_button_draw) +
+    sizeof(((contracts::QolUiComponents*)nullptr)->arrow_button_draw);
+// Android CMake Debug omits NDEBUG; optimized configurations define it.
+#if defined(NDEBUG)
+constexpr bool kShowHidden = false;
+#else
+constexpr bool kShowHidden = true;
+#endif
+
+const contracts::QolHostSdk* g_sdk = nullptr;
+const contracts::QolGameHost* g_game = nullptr;
+const contracts::QolUiAdapter* g_ui = nullptr;
+const contracts::QolUiComponents* g_components = nullptr;
+const contracts::QolFeatureControlApi* g_control = nullptr;
+QolUiHandle g_root = nullptr, g_left = nullptr, g_right = nullptr, g_back = nullptr;
+QolUiHandle g_pressed_list = nullptr;
+bool g_back_pressed = false;
+std::mutex g_mtx;
+bool g_panel_active = false;
+uint64_t g_generation = 0, g_frame = 0;
+int g_selected_category = 0, g_pending_category = -1, g_pending_action_item = -1;
+std::vector<contracts::FeatureCategoryDefinition> g_categories;
+std::vector<feature_model::Item> g_items;
+std::vector<uint32_t> g_right_indices;
+struct OwnerAvailabilityState {
+    std::string plugin_id;
+    contracts::FeatureOwnerAvailability availability = contracts::FeatureOwnerAvailability::kFailed;
+};
+std::vector<OwnerAvailabilityState> g_owner_availability;
+struct GameInfoDisplay {
+    std::string game;
+    std::string variant;
+    std::string module;
+    std::string platform;
+};
+GameInfoDisplay g_game_info;
+bool g_selected_is_game_info = false;
+struct ItemState {
+    bool valid = false;
+    uint8_t confirmed = 0;
+    uint64_t request_id = 0;
+    bool gesture = false;
+    int32_t desired = 0;
+    uint32_t choice_position = UINT32_MAX;
+    uint32_t choice_target = UINT32_MAX;
+    QolUiHandle toggle = nullptr, action = nullptr, choice_left = nullptr, choice_right = nullptr;
+    char message[128]{};
+};
+std::vector<ItemState> g_states;
+struct ChoiceContext { uint32_t item_index; uint64_t generation; int32_t delta; };
+std::vector<ChoiceContext> g_choice_contexts;
+int g_pending_choice_item = -1;
+int32_t g_pending_choice_delta = 0;
+struct EntryContinuation {
+    bool active = false;
+    std::string plugin_id;
+    std::string feature_id;
+    uint64_t request_id = 0;
+    uint64_t page_generation = 0;
+    uint32_t process_ticks = 0;
+    bool persisted = false;
+};
+constexpr uint32_t kEntryWaitMaxProcessTicks = 300;
+EntryContinuation g_entry_continuation;
+struct ToggleContext { uint32_t item_index; uint64_t generation; };
+std::vector<ToggleContext> g_contexts;
+char g_status[256]{};
+char g_module_version[64]{};
+int g_summary_categories = 0, g_summary_items = 0;
+
+bool main_thread() {
+    return g_ui != nullptr && g_ui->is_main_thread != nullptr && g_ui->is_main_thread() != 0;
+}
+void set_status(const char* text) {
+    std::snprintf(g_status, sizeof(g_status), "%s", text == nullptr ? "" : text);
+}
+void item_error(uint32_t i, const char* text) {
+    std::snprintf(g_states[i].message, sizeof(g_states[i].message), "%s", text);
+    std::snprintf(g_status, sizeof(g_status), "%s：%s", g_items[i].label, text);
+}
+void clear_entry_continuation() { g_entry_continuation = EntryContinuation{}; }
+bool feature_control_has_read_actual() {
+    return g_control != nullptr && g_control->struct_size >= kFeatureControlReadActualSize &&
+        g_control->read_actual != nullptr;
+}
+void sync_controls(uint32_t i);
+contracts::FeatureOwnerAvailability read_owner_availability(const char* plugin_id) {
+    if (g_control == nullptr || g_control->struct_size < kFeatureControlOwnerAvailabilitySize ||
+        g_control->read_owner_availability == nullptr || plugin_id == nullptr)
+        return contracts::FeatureOwnerAvailability::kFailed;
+    contracts::FeatureOwnerAvailability availability = contracts::FeatureOwnerAvailability::kFailed;
+    if (!contracts::succeeded(g_control->read_owner_availability(
+            g_control->context, plugin_id, &availability)))
+        return contracts::FeatureOwnerAvailability::kFailed;
+    return availability;
+}
+contracts::FeatureOwnerAvailability owner_availability(const char* plugin_id) {
+    for (const auto& owner : g_owner_availability)
+        if (owner.plugin_id == plugin_id) return owner.availability;
+    return contracts::FeatureOwnerAvailability::kFailed;
+}
+void refresh_owner_availability() {
+    for (auto& owner : g_owner_availability) {
+        const auto latest = read_owner_availability(owner.plugin_id.c_str());
+        if (latest == owner.availability) continue;
+        owner.availability = latest;
+        for (uint32_t i = 0; i < g_items.size(); ++i)
+            if (owner.plugin_id == g_items[i].plugin_id) sync_controls(i);
+    }
+}
+void refresh_owner_availability(uint32_t item_index) {
+    if (item_index >= g_items.size()) return;
+    const auto& plugin_id = g_items[item_index].plugin_id;
+    for (auto& owner : g_owner_availability) {
+        if (owner.plugin_id != plugin_id) continue;
+        const auto latest = read_owner_availability(plugin_id);
+        if (latest == owner.availability) return;
+        owner.availability = latest;
+        for (uint32_t i = 0; i < g_items.size(); ++i)
+            if (owner.plugin_id == g_items[i].plugin_id) sync_controls(i);
+        return;
+    }
+}
+bool owner_available(uint32_t i) {
+    return feature_model::owner_available(owner_availability(g_items[i].plugin_id));
+}
+const char* displayed_description(uint32_t i) {
+    const char* failure = feature_model::owner_failure_text(owner_availability(g_items[i].plugin_id));
+    return failure[0] == '\0' ? g_items[i].description : failure;
+}
+bool entry_continuation_matches(const feature_model::Item& item) {
+    return g_entry_continuation.active &&
+        g_entry_continuation.page_generation == g_generation &&
+        g_entry_continuation.plugin_id == item.plugin_id &&
+        g_entry_continuation.feature_id == item.feature_id;
+}
+bool toggle_enabled(uint32_t i) {
+    const auto& s = g_states[i];
+    return feature_model::toggle_enabled(s.valid, s.request_id, s.gesture, owner_available(i));
+}
+bool action_enabled(uint32_t i) {
+    const auto& s = g_states[i];
+    const bool request_pending = s.request_id != 0 || g_pending_action_item == static_cast<int>(i) ||
+        g_entry_continuation.active;
+    return feature_model::entry_enabled(g_items[i], s.valid, request_pending, s.gesture,
+                                        owner_available(i));
+}
+void sync_controls(uint32_t i) {
+    auto& s = g_states[i];
+    if (g_components == nullptr) return;
+    if (s.toggle != nullptr) {
+        const auto value = g_components->native_toggle_set_value(s.toggle, s.confirmed);
+        const auto enabled = g_components->native_toggle_set_enabled(s.toggle, toggle_enabled(i));
+        if (!contracts::succeeded(value) || !contracts::succeeded(enabled))
+            set_status("开关状态更新失败");
+    }
+    if (s.action != nullptr && !contracts::succeeded(
+            g_components->text_button_set_enabled(s.action, action_enabled(i))))
+        set_status("入口按钮状态更新失败");
+    if (s.choice_left != nullptr && g_components->arrow_button_set_enabled != nullptr) {
+        const bool pending = s.request_id != 0 || g_pending_choice_item == static_cast<int>(i);
+        (void)g_components->arrow_button_set_enabled(s.choice_left,
+            settings_model::choice_arrow_enabled(s.valid, owner_available(i), pending,
+                s.choice_position, g_items[i].choice_count, -1));
+        (void)g_components->arrow_button_set_enabled(s.choice_right,
+            settings_model::choice_arrow_enabled(s.valid, owner_available(i), pending,
+                s.choice_position, g_items[i].choice_count, 1));
+    }
+}
+bool choice_api_available() {
+    return g_control != nullptr && g_control->struct_size >= kFeatureControlChoiceSize &&
+        g_control->read_choice != nullptr && g_control->request_set_choice != nullptr;
+}
+const char* choice_label(uint32_t i) {
+    const auto& item = g_items[i];
+    const auto position = g_states[i].choice_position;
+    if (position == UINT32_MAX) return "未知选项";
+    return position == 0 ? "关闭" : item.choices[position - 1].label;
+}
+void refresh_item_value(uint32_t i) {
+    auto& s = g_states[i];
+    const auto& item = g_items[i];
+    if (g_control == nullptr) { s.valid = false; return; }
+    if (item.type == FeatureType::kChoice) {
+        if (s.request_id != 0 || s.gesture || !choice_api_available()) {
+            s.valid = false;
+            s.choice_position = UINT32_MAX;
+            sync_controls(i);
+            return;
+        }
+        char value[1024]{};
+        uint32_t size = 0;
+        const auto result = g_control->read_choice(g_control->context, item.plugin_id,
+            item.feature_id, value, sizeof(value), &size);
+        if (!contracts::succeeded(result) || size > sizeof(value)) {
+            s.valid = false;
+            s.choice_position = UINT32_MAX;
+        } else {
+            const std::string selected(value, size);
+            std::vector<const char*> values;
+            values.reserve(item.choice_count);
+            for (uint32_t n = 0; n < item.choice_count; ++n)
+                values.push_back(item.choices[n].value);
+            const auto position = selected.find('\0') != std::string::npos ? UINT32_MAX :
+                settings_model::choice_position(selected.c_str(), values.data(),
+                    static_cast<uint32_t>(values.size()));
+            s.valid = position != UINT32_MAX;
+            s.choice_position = position;
+        }
+        sync_controls(i);
+        return;
+    }
+    if (s.request_id == 0 && !s.gesture) {
+        uint8_t value = 0;
+        s.valid = contracts::succeeded(g_control->read_feature(
+            g_control->context, item.plugin_id, item.feature_id, &value));
+        if (s.valid) s.confirmed = value;
+    }
+    sync_controls(i);
+}
+void refresh_all_values() {
+    for (uint32_t i = 0; i < g_items.size(); ++i) refresh_item_value(i);
+}
+bool load_catalog() {
+    clear_entry_continuation();
+    g_items.clear(); g_categories.clear(); g_states.clear(); g_contexts.clear();
+    g_choice_contexts.clear();
+    g_owner_availability.clear();
+    ++g_generation;
+    g_pending_action_item = -1;
+    g_pending_choice_item = -1;
+    const contracts::QolFeatureCatalogPlugin* plugins = nullptr;
+    uint32_t count = 0;
+    const contracts::FeatureCategoryDefinition* categories = nullptr;
+    uint32_t category_count = 0;
+    if (g_control == nullptr || !contracts::succeeded(
+        g_control->read_catalog(g_control->context, &plugins, &count)) ||
+        !contracts::succeeded(g_control->read_categories(
+            g_control->context, &categories, &category_count)) ||
+        !feature_model::build(plugins, count, kShowHidden, g_items) ||
+        !feature_model::build_categories(categories, category_count, kShowHidden,
+                                         g_items, g_categories)) return false;
+    g_states.resize(g_items.size());
+    for (uint32_t i = 0; i < g_items.size(); ++i) {
+        g_contexts.push_back({i, g_generation});
+        bool known_owner = false;
+        for (const auto& owner : g_owner_availability)
+            if (owner.plugin_id == g_items[i].plugin_id) { known_owner = true; break; }
+        if (!known_owner) g_owner_availability.push_back({g_items[i].plugin_id,
+            contracts::FeatureOwnerAvailability::kFailed});
+    }
+    refresh_owner_availability();
+    std::lock_guard<std::mutex> lock(g_mtx);
+    g_summary_categories = static_cast<int>(g_categories.size());
+    g_summary_items = static_cast<int>(g_items.size());
+    return true;
+}
+void draw_row_background(QolUiHandle row, int32_t width, int32_t height, uint8_t selected) {
+    int64_t x = 0, y = 0;
+    if (!contracts::succeeded(g_ui->control_absolute_origin(row, &x, &y))) return;
+    if (selected) (void)g_ui->fill_rect({x, y, width, height}, contracts::ui_theme::kRowSelectedBg);
+    (void)g_ui->fill_rect({x, y + height - 2, width, 2}, contracts::ui_theme::kFrameGold);
+}
+void draw_left_row(void*, uint32_t index, QolUiHandle row, uint8_t selected) {
+    if (index >= g_categories.size()) return;
+    int64_t x = 0, y = 0;
+    if (!contracts::succeeded(g_ui->control_absolute_origin(row, &x, &y))) return;
+    int32_t pressed = 0;
+    if (g_ui->control_pressed != nullptr) (void)g_ui->control_pressed(row, &pressed);
+    const UiRect option_rect{x + kLeftOptionX, y + kLeftOptionY,
+        kLeftOptionWidth, kLeftOptionHeight};
+    (void)g_ui->draw_help_option_row(option_rect, selected, static_cast<uint8_t>(pressed != 0));
+    const int32_t text_y = kLeftOptionY +
+        (kLeftOptionHeight - kLeftOptionTextHeight) / 2;
+    (void)g_components->draw_control_text(row, g_categories[index].name,
+        kLeftOptionX + kLeftOptionWidth / 2, text_y, contracts::ui_theme::kTextGold, 2, 1);
+}
+void draw_right_row(void*, uint32_t row_index, QolUiHandle row, uint8_t selected) {
+    if (row_index >= g_right_indices.size()) return;
+    const auto i = g_right_indices[row_index];
+    const auto& item = g_items[i];
+    const auto& s = g_states[i];
+    draw_row_background(row, kRightW, kRightRowH, selected);
+    const int32_t control_left = settings_model::right_control_left(kRightW);
+    const int32_t text_right = control_left;
+    const int32_t text_width = settings_model::description_width_for_toggle(text_right);
+    const auto layout = settings_model::row_text_layout(
+        settings_model::use_item_description(displayed_description(i)), kRightRowH);
+    const auto title = settings_model::truncate_text(item.label, text_width);
+    if (!title.lines.empty()) (void)g_components->draw_control_text(row, title.lines[0].c_str(),
+        16, layout.title_y, !owner_available(i) ? contracts::ui_theme::kError :
+        (item.type == FeatureType::kChoice ? (s.valid ? contracts::ui_theme::kTextGold :
+            contracts::ui_theme::kError) : toggle_enabled(i) ? contracts::ui_theme::kTextGold :
+        contracts::ui_theme::kTextDisabled), 0, 1);
+    const auto description = settings_model::truncate_text(displayed_description(i), text_width);
+    if (!description.lines.empty()) (void)g_components->draw_control_text(row,
+        description.lines[0].c_str(), 16, layout.description_y,
+        owner_available(i) ? contracts::ui_theme::kTextNormal : contracts::ui_theme::kTextDisabled, 0, 1);
+    if (s.toggle != nullptr) (void)g_components->native_toggle_draw(s.toggle);
+    if (s.action != nullptr) (void)g_components->text_button_draw(s.action);
+    if (item.type == FeatureType::kChoice) {
+        if (s.choice_left != nullptr) (void)g_components->arrow_button_draw(s.choice_left);
+        if (s.choice_right != nullptr) (void)g_components->arrow_button_draw(s.choice_right);
+        const auto label = settings_model::truncate_text(choice_label(i),
+            settings_model::choice_label_width());
+        if (!label.lines.empty()) (void)g_components->draw_control_text(row, label.lines[0].c_str(),
+            control_left + settings_model::kToggleWidth / 2,
+            settings_model::toggle_top(kRightRowH) + 27,
+            s.valid ? contracts::ui_theme::kTextNormal : contracts::ui_theme::kError, 2, 1);
+    }
+}
+void on_left_select(void*, uint32_t i) { g_pending_category = static_cast<int>(i); }
+void native_toggle_changed(void* user, int32_t desired) {
+    const auto* context = static_cast<const ToggleContext*>(user);
+    if (!g_panel_active || context == nullptr || context->generation != g_generation ||
+        context->item_index >= g_items.size()) return;
+    const auto i = context->item_index;
+    refresh_owner_availability(i);
+    if (!toggle_enabled(i)) return;
+    g_states[i].desired = desired != 0;
+    g_states[i].gesture = true;
+    sync_controls(i);
+}
+void action_button_clicked(void* user) {
+    const auto* context = static_cast<const ToggleContext*>(user);
+    if (context != nullptr && context->item_index < g_items.size())
+        refresh_owner_availability(context->item_index);
+    if (!g_panel_active || context == nullptr || context->generation != g_generation ||
+        context->item_index >= g_items.size() || g_pending_action_item >= 0 ||
+        !action_enabled(context->item_index)) return;
+    g_pending_action_item = static_cast<int>(context->item_index);
+    sync_controls(context->item_index);
+}
+void choice_arrow_clicked(void* user) {
+    const auto* context = static_cast<const ChoiceContext*>(user);
+    if (!g_panel_active || context == nullptr || context->generation != g_generation ||
+        context->item_index >= g_items.size() || g_pending_choice_item >= 0) return;
+    const auto i = context->item_index;
+    refresh_owner_availability(i);
+    if (g_items[i].type != FeatureType::kChoice || !choice_api_available() ||
+        !g_states[i].valid || !owner_available(i) || g_states[i].request_id != 0) return;
+    const uint32_t next = settings_model::choice_next_position(g_states[i].choice_position,
+        g_items[i].choice_count, context->delta);
+    if (next == g_states[i].choice_position) return;
+    g_pending_choice_item = static_cast<int>(i);
+    g_pending_choice_delta = context->delta;
+    g_states[i].choice_target = next;
+    sync_controls(i);
+}
+const char* series_display_name(const char* series) {
+    if (series == nullptr) return "未知版本";
+    if (std::strcmp(series, "original") == 0) return "原版";
+    if (std::strcmp(series, "overhaul") == 0) return "盗版大修";
+    if (std::strcmp(series, "monster") == 0) return "Monster版";
+    if (std::strcmp(series, "c18") == 0) return "C18版";
+    return "未知版本";
+}
+void refresh_game_info() {
+    g_game_info = {};
+    contracts::QolGameIdentity identity{};
+    bool identity_available = false;
+    constexpr size_t kIdentityApiSize = offsetof(contracts::QolGameHost, game_identity) +
+        sizeof(((contracts::QolGameHost*)nullptr)->game_identity);
+    if (g_game != nullptr && g_game->abi.major == contracts::kGameHostMajor &&
+        g_game->abi.minor >= contracts::kGameHostIdentityMinor &&
+        g_game->abi.size >= kIdentityApiSize &&
+        g_game->game_identity.read != nullptr) {
+        identity_available = contracts::succeeded(g_game->game_identity.read(&identity));
+    }
+
+    g_game_info.game = "艾诺迪亚4";
+    if (identity_available && identity.game_version_name != nullptr &&
+        identity.game_version_name[0] != '\0') {
+        const char* version = identity.game_version_name;
+        g_game_info.game += (version[0] == 'v' || version[0] == 'V') ? " " : " v";
+        g_game_info.game += version;
+    }
+
+    const char* series = identity_available ? series_display_name(identity.series_name) : "未知版本";
+    g_game_info.variant = series;
+    if (identity_available && identity.version_label != nullptr &&
+        identity.version_label[0] != '\0') {
+        g_game_info.variant += " ";
+        g_game_info.variant += identity.version_label;
+    }
+
+    g_game_info.module = "QoL模块 ";
+    g_game_info.module += g_module_version[0] != '\0' ? "v" : "";
+    g_game_info.module += g_module_version[0] != '\0' ? g_module_version : "未知";
+
+    g_game_info.platform = "Android ";
+    if (identity_available && identity.android_release != nullptr &&
+        identity.android_release[0] != '\0') {
+        g_game_info.platform += identity.android_release;
+    } else {
+        g_game_info.platform += "未知";
+    }
+    if (identity_available && identity.android_sdk_int > 0) {
+        g_game_info.platform += " (API ";
+        g_game_info.platform += std::to_string(identity.android_sdk_int);
+        g_game_info.platform += ")";
+    }
+    g_game_info.platform += sizeof(void*) == 8 ? " 64位" : " 32位";
+}
+void destroy_right_list() {
+    for (auto& s : g_states) {
+        s.toggle = nullptr; s.action = nullptr; s.choice_left = nullptr; s.choice_right = nullptr;
+    }
+    if (g_right != nullptr && g_components != nullptr) (void)g_components->destroy(g_right);
+    g_right = nullptr; g_right_indices.clear();
+    g_selected_is_game_info = false;
+    g_game_info = {};
+}
+bool build_right_list(int category) {
+    destroy_right_list();
+    if (category < 0 || static_cast<size_t>(category) >= g_categories.size()) return false;
+    if (g_categories[category].category == FeatureCategory::kGameInfo) {
+        g_selected_is_game_info = true;
+        refresh_game_info();
+        return true;
+    }
+    for (uint32_t i = 0; i < g_items.size(); ++i)
+        if (g_items[i].category == g_categories[category].category) g_right_indices.push_back(i);
+    const contracts::UiScrollListDesc list{{kRightX, kRightY, kRightW, kRightH}, kRightRowH,
+        static_cast<uint32_t>(g_right_indices.size()), -1, &draw_right_row, nullptr, nullptr};
+    const QolResult right_create = g_components->scroll_list_create(&list, g_root, &g_right);
+    if (!contracts::succeeded(right_create)) {
+        CORE_UI_LOG_INFO("settings right list create failed code=%d", right_create.ok);
+        return false;
+    }
+    const QolResult selection = g_components->scroll_list_set_selection_enabled(g_right, 0);
+    if (!contracts::succeeded(selection)) {
+        CORE_UI_LOG_INFO("settings right list selection failed code=%d", selection.ok);
+        destroy_right_list(); return false;
+    }
+    g_choice_contexts.resize(g_items.size() * 2);
+    for (uint32_t row = 0; row < g_right_indices.size(); ++row) {
+        const auto i = g_right_indices[row];
+        QolUiHandle handle = nullptr;
+        const QolResult row_result = g_components->scroll_list_get_row(g_right, row, &handle);
+        if (!contracts::succeeded(row_result)) {
+            CORE_UI_LOG_INFO("settings row get failed row=%u code=%d", row, row_result.ok);
+            destroy_right_list(); return false;
+        }
+        const int32_t control_left = settings_model::right_control_left(kRightW);
+        const int32_t control_top = settings_model::toggle_top(kRightRowH);
+        if (g_items[i].type == FeatureType::kEntry) {
+            const contracts::UiButtonDesc button{{control_left, control_top,
+                settings_model::kToggleWidth, settings_model::kToggleHeight},
+                g_items[i].action_label, contracts::kUiTextButtonFontLarger,
+                &action_button_clicked, &g_contexts[i]};
+            if (!contracts::succeeded(g_components->capsule_text_button_create(&button, handle,
+                &g_states[i].action))) { destroy_right_list(); return false; }
+        } else if (g_items[i].type == FeatureType::kChoice) {
+            const int32_t choice_left = control_left + settings_model::kChoiceArrowWidth;
+            const contracts::UiArrowButtonDesc left{{control_left, control_top,
+                settings_model::kChoiceArrowWidth, settings_model::kToggleHeight},
+                contracts::kUiArrowLeft, 0, &choice_arrow_clicked,
+                &g_choice_contexts[static_cast<size_t>(i) * 2]};
+            const contracts::UiArrowButtonDesc right{{choice_left + settings_model::kChoiceLabelWidth,
+                control_top, settings_model::kChoiceArrowWidth, settings_model::kToggleHeight},
+                contracts::kUiArrowRight, 0, &choice_arrow_clicked,
+                &g_choice_contexts[static_cast<size_t>(i) * 2 + 1]};
+            g_choice_contexts[static_cast<size_t>(i) * 2] = {i, g_generation, -1};
+            g_choice_contexts[static_cast<size_t>(i) * 2 + 1] = {i, g_generation, 1};
+            const QolResult left_arrow = g_components->arrow_button_create(
+                &left, handle, &g_states[i].choice_left);
+            const QolResult right_arrow = contracts::succeeded(left_arrow)
+                ? g_components->arrow_button_create(&right, handle, &g_states[i].choice_right)
+                : left_arrow;
+            if (!contracts::succeeded(left_arrow) || !contracts::succeeded(right_arrow)) {
+                CORE_UI_LOG_INFO("settings choice arrow create failed item=%u code=%d/%d",
+                                 i, left_arrow.ok, right_arrow.ok);
+                destroy_right_list(); return false;
+            }
+        } else {
+            const contracts::UiNativeToggleDesc toggle{{control_left, control_top,
+                settings_model::kToggleWidth, settings_model::kToggleHeight}, g_states[i].confirmed,
+                static_cast<uint8_t>(toggle_enabled(i)), &native_toggle_changed, &g_contexts[i]};
+            const QolResult toggle_result = g_components->native_toggle_create(
+                &toggle, handle, &g_states[i].toggle);
+            if (!contracts::succeeded(toggle_result)) {
+                CORE_UI_LOG_INFO("settings toggle create failed item=%u code=%d", i, toggle_result.ok);
+                destroy_right_list(); return false;
+            }
+        }
+        sync_controls(i);
+    }
+    return true;
+}
+void destroy_page() {
+    { std::lock_guard<std::mutex> lock(g_mtx); g_panel_active = false;
+      g_summary_categories = 0; g_summary_items = 0; }
+    clear_entry_continuation();
+    ++g_generation;
+    g_pending_category = -1; g_pending_action_item = -1;
+    g_pending_choice_item = -1;
+    destroy_right_list();
+    if (g_components != nullptr) {
+        if (g_left != nullptr) (void)g_components->destroy(g_left);
+        if (g_back != nullptr) (void)g_components->destroy(g_back);
+    }
+    if (g_ui != nullptr && g_root != nullptr) (void)g_ui->delete_control(g_root);
+    g_root = nullptr; g_left = nullptr; g_back = nullptr; g_pressed_list = nullptr;
+    g_back_pressed = false; g_selected_category = 0;
+    g_states.clear(); g_contexts.clear(); g_choice_contexts.clear(); g_items.clear(); g_categories.clear();
+    g_owner_availability.clear();
+    g_frame = 0; set_status("");
+}
+void process_pending_toggles() {
+    for (uint32_t i = 0; i < g_items.size(); ++i) {
+        auto& s = g_states[i];
+        if (!s.gesture) continue;
+        s.gesture = false;
+        refresh_owner_availability(i);
+        if (!toggle_enabled(i) || !owner_available(i) || g_control == nullptr) {
+            sync_controls(i); continue;
+        }
+        if (s.confirmed == s.desired) { sync_controls(i); continue; }
+        const auto& item = g_items[i];
+        contracts::FeatureReceipt receipt{};
+        const auto result = g_control->request_set_feature(g_control->context,
+            item.plugin_id, item.feature_id, s.desired, &receipt);
+        if (!contracts::succeeded(result) || receipt.admission != contracts::FeatureAdmission::kAdmitted ||
+            receipt.request_id == 0) item_error(i, settings_model::request_error_text(result.code));
+        else { s.request_id = receipt.request_id;
+               std::snprintf(s.message, sizeof(s.message), "保存中…"); }
+        sync_controls(i);
+    }
+}
+void poll_requests() {
+    if (g_control == nullptr) return;
+    for (uint32_t i = 0; i < g_items.size(); ++i) {
+        auto& s = g_states[i];
+        if (s.request_id == 0) continue;
+        if (g_items[i].type == FeatureType::kChoice) {
+            contracts::FeatureReceipt receipt{};
+            const auto result = g_control->receipt(g_control->context, s.request_id, &receipt);
+            if (!contracts::succeeded(result)) {
+                s.request_id = 0;
+                s.choice_target = UINT32_MAX;
+                item_error(i, "保存状态未知，请核对当前选项");
+            } else if (receipt.persistence == contracts::FeaturePersistence::kPending) {
+                continue;
+            } else if (receipt.persistence != contracts::FeaturePersistence::kPersisted ||
+                       receipt.admission != contracts::FeatureAdmission::kAdmitted) {
+                s.request_id = 0;
+                s.choice_target = UINT32_MAX;
+                item_error(i, "保存失败，选项未更改");
+            } else {
+                const uint32_t target = s.choice_target;
+                s.request_id = 0;
+                s.choice_target = UINT32_MAX;
+                refresh_item_value(i);
+                if (!s.valid || s.choice_position != target)
+                    item_error(i, "保存状态未知，请核对当前选项");
+                else
+                    std::snprintf(s.message, sizeof(s.message), "已保存");
+            }
+            sync_controls(i);
+            continue;
+        }
+        contracts::FeatureReceipt receipt{};
+        const auto result = g_control->receipt(g_control->context, s.request_id, &receipt);
+        if (!contracts::succeeded(result)) {
+            s.request_id = 0; item_error(i, "保存状态未知，请核对当前设置");
+        } else if (receipt.persistence == contracts::FeaturePersistence::kPending) continue;
+        else if (receipt.persistence == contracts::FeaturePersistence::kFailed ||
+                 receipt.admission != contracts::FeatureAdmission::kAdmitted) {
+            s.request_id = 0; item_error(i, "保存失败，设置未更改");
+        } else {
+            s.request_id = 0;
+            std::snprintf(s.message, sizeof(s.message), "已保存；运行状态由宿主更新");
+        }
+        // Receipt confirms persistence, not the latest value or lifecycle completion.
+        refresh_item_value(i);
+    }
+}
+void process_pending_choice() {
+    const int item_index = g_pending_choice_item;
+    if (item_index < 0 || static_cast<size_t>(item_index) >= g_items.size()) return;
+    g_pending_choice_item = -1;
+    const uint32_t i = static_cast<uint32_t>(item_index);
+    auto& state = g_states[i];
+    const auto& item = g_items[i];
+    if (!choice_api_available() || item.type != FeatureType::kChoice || !state.valid ||
+        state.request_id != 0 || !owner_available(i)) {
+        state.choice_target = UINT32_MAX;
+        sync_controls(i);
+        return;
+    }
+    const uint32_t target = settings_model::choice_next_position(state.choice_position,
+        item.choice_count, g_pending_choice_delta);
+    if (target == state.choice_position) {
+        state.choice_target = UINT32_MAX;
+        sync_controls(i);
+        return;
+    }
+    const char* value = target == 0 ? nullptr : item.choices[target - 1].value;
+    contracts::FeatureReceipt receipt{};
+    const auto result = g_control->request_set_choice(g_control->context, item.plugin_id,
+        item.feature_id, value, &receipt);
+    if (!contracts::succeeded(result) || receipt.admission != contracts::FeatureAdmission::kAdmitted ||
+        receipt.request_id == 0) {
+        state.choice_target = UINT32_MAX;
+        item_error(i, settings_model::request_error_text(!contracts::succeeded(result) ?
+            result.code : receipt.error_code != 0 ? receipt.error_code : kQolErrBlocked));
+    } else {
+        state.request_id = receipt.request_id;
+        state.choice_target = target;
+        std::snprintf(state.message, sizeof(state.message), "保存中…");
+    }
+    sync_controls(i);
+}
+void process_pending_action() {
+    const int i = g_pending_action_item; g_pending_action_item = -1;
+    if (i < 0 || static_cast<size_t>(i) >= g_items.size()) return;
+    refresh_owner_availability(static_cast<uint32_t>(i));
+    if (g_control == nullptr || !owner_available(static_cast<uint32_t>(i))) {
+        sync_controls(static_cast<uint32_t>(i));
+        return;
+    }
+    refresh_item_value(i);
+    auto& state = g_states[static_cast<size_t>(i)];
+    const auto& item = g_items[static_cast<size_t>(i)];
+    if (!action_enabled(static_cast<uint32_t>(i))) {
+        item_error(static_cast<uint32_t>(i), settings_model::action_error_text(kQolErrBusy));
+        sync_controls(static_cast<uint32_t>(i));
+        return;
+    }
+    if (state.confirmed != 0) {
+        if (!feature_control_has_read_actual()) {
+            item_error(static_cast<uint32_t>(i),
+                       settings_model::action_error_text(kQolErrNotReady));
+            sync_controls(static_cast<uint32_t>(i));
+            return;
+        }
+        int32_t ignored_host_state = 0;
+        uint8_t actual_enabled = 0;
+        const auto actual_result = g_control->read_actual(g_control->context,
+            item.plugin_id, &ignored_host_state, &actual_enabled);
+        const int32_t actual_error = !contracts::succeeded(actual_result) ?
+            actual_result.code : kQolErrNotReady;
+        if (!contracts::succeeded(actual_result) || actual_enabled != 1) {
+            item_error(static_cast<uint32_t>(i),
+                       settings_model::action_error_text(actual_error));
+            sync_controls(static_cast<uint32_t>(i));
+            return;
+        }
+        if (g_control->invoke_entry == nullptr) {
+            item_error(static_cast<uint32_t>(i),
+                       settings_model::action_error_text(kQolErrNotReady));
+        } else {
+            const auto result = g_control->invoke_entry(
+                g_control->context, item.plugin_id, item.feature_id);
+            if (!contracts::succeeded(result))
+                item_error(static_cast<uint32_t>(i),
+                           settings_model::action_error_text(result.code));
+            else
+                set_status("");
+        }
+        sync_controls(static_cast<uint32_t>(i));
+        return;
+    }
+
+    if (!feature_control_has_read_actual() ||
+        g_control->request_set_feature == nullptr || g_control->receipt == nullptr) {
+        item_error(static_cast<uint32_t>(i),
+                   settings_model::action_error_text(kQolErrNotReady));
+        sync_controls(static_cast<uint32_t>(i));
+        return;
+    }
+
+    contracts::FeatureReceipt receipt{};
+    const auto result = g_control->request_set_feature(
+        g_control->context, item.plugin_id, item.feature_id, 1, &receipt);
+    if (!contracts::succeeded(result) ||
+        receipt.admission != contracts::FeatureAdmission::kAdmitted || receipt.request_id == 0) {
+        const int32_t error = !contracts::succeeded(result) ? result.code :
+            (receipt.error_code != 0 ? receipt.error_code : kQolErrBlocked);
+        item_error(static_cast<uint32_t>(i), settings_model::request_error_text(error));
+        sync_controls(static_cast<uint32_t>(i));
+        return;
+    }
+
+    g_entry_continuation.active = true;
+    g_entry_continuation.plugin_id = item.plugin_id;
+    g_entry_continuation.feature_id = item.feature_id;
+    g_entry_continuation.request_id = receipt.request_id;
+    g_entry_continuation.page_generation = g_generation;
+    g_entry_continuation.process_ticks = 0;
+    g_entry_continuation.persisted = false;
+    set_status("");
+    sync_controls(static_cast<uint32_t>(i));
+}
+int entry_continuation_item_index() {
+    if (!g_entry_continuation.active ||
+        g_entry_continuation.page_generation != g_generation || !g_panel_active) return -1;
+    for (uint32_t i = 0; i < g_items.size(); ++i) {
+        if (entry_continuation_matches(g_items[i])) return static_cast<int>(i);
+    }
+    return -1;
+}
+void finish_entry_continuation(uint32_t item_index, const char* error) {
+    clear_entry_continuation();
+    if (item_index >= g_items.size()) return;
+    if (error != nullptr) item_error(item_index, error);
+    sync_controls(item_index);
+}
+void poll_entry_continuation() {
+    if (!g_entry_continuation.active) return;
+    const int item_index = entry_continuation_item_index();
+    if (item_index < 0) {
+        clear_entry_continuation();
+        return;
+    }
+    const auto index = static_cast<uint32_t>(item_index);
+    refresh_owner_availability(index);
+    if (!owner_available(index)) {
+        finish_entry_continuation(index, feature_model::owner_failure_text(
+            owner_availability(g_items[index].plugin_id)));
+        return;
+    }
+    if (g_control == nullptr || g_control->receipt == nullptr ||
+        g_control->read_feature == nullptr || g_control->invoke_entry == nullptr ||
+        !feature_control_has_read_actual()) {
+        finish_entry_continuation(index, settings_model::action_error_text(kQolErrNotReady));
+        return;
+    }
+    if (++g_entry_continuation.process_ticks > kEntryWaitMaxProcessTicks) {
+        finish_entry_continuation(index, settings_model::action_error_text(kQolErrTimeout));
+        return;
+    }
+
+    if (!g_entry_continuation.persisted) {
+        contracts::FeatureReceipt receipt{};
+        const auto result = g_control->receipt(
+            g_control->context, g_entry_continuation.request_id, &receipt);
+        if (!contracts::succeeded(result)) {
+            finish_entry_continuation(index, settings_model::action_error_text(result.code));
+            return;
+        }
+        if (receipt.request_id != g_entry_continuation.request_id ||
+            receipt.admission != contracts::FeatureAdmission::kAdmitted) {
+            finish_entry_continuation(index,
+                settings_model::request_error_text(receipt.error_code != 0 ?
+                    receipt.error_code : kQolErrInternal));
+            return;
+        }
+        if (receipt.persistence == contracts::FeaturePersistence::kPending) {
+            if (g_entry_continuation.process_ticks >= kEntryWaitMaxProcessTicks)
+                finish_entry_continuation(index,
+                    settings_model::action_error_text(kQolErrTimeout));
+            return;
+        }
+        if (receipt.persistence != contracts::FeaturePersistence::kPersisted) {
+            finish_entry_continuation(index,
+                settings_model::request_error_text(receipt.error_code != 0 ?
+                    receipt.error_code : kQolErrInternal));
+            return;
+        }
+        g_entry_continuation.persisted = true;
+    }
+
+    uint8_t feature_enabled = 0;
+    const auto feature_result = g_control->read_feature(g_control->context,
+        g_entry_continuation.plugin_id.c_str(), g_entry_continuation.feature_id.c_str(),
+        &feature_enabled);
+    if (!contracts::succeeded(feature_result)) {
+        finish_entry_continuation(index,
+            settings_model::action_error_text(feature_result.code));
+        return;
+    }
+    if (feature_enabled != 1) {
+        finish_entry_continuation(index,
+            settings_model::action_error_text(kQolErrNotReady));
+        return;
+    }
+    g_states[index].valid = true;
+    g_states[index].confirmed = feature_enabled;
+
+    int32_t ignored_host_state = 0;
+    uint8_t actual_enabled = 0;
+    const auto actual_result = g_control->read_actual(g_control->context,
+        g_entry_continuation.plugin_id.c_str(), &ignored_host_state, &actual_enabled);
+    if (actual_result.code == kQolErrNotReady) {
+        if (g_entry_continuation.process_ticks >= kEntryWaitMaxProcessTicks)
+            finish_entry_continuation(index,
+                settings_model::action_error_text(kQolErrTimeout));
+        return;
+    }
+    if (!contracts::succeeded(actual_result)) {
+        finish_entry_continuation(index,
+            settings_model::action_error_text(actual_result.code));
+        return;
+    }
+    if (actual_enabled != 1) {
+        if (g_entry_continuation.process_ticks >= kEntryWaitMaxProcessTicks)
+            finish_entry_continuation(index,
+                settings_model::action_error_text(kQolErrTimeout));
+        return;
+    }
+
+    if (!g_panel_active || g_entry_continuation.page_generation != g_generation) {
+        clear_entry_continuation();
+        return;
+    }
+    const auto invoke_result = g_control->invoke_entry(g_control->context,
+        g_entry_continuation.plugin_id.c_str(), g_entry_continuation.feature_id.c_str());
+    finish_entry_continuation(index, contracts::succeeded(invoke_result) ? nullptr :
+        settings_model::action_error_text(invoke_result.code));
+    if (contracts::succeeded(invoke_result)) set_status("");
+}
+bool components_complete() {
+    constexpr size_t end = offsetof(contracts::QolUiComponents, capsule_text_button_create) +
+        sizeof(((contracts::QolUiComponents*)nullptr)->capsule_text_button_create);
+    return g_components != nullptr && g_components->major == contracts::kUiContractMajor &&
+        g_components->minor >= 23 &&
+        g_components->size >= end && g_components->size >= kArrowComponentsSize &&
+        g_components->capsule_text_button_create &&
+        g_components->scroll_list_create &&
+        g_components->scroll_list_get_row && g_components->scroll_list_set_selection_enabled &&
+        g_components->scroll_list_process && g_components->scroll_list_draw &&
+        g_components->native_toggle_create && g_components->native_toggle_set_value &&
+        g_components->native_toggle_set_enabled && g_components->native_toggle_draw &&
+        g_components->arrow_button_create && g_components->arrow_button_set_enabled &&
+        g_components->arrow_button_draw &&
+        g_components->text_button_set_enabled &&
+        g_components->text_button_draw && g_components->destroy &&
+        g_components->draw_control_text && g_components->draw_container_styled &&
+        g_components->dispatch_native_event;
+}
+void destroy_page();
+void settings_panel_enter() {
+    if (!main_thread() || !components_complete() || g_control == nullptr) {
+        CORE_UI_LOG_INFO("settings enter blocked preconditions");
+        return;
+    }
+    if (g_root != nullptr) destroy_page();
+    if (!g_ui->create_control || !g_ui->set_rect || !g_ui->delete_control ||
+        !g_ui->control_absolute_origin || !g_ui->fill_rect || !g_ui->begin_frame ||
+        !g_ui->end_frame || !g_ui->hit_test ||
+        g_ui->minor < contracts::kUiAdapterMinor || !g_ui->draw_help_option_row) {
+        CORE_UI_LOG_INFO("settings enter blocked ui api");
+        return;
+    }
+    if (!load_catalog()) {
+        CORE_UI_LOG_INFO("settings enter blocked catalog");
+        set_status("功能目录读取失败");
+        return;
+    }
+    refresh_all_values();
+    int32_t x = 0, y = 0;
+    if (g_ui->screen_inset_width) (void)g_ui->screen_inset_width(&x);
+    if (g_ui->screen_inset_height) (void)g_ui->screen_inset_height(&y);
+    if (!contracts::succeeded(g_ui->create_control(0, nullptr, &g_root)) || g_root == nullptr) {
+        CORE_UI_LOG_INFO("settings enter blocked root create");
+        return;
+    }
+    (void)g_ui->set_rect(g_root, {x, y, kPanelW, kPanelH});
+    if (g_components->nav_button_create) {
+        const contracts::UiNavButtonDesc nav{{kBackAbsX - x, kBackAbsY - y, kBackW, kBackH},
+            contracts::kUiNavButtonAuto, nullptr, nullptr};
+        (void)g_components->nav_button_create(&nav, g_root, &g_back);
+    }
+    if (g_ui->load_image_unit) {
+        (void)g_ui->load_image_unit(0x4f); (void)g_ui->load_image_unit(0x50);
+        (void)g_ui->load_image_unit(0x0f);
+    }
+    const char* version = contracts::host_sdk_module_version(g_sdk);
+    std::snprintf(g_module_version, sizeof(g_module_version), "%s", version == nullptr ? "" : version);
+    if (!g_categories.empty()) {
+        const contracts::UiScrollListDesc list{{kLeftX, kLeftY, kLeftW, kLeftH}, kLeftRowH,
+            static_cast<uint32_t>(g_categories.size()), 0, &draw_left_row, &on_left_select, nullptr};
+        const QolResult left_create = g_components->scroll_list_create(&list, g_root, &g_left);
+        if (!contracts::succeeded(left_create)) {
+            CORE_UI_LOG_INFO("settings enter blocked left list code=%d", left_create.ok);
+            destroy_page();
+            return;
+        }
+        if (!build_right_list(0)) {
+            CORE_UI_LOG_INFO("settings enter blocked right list");
+            destroy_page();
+            return;
+        }
+    }
+    std::lock_guard<std::mutex> lock(g_mtx); g_panel_active = true;
+}
+void settings_panel_process() {
+    if (!main_thread() || !g_panel_active || g_root == nullptr) return;
+    ++g_frame;
+    refresh_owner_availability();
+    if (g_pending_category >= 0) {
+        if (g_pending_category != g_selected_category && build_right_list(g_pending_category))
+            g_selected_category = g_pending_category;
+        g_pending_category = -1;
+    }
+    poll_entry_continuation(); process_pending_action(); process_pending_choice(); poll_requests();
+    if (g_frame % 30 == 0) refresh_all_values();
+    process_pending_toggles();
+    if (g_left) (void)g_components->scroll_list_process(g_left);
+    if (g_right) (void)g_components->scroll_list_process(g_right);
+    if (!contracts::succeeded(g_ui->begin_frame())) return;
+    int64_t x = 0, y = 0;
+    if (contracts::succeeded(g_ui->control_absolute_origin(g_root, &x, &y))) {
+        if (g_ui->draw_image_part) {
+            (void)g_ui->draw_image_part(0x4f, 0, x + kPanelW / 2 - 300, y + kPanelH / 2, 2, 1);
+            (void)g_ui->draw_image_part(0x50, 0, x + kPanelW / 2 + 300, y + kPanelH / 2, 2, 1);
+        }
+        for (const auto& rect : {UiRect{x + kLeftX - 8, y + kLeftY - 8, kLeftW + 32, kLeftH + 16},
+             UiRect{x + kRightX - 8, y + kRightY - 8, kRightW + 32, kRightH + 16}}) {
+            const contracts::UiContainerStyleDesc style{rect, 0x0000, 60, 1};
+            (void)g_components->draw_container_styled(&style);
+        }
+    }
+    if (g_left) (void)g_components->scroll_list_draw(g_left);
+    if (g_selected_is_game_info) {
+        constexpr int64_t center_x = kRightX + kRightW / 2;
+        // Font table: 0=20, 1=24, 2=38, 3=28. The composition uses 38/28/28/24.
+        (void)g_components->draw_control_text(g_root, g_game_info.game.c_str(), center_x, 236,
+            contracts::ui_theme::kTextGold, 2, 2);
+        (void)g_components->draw_control_text(g_root, g_game_info.variant.c_str(), center_x, 294,
+            contracts::ui_theme::kTextNormal, 2, 3);
+        (void)g_components->draw_control_text(g_root, g_game_info.module.c_str(), center_x, 338,
+            contracts::ui_theme::kTextDisabled, 2, 3);
+        (void)g_components->draw_control_text(g_root, g_game_info.platform.c_str(), center_x, 382,
+            contracts::ui_theme::kTextDisabled, 2, 1);
+    } else if (g_right) {
+        (void)g_components->scroll_list_draw(g_right);
+    }
+    const auto status = settings_model::truncate_text(g_status, kPanelW - 48);
+    if (!status.lines.empty()) (void)g_components->draw_control_text(g_root, status.lines[0].c_str(),
+        24, kPanelH - 72, contracts::ui_theme::kError, 0, 1);
+    if (g_back && g_components->nav_button_draw) (void)g_components->nav_button_draw(g_back);
+    (void)g_ui->end_frame();
+}
+void settings_panel_f3() { if (main_thread()) destroy_page(); }
+void settings_panel_f4() {}
+uint32_t settings_panel_event(uint64_t event, uint64_t param, uint64_t param2) {
+    if (!main_thread() || !g_panel_active || g_root == nullptr) return 1;
+    if (event != 0x17 && event != 0x18 && event != 0x19) return 1;
+    if (event == 0x19) {
+        uint32_t consumed = 0;
+        (void)g_components->dispatch_native_event(g_pressed_list ? g_pressed_list : g_root,
+            event, param, param2, &consumed);
+        return consumed;
+    }
+    int64_t x = 0, y = 0;
+    if (!param || !g_ui->touch_coordinates || !contracts::succeeded(
+        g_ui->touch_coordinates(param, &x, &y))) return 1;
+    if (g_back) {
+        const bool inside = g_ui->hit_test(g_back, x, y, {0, 0, kBackW, kBackH}) > 0;
+        if ((event == 0x17 && inside) || (event == 0x18 && g_back_pressed)) {
+            g_back_pressed = event == 0x17;
+            uint32_t consumed = 0;
+            (void)g_components->dispatch_native_event(g_root, event, param, param2, &consumed);
+            return consumed;
+        }
+    }
+    if (event == 0x17) g_pressed_list = g_right &&
+        g_ui->hit_test(g_right, x, y, {0, 0, kRightW, kRightH}) > 0 ? g_right :
+        g_left && g_ui->hit_test(g_left, x, y, {0, 0, kLeftW, kLeftH}) > 0 ? g_left : nullptr;
+    if (!g_pressed_list) return 1;
+    uint32_t consumed = 0;
+    (void)g_components->dispatch_native_event(g_pressed_list, event, param, param2, &consumed);
+    if (event == 0x18) g_pressed_list = nullptr;
+    return 1;
+}
+std::string result_ok() { return "{\"ok\":true}"; }
+std::string result_error(const char* message) {
+    char buffer[256]{}; uint32_t size = 0;
+    if (g_sdk && g_sdk->result.write_error && contracts::succeeded(
+        g_sdk->result.write_error(message, buffer, sizeof(buffer), &size))) return std::string(buffer, size);
+    return "{\"ok\":false,\"error\":\"settings unavailable\"}";
+}
+const char* ui_screen_name() {
+    const char* name = nullptr;
+    if (g_ui && g_ui->screen_name && contracts::succeeded(g_ui->screen_name(&name)) && name) return name;
+    return "";
+}
+void more_games_clicked(void*) {
+    if (plugin_enabled()) (void)settings_panels_open("settings");
+}
+// 主菜单入口齿轮：与原版「更多游戏」按钮同父，放在其右侧 10px；尺寸为自动出售
+// 入口（68）的 2 倍。原版按钮照常显示，不做替换/隐藏。
+contracts::QolUiAnchoredButton g_main_menu_gear{};
+
+QolResult main_menu_gear_layout(void* parent, UiRect* out_rect, void* user) {
+    (void)user;
+    if (parent == nullptr || out_rect == nullptr || g_ui == nullptr ||
+        g_ui->main_menu_more_games_snapshot == nullptr) {
+        return contracts::error(kQolErrNotReady, "menu snapshot unavailable", 25);
+    }
+    QolUiHandle original = nullptr;
+    QolUiHandle snapshot_parent = nullptr;
+    UiRect rect{};
+    const QolResult snapshot =
+        g_ui->main_menu_more_games_snapshot(&original, &snapshot_parent, &rect);
+    if (!contracts::succeeded(snapshot) || original == nullptr || snapshot_parent != parent ||
+        rect.w <= 0 || rect.h <= 0) {
+        // 主菜单树未就位/已切换：锚定层保留状态，下一帧重试。
+        return contracts::error(kQolErrNotReady, "more games not ready", 20);
+    }
+    constexpr int64_t kGearSize = 68;
+    constexpr int64_t kGap = 10;
+    *out_rect = {rect.x + rect.w + kGap, rect.y + (rect.h - kGearSize) / 2, kGearSize, kGearSize};
+    static UiRect last_menu_rect{};
+    if (last_menu_rect.x != rect.x || last_menu_rect.y != rect.y ||
+        last_menu_rect.w != rect.w || last_menu_rect.h != rect.h) {
+        last_menu_rect = rect;
+        CORE_UI_LOG_INFO("main-menu more-games rect=(%lld,%lld,%lld,%lld) gear=(%lld,%lld,%lld,%lld)",
+                         static_cast<long long>(rect.x), static_cast<long long>(rect.y),
+                         static_cast<long long>(rect.w), static_cast<long long>(rect.h),
+                         static_cast<long long>(out_rect->x), static_cast<long long>(out_rect->y),
+                         static_cast<long long>(out_rect->w), static_cast<long long>(out_rect->h));
+    }
+    return contracts::ok();
+}
+
+}  // namespace
+
+void settings_bind_sdk(const contracts::QolHostSdk* sdk, contracts::QolOwnerToken) {
+    // Teardown uses the previous adapter before installing a new lifecycle context.
+    if (g_root != nullptr) destroy_page();
+    else clear_entry_continuation();
+    g_sdk = sdk; g_ui = sdk ? sdk->ui : nullptr;
+    g_control = contracts::feature_control_if_available(sdk); g_components = nullptr;
+    if (sdk && sdk->capabilities.require) {
+        const void* iface = nullptr;
+        if (contracts::succeeded(sdk->capabilities.require(contracts::kUiComponentsCapabilityId,
+            {contracts::kUiContractMajor, contracts::kUiContractMinor}, &iface)))
+            g_components = static_cast<const contracts::QolUiComponents*>(iface);
+    }
+    g_module_version[0] = '\0';
+}
+void settings_bind_game(const contracts::QolGameHost* game) { g_game = game; }
+bool settings_provider_open() { return plugin_enabled() && g_control != nullptr && components_complete(); }
+bool settings_provider_active() { std::lock_guard<std::mutex> lock(g_mtx); return g_panel_active; }
+void settings_provider_close() { settings_ui_close_panel(); }
+const char* settings_provider_block_reason() { return settings_provider_active() ? "ui occupied: settings panel" : nullptr; }
+const contracts::PanelCallbacks* settings_panel_callbacks() {
+    static const contracts::PanelCallbacks callbacks{&settings_panel_enter, &settings_panel_process,
+        &settings_panel_f3, &settings_panel_f4, &settings_panel_event};
+    return &callbacks;
+}
+void settings_ui_close_panel() { settings_panel_f3(); }
+std::string data_settings_ui_inject() {
+    if (!g_sdk) return result_error("settings unavailable");
+    settings_more_games_tick();
+    return result_ok();
+}
+std::string data_settings_ui_status_json() {
+    std::lock_guard<std::mutex> lock(g_mtx); char buffer[256]{};
+    std::snprintf(buffer, sizeof(buffer),
+        "{\"panel_active\":%s,\"categories\":%d,\"items\":%d,\"more_games_bind\":\"%s\"}",
+        g_panel_active ? "true" : "false", g_summary_categories, g_summary_items,
+        settings_more_games_bind_state());
+    return buffer;
+}
+std::string data_settings_ui_restore() {
+    if (settings_provider_active()) settings_panels_close("settings");
+    settings_release_more_games(); return result_ok();
+}
+std::string data_settings_ui_open_panel() {
+    return settings_provider_open() && settings_panels_open("settings") ? result_ok() : result_error("settings unavailable");
+}
+std::string data_settings_ui_open_option() {
+    contracts::QolPopupStateEntry entry{};
+    if (!g_sdk || !g_sdk->hooks.popup_resolve || !g_ui || !g_ui->set_popup_process_info ||
+        !contracts::succeeded(g_sdk->hooks.popup_resolve("F_PANEL_OPTIONS_ENTER", &entry)) ||
+        !contracts::succeeded(g_ui->set_popup_process_info(1, entry.state_id))) return result_error("option state unavailable");
+    return result_ok();
+}
+void settings_release_more_games() {
+    if (g_components != nullptr && g_components->anchored_button_release != nullptr) {
+        (void)g_components->anchored_button_release(&g_main_menu_gear);
+    } else {
+        g_main_menu_gear = {};
+    }
+}
+const char* settings_more_games_bind_state() {
+    return g_main_menu_gear.mounted != 0 ? "live" : "waiting";
+}
+void settings_more_games_tick() {
+    // 入口由主菜单绘制钩子每帧 ensure/draw；这里只处理关闭与离开主菜单。
+    const bool on_main_menu = std::strcmp(ui_screen_name(), "main_menu") == 0;
+    if (plugin_enabled() && on_main_menu) return;
+    if (g_components != nullptr && g_components->anchored_button_set_visible != nullptr) {
+        (void)g_components->anchored_button_set_visible(&g_main_menu_gear, 0);
+    }
+}
+
+void settings_main_menu_more_games_draw(void* group, int32_t x, int32_t y, void* loc,
+                                        int32_t type, int32_t flip, int32_t unknown) {
+    (void)unknown;
+    // 原版「更多游戏」按钮照常绘制：本模块不再替换它，只在其右侧叠加齿轮入口。
+    if (g_ui != nullptr && g_ui->draw_part != nullptr) {
+        (void)g_ui->draw_part(group, x, y, loc, type, flip);
+    }
+    if (!plugin_enabled() || g_components == nullptr ||
+        g_components->anchored_button_ensure == nullptr ||
+        g_components->anchored_button_draw == nullptr) {
+        return;
+    }
+    const contracts::UiIconButtonDesc icon_desc{{0, 0, 68, 68}, 0x16, 0x00, 1, 1, "设置",
+        &more_games_clicked, nullptr, 0};
+    const contracts::UiAnchoredButtonDesc desc{
+        static_cast<uint32_t>(contracts::QolUiRootKind::kMainMenuParent), icon_desc};
+    uint8_t created = 0;
+    if (!contracts::succeeded(g_components->anchored_button_ensure(
+            &g_main_menu_gear, &desc, &main_menu_gear_layout, nullptr, &created))) {
+        return;
+    }
+    (void)g_components->anchored_button_draw(&g_main_menu_gear);
+}
+}  // namespace qol::features::core_ui

@@ -1,0 +1,22 @@
+{
+  "guards": {
+    "cases": 28,
+    "all_http_400_and_no_ticket": true
+  },
+  "no_side_effects_before_writes": {
+    "money_same": true,
+    "bag0_same": true,
+    "party_same": true
+  },
+  "after_backup_restore": {
+    "money_same_as_write_before": true,
+    "bag0_same_as_write_before": true,
+    "party_same_as_write_before": true,
+    "bag6_slot11": "not captured before writes; extensionBagEnabled=false; final raw query returned item not found"
+  },
+  "backup": {
+    "file": "protected-slot0.qol_save",
+    "sha256": "e266acc521f2a47429404d7412671620aeb06e4f326e0c6d514fdbbd1e5e1dd5",
+    "import_ok": true
+  }
+}
