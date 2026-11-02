@@ -29,8 +29,13 @@ constexpr int64_t kPanelW = 960, kPanelH = 640;
 constexpr int64_t kLeftX = 24, kLeftY = 100, kLeftW = 300, kLeftH = 444;
 constexpr int64_t kRightX = 364, kRightY = 100, kRightW = 572, kRightH = 444;
 constexpr int32_t kLeftRowH = 73;
-constexpr int32_t kLeftOptionInsetX = 5;
-constexpr int32_t kLeftOptionInsetY = 1;
+constexpr int32_t kLeftOptionHeight = 50;
+constexpr int32_t kLeftOptionWidth = 284;
+// 左面板框相对列表视口左右各外扩 8/24。284 宽让选项右边缘对齐视口右边缘，
+// 避免按下贴片被滚动列表裁切；同时两侧相对面板框各留 24，滚动条落在右侧留白内。
+constexpr int32_t kLeftOptionX =
+    (static_cast<int32_t>(kLeftW) + 8 + 24 - kLeftOptionWidth) / 2 - 8;
+constexpr int32_t kLeftOptionY = (kLeftRowH - kLeftOptionHeight) / 2;
 constexpr int32_t kLeftOptionTextHeight = 24;
 constexpr int32_t kRightRowH = settings_model::kMinimumRightRowHeight;
 constexpr int64_t kBackAbsX = contracts::ui_theme::kNavBoxAbsX;
@@ -316,13 +321,13 @@ void draw_left_row(void*, uint32_t index, QolUiHandle row, uint8_t selected) {
     if (!contracts::succeeded(g_ui->control_absolute_origin(row, &x, &y))) return;
     int32_t pressed = 0;
     if (g_ui->control_pressed != nullptr) (void)g_ui->control_pressed(row, &pressed);
-    const UiRect option_rect{x + kLeftOptionInsetX, y + kLeftOptionInsetY,
-        kLeftW - 2 * kLeftOptionInsetX, kLeftRowH - 2 * kLeftOptionInsetY};
+    const UiRect option_rect{x + kLeftOptionX, y + kLeftOptionY,
+        kLeftOptionWidth, kLeftOptionHeight};
     (void)g_ui->draw_help_option_row(option_rect, selected, static_cast<uint8_t>(pressed != 0));
-    const int32_t text_y = kLeftOptionInsetY +
-        (kLeftRowH - 2 * kLeftOptionInsetY - kLeftOptionTextHeight) / 2;
+    const int32_t text_y = kLeftOptionY +
+        (kLeftOptionHeight - kLeftOptionTextHeight) / 2;
     (void)g_components->draw_control_text(row, g_categories[index].name,
-        kLeftW / 2, text_y, contracts::ui_theme::kTextGold, 2, 1);
+        kLeftOptionX + kLeftOptionWidth / 2, text_y, contracts::ui_theme::kTextGold, 2, 1);
 }
 void draw_right_row(void*, uint32_t row_index, QolUiHandle row, uint8_t selected) {
     if (row_index >= g_right_indices.size()) return;

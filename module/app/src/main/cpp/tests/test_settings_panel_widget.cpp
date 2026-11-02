@@ -593,13 +593,13 @@ void test_left_rows_use_inset_help_option_component() {
     assert(g_fill_rect_calls == 0);  // 选项组件自带底色，行内不再画满行底色或分割线。
     assert(g_help_option_calls.size() == 1);
     const auto& call = g_help_option_calls[0];
-    assert(call.rect.x == 5 && call.rect.y == 1 && call.rect.w == 290 && call.rect.h == 71);
+    assert(call.rect.x == 16 && call.rect.y == 11 && call.rect.w == 284 && call.rect.h == 50);
     assert(call.selected == 1 && call.pressed == 0);
     assert(g_drawn_text.size() == 1);
     const auto& text = g_drawn_text[0];
     assert(text.text == g_categories[0].name);
     assert(text.color == contracts::ui_theme::kTextGold);
-    assert(text.x == 150 && text.y == 24 && text.align == 2 && text.font == 1);
+    assert(text.x == 158 && text.y == 24 && text.align == 2 && text.font == 1);
 }
 
 void test_game_info_category_builds_read_only_composition() {
