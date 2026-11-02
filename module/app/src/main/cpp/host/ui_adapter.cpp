@@ -942,14 +942,20 @@ bool draw_option_side_cap(void* group, void* loc, int32_t x, int32_t y, int32_t 
     std::memcpy(&cap_height, bytes + IMAGE_LOC_SOURCE_HEIGHT, sizeof(cap_height));
     const int32_t middle_dst = height - 2 * kCorner;
     const int32_t middle_src = cap_height - 2 * kCorner;
-    if (width <= 0 || middle_src < middle_dst || middle_src <= 0) return false;
-    // 原版贴片固定 20x56（含上下圆角）；按当前高度取上下各 9px 圆角，中段从原贴片
-    // 中部裁取，避免缩放贴图或自绘竖边。
-    const int32_t middle_y = source_y + kCorner + (middle_src - middle_dst) / 2;
+    if (width <= 0 || middle_src <= 0) return false;
+    // 原版贴片固定 20x56（含上下圆角）；上下各取 9px 圆角，中段按可用高度裁取。
+    // 超过原贴片中段高度时重复同一段原生竖边，不缩放、不自绘。
     fn_grpx_draw_part_ex(group, x, y, source_x, source_y, width, kCorner, 0, 0, 0, 2, 0);
-    if (middle_dst > 0) {
-        fn_grpx_draw_part_ex(group, x, y + kCorner, source_x, middle_y, width, middle_dst,
+    int32_t remaining = middle_dst;
+    int32_t dst_y = y + kCorner;
+    while (remaining > 0) {
+        const int32_t chunk = remaining < middle_src ? remaining : middle_src;
+        const int32_t src_offset = (middle_src - chunk) / 2;
+        fn_grpx_draw_part_ex(group, x, dst_y, source_x,
+                             source_y + kCorner + src_offset, width, chunk,
                              0, 0, 0, 2, 0);
+        dst_y += chunk;
+        remaining -= chunk;
     }
     fn_grpx_draw_part_ex(group, x, y + height - kCorner, source_x,
                          source_y + cap_height - kCorner, width, kCorner, 0, 0, 0, 2, 0);

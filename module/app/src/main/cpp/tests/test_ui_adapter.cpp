@@ -872,6 +872,24 @@ int main() {
         CHECK(bottom.x == 120 && bottom.y == 241 && bottom.source_x == 2 &&
               bottom.source_y == 200 && bottom.width == 244 && bottom.height == 9 &&
               bottom.draw_mode == 2 && bottom.alpha == 0);
+
+        // 高于原贴片 56 时重复中段，竖边仍覆盖整个组件高度。
+        g_draw_part_ex_calls.clear();
+        g_round_rect_calls.clear();
+        CHECK(adapter->draw_help_option_row({100, 200, 284, 100}, 0, 1).ok == kQolOk);
+        CHECK(g_round_rect_calls.size() == 1 && g_round_rect_calls[0].h == 92);
+        CHECK(g_draw_part_calls == 0);
+        CHECK(g_draw_part_ex_calls.size() == 12);
+        const auto& tall_mid1 = g_draw_part_ex_calls[1];
+        const auto& tall_mid2 = g_draw_part_ex_calls[2];
+        const auto& tall_mid3 = g_draw_part_ex_calls[3];
+        const auto& tall_left_bottom = g_draw_part_ex_calls[4];
+        CHECK(tall_mid1.y == 209 && tall_mid1.height == 38 && tall_mid1.source_y == 455);
+        CHECK(tall_mid2.y == 247 && tall_mid2.height == 38 && tall_mid2.source_y == 455);
+        CHECK(tall_mid3.y == 285 && tall_mid3.height == 6 && tall_mid3.source_y == 471);
+        CHECK(tall_left_bottom.y == 291 && tall_left_bottom.height == 9 &&
+              tall_left_bottom.source_y == 493);
+        CHECK(g_draw_part_ex_calls[11].y == 291);
         fn_ui_fill_round_rect = nullptr;
         fn_ui_fill_round_rect2 = nullptr;
         fn_imgsys_get_group = nullptr;
