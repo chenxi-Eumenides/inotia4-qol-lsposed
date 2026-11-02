@@ -1,5 +1,6 @@
 #include "host/assembly.h"
 
+#include <atomic>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -8,6 +9,7 @@
 #include "patch/call_patch.h"
 #include "patch/native_hook.h"
 #include "patch/save_enter.h"
+#include "patch/save_exit.h"
 #include "infra/log/qol_log.h"
 #include "infra/capabilities.h"
 #include "contracts/character_state.h"
@@ -76,6 +78,7 @@
 #endif
 #include "game/access/patches.h"
 #include "game/access/qol_log_seam.h"
+#include "game/access/game_access.h"
 #include "game/state/game_state.h"
 #include "game/access/ptr_slots.h"
 #include "game/access/symbols.h"
@@ -90,10 +93,14 @@
 #include "host/plugin_registry.h"
 #include "host/ui_adapter.h"
 #include "infra/commands.h"
+#include "infra/events.h"
+#include "infra/frame/transition_dispatch.h"
 #include "infra/request_policy.h"
 #include "infra/config.h"
 #include "infra/runtime.h"
 #include "infra/scheduler.h"
+#include "contracts/events.h"
+#include "hooks/registry.h"
 #include "patch/instr_patch.h"
 #include "patch/ptr_slot.h"
 #include "host/adapters.h"
@@ -312,6 +319,67 @@ MechanismOutcome dispatch_release(const contracts::ResourceClaim& claim, uintptr
     return MechanismOutcome{outcome.ok, outcome.error};
 }
 
+// save 发起点安装就绪门禁：bridge 解析与全部原函数入口可用才改写字节；未就绪保持原版
+// 代码不动（与迁移前 save_*_host_install_if_ready 的门禁逐字同源）。
+bool save_sites_ready() {
+    return bridge_ready() && g_base != 0 && fn_game_start_resume_game != nullptr &&
+           fn_select_character_start_game != nullptr && fn_game_exit != nullptr;
+}
+
+// save 发起点（owner="core"，patch 层声明：save_enter_claims/save_exit_claims）的宿主
+// 声明式安装：登记 → dispatch_install（kCallPatch：patch_site 站点解析 + patch 原语）→
+// live + 运行期地址登记。任一条失败逆序回滚已装条目（fail-closed，禁止半装），返回
+// false（整组可重试）。
+bool install_save_patch_claims() {
+    const contracts::ResourceClaim* const groups[] = {save_enter_claims(), save_exit_claims()};
+    const uint32_t counts[] = {save_enter_claim_count(), save_exit_claim_count()};
+    constexpr uint32_t kMaxInstalled = 4;  // 现有声明共 3 条
+    const contracts::ResourceClaim* installed[kMaxInstalled];
+    uint32_t installed_count = 0;
+    const auto rollback = [&installed, &installed_count]() {
+        for (uint32_t i = installed_count; i > 0; --i) {
+            const contracts::ResourceClaim& claim = *installed[i - 1];
+            qol::game::PatchSite site{};
+            if (qol::game::patch_site(claim.symbol, &site)) {
+                (void)dispatch_release(claim, 0);
+            }
+            hooks::set_state(claim.id, contracts::ResourceState::kFree);
+            hooks::runtime_clear(claim.id);
+        }
+        installed_count = 0;
+    };
+    for (uint32_t g = 0; g < 2; ++g) {
+        for (uint32_t i = 0; i < counts[g]; ++i) {
+            const contracts::ResourceClaim& claim = groups[g][i];
+            if (!hooks::register_claim(claim)) {
+                rollback();
+                return false;
+            }
+            qol::game::PatchSite site{};
+            if (!qol::game::patch_site(claim.symbol, &site)) {
+                rollback();
+                return false;
+            }
+            const MechanismOutcome outcome = dispatch_install(claim, 0);
+            if (outcome.ok != 0) {
+                rollback();
+                return false;
+            }
+            hooks::set_state(claim.id, contracts::ResourceState::kLive);
+            hooks::runtime_set(claim.id, site.addr, nullptr);
+            installed[installed_count++] = &claim;
+        }
+    }
+    return true;
+}
+
+// save 迁移装配（tick 注册 + 发起点安装）完成标记：装配末段首装或逻辑帧补装成功即置位。
+std::atomic<bool> g_save_patches_ready{false};
+// 补装尝试上限：覆盖装配期短暂未就绪；持续失败（如版本漂移导致原字不匹配）到限即停，
+// 避免 call_patch 逐帧 ERROR 刷屏。装配期已 WARN 一次，到限不再补记。
+constexpr uint32_t kSavePatchRetryLimit = 300;
+uint32_t g_save_patch_retry_count = 0;
+
 #if QOL_ENABLE_DEVICE_PROBE
 void probe_entry_export_resolution() {
     bool found_followed = false;
@@ -339,9 +407,7 @@ void probe_entry_export_resolution() {
 #endif
 
 // 逻辑帧任务：命令排空 → 生命周期推进 → 门禁对齐（主线程）。
-// 经 infra::scheduler 逻辑帧点派发；帧源 wrapper 同时派发 legacy frame_task，
-// 未迁移消费者（autosell/quest/save_enter/transition_dispatch/char_next_exp_cache 等）
-// 在各自迁移前继续由 legacy 管理器工作。
+// 经 infra::scheduler 逻辑帧点派发，drain 是注册序最早的任务。
 // 顺序原因：先执行命令（可能触发 lifecycle_apply 启动事务），再推进生命周期事务，
 // 最后门禁对齐；sync_gates 处理门禁落态与 kBlocked 重评估，不会与事务中间态冲突。
 // 返回 true = 保留期任务，不自动注销。
@@ -354,13 +420,27 @@ bool drain_commands_task(int64_t frame, void* ctx) {
     // 启动期 ownership 恢复：SaveEnter 信号驱动的单次定向重试（非逐帧/非定时）。
     // 位置固定在 reconciler 之后：desired 关闭、依赖撤销与 stop 已先经 reconciler 处理。
     feature_registry_retry_pending_ownership();
+    // save enter/exit 迁移装配补装（resumable 语义，替代旧「启动失败即永不重试」）：
+    // 装配末段首装失败时逐帧重试至成功（幂等，成功后为原子快路径并停止）；到限即停，
+    // 避免版本漂移等永久失败场景下 call_patch 逐帧 ERROR 刷屏。
+    if (!g_save_patches_ready.load(std::memory_order_acquire) &&
+        g_save_patch_retry_count < kSavePatchRetryLimit) {
+        ++g_save_patch_retry_count;
+        if (save_sites_ready() && install_save_patch_claims() && save_enter_init()) {
+            g_save_patches_ready.store(true, std::memory_order_release);
+            QOL_LOG_INFO(QolDomain::kCore, "assembly: save patches installed on frame retry");
+        }
+    }
     // save_route unbind 的 drain 在帧点完成，不自旋。
     save_route::step();
     return true;
 }
 
-// SaveEnter 锁存回调：只记录当前有效 activation token，不做资源安装/插件调用/游戏访问。
-void on_save_enter_ready(void* /*ctx*/) { feature_registry_notify_save_ready(); }
+// SaveEnter 锁存订阅回调（infra 事件签名）：只记录当前有效 activation token，
+// 不做资源安装/插件调用/游戏访问。
+void on_save_enter_ready(void* /*ctx*/, const void* /*payload*/) {
+    feature_registry_notify_save_ready();
+}
 
 // save_transaction 的 gate 准入缝：gate 与 store 共用一把锁，取锁后按凭据校验，
 // 消除 query→write TOCTOU。
@@ -391,8 +471,14 @@ bool assembly_init() {
     // extending the Game Host ABI or making the plugin depend on Game Adapter internals.
     extension_bag_bind_player_update_shortcut(fn_player_update_shortcut);
 #endif
-    // 启动期 ownership 恢复信号源：一次注册（幂等），回调只锁存 owner token。
-    (void)save_enter_register(&on_save_enter_ready, nullptr);
+    // 启动期 ownership 恢复信号源：装配期经 infra 事件订阅一次（幂等：以已存订阅 id
+    // 判定，assembly_init 重入不产生重复订阅；订阅不随插件启停变化），回调只锁存 owner
+    // token。装配期/主线程串行执行，无需额外同步。
+    static uint64_t g_save_enter_subscription = 0;
+    if (g_save_enter_subscription == 0) {
+        g_save_enter_subscription = qol::infra::subscribe(qol::contracts::kEventSaveEnter,
+                                                          &on_save_enter_ready, nullptr);
+    }
     // item_count facade 是宿主装配的常驻实现，始终可查；扩展模式由生命周期策略驱动。
     const_cast<contracts::QolGameHost&>(g_game_host).item_count = host_item_count_api();
     qol::game::lifecycle_participant_bind_host(host_lifecycle_dispatch());
@@ -403,6 +489,9 @@ bool assembly_init() {
 
     // 帧时钟注入：infra 不依赖 game，游戏事实由 host 装配时提供（见 infra/runtime.h）。
     infra::runtime_init(infra::Clock{&qol::game::frame_count});
+    // 逻辑锚点安装判定注入：transition_run/run_inline 的 fail-fast 依据。gate 动态读取
+    // frame_source_installed()，锚点随后安装成功即生效；infra 不依赖 host（§2.2）。
+    infra::set_logic_anchor_gate(&frame_source_installed);
     infra::set_request_op_authorizer(&security_op_enabled);
 
     // 保存事务 Adapter 装配期解析：SAVE_LoadCharacterAll→SAVE_Save 唯一 BL 扫描与
@@ -564,6 +653,32 @@ bool assembly_init() {
     // bridge_init attaches the ELF resolver before nativeInit enters assembly_init.
     probe_entry_export_resolution();
 #endif
+    // Save enter 迁移装配（装配末段，顺序关键）：core.save 插件的 RenderPre 确认任务在
+    // 插件装配期注册，scheduler 注册序即派发序；save_enter_tick 置于其后保证每帧
+    // 「先 core.save 确认、后 save_enter 消费」。发起点站点解析依赖 bridge/fn_resolve，
+    // boot 期安装曾因 bridge_ready() 恒 false 失败，故置本段。失败只降级不 fail 装配
+    // （迁移前 bridge 调用点亦不检查返回值）；未装成功由逻辑帧补装任务按 resumable
+    // 语义逐帧重试。
+    if (!save_enter_init()) {
+        QOL_LOG_WARN(QolDomain::kCore, "assembly: save enter tick registration failed");
+        module_engine_failure = true;
+    }
+    if (save_sites_ready() && install_save_patch_claims()) {
+        g_save_patches_ready.store(true, std::memory_order_release);
+    } else {
+        QOL_LOG_WARN(QolDomain::kCore,
+                     "assembly: save patch claims install failed or site not ready");
+        module_engine_failure = true;
+    }
+    // 迁移消费者帧任务注册（char_next_exp 缓存 / transition 逻辑相位消费者）。
+    // 注册点必须在装配末段：注册顺序即派发顺序，置于 drain 与插件装配之后
+    // 消除对 bridge 调用次序的依赖。
+    // 失败只降级不 fail 装配：迁移前 bridge 调用点亦不检查返回值。
+    char_next_exp_cache_start();  // void：内部以任务 id 幂等，失败保持 0（不派发）
+    if (!transition_dispatch_init()) {
+        QOL_LOG_WARN(QolDomain::kCore, "assembly: transition dispatch registration failed");
+        module_engine_failure = true;
+    }
     g_assembly_done = true;
     module_health_set_fact(contracts::QolModuleHealthBit::kModuleInitialization, true,
                            module_engine_failure);

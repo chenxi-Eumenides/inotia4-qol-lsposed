@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 
+#include "contracts/events.h"
 #include "contracts/game_ports/quest_port.h"
 #include "contracts/http.h"
 #include "contracts/world_facts.h"
@@ -65,6 +66,7 @@ const contracts::QolGameHost* g_game = nullptr;
 const contracts::WorldFactsApi* g_world_facts = nullptr;
 const contracts::QolQuestPort* g_quest_port = nullptr;
 uint64_t g_snapshot_task = 0;
+uint64_t g_save_enter_subscription = 0;
 Snapshot<QuestSnapshot> g_snapshot;
 
 const contracts::CapabilityRequirement kRequires[] = {
@@ -499,6 +501,31 @@ void start_snapshot_task() {
     }
 }
 
+// QolEventHandler 签名适配：转调 on_save_enter（复位 world 边沿 + 启动 resync tick），
+// 复用其内部逻辑，不复制状态机。
+void on_save_enter_event(void* /*ctx*/, const void* /*payload*/) {
+    on_save_enter(nullptr);
+}
+
+// 订阅 kEventSaveEnter（core.save 确认后 publish，patch/save_enter）。同一 fn+ctx
+// 幂等：已订阅（id 非 0）时直接返回，避免 install 重入产生重复 resync。
+void register_save_enter_subscription() {
+    if (g_save_enter_subscription != 0 || g_sdk == nullptr ||
+        g_sdk->events.subscribe == nullptr) {
+        return;
+    }
+    (void)g_sdk->events.subscribe(contracts::kEventSaveEnter, &on_save_enter_event, nullptr,
+                                  &g_save_enter_subscription);
+}
+
+void unregister_save_enter_subscription() {
+    if (g_save_enter_subscription != 0 && g_sdk != nullptr &&
+        g_sdk->events.unsubscribe != nullptr) {
+        (void)g_sdk->events.unsubscribe(g_save_enter_subscription);
+    }
+    g_save_enter_subscription = 0;
+}
+
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_game = ctx.game;
@@ -565,6 +592,8 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_game = nullptr;
         return 1;
     }
+    // 订阅注册放在全部失败分支之后；失败路径无需清理。
+    register_save_enter_subscription();
     set_gate(true);
     start_resync_task();
     start_snapshot_task();
@@ -574,6 +603,7 @@ int plugin_install(contracts::PluginContext& ctx) {
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
+    unregister_save_enter_subscription();
     if (g_sdk != nullptr && g_sdk->commands.unregister_typed_handler != nullptr) {
         (void)g_sdk->commands.unregister_typed_handler(kSetStateHandlerId);
     }

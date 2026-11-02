@@ -442,6 +442,7 @@ target_include_directories(infra_data_tests PRIVATE
     ${CPP_DIR}
 )
 target_compile_features(infra_data_tests PRIVATE cxx_std_17)
+set_target_properties(infra_data_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME infra_data_tests COMMAND infra_data_tests)
 
 # 自动出售 sidecar 配置纯序列化 host 测试（末尾追加）
@@ -2315,7 +2316,6 @@ add_test(NAME ui_state_port_tests COMMAND ui_state_port_tests)
 add_executable(game_cache_tests
     test_game_cache.cpp
     ${CPP_DIR}/core/native/game_cache.cpp
-    ${CPP_DIR}/infra/frame/frame_task.cpp
     ${CPP_DIR}/infra/runtime.cpp
 )
 target_include_directories(game_cache_tests PRIVATE ${CPP_DIR})

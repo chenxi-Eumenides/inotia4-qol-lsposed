@@ -1,9 +1,6 @@
 #include "gamebridge_internal.h"
 #include "game/clock.h"
 #include "infra/log/qol_log.h"
-#include "patch/save_enter.h"
-#include "patch/save_exit.h"
-#include "infra/frame/transition_dispatch.h"
 #if !QOL_KERNEL_ONLY
 #include "plugins/autosell/config.h"
 #endif
@@ -275,17 +272,14 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
             autosell_set_host_installed(true);
 #endif
         }
-        // 角色升级所需经验游戏线程缓存：注册常驻逻辑帧任务（CHAR_GetNextExperience 非纯读，
-        // 不能在预取/HTTP 线程调用）。帧宿主未安装时任务注册成功但不派发（惰性无效）。
-        char_next_exp_cache_start();
-        transition_dispatch_init();           // 状态转换：逻辑帧点消费（go_main_menu/enter_slot/create_slot）
-        save_enter_init();                    // 进入存档回调：帧检测任务（world 就绪触发一次）
-        save_enter_host_install_if_ready();   // 进入存档回调：读档/新档发起点（指令改写）
-        save_exit_host_install_if_ready();    // 退出存档回调：world->主菜单发起点（指令改写）
+        // char_next_exp 缓存与 transition 消费者的帧任务注册已迁至 assembly_init 末段
+        // （统一帧调度器注册序，bridge 侧不再注册）。save enter/exit 的 tick 注册与
+        // 发起点 claim 安装同段迁移：装配期声明式安装 + 逻辑帧补装（resumable 重试），
+        // bridge 侧不再直调 save_enter_init / save_*_host_install_if_ready。
         // 自动出售已迁移为 autosell 插件（assembly 注册）：save_enter/save_exit 回调与
         // 扫描任务生命周期由插件 install/on_enabled 管理。
-        // 任务完成度进档重算已迁移为 quest 插件（plugin.cpp install 注册 save_enter 回调），
-        // 由 assembly_init 统一装配。
+        // 任务完成度进档重算已迁移为 quest 插件（assembly_init 统一装配）：插件 install
+        // 订阅 kEventSaveEnter（core.save 确认后 publish），不复用旧 save_enter 回调设施。
         // 帧缓存预取按 Store 的 apiEnabled 在 assembly/install 完成后启停，避免早于 builder 与 frame source。
         // 设置页/备份面板/自动出售面板由插件提供 panel provider（含回调）；PopupState 由
         // core.custom_ui 的 PopupHost 在面板打开期间统一托管、空闲还原。autosell 另声明

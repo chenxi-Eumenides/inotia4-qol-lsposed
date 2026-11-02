@@ -14,8 +14,10 @@
 // 对 state==1 的任务调用 QUESTSYSTEM_IsComplete；游戏自判达成时走 QUESTSYSTEM_ChangeQuestState
 // (qid, 2) 补齐状态。只做 1→2 补升，不做降级。
 //
-// 帧节拍经 Host SDK scheduler 逻辑帧点（帧源 wrapper 派发）；通过 Game Host world 状态边沿
-// 识别进档完成，避免依赖宿主私有 save_enter 设施。
+// 帧节拍经 Host SDK scheduler 逻辑帧点（帧源 wrapper 派发）。进档重算有两个同步点：
+// Game Host world 状态边沿（LogicPre 常驻检测）与 kEventSaveEnter 事件（core.save
+// 确认后 publish，插件 install 订阅）；两者均复用同一条 resync 路径，不依赖宿主私有
+// save_enter 设施。
 
 namespace qol::features::core_quest {
 

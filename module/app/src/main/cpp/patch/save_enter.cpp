@@ -1,18 +1,19 @@
-// save_enter.cpp —— 进入存档（读档/新档）加载完成回调。
+// save_enter.cpp —— 进入存档（读档/新档）加载完成事件发源地。
 //
 // 发起点：SaveSlot_SlotButtonExe+0x88（读档）与 SelectCharacter_ButtonStartExe+0x10（新档）
-// 的 BL 经 call_patch 改指 wrapper；wrapper 先标记 pending 再复刻原调用。检测任务由
-// frame_task 注册在 kFramePointRenderPre（仅 world 态 DrawPlay 执行），world 就绪后触发一次。
+// 的 BL，作为两条声明式 kCallPatch 资源（owner="core"）由宿主装配末段安装改指 wrapper；
+// wrapper 先经 core.save 转换门禁并标记 pending，再复刻原调用。检测任务 save_enter_tick
+// 由 infra::scheduler 注册在 kRenderPre 点位（仅 world 态 DrawPlay 执行），
+// world 就绪后消费一次、publish kEventSaveEnter（旧回调设施已退役，消费者改为事件订阅）。
 //
 // P3c 重接：读档发起先经 core.save 的转换状态机 begin（prepare_detach 拒绝时阻断原版
 // 转换），确认序（reset/ensure+journal 严格检查+新 epoch+session_ready+加载排空）由
 // core.save 在 RenderPre 完成；save_enter_tick 只在确认序发布 ready 后才消费 pending、
-// 派发旧回调与 kEventSaveEnter。确认失败不消费、不派发、保持阻断。
+// 发布 kEventSaveEnter。确认失败不消费、不派发、保持阻断。
 
 #include "patch/save_enter.h"
 
-#include "patch/call_patch.h"
-#include "infra/frame/frame_task.h"
+#include "infra/scheduler.h"
 #include "infra/log/qol_log.h"
 #include "contracts/events.h"
 #include "contracts/runtime_hooks.h"
@@ -25,24 +26,12 @@
 #include "infra/events.h"
 
 #include <atomic>
-#include <mutex>
-#include <utility>
-#include <vector>
 
 namespace {
-
-// 发起点原指令字（llvm-objdump 核对）。
-constexpr uint32_t kResumeBlWord = save_enter_detail::kResumeBinding.original_call;
-constexpr uint32_t kStartGameBlWord = save_enter_detail::kNewGameConfirmBinding.original_call;
-
-std::mutex g_save_enter_mtx;
-std::vector<std::pair<SaveEnterFn, void*>> g_callbacks;  // 仅持锁访问
 
 std::atomic<bool> g_pending{false};
 
 std::atomic<bool> g_tick_registered{false};
-std::atomic<bool> g_host_installed{false};
-std::atomic<bool> g_host_installing{false};
 
 // 读档 wrapper：先经 core.save begin 转换（kResume；准入关闭时阻断原版转换），成功后
 // 登记 loading 旁路 invocation 与未就绪转换（SAVE_Save 的读档期旁路矩阵输入），再标记
@@ -97,7 +86,43 @@ void save_new_wrapper() {
     fn_select_character_start_game();
 }
 
-// 帧检测任务：core.save 确认序发布 ready 后消费一次并锁外派发回调（回调在主线程执行）。
+// 两个发起点的声明式资源（owner="core"）：站点登记与原指令字见 game/access/patches.cpp
+// （P_SAVESLOT_SLOT_BUTTON_EXE_RESUME / P_SELECTCHAR_BUTTON_START_EXE_STARTGAME，原字与
+// save_enter_detail binding 同源）。resumable=true 表示安装失败后允许宿主声明式重装。
+constexpr const char* kOwner = "core";
+const qol::contracts::ResourceClaim kEnterClaims[] = {
+    {
+        "patch:SAVESLOT_SLOT_BUTTON_EXE+0x88",  // id
+        "P_SAVESLOT_SLOT_BUTTON_EXE_RESUME",    // symbol：patch 点登记名
+        qol::contracts::ResourceMechanism::kCallPatch,
+        qol::contracts::ResourcePolicy::kPrivate,
+        qol::contracts::ResourceRequirement::kRequired,
+        qol::contracts::ResourceFailure::kFailClosed,
+        true,   // resumable
+        kOwner,
+        "读档发起点：SaveSlot_SlotButtonExe 内联 bl 调用点，无函数指针槽可挂",
+        nullptr,  // gate：常驻
+        120,      // step_budget
+        reinterpret_cast<void*>(&save_load_wrapper),  // handler（BL 目标）
+    },
+    {
+        "patch:SELECTCHAR_BUTTON_START_EXE+0x10",
+        "P_SELECTCHAR_BUTTON_START_EXE_STARTGAME",
+        qol::contracts::ResourceMechanism::kCallPatch,
+        qol::contracts::ResourcePolicy::kPrivate,
+        qol::contracts::ResourceRequirement::kRequired,
+        qol::contracts::ResourceFailure::kFailClosed,
+        true,
+        kOwner,
+        "新档确认发起点：SelectCharacter_ButtonStartExe 内联 bl 调用点，无函数指针槽可挂",
+        nullptr,
+        120,
+        reinterpret_cast<void*>(&save_new_wrapper),
+    },
+};
+
+// 帧检测任务：core.save 确认序发布 ready 后消费 pending 并 publish kEventSaveEnter。
+// should_fire 探针门禁是「core.save 确认未完成就不消费不派发」的顺序无关保证，必须保留。
 // 确认未完成/失败：不消费 pending、不派发、保持阻断。
 bool save_enter_tick(int64_t /*frame*/, void* /*ctx*/) {
     if (!save_enter_detail::should_fire(g_pending.load(std::memory_order_acquire),
@@ -108,43 +133,14 @@ bool save_enter_tick(int64_t /*frame*/, void* /*ctx*/) {
     if (hooks.save_enter_ready != nullptr && !hooks.save_enter_ready()) return true;
     if (!g_pending.exchange(false, std::memory_order_acq_rel)) return true;  // 已被并发消费
 
-    std::vector<std::pair<SaveEnterFn, void*>> snapshot;
-    {
-        std::lock_guard<std::mutex> lock(g_save_enter_mtx);
-        snapshot = g_callbacks;  // 持锁快照，锁外执行回调
-    }
-    for (const auto& entry : snapshot) {
-        entry.first(entry.second);
-    }
     const qol::contracts::SaveEnterEvent event{current_save_slot()};
     (void)qol::infra::publish(qol::contracts::kEventSaveEnter, &event);
     // 由 g_pending.exchange 保证每次 pending 只触发一次（非逐帧），保持 INFO。
-    QOL_LOG_INFO(QolDomain::kSave, "save enter fired callbacks=%zu", snapshot.size());
+    QOL_LOG_INFO(QolDomain::kSave, "save enter fired");
     return true;
 }
 
 }  // namespace
-
-bool save_enter_register(SaveEnterFn fn, void* ctx) {
-    if (fn == nullptr) return false;
-    std::lock_guard<std::mutex> lock(g_save_enter_mtx);
-    for (const auto& entry : g_callbacks) {
-        if (entry.first == fn && entry.second == ctx) return true;  // 幂等
-    }
-    g_callbacks.emplace_back(fn, ctx);
-    return true;
-}
-
-void save_enter_unregister(SaveEnterFn fn, void* ctx) {
-    std::lock_guard<std::mutex> lock(g_save_enter_mtx);
-    for (auto it = g_callbacks.begin(); it != g_callbacks.end();) {
-        if (it->first == fn && it->second == ctx) {
-            it = g_callbacks.erase(it);
-        } else {
-            ++it;
-        }
-    }
-}
 
 void save_enter_mark_pending() {
     g_pending.store(true, std::memory_order_release);
@@ -152,7 +148,8 @@ void save_enter_mark_pending() {
 
 bool save_enter_init() {
     if (g_tick_registered.exchange(true, std::memory_order_acq_rel)) return true;
-    const FrameTaskId id = frame_task_add(kFramePointRenderPre, &save_enter_tick, nullptr, 0, 0);
+    const qol::infra::FrameTaskId id = qol::infra::scheduler_add(
+        qol::infra::FramePoint::kRenderPre, &save_enter_tick, nullptr, 1, 0);
     if (id == 0) {
         g_tick_registered.store(false, std::memory_order_release);  // 允许重试
         return false;
@@ -160,49 +157,8 @@ bool save_enter_init() {
     return true;
 }
 
-bool save_enter_host_install_if_ready() {
-    if (g_host_installed.load(std::memory_order_acquire)) return true;
-    // exchange 抢占安装权：并发重复调用时后到者直接返回当前状态（幂等）。
-    if (g_host_installing.exchange(true, std::memory_order_acq_rel)) {
-        return g_host_installed.load(std::memory_order_acquire);
-    }
-
-    if (!bridge_ready() || g_base == 0 || fn_game_start_resume_game == nullptr ||
-        fn_select_character_start_game == nullptr) {
-        g_host_installing.store(false, std::memory_order_release);
-        return false;  // 未就绪：不改写字节，允许后续重试
-    }
-
-    const qol::game::SaveSiteRef load_site = qol::game::save_enter_load_site();
-    const uintptr_t load_addr =
-        g_base + fn_resolve("F_SAVESLOT_SLOT_BUTTON_EXE_VMA", load_site.vma) +
-        load_site.call_off;
-    if (!call_patch_install_bl(load_addr, kResumeBlWord,
-                               reinterpret_cast<void*>(&save_load_wrapper))) {
-        QOL_LOG_ERROR(QolDomain::kSave,
-                      "install load-site failed call=%p expected=0x%08x",
-                      reinterpret_cast<void*>(load_addr), kResumeBlWord);
-        g_host_installing.store(false, std::memory_order_release);
-        return false;  // fail-closed：call_patch 已保证未改写任何字节
-    }
-
-    const qol::game::SaveSiteRef new_site = qol::game::save_enter_new_site();
-    const uintptr_t new_addr =
-        g_base + fn_resolve("F_SELECTCHAR_BUTTON_START_EXE_VMA", new_site.vma) +
-        new_site.call_off;
-    if (!call_patch_install_bl(new_addr, kStartGameBlWord,
-                               reinterpret_cast<void*>(&save_new_wrapper))) {
-        QOL_LOG_ERROR(QolDomain::kSave,
-                      "install new-site failed call=%p; rolling back load-site",
-                      reinterpret_cast<void*>(new_addr));
-        call_patch_revert_bl(load_addr, kResumeBlWord);  // 全成或全退
-        g_host_installing.store(false, std::memory_order_release);
-        return false;
-    }
-
-    g_host_installed.store(true, std::memory_order_release);
-    g_host_installing.store(false, std::memory_order_release);
-    QOL_LOG_INFO(QolDomain::kSave, "installed load=%p new=%p",
-                 reinterpret_cast<void*>(load_addr), reinterpret_cast<void*>(new_addr));
-    return true;
+uint32_t save_enter_claim_count() {
+    return sizeof(kEnterClaims) / sizeof(kEnterClaims[0]);
 }
+
+const qol::contracts::ResourceClaim* save_enter_claims() { return kEnterClaims; }

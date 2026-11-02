@@ -2,11 +2,9 @@
 
 // 帧源实现（见 host/frame_source.h）。两条锚点作为声明式 kCallPatch 资源安装：
 //  1) GAMESTATE_DrawPlay +0x20 的 bl MAP_DrawBase → frame_render_pre_wrapper：
-//     先 scheduler_dispatch(kRenderPre) + legacy frame_task_dispatch，
-//     再复刻 fn_map_drawbase()。
+//     先 scheduler_dispatch(kRenderPre)，再复刻 fn_map_drawbase()。
 //  2) MainProcess +0x40 的 bl STATE_NextStartProcess → frame_logic_pre_wrapper：
-//     先 scheduler_dispatch(kLogicPre) + legacy frame_task_dispatch，
-//     再复刻 fn_state_next_start_process()。
+//     先 scheduler_dispatch(kLogicPre)，再复刻 fn_state_next_start_process()。
 // 两条锚点全成或全退；安装永久生效，不做运行期卸载；幂等。
 
 #include <atomic>
@@ -26,13 +24,12 @@
 #include "infra/frame/transition_dispatch.h"
 #include "patch/save_enter.h"
 #include "patch/call_patch.h"
-#include "infra/frame/frame_host.h"
-#include "infra/frame/frame_task.h"
 #include "infra/log/qol_log.h"
 #include "game/access/patches.h"
 #include "game/access/game_access.h"
 #include "game/adapter_ports/game_host_port.h"
 #include "hooks/registry.h"
+#include "infra/runtime.h"
 #include "infra/scheduler.h"
 #include "patch/instr_patch.h"
 #include "host/plugin_registry.h"
@@ -52,10 +49,9 @@ std::atomic<bool> g_frame_source_installing{false};
 
 bool cache_reader_is_game_main_thread() { return qol::game::game_host_is_main_thread(); }
 
-// 替换原 BL MAP_DrawBase：先派发调度器与 legacy 帧任务，再复刻原调用。
+// 替换原 BL MAP_DrawBase：先派发调度器，再复刻原调用。
 void frame_render_pre_wrapper() {
     qol::infra::scheduler_dispatch(qol::infra::FramePoint::kRenderPre);
-    frame_task_dispatch(kFramePointRenderPre);
     if (fn_map_drawbase != nullptr) fn_map_drawbase();
 }
 
@@ -66,7 +62,9 @@ void frame_logic_pre_wrapper() {
     qol::game::game_host_mark_main_thread();
     module_health_observe_main_menu(qol::game::ui_main_menu_state_observed());
     qol::infra::scheduler_dispatch(qol::infra::FramePoint::kLogicPre);
-    frame_task_dispatch(kFramePointLogicPre);
+    // 缓存刷新必须在所有 owner 回调之后：回调内刚构建/失效的槽由这里统一补刷，
+    // 否则同一帧会对同一槽重复构建。
+    frame_cache_logic_step(qol::infra::frame_count());
     if (fn_state_next_start_process != nullptr) fn_state_next_start_process();
 }
 
@@ -197,12 +195,6 @@ bool frame_source_installed() {
 
 }  // namespace qol::host
 
-// 兼容层：transition_dispatch（未迁移消费者）查询逻辑锚点是否安装。
-// 旧实现随 infra/frame/frame_host.cpp 删除；安装状态现由 host/frame_source 持有。
-bool frame_host_anchors_installed() {
-    return qol::host::frame_source_installed();
-}
-
 // ---------------------------------------------------------------------------
 // T2l-rh：过渡注入面（contracts/runtime_hooks.h）的 host 定义。
 // 语义与 infra 原语逐字等价：POD body/ctx 与 infra 的 std::function/std::string 只在本文件
@@ -277,22 +269,26 @@ bool host_frame_task_trampoline(int64_t frame, void* ctx) {
     return slot->fn(frame, slot->ctx) != 0;
 }
 
-uint64_t host_frame_task_add(int32_t point, QolRuntimeFrameTaskFn fn, void* ctx, int32_t interval,
-                             int32_t count) {
-    if (fn == nullptr || point < 0 || point >= kFramePointCount) return 0;
+uint64_t host_scheduler_add(int32_t point, QolRuntimeFrameTaskFn fn, void* ctx, int32_t interval,
+                            int32_t count) {
+    if (fn == nullptr || point < kQolRuntimeFramePointRenderPre ||
+        point > kQolRuntimeFramePointLogicPre) {
+        return 0;
+    }
     auto slot = std::make_shared<HostFrameTaskCtx>();
     slot->fn = fn;
     slot->ctx = ctx;
-    const uint64_t id = frame_task_add(point, &host_frame_task_trampoline, slot.get(), interval,
-                                       count);
+    const uint64_t id =
+        qol::infra::scheduler_add(static_cast<qol::infra::FramePoint>(point),
+                                  &host_frame_task_trampoline, slot.get(), interval, count);
     if (id == 0) return 0;
     std::lock_guard<std::mutex> lock(g_host_frame_task_mtx);
     g_host_frame_tasks.emplace(id, std::move(slot));
     return id;
 }
 
-bool host_frame_task_remove(uint64_t id) {
-    const bool removed = frame_task_remove(id);
+bool host_scheduler_remove(uint64_t id) {
+    const bool removed = qol::infra::scheduler_remove(id);
     std::lock_guard<std::mutex> lock(g_host_frame_task_mtx);
     const auto it = g_host_frame_tasks.find(id);
     if (it != g_host_frame_tasks.end()) {
@@ -367,15 +363,19 @@ void host_save_transition_cancel_thunk(uint64_t transition) {
     (void)qol::host::save_route::dispatch_native_call_for_plugin("core.save", &call, &status);
 }
 
-// W31：contracts 帧点位常量必须与 infra 同值（0=渲染前、1=逻辑前）。
-static_assert(kQolRuntimeFramePointRenderPre == kFramePointRenderPre, "frame point drift");
-static_assert(kQolRuntimeFramePointLogicPre == kFramePointLogicPre, "frame point drift");
+// W31：contracts 帧点位常量必须与 infra scheduler 同值（0=渲染前、1=逻辑前）。
+static_assert(kQolRuntimeFramePointRenderPre ==
+                  static_cast<int32_t>(qol::infra::FramePoint::kRenderPre),
+              "frame point drift");
+static_assert(kQolRuntimeFramePointLogicPre ==
+                  static_cast<int32_t>(qol::infra::FramePoint::kLogicPre),
+              "frame point drift");
 
 const QolRuntimeHooksApi kQolRuntimeHooksApi{
     kQolRuntimeHooksVersion,    &host_transition_run,
     &host_transition_run_inline,
-    &host_frame_task_add,
-    &host_frame_task_remove,
+    &host_scheduler_add,
+    &host_scheduler_remove,
     &save_enter_mark_pending,
     &host_capability_require,
     &host_save_transition_begin_thunk,

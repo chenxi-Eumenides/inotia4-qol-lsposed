@@ -165,7 +165,6 @@ target_link_libraries(gamebridge PRIVATE ${log-lib} dl)
 target_sources(gamebridge PRIVATE
     patch/call_patch.cpp
     patch/native_hook.cpp
-    infra/frame/frame_task.cpp
     patch/save_enter.cpp
     patch/save_exit.cpp
     core/native/inventory_trade.cpp

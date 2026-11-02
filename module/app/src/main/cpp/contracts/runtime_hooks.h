@@ -13,9 +13,10 @@
 
 namespace qol::contracts {
 
-constexpr QolVersion kQolRuntimeHooksVersion{1, 0};
+// minor=1：帧任务字段由 legacy frame_task 直通改为 infra::scheduler 直通（同位同签名）。
+constexpr QolVersion kQolRuntimeHooksVersion{1, 1};
 
-// 帧点位（与 infra frame_task 常量同值；W31 核验）：0=渲染前、1=逻辑前。
+// 帧点位（与 infra scheduler 帧点位同值；W31 核验）：0=渲染前、1=逻辑前。
 constexpr int32_t kQolRuntimeFramePointRenderPre = 0;
 constexpr int32_t kQolRuntimeFramePointLogicPre = 1;
 
@@ -39,10 +40,10 @@ typedef struct QolRuntimeHooksApi {
     QolResult (*transition_run_inline)(QolRuntimeTransitionBodyFn fn, void* ctx, char* out,
                                        uint32_t capacity, uint32_t* out_len);
 
-    // 帧任务（直通 infra frame_task_add/remove）；point: 0=kRenderPre、1=kLogicPre。
-    uint64_t (*frame_task_add)(int32_t point, QolRuntimeFrameTaskFn fn, void* ctx, int32_t interval,
-                               int32_t count);
-    bool (*frame_task_remove)(uint64_t id);
+    // 帧任务（直通 infra scheduler_add/remove）；point: 0=kRenderPre、1=kLogicPre。
+    uint64_t (*scheduler_add)(int32_t point, QolRuntimeFrameTaskFn fn, void* ctx, int32_t interval,
+                              int32_t count);
+    bool (*scheduler_remove)(uint64_t id);
 
     // 标记「进入存档流程已发起」（直通 infra/save/save_enter）。
     void (*save_enter_mark_pending)();

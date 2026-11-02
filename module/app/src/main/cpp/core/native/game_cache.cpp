@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "game_cache.h"
-#include "infra/frame/frame_task.h"
 #include "infra/scheduler.h"
 
 // system 槽（gamestate/snapshot）builder 仍由 game_system 提供（T2l-integ 口径，system 槽留 game_system）；
@@ -71,7 +70,6 @@ std::atomic<bool> g_cache_world{false};
 std::atomic<bool (*)()> g_world_gate{nullptr};
 std::atomic<bool (*)()> g_main_thread_gate{nullptr};
 uint64_t g_cache_generation = 1;  // 受 g_cache_mtx 保护；stop/start 使在途结果失效
-FrameTaskId g_cache_task = 0;    // 受 g_cache_mtx 保护
 bool g_world_state_known = false;
 bool g_last_world_state = false;
 
@@ -97,12 +95,9 @@ bool has_requested_builder_locked() {
 }
 
 void schedule_cache_task_locked() {
-    if (!g_cache_enabled.load(std::memory_order_acquire) || g_cache_task != 0 ||
-        !has_requested_builder_locked()) {
-        return;
-    }
-    // 任务只在有消费者请求缓存后注册；真正的 builder 仍由 frame_source 的逻辑帧派发。
-    g_cache_task = frame_task_add(kFramePointLogicPre, &cache_logic_task, nullptr, 1, 0);
+    // 刷新由 frame_source 在每个逻辑帧派发完 owner 回调后调用 frame_cache_logic_step；
+    // 这里只保留「有消费者请求」的前置判断，不再注册独立帧任务。
+    (void)has_requested_builder_locked();
 }
 
 std::string fallback_locked(const CacheSlot& slot) {
@@ -379,17 +374,22 @@ void frame_cache_start() {
 }
 
 void frame_cache_stop() {
-    FrameTaskId task = 0;
     {
         std::lock_guard<std::mutex> lock(g_cache_mtx);
         ++g_cache_generation;
         g_cache_enabled.store(false, std::memory_order_release);
-        task = g_cache_task;
-        g_cache_task = 0;
         for (CacheSlot& slot : g_cache_slots) slot.dirty = false;
     }
-    if (task != 0) frame_task_remove(task);
     g_cache_cv.notify_all();
+}
+
+void frame_cache_logic_step(int64_t frame) {
+    if (!g_cache_enabled.load(std::memory_order_acquire)) return;
+    {
+        std::lock_guard<std::mutex> lock(g_cache_mtx);
+        if (!has_requested_builder_locked()) return;
+    }
+    (void)cache_logic_task(frame, nullptr);
 }
 
 void frame_cache_force_refresh() {

@@ -7,9 +7,9 @@
 
 #include "infra/frame/transition_dispatch.h"
 
-#include "infra/frame/frame_host.h"
-#include "infra/frame/frame_task.h"
 #include "infra/log/qol_log.h"
+#include "infra/runtime.h"
+#include "infra/scheduler.h"
 
 #include <atomic>
 #include <chrono>
@@ -17,7 +17,6 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
-#include <thread>
 #include <utility>
 
 namespace {
@@ -36,13 +35,9 @@ uint64_t g_done_seq = 0;                 // 仅持锁访问
 std::string g_result;                    // 仅持锁访问
 std::atomic<bool> g_in_flight{false};
 std::atomic<bool> g_tick_registered{false};
-// 逻辑相位所在线程（transition_tick 每帧记录）：transition_run_inline 据此校验调用位置，
-// 防止在非游戏主线程直接执行游戏状态机。
-std::atomic<std::thread::id> g_logic_thread{};
 
 // 逻辑相位消费：游戏主线程取走 pending、锁外执行、回写结果并唤醒 HTTP 线程。
 bool transition_tick(int64_t /*frame*/, void* /*ctx*/) {
-    g_logic_thread.store(std::this_thread::get_id(), std::memory_order_release);
     std::shared_ptr<PendingTask> task;
     {
         std::lock_guard<std::mutex> lock(g_mtx);
@@ -68,7 +63,8 @@ bool transition_tick(int64_t /*frame*/, void* /*ctx*/) {
 
 bool transition_dispatch_init() {
     if (g_tick_registered.exchange(true, std::memory_order_acq_rel)) return true;
-    const FrameTaskId id = frame_task_add(kFramePointLogicPre, &transition_tick, nullptr, 0, 0);
+    const qol::infra::FrameTaskId id = qol::infra::scheduler_add(
+        qol::infra::FramePoint::kLogicPre, &transition_tick, nullptr, 1, 0);
     if (id == 0) {
         g_tick_registered.store(false, std::memory_order_release);  // 允许后续重试
         return false;
@@ -84,7 +80,7 @@ bool transition_run(std::function<void(std::string*)> fn, int timeout_ms, std::s
         return false;
     }
     // 逻辑锚点未安装时游戏线程不会消费，直接 fail-fast（避免每次等满超时）。
-    if (!frame_host_anchors_installed()) {
+    if (!qol::infra::logic_anchor_installed()) {
         if (result != nullptr) *result = "logic anchor not installed";
         return false;
     }
@@ -132,12 +128,14 @@ bool transition_run_inline(std::function<void(std::string*)> fn, std::string* re
         if (result != nullptr) *result = "transition function required";
         return false;
     }
-    if (!frame_host_anchors_installed()) {
+    if (!qol::infra::logic_anchor_installed()) {
         if (result != nullptr) *result = "logic anchor not installed";
         return false;
     }
-    // 只允许逻辑相位（命令排空所在的同一线程/相位）执行：否则游戏状态机跑在错误线程。
-    if (g_logic_thread.load(std::memory_order_acquire) != std::this_thread::get_id()) {
+    // 只允许 LogicPre 派发栈内执行：scheduler_is_dispatching 是 thread_local 派发标记，
+    // 精确覆盖「当前线程正在执行 kLogicPre 回调」（旧线程标记实现只能事后记录且跨帧残留）；
+    // 否则游戏状态机跑在错误线程。
+    if (!qol::infra::scheduler_is_dispatching(qol::infra::FramePoint::kLogicPre)) {
         if (result != nullptr) *result = "not in logic phase";
         return false;
     }

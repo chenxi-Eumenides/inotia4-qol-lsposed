@@ -19,6 +19,9 @@ void frame_cache_set_main_thread_gate(bool (*fn)());
 
 void frame_cache_start();
 void frame_cache_stop();
+// 逻辑帧刷新入口：由帧源在该帧所有 owner 回调返回后调用一次；未请求任何槽时无副作用。
+// 刷新必须晚于 owner 回调，否则同一帧会因回调刚写出的事实再次构建同一槽。
+void frame_cache_logic_step(int64_t frame);
 // 标记已请求的槽待刷新；后续逻辑帧按固定预算处理，安全逻辑相位内的目标槽读取可单次同步刷新。
 void frame_cache_force_refresh();
 bool frame_cache_ready();

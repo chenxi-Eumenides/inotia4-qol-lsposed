@@ -9,7 +9,6 @@
 #include <thread>
 #include <vector>
 
-#include "infra/frame/frame_task.h"
 #include "infra/runtime.h"
 #include "infra/scheduler.h"
 #include "game/json/game_json.h"
@@ -146,7 +145,8 @@ void check(bool condition, const char* expression, int line) {
 
 void dispatch_frame(int64_t frame) {
     g_frame.store(frame, std::memory_order_relaxed);
-    frame_task_dispatch(kFramePointLogicPre);
+    qol::infra::scheduler_dispatch(qol::infra::FramePoint::kLogicPre);
+    frame_cache_logic_step(frame);
 }
 
 void run_logic_result_read(int64_t frame, ResultRead* request) {

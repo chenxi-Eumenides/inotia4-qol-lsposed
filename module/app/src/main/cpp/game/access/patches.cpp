@@ -51,6 +51,16 @@ constexpr SiteEntry kSites[] = {
      PatchKind::kBlRedirect},
     {"P_MAINPROCESS_NEXT_STATE", F_MAINPROCESS_VMA, F_MAINPROCESS_NEXT_STATE_CALL_OFF,
      MAINPROCESS_NEXT_STATE_CALL_WORD, 0, PatchKind::kBlRedirect},
+    // Save enter/exit 发起点（常驻，owner=core，装配末段声明式安装）：BL 重定向到存档
+    // wrapper。原指令字与 patch/save_enter 的 detail binding、patch/save_exit 常量同源
+    // （llvm-objdump 核对，game_symbols.h 注释同值）；依赖矩阵 game/→patch/ 禁止 include，
+    // 登记表按本文件惯例写字面值，不新造指纹。
+    {"P_SAVESLOT_SLOT_BUTTON_EXE_RESUME", F_SAVESLOT_SLOT_BUTTON_EXE_VMA,
+     F_SAVESLOT_SLOT_BUTTON_EXE_RESUME_CALL_OFF, 0x97fecd56, 0, PatchKind::kBlRedirect},
+    {"P_SELECTCHAR_BUTTON_START_EXE_STARTGAME", F_SELECTCHAR_BUTTON_START_EXE_VMA,
+     F_SELECTCHAR_BUTTON_START_EXE_STARTGAME_CALL_OFF, 0x97ffffea, 0, PatchKind::kBlRedirect},
+    {"P_GAMESTATE_SET_STATE_GAME_EXIT", F_GAMESTATE_SET_STATE_VMA,
+     F_GAMESTATE_SET_STATE_GAME_EXIT_CALL_OFF, 0x97febb3d, 0, PatchKind::kBlRedirect},
     // 自动出售入口按钮绘制宿主（owner=autosell）：+0x1cc 原 bl UIDesc_Draw 改指模块 wrapper。
     {"P_SCENE_DRAW_EQUIP_DESC", F_SCENE_DRAW_EQUIP_VMA, F_SCENE_DRAW_EQUIP_DESC_CALL_OFF,
      F_SCENE_DRAW_EQUIP_DESC_CALL_WORD, 0, PatchKind::kBlRedirect},

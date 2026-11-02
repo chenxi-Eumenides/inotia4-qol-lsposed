@@ -63,7 +63,7 @@ int32_t char_stat_total(const void* ch, int index) {
 }
 
 // ---- next_exp 游戏线程帧缓存 ----
-// 生命周期：char_next_exp_cache_start() 在 nativeInit 注册一个常驻帧任务（kFramePointLogicPre，
+// 生命周期：char_next_exp_cache_start() 在宿主装配末段注册一个常驻帧任务（kLogicPre，
 // 每帧触发），随进程存活；不进 world 时置无效。读者（JSON 预取/HTTP 线程）只读 atomic 快照，
 // 不调用任何游戏函数；未命中缓存时回退直读游戏自身的惰性缓存 [ch+0x320]。
 namespace {
@@ -107,7 +107,7 @@ bool char_next_exp_tick(int64_t /*frame*/, void* /*ctx*/) {
 
 void char_next_exp_cache_start() {
     if (g_char_next_exp_task != 0) return;
-    g_char_next_exp_task = qol::contracts::qol_runtime_hooks().frame_task_add(
+    g_char_next_exp_task = qol::contracts::qol_runtime_hooks().scheduler_add(
         qol::contracts::kQolRuntimeFramePointLogicPre, &char_next_exp_tick_adapter, nullptr, 1, 0);
 }
 

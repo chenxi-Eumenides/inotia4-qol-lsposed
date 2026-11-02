@@ -2,9 +2,8 @@
 
 // 帧任务调度器实现（见 infra/scheduler.h 的接口契约）。
 //
-// 语义照搬 legacy infra/frame/frame_task：按帧去重、interval 归一、count 递减、
-// 回调返回 false 自动注销；注册顺序即派发顺序。实现独立（固定数组 + 互斥锁），
-// 与 legacy 管理器零共享，未迁移消费者继续使用 legacy。
+// 语义沿用旧 infra/frame/frame_task：按帧去重、interval 归一、count 递减、
+// 回调返回 false 自动注销；注册顺序即派发顺序。实现独立（固定数组 + 互斥锁）。
 
 #include <mutex>
 
@@ -106,9 +105,7 @@ bool is_due(int64_t frame, int64_t next_frame, bool armed) {
     return frame >= next_frame;
 }
 
-}  // namespace
-
-FrameTaskId scheduler_add(FramePoint point, FrameHandler handler, void* ctx, int interval, int count) {
+FrameTaskId add_entry(FramePoint point, FrameHandler handler, void* ctx, int interval, int count) {
     if (handler == nullptr || !valid_point(point)) return 0;
     std::lock_guard<std::mutex> lock(g_mtx);
     if (g_count >= kCapacity) return 0;
@@ -128,6 +125,12 @@ FrameTaskId scheduler_add(FramePoint point, FrameHandler handler, void* ctx, int
     entry.armed = false;      // 首个派发周期必触发
     ++g_count;
     return id;
+}
+
+}  // namespace
+
+FrameTaskId scheduler_add(FramePoint point, FrameHandler handler, void* ctx, int interval, int count) {
+    return add_entry(point, handler, ctx, interval, count);
 }
 
 bool scheduler_remove(FrameTaskId id) {

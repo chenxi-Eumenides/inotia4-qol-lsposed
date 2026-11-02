@@ -199,17 +199,17 @@ int32_t nav_tick_adapter(int64_t frame, void* ctx) { return nav_task_tick(frame,
 bool motion_task_start(bool (*fn)(int64_t, void*), void* ctx) {
     if (!game_in_world()) return false;
     if (g_gamestate != nullptr && *reinterpret_cast<uint32_t*>(g_gamestate) != 0) return false;
-    if (g_motion_task != 0) qol::contracts::qol_runtime_hooks().frame_task_remove(g_motion_task);
+    if (g_motion_task != 0) qol::contracts::qol_runtime_hooks().scheduler_remove(g_motion_task);
     const contracts::QolRuntimeFrameTaskFn adapter =
         fn == &nav_task_tick ? &nav_tick_adapter : &walk_tick_adapter;
-    g_motion_task = qol::contracts::qol_runtime_hooks().frame_task_add(
+    g_motion_task = qol::contracts::qol_runtime_hooks().scheduler_add(
         contracts::kQolRuntimeFramePointRenderPre, adapter, ctx, 0, 0);
     return g_motion_task != 0;
 }
 
 void motion_task_stop() {
     if (g_motion_task != 0) {
-        qol::contracts::qol_runtime_hooks().frame_task_remove(g_motion_task);
+        qol::contracts::qol_runtime_hooks().scheduler_remove(g_motion_task);
         g_motion_task = 0;
     }
 }

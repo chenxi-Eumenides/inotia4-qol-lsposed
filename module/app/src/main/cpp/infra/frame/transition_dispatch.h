@@ -13,7 +13,7 @@
 // 语义：
 //  - 任意线程调用 transition_run(fn, timeout_ms, &result)；
 //  - 同一时刻只允许一个转换在途（单飞）：抢不到立即返回 false，result 为 busy 文本；
-//  - fn 在游戏主线程的 kFramePointLogicPre 相位执行（见 frame_host 逻辑锚点）；
+//  - fn 在游戏主线程的 kLogicPre 相位执行（见 host/frame_source 逻辑锚点）；
 //  - 调用方同步阻塞等待；超时且任务尚未被消费则取消（消费后不可中途取消）；
 //  - fn 在游戏线程执行时把最终响应（op_ok/op_err JSON 等）写入 result；
 //    transition_run 返回 true 表示 fn 已执行（result 为 fn 输出），
