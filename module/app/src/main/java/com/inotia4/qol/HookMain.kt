@@ -1,12 +1,14 @@
 package com.inotia4.qol
 
 import android.app.Activity
+import android.content.Intent
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import com.inotia4.qol.patch.ImmersiveMode
 import com.inotia4.qol.patch.PopupBlockers
 import com.inotia4.qol.patch.ResourceNamespaceBridge
 import com.inotia4.qol.patch.WatermarkOverlay
+import com.inotia4.qol.storage.PickedFileIngest
 import io.github.libxposed.api.XposedModuleInterface
 
 class HookMain : XposedModule() {
@@ -47,6 +49,25 @@ class HookMain : XposedModule() {
             installWatermarkHook(param, moduleApkPath)
             LogFile.info(LogDomain.PLATFORM, "kernel-only mode: business hooks skipped")
             return
+        }
+        // SAF 自选备份导入：拦截宿主 MainActivity.onActivityResult。先 proceed 放行游戏自身
+        // 逻辑（它内部调 super 并转发 Peppermint），再把结果转发给摄入器；kernel-only 分支
+        // 不安装，PickedFileIngest 在该模式下不产生行为副作用。
+        MainActivityStartupHook.installActivityResult(param) { method ->
+            hook(method)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    (chain.thisObject as? Activity)?.let { activity ->
+                        PickedFileIngest.onActivityResult(
+                            activity,
+                            chain.getArg(0) as Int,
+                            chain.getArg(1) as Int,
+                            chain.getArg(2) as Intent?,
+                        )
+                    }
+                    result
+                }
         }
         ResourceNamespaceBridge.install(param) { method ->
             hook(method)

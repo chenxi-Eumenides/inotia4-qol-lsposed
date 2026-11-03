@@ -561,10 +561,24 @@ QolResult open_manager_feature(contracts::PluginContext& ctx) {
     return contracts::error(kQolErrBlocked, message, sizeof(message) - 1);
 }
 
+// 崩溃日志导出复用公共存储导出门面：入口只入队，复制在 Kotlin worker 执行。
+QolResult export_crash_logs_feature(contracts::PluginContext& ctx) {
+    const auto* api = contracts::public_export_if_available(ctx.sdk);
+    if (api == nullptr) {
+        constexpr char message[] = "public export bridge unavailable";
+        return contracts::error(kQolErrNotReady, message, sizeof(message) - 1);
+    }
+    return api->export_crash_logs();
+}
+
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"save_backup.open_manager", 1, contracts::FeatureCategory::kTools,
      contracts::FeatureType::kEntry, "存档备份", "存档备份并支持跨设备导入导出",
       nullptr, &open_manager_feature, "打开", -2},
+    {"save_backup.export_crash_logs", 1, contracts::FeatureCategory::kGeneral,
+     contracts::FeatureType::kEntry, "导出崩溃日志",
+     "把 qol-crash.log.prev、java-crash.log.prev 复制到 Download/qol/", nullptr,
+     &export_crash_logs_feature, "导出", -2},
 };
 
 const contracts::PluginDescriptor kDescriptor = {
@@ -584,7 +598,7 @@ const contracts::PluginDescriptor kDescriptor = {
     kPorts,
     1,
     nullptr, 0,
-    kFeatures, 1,
+    kFeatures, 2,
     kSbHttpEndpoints,
     static_cast<uint32_t>(sizeof(kSbHttpEndpoints) / sizeof(kSbHttpEndpoints[0])),
     nullptr,

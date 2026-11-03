@@ -240,7 +240,14 @@ Kotlin postAndAwait
 - 左栏三槽：以 `save{slot}.dat` 是否可读判定有效/损坏/空；有效槽从明文解析职业/等级/地图；不再使用运行期槽状态。
 - 右栏：手动备份列表（每页 5 项，逐帧增量解析）+ `auto` 卡片。解析走 `describe_backup_for_panel`：仓库密文项（`flags=0`）用本机密钥试解，任一项解不开（典型为跨设备 v2 备份）时把该行时间文本标红，提示该备份在本机不可导入。
 - 操作：导出/删除/导入；导入/删除弹确认框；列表/条目/auto 直接消费 typed usecase，导出/导入/删除经公共 API 适配；面板不解析 JSON。
+- 屏幕最右列：两个独立按钮，不属于三栏布局，按钮尺寸为中列 `OPS_BTN_*` 的 70%（`0x4E×0x43`，间距 `0x0B`），x 由 `ROOT_W + panel_root_rect().x - 0x08 - SIDE_BTN_W` 推出（落在 root 之外、屏幕右侧留白），y 以 `CONTENT_MID_Y` 为中线上下居中。上箭头＝导出到公共 Download（action 403，需已选备份，弹确认框），下箭头＝从文件导入（action 404，拉起系统文件选择器）。图标为 `fill_rect` 手绘，不使用游戏图集资源。
 - 面板状态（选中、页码、缓存）只在 `ui/panel.cpp`，不进入核心层。
+
+### 6.7 与公共存储交换
+
+- 导出：面板确认后用 `describe_backup`/自动备份路径解析出的绝对路径调用 `QolPublicExportApi::export_backup`；Host 转 JNI 到 Kotlin，复制到 `Download/qol/backups/<原文件名>`（同名覆盖，不产生 `(1)` 副本）。调用只入队，面板不等待结果。
+- 导入：`QolPublicExportApi::pick_import_file` 拉起 `ACTION_OPEN_DOCUMENT`；宿主 `onActivityResult` 取回 URI 后由 Kotlin 流式复制到 `qol/backups/.incoming/`，校验 magic `QSB1`、版本 v1–v4 与尾部 CRC32，通过后原子移入 `qol/backups/` 并调用 `nativeSaveBackupUiRefresh()` 刷新列表。**不自动导入**，仍需用户选中条目后走 6.2 的导入流程。
+- 两条链路都不需要任何存储权限；`Download/` 写入走 `MediaStore.Downloads`（API 29+），低于 API 29 直接失败。
 
 ## 7. 线程、快照与锁
 
@@ -251,6 +258,7 @@ Kotlin postAndAwait
 - **file_mutex**：只保护 bundle 读改写（回填/删除/导入定位），不承载业务状态。
 - **slot_operation lease**：导出/导入/删槽按槽串行，与游戏保存/删档互斥。
 - **锁序**：`slot_lease → file_mutex → store`；不用 `recursive_mutex`，不用 `try_lock` 做重入检测。
+- **公共存储交换**：`export_backup`/`pick_import_file` 只做 JNI 入队，拷贝在 Kotlin 的 `qol-public-export` / `qol-saf-import` 单线程 executor；`nativeSaveBackupUiRefresh()` 必须由 Kotlin 主线程调用，未打开面板时直接返回、不刷新。
 - 无全局业务互斥量 `g_sb_mtx`。
 
 ## 8. 错误语义

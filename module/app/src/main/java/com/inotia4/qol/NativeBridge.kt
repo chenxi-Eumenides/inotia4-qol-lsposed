@@ -1,5 +1,6 @@
 package com.inotia4.qol
 
+import com.inotia4.qol.storage.PublicExportBridge
 import java.util.concurrent.locks.ReentrantLock
 
 object NativeBridge {
@@ -40,6 +41,7 @@ object NativeBridge {
             initializationAttempted = true
             initializationInProgress = true
             ready = try {
+                nativeRegisterPublicExportBridge(PublicExportBridge::class.java)
                 nativeRegisterExtensionBagUiBridge(ExtensionBagUiBridge::class.java)
                 nativeInit()
             } catch (t: Throwable) {
@@ -79,6 +81,7 @@ object NativeBridge {
     external fun nativeQolCrashSetConfig(text: String)
 
     external fun nativeRegisterExtensionBagUiBridge(bridge: Class<*>)
+    external fun nativeRegisterPublicExportBridge(bridge: Class<*>)
     external fun nativeGetInitReport(): String
     external fun nativeHttpDispatch(method: Int, path: String, query: String?, body: String?): String
 
@@ -130,6 +133,8 @@ object NativeBridge {
     )
     external fun nativeSaveBackupUiInject(): String
     external fun nativeSaveBackupUiSelfCheck(): String
+    // SAF 导入落盘后的面板列表刷新（仅在面板打开时有实际效果）。
+    external fun nativeSaveBackupUiRefresh(): String
     external fun nativeSettingsUiStatus(): String
     external fun nativeRecoverAfterHiveBlock(): String
     external fun nativeNpcDialogOptions(): String

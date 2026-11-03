@@ -97,6 +97,7 @@ add_library(gamebridge SHARED
     bridge/native/gamebridge_ui.cpp
     bridge/native/gamebridge_domain_operations.cpp
     bridge/native/gamebridge_settings.cpp
+    bridge/native/gamebridge_public_export.cpp
     game/access/game_access.cpp
     game/access/item_handle_registry.cpp
     game/symbols/symbol_resolver.cpp
@@ -291,6 +292,7 @@ target_sources(gamebridge PRIVATE
     host/features/http_control.cpp
     host/owner_identity.cpp
     host/save_route.cpp
+    host/public_export.cpp
     game/access/save_file_evidence.cpp
     game/access/save_transaction.cpp
     game/adapter_ports/save_transaction_port.cpp

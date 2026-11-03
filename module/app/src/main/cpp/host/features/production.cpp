@@ -1,6 +1,7 @@
 #include "production.h"
 #include "platform.h"
 #include "host/owner_identity.h"
+#include "host/public_export.h"
 #include "infra/status.h"
 #include "infra/log/qol_log.h"
 
@@ -588,11 +589,13 @@ const contracts::QolSecurityApi& production_security_api() {
 }
 
 bool production_feature_bind_runtime_sdk(contracts::QolHostSdk& sdk) {
-    constexpr std::size_t end = offsetof(contracts::QolHostSdk, security) + sizeof(sdk.security);
+    constexpr std::size_t end = offsetof(contracts::QolHostSdk, public_export) +
+                                sizeof(sdk.public_export);
     if (sdk.abi.major != contracts::kHostSdkMajor || sdk.abi.minor < 24 ||
         sdk.abi.size < end) return false;
     sdk.runtime_effects = &production_runtime_effects_api();
     sdk.security = &production_security_api();
+    sdk.public_export = &public_export_api();
     return true;
 }
 

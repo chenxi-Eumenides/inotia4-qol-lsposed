@@ -21,6 +21,9 @@ object StaticData {
         appContext = context
     }
 
+    /** 供异步任务（如公共 Download 导出）取 application context；未 attach 时为 null。 */
+    fun context(): Context? = appContext
+
     /** 游戏数据目录（/data/data/<包名>/，v0.5.12 P0-2 存档导出定位用） */
     fun dataDir(): String? = appContext?.applicationInfo?.dataDir
 

@@ -35,6 +35,7 @@
 #include "lifecycle_participant.h"
 #include "module_health.h"
 #include "panels.h"
+#include "public_export.h"
 #include "result.h"
 #include "version.h"
 
@@ -504,6 +505,8 @@ struct QolHostSdk {
     const QolDescHookApi* desc_hook_v2;
     // v1.29 tail: registered panel provider enumeration (panel_id + owner).
     const QolPanelEnumerationApi* panel_enumeration;
+    // v1.31 tail: 模块目录→公共 Download 的异步导出入口；null 表示不可用。
+    const QolPublicExportApi* public_export;
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
@@ -512,8 +515,24 @@ constexpr uint16_t kHostSdkMajor = 1;
 // minor 26 appends feature display priority and category metadata to the feature table;
 // minor 27 appends desc hook V2; minor 28 appends owner availability to feature control;
 // minor 29 appends registered panel provider enumeration; minor 30 adds feature choice metadata
-// and read/write management functions at the tails of their existing tables.
-constexpr uint16_t kHostSdkMinor = 30;
+// and read/write management functions at the tails of their existing tables; minor 31 appends
+// the asynchronous public-Download export entry point.
+constexpr uint16_t kHostSdkMinor = 31;
+
+inline const QolPublicExportApi* public_export_if_available(const QolHostSdk* sdk) {
+    constexpr std::size_t end = offsetof(QolHostSdk, public_export) +
+                                sizeof(const QolPublicExportApi*);
+    constexpr std::size_t required = offsetof(QolPublicExportApi, pick_import_file) +
+                                     sizeof(QolPublicExportApi::pick_import_file);
+    if (sdk == nullptr || sdk->abi.major != kHostSdkMajor || sdk->abi.minor < 31 ||
+        sdk->abi.size < end) return nullptr;
+    const auto* api = sdk->public_export;
+    if (api == nullptr || api->struct_size < required || api->export_crash_logs == nullptr ||
+        api->export_backup == nullptr || api->pick_import_file == nullptr) {
+        return nullptr;
+    }
+    return api;
+}
 
 inline const QolDescHookApi* desc_hook_v2_if_available(const QolHostSdk* sdk) {
     constexpr std::size_t end = offsetof(QolHostSdk, desc_hook_v2) +

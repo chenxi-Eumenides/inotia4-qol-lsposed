@@ -4,6 +4,8 @@
 #include "../../../contracts/ui.h"
 #include "plugins/save_backup/bundle.h"
 #include "plugins/save_backup/feature.h"
+#include "plugins/save_backup/persistence/persistence.h"
+#include "plugins/save_backup/state/state.h"
 #include "plugins/save_backup/usecases/backup_usecases.h"
 #include "plugins/save_backup/log.h"
 
@@ -60,6 +62,11 @@
 #define OPS_BTN_W 0x70
 #define OPS_BTN_GAP 0x10
 #define OPS_Y0 (CONTENT_MID_Y - (3 * OPS_BTN_H + 2 * OPS_BTN_GAP) / 2)
+// 屏幕最右列两按钮（0=导出到 Download，1=从文件导入）：尺寸取中间操作列（0x70×0x60/间距 0x10）
+// 的 70%；SIDE_X 落在 root 右缘之外的屏幕留白（见 side_btn_rect），不占用三栏布局。
+#define SIDE_BTN_W 0x4E
+#define SIDE_BTN_H 0x43
+#define SIDE_BTN_GAP 0x0B
 #define LIST_PAGE_BTN_H 0x30
 #define LIST_PAGE_BTN_W 0x38
 #define PAGE_ROW_Y (CONTENT_BOTTOM - LIST_ROW_H / 2 - LIST_PAGE_BTN_H)
@@ -148,6 +155,8 @@ int g_back_pressed = 0;
 // 三栏控件容器（label 类型，参与命中但 DrawProc 自绘；DrawProc 走 fn_ctrl_btn_draw → 自定义 cb）。
 void* g_slot_btns[3] = {nullptr, nullptr, nullptr};
 void* g_ops_btns[3] = {nullptr, nullptr, nullptr};   // 0=导出 1=导入 2=删除
+// 屏幕最右列纯命中按钮（文本空、DrawProc 手绘箭头）：0=导出到 Download，1=从文件导入。
+void* g_side_btns[2] = {nullptr, nullptr};
 void* g_list_btns[LIST_COLS_MAX] = {nullptr};       // 当前页 5 个
 void* g_auto_btn = nullptr;
 void* g_prev_btn = nullptr;
@@ -193,13 +202,16 @@ int g_total_pages = 0;
 // 保留状态字段与消息控件；操作反馈统一写日志，标题区不显示结果横幅。
 std::string g_msg_text;
 bool g_msg_is_error = false;
-enum class DialogKind { kNone, kExport, kImport, kDeleteSlot, kDeleteBackup };
+enum class DialogKind { kNone, kExport, kImport, kDeleteSlot, kDeleteBackup, kExportDownload };
 DialogKind g_dialog = DialogKind::kNone;
 // 确认框正文。
 std::string g_confirmation_prompt;
 std::string g_dialog_checksum;
 int g_dialog_slot = -1;
 bool g_dialog_auto = false;
+// kExportDownload 待确认的源文件路径与展示名（受 g_sbui_mtx 保护）。
+std::string g_dialog_path;
+std::string g_dialog_name;
 // 左栏三槽缓存：enter 后由游戏线程读取磁盘存档（load_data + 明文摘要），DrawProc 只读缓存。
 struct SlotInfo {
     bool exists = false;
@@ -473,6 +485,7 @@ const BackupEntry* selected_manual_backup() {
 // ============== Component 绘制 ==============
 void slot_btn_draw(void* ctrl);
 void ops_btn_draw(void* ctrl);
+void side_btn_draw(void* ctrl);
 void list_btn_draw(void* ctrl);
 void auto_btn_draw(void* ctrl);
 void sync_component_enabled_locked();
@@ -483,6 +496,7 @@ void root_decor_draw();
 UiRect panel_root_rect();
 UiRect slot_btn_rect(int i);
 UiRect ops_btn_rect(int i);
+UiRect side_btn_rect(int i);
 UiRect list_btn_rect(int i);
 UiRect auto_btn_rect();
 int page_entry_count();
@@ -608,6 +622,17 @@ std::string data_savebackup_ui_self_check() {
         "{\"ok\":true,\"backup_count\":%zu,\"total_pages\":%d,\"page_index\":%d}",
         g_backups.size(), g_total_pages, g_page_index);
     return std::string(buf);
+}
+
+std::string data_savebackup_ui_refresh() {
+    // 面板未打开时不刷新：不触发文件系统枚举，也避免覆盖上次打开时的列表状态；
+    // Kotlin 侧在导入成功后经主线程 post 调用，refresh_panel_data() 自身加锁。
+    {
+        std::lock_guard<std::mutex> lock(g_sbui_mtx);
+        if (!g_panel_active) return "{\"ok\":true,\"active\":false}";
+    }
+    refresh_panel_data();
+    return "{\"ok\":true,\"active\":true}";
 }
 
 void save_backup_inject_map_names_for_test(const char* json) {

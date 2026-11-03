@@ -30,6 +30,7 @@ std::string data_savebackup_ui_status_json();
 std::string data_savebackup_ui_restore();
 std::string data_savebackup_ui_open_panel();
 std::string data_savebackup_ui_self_check();
+std::string data_savebackup_ui_refresh();
 
 // 测试用：注入 map_name（绕过 JSON 解析），供 host 单测复用解析路径。
 void save_backup_inject_map_names_for_test(const char* json);

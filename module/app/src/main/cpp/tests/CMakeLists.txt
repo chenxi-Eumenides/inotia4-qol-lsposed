@@ -637,6 +637,8 @@ add_test(NAME host_feature_controller_tests
     COMMAND host_feature_controller_tests ${CMAKE_CURRENT_BINARY_DIR})
 add_executable(production_feature_facade_tests
     test_production_feature_facade.cpp
+    test_public_export_bridge_stubs.cpp
+    ${CPP_DIR}/host/public_export.cpp
     ${CPP_DIR}/host/features/production.cpp
     ${CPP_DIR}/host/features/platform.cpp
     ${CPP_DIR}/host/features/http_control.cpp
@@ -1372,6 +1374,8 @@ add_test(NAME craft_ui_handle_identity_tests COMMAND craft_ui_handle_identity_te
 add_executable(host_adapter_tests
     test_host_adapters.cpp
     test_game_host_stubs.cpp
+    test_public_export_bridge_stubs.cpp
+    ${CPP_DIR}/host/public_export.cpp
     ${CPP_DIR}/host/host_sdk.cpp
     ${CPP_DIR}/host/module_health.cpp
     ${CPP_DIR}/host/features/production.cpp

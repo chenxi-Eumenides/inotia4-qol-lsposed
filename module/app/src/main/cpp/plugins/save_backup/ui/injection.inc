@@ -155,9 +155,68 @@ static void open_delete_dialog() {
     if (!open_confirmation(prompt)) reject_confirmation_open();
 }
 
+// 屏幕最右列「导出到 Download」：把选中的手动/自动备份源文件路径交给 Host 公共导出入口
+// （异步复制到 Download/qol/backups/，结果由 Kotlin 写日志）。只入队，不改面板数据。
+static void open_export_download_dialog() {
+    const auto* api = contracts::public_export_if_available(save_backup_host_sdk());
+    if (api == nullptr) {
+        SB_UI_LOG("export to download unavailable: public_export api not ready");
+        return;
+    }
+    std::string path;
+    std::string name;
+    {
+        std::lock_guard<std::mutex> lock(g_sbui_mtx);
+        const BackupEntry* manual = selected_manual_backup();
+        if (manual != nullptr) {
+            std::string dir;
+            if (!::save_backup::persistence::backup_dir(
+                    ::save_backup::state::snapshot().external_dir, dir)) {
+                SB_UI_LOG("export to download unavailable: backup dir unresolved");
+                return;
+            }
+            path = dir + "/" + manual->name;
+            name = manual->name;
+        } else if (g_selected_auto && g_auto_backup_valid) {
+            const std::optional<std::string> auto_path = ::save_backup::persistence::auto_backup_path(
+                ::save_backup::state::snapshot().external_dir, g_selected_slot);
+            if (!auto_path.has_value()) {
+                SB_UI_LOG("export to download unavailable: auto backup file missing");
+                return;
+            }
+            path = *auto_path;
+            name = g_auto_backup.name;
+        } else {
+            SB_UI_LOG("export to download unavailable: no backup selected");
+            return;
+        }
+        g_dialog = DialogKind::kExportDownload;
+        g_dialog_path = path;
+        g_dialog_name = name;
+    }
+    if (!open_confirmation("将 " + name + " 复制到 Download/qol/backups/？")) {
+        reject_confirmation_open();
+    }
+}
+
+// 屏幕最右列「从文件导入」：拉起系统文件选择器（SAF）；选中文件由 Host 归入 qol/backups/
+// 后刷新存档面板。不要求面板内有选中项。
+static void pick_import_file_via_host() {
+    const auto* api = contracts::public_export_if_available(save_backup_host_sdk());
+    if (api == nullptr) {
+        SB_UI_LOG("import from file unavailable: public_export api not ready");
+        return;
+    }
+    if (!contracts::succeeded(api->pick_import_file())) {
+        SB_UI_LOG("import from file failed: picker unavailable");
+    }
+}
+
 static void execute_dialog_confirm() {
     DialogKind kind;
     std::string checksum;
+    std::string path;
+    std::string name;
     int slot;
     bool from_auto;
     {
@@ -166,11 +225,24 @@ static void execute_dialog_confirm() {
         checksum = g_dialog_checksum;
         slot = g_dialog_slot;
         from_auto = g_dialog_auto;
+        path = g_dialog_path;
+        name = g_dialog_name;
         clear_pending_locked();
     }
     if (kind == DialogKind::kNone) return;
     if (kind == DialogKind::kExport) {
         execute_export(slot);
+        return;
+    }
+    if (kind == DialogKind::kExportDownload) {
+        // Host 侧异步复制：调用只入队、立即返回，完成结果由 Kotlin 写日志；
+        // Download 副本不在本面板列表内，无需刷新面板数据。
+        const auto* api = contracts::public_export_if_available(save_backup_host_sdk());
+        if (api == nullptr || !contracts::succeeded(api->export_backup(path.c_str(), name.c_str()))) {
+            SB_UI_LOG("export to download failed: %s", name.c_str());
+        } else {
+            SB_UI_LOG("export to download queued: %s", name.c_str());
+        }
         return;
     }
     std::string response;
@@ -242,6 +314,15 @@ void component_action_clicked(void* user) {
         if (op == 0) open_export_dialog();
         else if (op == 1) open_delete_dialog();
         else open_import_dialog();
+    } else if (action == 403 || action == 404) {
+        {
+            std::lock_guard<std::mutex> lock(g_sbui_mtx);
+            if (g_dialog != DialogKind::kNone) return;
+            // 纯命中按钮没有引擎 Enabled 位：点击时按绘制同口径再判一次可用性。
+            if (!side_btn_enabled(action == 403 ? 0 : 1)) return;
+        }
+        if (action == 403) open_export_download_dialog();
+        else pick_import_file_via_host();
     } else if (action == 500 || action == 501) {
         std::lock_guard<std::mutex> lock(g_sbui_mtx);
         if (g_dialog != DialogKind::kNone) return;

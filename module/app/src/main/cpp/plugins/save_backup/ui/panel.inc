@@ -39,6 +39,15 @@ UiRect ops_btn_rect(int i) {
             OPS_BTN_W, OPS_BTN_H};
 }
 
+// 屏幕最右列两按钮（0=导出到 Download，1=从文件导入）：x 超出 ROOT_W、落在 root 右缘之外的
+// 屏幕留白（面板 mask 宽 ROOT_W + root.x*2 覆盖到屏幕右缘），属设计意图，不占用三栏布局；
+// panel_root_rect().x 随设备宽高比变化，每帧经 sync_side_btn_rects_locked 写回控件。
+UiRect side_btn_rect(int i) {
+    const int64_t side_x = ROOT_W + panel_root_rect().x - 0x08 - SIDE_BTN_W;
+    const int64_t side_y0 = CONTENT_MID_Y - (2 * SIDE_BTN_H + SIDE_BTN_GAP) / 2;
+    return {side_x, side_y0 + i * (SIDE_BTN_H + SIDE_BTN_GAP), SIDE_BTN_W, SIDE_BTN_H};
+}
+
 UiRect list_btn_rect(int i) {
     // 右栏框内条目顶部对齐：首行顶 = 框内上缘（FRAME_Y+FRAME_BORDER），行距 LIST_ROW_H，
     // 不再随条目数垂直居中（n<5 时靠上排列）；末行底仅在满 5 行时贴框内下缘（框高按 5 行固定）。
@@ -60,6 +69,17 @@ void sync_list_btn_rects_locked() {
             UiRect rect = list_btn_rect(i);
             if (rect.w <= 0 || rect.h <= 0) rect = {LIST_COL_X, 0, 1, 1};
             (void)g_ui_components->set_rect(g_list_btns[i], rect);
+        }
+    }
+}
+
+// side 按钮 rect 依赖 panel_root_rect().x（随设备宽高比变化）；与 sync_list_btn_rects_locked
+// 同口径每帧写回控件（调用方持 g_sbui_mtx）。
+void sync_side_btn_rects_locked() {
+    for (int i = 0; i < 2; ++i) {
+        if (g_side_btns[i] != nullptr && g_ui_components != nullptr &&
+            g_ui_components->set_rect != nullptr) {
+            (void)g_ui_components->set_rect(g_side_btns[i], side_btn_rect(i));
         }
     }
 }
@@ -87,6 +107,7 @@ void destroy_panel_controls_locked() {
         g_slot_btns[i] = nullptr;
         g_ops_btns[i] = nullptr;
     }
+    for (int i = 0; i < 2; ++i) g_side_btns[i] = nullptr;
     for (int i = 0; i < LIST_COLS_MAX; ++i) g_list_btns[i] = nullptr;
     g_auto_btn = nullptr;
     g_prev_btn = nullptr;
@@ -137,6 +158,21 @@ void create_panel_controls_locked() {
         &component_action_clicked, reinterpret_cast<void*>(402)};
     if (!contracts::succeeded(g_ui_components->arrow_button_create(&import_arrow, root, &g_ops_btns[2]))) {
         SB_UI_LOG("create controls failed at import arrow");
+        return;
+    }
+    // 屏幕最右列两按钮为纯命中按钮（文本空、DrawProc 手绘）：user 直接用 action id（403/404），
+    // 不走 kind+index 编码。
+    const auto create_side_hit = [&](UiRect rect, int action, void** out) {
+        const contracts::UiButtonDesc desc{rect, "", contracts::kUiTextButtonFontDefault,
+            &component_action_clicked, reinterpret_cast<void*>(static_cast<intptr_t>(action))};
+        return contracts::succeeded(g_ui_components->button_create(&desc, root, out)) && *out != nullptr;
+    };
+    if (!create_side_hit(side_btn_rect(0), 403, &g_side_btns[0])) {
+        SB_UI_LOG("create controls failed at side export button");
+        return;
+    }
+    if (!create_side_hit(side_btn_rect(1), 404, &g_side_btns[1])) {
+        SB_UI_LOG("create controls failed at side import button");
         return;
     }
     for (int i = 0; i < LIST_COLS_PER_PAGE; ++i) {
@@ -249,12 +285,14 @@ void panel_process_impl() {
     // 列表条目数/页码变化后在此把最新 rect 写回控件，使引擎侧的控件 rect 与计算 rect 一致
     // （命中/绘制另用 panel_abs_origin + 计算 rect，双保险）。
     sync_list_btn_rects_locked();
+    sync_side_btn_rects_locked();
     // 帧封装与 core.ui settings_panel_process 同款（ui_begin_frame 内含 SaveLCD/RestoreLCD）
     ui_begin_frame();
     root_decor_draw();
     sync_component_enabled_locked();
     for (int i = 0; i < 3; ++i) if (g_slot_btns[i]) slot_btn_draw(g_slot_btns[i]);
     for (int i = 0; i < 3; ++i) if (g_ops_btns[i]) ops_btn_draw(g_ops_btns[i]);
+    for (int i = 0; i < 2; ++i) if (g_side_btns[i]) side_btn_draw(g_side_btns[i]);
     for (int i = 0; i < LIST_COLS_PER_PAGE; ++i) if (g_list_btns[i]) list_btn_draw(g_list_btns[i]);
     if (g_auto_btn) auto_btn_draw(g_auto_btn);
     if (g_prev_btn) page_btn_draw(g_prev_btn);

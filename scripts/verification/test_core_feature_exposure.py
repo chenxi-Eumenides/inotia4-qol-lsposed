@@ -166,9 +166,15 @@ class CoreFeatureExposureTests(unittest.TestCase):
             ),
         )
         feature = FEATURE.findall(source)
-        self.assertEqual(len(feature), 1)
-        self.assertEqual(feature[0][:5], (
+        self.assertEqual(len(feature), 2)
+        by_id = {item[0]: item for item in feature}
+        self.assertIn("save_backup.export_crash_logs", by_id)
+        self.assertEqual(by_id["save_backup.open_manager"][:5], (
             "save_backup.open_manager", "1", "kTools", "kEntry", "存档备份",
+        ))
+        # 公共 Download 导出入口与存档备份同属公开目录：General 分类、entry、默认启用。
+        self.assertEqual(by_id["save_backup.export_crash_logs"][:5], (
+            "save_backup.export_crash_logs", "1", "kGeneral", "kEntry", "导出崩溃日志",
         ))
 
     def test_platform_controls_remain_public(self):

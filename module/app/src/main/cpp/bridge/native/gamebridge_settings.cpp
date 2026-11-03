@@ -4,6 +4,7 @@
 #if !QOL_KERNEL_ONLY
 using qol::features::core_ui::data_settings_ui_status_json;
 using qol::features::save_backup::data_savebackup_ui_inject;
+using qol::features::save_backup::data_savebackup_ui_refresh;
 using qol::features::save_backup::data_savebackup_ui_self_check;
 #endif
 
@@ -34,5 +35,15 @@ Java_com_inotia4_qol_NativeBridge_nativeSaveBackupUiSelfCheck(JNIEnv* env, jclas
     return kernel_only_result(env);
 #else
     return env->NewStringUTF(data_savebackup_ui_self_check().c_str());
+#endif
+}
+
+// SAF 导入落盘后的列表刷新（调用方 Kotlin 已 post 到主线程）。
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeSaveBackupUiRefresh(JNIEnv* env, jclass) {
+#if QOL_KERNEL_ONLY
+    return kernel_only_result(env);
+#else
+    return env->NewStringUTF(data_savebackup_ui_refresh().c_str());
 #endif
 }

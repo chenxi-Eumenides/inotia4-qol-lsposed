@@ -502,3 +502,15 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 4. 非主线程调用写副作用游戏函数；
 5. 崩溃 / `UnsatisfiedLinkError` / 未捕获异常冒泡到游戏进程；
 6. 证据只有静态审查、构建成功或 API 200，缺少可复现的行为观测。
+
+### 5.32 公共存储交换：导出到 Download / 自选文件导入（2026-11-03）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| Host 套件 | **155/158 PASS**：`ctest --test-dir module/app/src/main/cpp/tests/build` | 3 个失败与本次改动无关且在 HEAD 基线同样失败：`custom_recipe_tests`（`recipes[6]`）、`core_api_lifecycle_tests`（`api.enabled` 描述非空）、`item_handle_contract_redline`（cmake 脚本目标）。基线用 `git worktree add HEAD` 复跑确认 |
+| Host 定向断言 | **PASS**：`production_feature_facade_tests`（平台 owner `feature_count` 仍为 1、`read_desired` 不变）、`test_settings_catalog_abi.cpp`（`kHostSdkMinor=31`、`public_export` 偏移 848、`sizeof=856`）、`lifecycle_participant_tests` | HostSdk 尾字段追加沿用既有 minor 递增规则 |
+| 静态/构建 | **PASS**：`scripts/build-debug.sh` → `output/inotia4_qol_lsposed_debug_2611032150_1929b9ba93d0.apk`；`scripts/patch-apk.sh` 集成 4/4 成功 | 集成包 `output/Inotia4_C18L_v603_debug_lspatch.apk` 用于真机 |
+| 设置页 → 导出崩溃日志（c18 v603） | **PASS**：基础设置出现「导出崩溃日志」行；点击后生成 `/sdcard/Download/qol/qol-crash.log.prev`，日志 `public export logs ok: count=1 target=Download/qol/`；连续点击两次目标目录仍只有 1 个文件（按 `DISPLAY_NAME`+`RELATIVE_PATH` 截断重写，不产生 `(1)` 副本） | 源 `java-crash.log.prev` 本次不存在，属预期分支 |
+| 存档面板右侧列（c18 v603） | **PASS（渲染与命中）**：上/下箭头绘制在 root 之外的屏幕右侧留白（`x=1098`，逻辑宽 1408），选中备份后上箭头点击进入确认流程；下箭头拉起系统选择器 | 越出父矩形的绘制与命中已实测可行 |
+| 面板导出备份（确认框 → `Download/qol/backups/`） | **BLOCKED（设备侧既有缺陷）**：点击后 `UIPopupMsg_CreateYesNo` → `ControlButton_Create` → `LINKEDLIST_insertTail` 空指针崩溃。同一 APK 上既有「删除」确认框崩溃栈完全相同，且未开面板时游戏自身选项弹窗（`Scene_Init_POPUP_SC_OPTION_MMENU`）同样崩溃，属本机 popup 创建缺陷，不是本次改动引入 | 需在确认框正常的设备上复验；导出路径与设置页导出共用同一 Kotlin MediaStore 实现 |
+| 自选文件导入（c18 v603） | **PASS**：下箭头拉起 `ACTION_OPEN_DOCUMENT`，选择器起始目录为 `Download`（`EXTRA_INITIAL_URI`）；选择 `autosave_s0.qol.bak` 后流式拷贝+magic/版本/尾部 CRC32 校验通过，按去重规则落盘为 `autosave_s0_1.qol.bak`（14062 B），日志 `saf import ok: autosave_s0_1.qol.bak size=14062`，返回面板后列表刷新为 3 条 | 校验失败分支（非法 magic/CRC 不符/超 64MB）未做真机注入 |

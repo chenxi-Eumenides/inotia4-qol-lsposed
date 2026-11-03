@@ -135,6 +135,66 @@ void ops_btn_draw(void* ctrl) {
     }
 }
 
+// 屏幕最右列按钮可用性（绘制、点击处理共用同一口径）：
+// modal 确认框打开时一律禁用；导出需有选中备份（手动或自动），导入不要求选中项。
+// 纯命中按钮没有引擎 Enabled 位（contracts/ui.h 无普通 UiButtonDesc 的 set_enabled），
+// 所以点击处理里必须按同口径再判一次。
+bool side_btn_enabled(int index) {
+    if (g_dialog != DialogKind::kNone) return false;
+    if (index == 0) {
+        return selected_manual_backup() != nullptr || (g_selected_auto && g_auto_backup_valid);
+    }
+    return true;
+}
+
+// 屏幕最右列两按钮的手绘箭头（0=向上=导出到 Download，1=向下=从文件导入）：
+// 与删除按钮的 X 同款 ui->fill_rect 手绘（component_absolute_rect 取绝对坐标、2px 步进、
+// 启用 COLOR_ARROW_GOLD / 禁用 COLOR_TEXT_GRAY，禁用态只切颜色）。图形在按钮内水平垂直
+// 居中，高 0x28 ≈ 按钮 60%；竖直干 + 5 级台阶（每级 4px、半宽逐级 ±4px）逼近三角箭头尖，
+// 向下箭头为垂直镜像。
+void side_btn_draw(void* ctrl) {
+    if (ctrl == nullptr || g_ui_components == nullptr) return;
+    int index = -1;
+    for (int i = 0; i < 2; ++i) if (ctrl == g_side_btns[i]) index = i;
+    if (index < 0) return;
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui == nullptr || ui->fill_rect == nullptr) return;
+    const uint32_t color = side_btn_enabled(index) ? COLOR_ARROW_GOLD : COLOR_TEXT_GRAY;
+    const UiRect rect = component_absolute_rect(side_btn_rect(index));
+    constexpr int64_t kGraphicH = 0x28;
+    constexpr int64_t kHeadH = 0x14;
+    constexpr int64_t kShaftW = 0x0C;
+    const int64_t y0 = rect.y + (rect.h - kGraphicH) / 2;
+    const int64_t shaft_x = rect.x + (rect.w - kShaftW) / 2;
+    const int64_t cx = rect.x + rect.w / 2;
+    auto fill_slab = [&](int64_t x, int64_t y, int64_t w) {
+        (void)ui->fill_rect({x, y, w, 2}, color);
+    };
+    if (index == 0) {
+        // 向上：头部台阶自尖部向下逐级变宽，干从头部基线铺到图形底。
+        for (int64_t dy = 0; dy < kGraphicH; dy += 2) {
+            if (dy < kHeadH) {
+                const int64_t half = 0x04 + (dy / 4) * 0x04;
+                fill_slab(cx - half, y0 + dy, 2 * half);
+            } else {
+                fill_slab(shaft_x, y0 + dy, kShaftW);
+            }
+        }
+    } else {
+        // 向下（垂直镜像）：干从图形顶铺到头部基线，台阶自基线向下逐级收窄成尖。
+        for (int64_t dy = 0; dy < kGraphicH; dy += 2) {
+            if (dy < kGraphicH - kHeadH) {
+                fill_slab(shaft_x, y0 + dy, kShaftW);
+            } else {
+                const int64_t from_base = dy - (kGraphicH - kHeadH);
+                const int64_t level = (kHeadH - from_base - 1) / 4;
+                const int64_t half = 0x04 + level * 0x04;
+                fill_slab(cx - half, y0 + dy, 2 * half);
+            }
+        }
+    }
+}
+
 void list_btn_draw(void* ctrl) {
     if (ctrl == nullptr || g_ui_components == nullptr) return;
     int local = -1;

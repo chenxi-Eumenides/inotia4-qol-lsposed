@@ -2,7 +2,9 @@ package com.inotia4.qol
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
+import com.inotia4.qol.storage.HostActivityTracker
 import io.github.libxposed.api.XposedModuleInterface
 import java.io.File
 import java.lang.reflect.Method
@@ -82,12 +84,34 @@ internal object MainActivityStartupHook {
 
     fun onActivityCreated(activity: Activity, moduleApkPath: String) {
         ModuleErrorDialog.onActivityAvailable(activity)
+        HostActivityTracker.onActivityAvailable(activity)
         requestStartup(activity.applicationContext, moduleApkPath)
     }
 
     fun onActivityFocused(activity: Activity, moduleApkPath: String) {
         ModuleErrorDialog.onActivityAvailable(activity)
+        HostActivityTracker.onActivityAvailable(activity)
         requestStartup(activity.applicationContext, moduleApkPath)
+    }
+
+    /**
+     * 安装宿主 MainActivity.onActivityResult hook：SAF 文件选择器的结果回调入口。
+     * 与 [install] 用同一个 [TARGET_ACTIVITY] 解析，失败按相同风格落日志不影响其他 hook。
+     */
+    fun installActivityResult(param: XposedModuleInterface.PackageLoadedParam, hooker: (Method) -> Unit) {
+        try {
+            val activityClass = param.getDefaultClassLoader().loadClass(TARGET_ACTIVITY)
+            val onActivityResult = activityClass.getDeclaredMethod(
+                "onActivityResult",
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                Intent::class.java,
+            )
+            hooker(onActivityResult)
+            LogFile.info(LogDomain.PLATFORM, "MainActivity onActivityResult hook installed")
+        } catch (t: Throwable) {
+            LogFile.error(LogDomain.PLATFORM, "MainActivity onActivityResult hook failed", t)
+        }
     }
 
     private fun requestStartup(context: Context, moduleApkPath: String) {
