@@ -1026,5 +1026,5 @@
 
 * SaveItem 的 H-13 函数处置、caller 未覆盖边界，见
   [历史库存接入决策](../../archive/development/features/extension-bag/inventory-integration-decision-plan.md) §2.2、§3.2。
-* 规则编号以 [`rulebook.md`](rulebook.md) 的冻结 `R-01..R-55` 为准；本册只保留操作卡覆盖关系。
+* 规则编号以 [`rulebook.md`](rulebook.md) 现行规则为准；本册只保留操作卡覆盖关系。
 * `IsHavingEmptySlot` 的 `needed<=0` 返回 `1` 事实及源码/Host 锚，见库存册 §2.1；VM-02 只负责验收。
