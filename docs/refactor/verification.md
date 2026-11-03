@@ -473,6 +473,18 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | VM-BM-01：步长/轴向/指针 | **失效（历史，C18L v589，旧订阅设计）**：启动日志 `move speed subscription=1`、150% 推送 `step=12`；八向触屏 `steps=12/0`、选中 `(12,0)`、`rot=90`；轴向 `movement move axis ... step=12 ... applied=12`；45° `steps=8/8`；50% 全向 `steps=4/1`；关闭 `world_tuning` 推送 8、重新启用推送 12；持续观察无 30 帧回退；8 资源全 `live`，无 FATAL/SIGSEGV。 | 需按新 `step` 档位重测：设置页选档位后触屏日志 `steps/applied` 与档位一致、空 selection 回写 `"8"` 并落 `config.json`、插件停用后步长回 8、日志无订阅/60 帧重试痕迹。原日志与截图仅作历史追溯。 |
 | VM-BM-02：碰撞/回退/场景 | **NOT_ACCEPTED（未执行）** | 需真机覆盖撞墙、沿墙滑行、回滚失败恢复坐标、切图/拾取/动画、物理键盘、其他分辨率；Host/烟测不替代。 |
 
+### 5.31 `dialog_content_json` NPC 分支悬垂指针崩溃（2026-11-03；Host/静态/Debug/真机烟测通过，崩溃态真机未复现）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 现象 | 真机日志 `apk/logs/qol-crash-点击背包崩溃.log`：`SIGSEGV` `SEGV_MAPERR fault=0x3100000021`，线程 `GLThread 104`（游戏主循环），frame=4842；崩溃前 3 ms 是同帧 `extension_bag projection_controller.cpp:111 write_set bag=0`（背包绘制首帧）。 | 设备 nubia NX789J / Android 16，模块 1.0.1(195)，游戏 C18L v603。与背包数据无关，背包打开只是让残留 NPC 数据所在内存被复用。 |
+| 根因 | 崩溃 PC 落在 `json_escape`（`game_json.cpp:19` `ldrb w1,[x20]`，x20=0x3100000021），返回地址在 `dialog_content_json` NPC 槽分支（`ui_state.cpp:848/852`）：`slots + i*16 + 8` 读到的文本指针是 `0x3100000021`。该分支原先只按 `UICHOICE_nItemCount`/`NPCTASKLIST_nCount` 判定，不看弹窗栈顶；计数是上一段 NPC 对话残留，槽数组（`UINpc_InitNPC` 按 nCount 分配）已释放/复用。 | 与 v0.4.48 的 `NPCTASKLIST_pDescText` 悬垂指针同类。 |
+| 修复 | 1) NPC 分支仅在栈顶为 `F_PANEL_NPC_ENTER`/`F_PANEL_CHOICE_ENTER` 或栈空数据态时进入，面板打开期间改走面板分支；2) `slots`、每个槽 `+8` 文本、`UICHOICE` 选项文本、`speaker`、`desc` 解引用前均经 `game_memory_accessible` 校验，不可读按空处理；3) `test_ui_state_dialog.cpp` 增加 7 组回归用例（面板态拦截、悬垂槽/文本/desc/speaker/槽数组过滤、choice 过滤）。 | `displayed` 语义、`npc`/`panel`/`none` 类型与字段名不变。 |
+| Host | **PASS**：`ui_state_dialog_tests` `pass=108 fail=0`；回退 `ui_state.cpp` 后同一用例 `exit=139`（SIGSEGV），证明覆盖崩溃路径。全量 host 158 项 155 通过，3 项失败（`custom_recipe_tests`/`item_handle_contract_redline`/`core_api_lifecycle_tests`），已在干净工作区复跑确认同样失败，与 §5.30 记录的既有基线一致。 | 命令：`cd module/app/src/main/cpp/tests && cmake --build build -j8 && ctest --test-dir build --output-on-failure` |
+| 静态/Debug | **PASS**：`uv run python scripts/maintenance/check_arch.py` 全部通过；`scripts/build-debug.sh` 成功，APK `output/inotia4_qol_lsposed_debug_2611031756_de04034e9a91.apk`，SHA-256 `de04034e9a912ced8ced8e54a03ec9ebecc679ad7c322f8e793b481123793b93`。 | `scripts/patch-apk.sh` 重新生成 4 个 debug 集成包；release 集成包已回填 `output/`。 |
+| 真机烟测（C18L v603，Phh-Treble Android 12） | **PASS（烟测）**：模块 identity sha256=`de04034e…`；`POST /api/ui/start_interact` 打开融合器对话，三个 options 标签正确；`dialog/select close` 与 `close_panel` 关闭后 `/api/ui/state`=`world`；`POST /api/ui/open_panel inventory` 后 `panel_inventory`，进程存活，`qol-crash.log` 0 字节。 | 日志 `.tmp/bagcrash/{qol-device.log,qol-device-after.log,patch.log}`。 |
+| 崩溃态真机复现 | **BLOCKED（该设备不可复现）**：该 rig 关闭 NPC 对话后 `NPCTASKLIST_nCount` 归零，造不出「面板打开 + 残留计数」状态；崩溃触发点依赖用户存档/会话状态。 | 需在发生崩溃的 nubia 手机上按同一路径回归（先与 NPC 对话，再开背包）；取得该证据前崩溃面按 NOT_ACCEPTED 计。 |
+
 ## 6. 待建立
 
 | 阶段 | 卡片 | 说明 |

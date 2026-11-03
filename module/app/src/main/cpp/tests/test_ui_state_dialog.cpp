@@ -25,6 +25,23 @@ UinpcQuestButtonOkExeFn fn_uinpc_quest_button_ok_exe = nullptr;
 UiSetPopupProcessInfoFn fn_ui_set_popup_process_info = nullptr;
 UinpcExeTaskFn fn_uinpc_exe_current_task = nullptr;
 GamestateSetStateFn fn_gamestate_set_state = nullptr;
+GetNameFn fn_get_name = nullptr;
+
+namespace {
+
+constexpr size_t kFakeGameSize = 0x800000;
+
+}  // namespace
+
+// 仅认可测试 mmap 出的假 libgame 区间可读，其余地址（含悬垂/垃圾指针）一律不可读，
+// 与生产 game_memory_accessible 的 /proc/self/maps 判定语义一致。
+bool game_memory_accessible(const void* address, size_t size, char permission) {
+    (void)permission;
+    const uintptr_t start = g_base;
+    const uintptr_t addr = reinterpret_cast<uintptr_t>(address);
+    return address != nullptr && size > 0 && addr >= start && size <= kFakeGameSize &&
+           addr - start <= kFakeGameSize - size;
+}
 
 namespace {
 int g_pass = 0;
@@ -89,6 +106,7 @@ bool game_in_world() { return g_in_world != 0; }
 namespace qol::game {
 bool story_active() { return g_story != 0; }
 SaveWriteResult save_game() { return {}; }
+std::string story_json() { return "{}"; }
 }
 
 std::string op_err(const char* msg) { return std::string("{\"ok\":false,\"error\":\"") + msg + "\"}"; }
@@ -198,9 +216,100 @@ void test_ui_write_frame_steps(uint32_t* stack_count, uintptr_t* top_enter,
     CHECK(g_popup_pop_calls == pop_calls_before_legacy + 1);
 }
 
+char* fake_name_bad(void*) {
+    return reinterpret_cast<char*>(static_cast<uintptr_t>(0x3100000021));
+}
+char* fake_name_good(void*) { return reinterpret_cast<char*>(g_base + 0x3f1200); }
+
+// NPC 对话数据（UICHOICE / NPCTASKLIST）在对话结束后属于悬垂数据：面板打开期间不得进入
+// npc 分支，各文本指针解引用前必须校验可读（真机 c18 v603 的背包崩溃回归）。
+void test_dialog_content_pointer_guards(uint8_t* popup_on, uint32_t* stack_count,
+                                        uintptr_t* top_enter) {
+    using namespace qol::game;
+    *popup_on = 0;  // 关掉 UIPopupMsg，走 world/NPC 分支
+
+    auto* slot_data = reinterpret_cast<uint8_t*>(g_base + 0x3f0000);
+    char* text_aaa = reinterpret_cast<char*>(g_base + 0x3f1000);
+    char* text_bbb = reinterpret_cast<char*>(g_base + 0x3f1100);
+    char* text_speaker = reinterpret_cast<char*>(g_base + 0x3f1200);
+    std::strcpy(text_aaa, "AAA");
+    std::strcpy(text_bbb, "BBB");
+    std::strcpy(text_speaker, "S2");
+    char* const dangling = reinterpret_cast<char*>(static_cast<uintptr_t>(0x3100000021));
+
+    *reinterpret_cast<void**>(g_base + G_NPCTASKLIST_PDATA_VMA) = slot_data;
+    *reinterpret_cast<uint8_t*>(g_base + G_NPCTASKLIST_COUNT_VMA) = 2;
+    *reinterpret_cast<uint8_t*>(g_base + G_UICHOICE_COUNT_VMA) = 0;
+    *reinterpret_cast<char**>(slot_data + 0 * 16 + 8) = text_aaa;
+    *reinterpret_cast<char**>(slot_data + 1 * 16 + 8) = dangling;
+    *reinterpret_cast<char**>(g_base + G_NPCTASKLIST_DESCTEXT_VMA) = dangling;
+    *reinterpret_cast<void**>(g_base + G_PLAYER_NEAR_NPC_VMA) = nullptr;
+
+    // 1) 背包面板打开：残留的 NPC 计数不得再走 npc 分支（本次真机崩溃场景）。
+    *stack_count = 1;
+    *top_enter = g_base + F_PANEL_INVENTORY_ENTER;
+    const std::string panel = dialog_content_json();
+    CHECK(panel.rfind("{\"type\":\"inventory\"", 0) == 0);
+    CHECK(panel.find("\"type\":\"npc\"") == std::string::npos);
+
+    // 2) 栈空数据态：仍输出 npc，但悬垂槽文本与 desc 被过滤，不崩溃。
+    *stack_count = 0;
+    const std::string residual = dialog_content_json();
+    CHECK(residual.rfind("{\"type\":\"npc\"", 0) == 0);
+    CHECK(residual.find("\"displayed\":false") != std::string::npos);
+    CHECK(residual.find("\"label\":\"AAA\"") != std::string::npos);
+    CHECK(residual.find("\"id\":\"1\",\"label\":\"\"") != std::string::npos);
+    CHECK(residual.find("\"text\":") == std::string::npos);
+    CHECK(residual.find("\"id\":\"close\"") != std::string::npos);
+
+    // 3) NPC 对话面板：正常输出且 displayed=true。
+    *stack_count = 1;
+    *top_enter = g_base + F_PANEL_NPC_ENTER;
+    const std::string npc = dialog_content_json();
+    CHECK(npc.find("\"displayed\":true") != std::string::npos);
+    CHECK(npc.find("\"label\":\"AAA\"") != std::string::npos);
+
+    // 4) 槽数组本身不可读：整段按无选项处理，只保留 close。
+    *reinterpret_cast<void**>(g_base + G_NPCTASKLIST_PDATA_VMA) = dangling;
+    const std::string no_slots = dialog_content_json();
+    CHECK(no_slots.find("\"label\":\"AAA\"") == std::string::npos);
+    CHECK(no_slots.find("\"id\":\"close\"") != std::string::npos);
+    *reinterpret_cast<void**>(g_base + G_NPCTASKLIST_PDATA_VMA) = slot_data;
+
+    // 5) UICHOICE 选项文本同规则逐项校验。
+    *reinterpret_cast<uint8_t*>(g_base + G_UICHOICE_COUNT_VMA) = 2;
+    auto** choice_texts = reinterpret_cast<char**>(g_base + G_UICHOICE_ITEMTEXT_VMA);
+    choice_texts[0] = dangling;
+    choice_texts[1] = text_bbb;
+    *top_enter = g_base + F_PANEL_CHOICE_ENTER;
+    const std::string choice = dialog_content_json();
+    CHECK(choice.find("\"id\":\"0\",\"label\":\"\"") != std::string::npos);
+    CHECK(choice.find("\"id\":\"1\",\"label\":\"BBB\"") != std::string::npos);
+    *reinterpret_cast<uint8_t*>(g_base + G_UICHOICE_COUNT_VMA) = 0;
+
+    // 6) speaker 指针不可读时不输出 speaker，可读时正常输出。
+    *reinterpret_cast<void**>(g_base + G_PLAYER_NEAR_NPC_VMA) = text_bbb;
+    *top_enter = g_base + F_PANEL_NPC_ENTER;
+    fn_get_name = &fake_name_bad;
+    CHECK(dialog_content_json().find("\"speaker\":") == std::string::npos);
+    fn_get_name = &fake_name_good;
+    CHECK(dialog_content_json().find("\"speaker\":\"S2\"") != std::string::npos);
+    fn_get_name = nullptr;
+    *reinterpret_cast<void**>(g_base + G_PLAYER_NEAR_NPC_VMA) = nullptr;
+
+    // 7) desc 可读时输出 text。
+    *reinterpret_cast<char**>(g_base + G_NPCTASKLIST_DESCTEXT_VMA) = text_bbb;
+    CHECK(dialog_content_json().find("\"text\":\"BBB\"") != std::string::npos);
+    *reinterpret_cast<char**>(g_base + G_NPCTASKLIST_DESCTEXT_VMA) = nullptr;
+
+    *stack_count = 1;
+    *top_enter = g_base + F_PANEL_INVENTORY_ENTER;
+    *popup_on = 1;
+}
+
 int main() {
     using namespace qol::game;
-    auto* base = static_cast<uint8_t*>(mmap(nullptr, 0x400000, PROT_READ | PROT_WRITE | PROT_EXEC,
+    auto* base = static_cast<uint8_t*>(mmap(nullptr, kFakeGameSize, PROT_READ | PROT_WRITE | PROT_EXEC,
                                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
     CHECK(base != MAP_FAILED);
     if (base == MAP_FAILED) return 1;
@@ -267,8 +376,9 @@ int main() {
                 sizeof(skills_enter));
     *reinterpret_cast<uint8_t**>(g_base + G_POPUP_STATE_LIST_GOT_VMA) = state_list;
     test_ui_write_frame_steps(&stack.count, &entry.enter, state_list);
+    test_dialog_content_pointer_guards(&popup_on, &stack.count, &entry.enter);
 
-    munmap(base, 0x400000);
+    munmap(base, kFakeGameSize);
     std::printf("ui_state_dialog: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

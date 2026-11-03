@@ -750,6 +750,18 @@ std::string npc_dialog_options_json() {
     return out;
 }
 
+namespace {
+
+constexpr size_t kNpcTaskSlotSize = 16;
+
+// 游戏侧文本指针（NPC 槽 +8、NPCTASKLIST_pDescText、fn_get_name 返回值）在对话结束后
+// 会随 NPC 面板释放/复用；解引用前必须确认可读，否则游戏主循环线程直接 SIGSEGV。
+bool game_text_readable(const char* text) {
+    return text != nullptr && game_memory_accessible(text, 1, 'r');
+}
+
+}  // namespace
+
 std::string dialog_content_json() {
     // 弹窗最优先（v0.4.39 修复）：剧情段结束弹任务简报时 gs=1 残留但 UIPopupMsg 激活，
     // 若 story 优先会遮蔽弹窗 → select ok 无法确认任务简报。弹窗会阻塞一切下层交互。
@@ -814,19 +826,25 @@ std::string dialog_content_json() {
                "{\"id\":\"close\",\"label\":\"关闭\"}]}";
         return out;
     }
-    if (choice_count > 0 || task_count > 0) {
+    // NPC 对话数据（UICHOICE / NPCTASKLIST）的生命期归游戏：槽数组由 UINpc_InitNPC 按当次
+    // 任务数分配，面板关闭后释放或复用，而 nCount 可能残留非 0。玩家此时可能已打开背包等
+    // 面板；若仍按 NPC 分支裸读槽数组，就会解引用悬垂指针在主循环线程上崩溃（真机 c18 v603：
+    // SIGSEGV @ json_escape，槽 +8 读到 0x3100000021）。因此仅在「栈顶就是对话类面板」或
+    // 「栈空的数据态（start_interact 前的数据已建立）」下进入，且逐项校验指针可读。
+    const bool npc_dialog_top = top_vma == F_PANEL_NPC_ENTER || top_vma == F_PANEL_CHOICE_ENTER;
+    const bool npc_data_without_panel = top_vma == 0;
+    if ((npc_dialog_top || npc_data_without_panel) && (choice_count > 0 || task_count > 0)) {
         std::string out = "{\"type\":\"npc\"";
         // displayed：区分「UI 对话框已显示」（popup 栈顶 npc 面板）vs「数据已建立但未渲染」
         // （如 start_interact 前的数据态、路过不可交互装饰物残留的 NEAR_NPC 数据）。
-        out += ",\"displayed\":" +
-               std::string(qol::game::popup_top_vma() == F_PANEL_NPC_ENTER ? "true" : "false");
+        out += ",\"displayed\":" + std::string(top_vma == F_PANEL_NPC_ENTER ? "true" : "false");
         void* near_npc = *reinterpret_cast<void**>(g_base + G_PLAYER_NEAR_NPC_VMA);
         if (near_npc != nullptr && fn_get_name != nullptr) {
             char* nm = fn_get_name(near_npc);
-            if (nm != nullptr) out += ",\"speaker\":\"" + json_escape(nm) + "\"";
+            if (game_text_readable(nm)) out += ",\"speaker\":\"" + json_escape(nm) + "\"";
         }
         char* desc = *reinterpret_cast<char**>(g_base + G_NPCTASKLIST_DESCTEXT_VMA);
-        if (desc != nullptr && desc[0] != 0) {
+        if (game_text_readable(desc) && desc[0] != 0) {
             out += ",\"text\":\"" + json_escape(desc) + "\"";
         }
         out += ",\"options\":[";
@@ -835,6 +853,7 @@ std::string dialog_content_json() {
             for (int i = 0; i < choice_count && i < 6; ++i) {
                 if (i > 0) out += ",";
                 char* t = reinterpret_cast<char*>(texts[i]);
+                if (!game_text_readable(t)) t = nullptr;
                 out += "{\"id\":\"" + std::to_string(i) + "\",\"label\":" +
                        (t != nullptr ? "\"" + json_escape(t) + "\"" : "\"\"") + "}";
             }
@@ -842,11 +861,18 @@ std::string dialog_content_json() {
             // NPC 选项列表（NPCTASKLIST 槽数组：32×16B，+0 type/+2 id/+8 文本指针）。
             // 选择框型 NPC（如商人）选项在此，非线性 next（v0.6.6 修复：原误判为 next）。
             void* slots = *reinterpret_cast<void**>(g_base + G_NPCTASKLIST_PDATA_VMA);
+            const int slot_limit = task_count < 32 ? static_cast<int>(task_count) : 32;
+            // 计数与槽数组可能不同步：整段不可读时按无选项处理，逐项再校验 +8 文本指针。
+            const bool slots_readable =
+                slots != nullptr &&
+                game_memory_accessible(slots, static_cast<size_t>(slot_limit) * kNpcTaskSlotSize, 'r');
             bool first = true;
-            for (int i = 0; i < task_count && i < 32; ++i) {
-                char* label = slots != nullptr
-                    ? *reinterpret_cast<char**>(reinterpret_cast<uint8_t*>(slots) + i * 16 + 8)
+            for (int i = 0; i < slot_limit; ++i) {
+                char* label = slots_readable
+                    ? *reinterpret_cast<char**>(reinterpret_cast<uint8_t*>(slots) +
+                                                i * kNpcTaskSlotSize + 8)
                     : nullptr;
+                if (!game_text_readable(label)) label = nullptr;
                 if (!first) out += ",";
                 out += "{\"id\":\"" + std::to_string(i) + "\",\"label\":" +
                        (label != nullptr ? "\"" + json_escape(label) + "\"" : "\"\"") + "}";
