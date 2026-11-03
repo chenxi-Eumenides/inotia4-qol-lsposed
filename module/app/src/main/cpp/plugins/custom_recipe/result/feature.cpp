@@ -314,8 +314,8 @@ QolResult tier_up_cost_inputs_for_item(qol::contracts::QolItemHandle item,
     if (out_quality_tier == nullptr || out_attribute_tier == nullptr) {
         return recipe_error(kQolErrInvalidArgument, "null tier-up cost input output");
     }
-    *out_quality_tier = 0;
-    *out_attribute_tier = 0;
+    *out_quality_tier = -1;
+    *out_attribute_tier = -1;
     uint16_t category = 0;
     bool is_jewel = false;
     QolResult result = query_jewel_fact(item, &category, &is_jewel);
@@ -329,7 +329,7 @@ QolResult tier_up_cost_inputs_for_item(qol::contracts::QolItemHandle item,
         if (result.ok != kQolOk) return result;
         *out_attribute_tier =
             ::custom_recipe::attribute_tier_from_quality_level(quality.quality.level);
-        if (*out_quality_tier < 1 || *out_attribute_tier < 1) {
+        if (*out_quality_tier < 0 || *out_attribute_tier < 0) {
             return recipe_error(kQolErrNotReady, "jewel tier-up cost inputs unavailable");
         }
         return contracts::ok();
@@ -381,7 +381,7 @@ QolResult tier_up_cost_inputs_for_item(qol::contracts::QolItemHandle item,
         return recipe_error(kQolErrNotFound, "no upgradable equipment affix");
     }
     *out_attribute_tier = ::custom_recipe::attribute_tier_from_quality_level(min_level);
-    if (*out_quality_tier < 1 || *out_attribute_tier < 1) {
+    if (*out_quality_tier < 0 || *out_attribute_tier < 0) {
         return recipe_error(kQolErrNotReady, "equipment tier-up cost inputs unavailable");
     }
     return contracts::ok();
@@ -431,8 +431,8 @@ struct MaterialNeedPlan {
 // 先完整验证需求，再由调用方依序写入 stuffList。
 QolResult prepare_material_needs(const ::custom_recipe::Def* def, int quality_tier,
                                  int attribute_tier, MaterialNeedPlan* out_plan) {
-    if (def == nullptr || out_plan == nullptr || quality_tier < 1 || quality_tier > 5 ||
-        attribute_tier < 1 || attribute_tier > 5 ||
+    if (def == nullptr || out_plan == nullptr || quality_tier < 0 || quality_tier > 4 ||
+        attribute_tier < 0 || attribute_tier > 4 ||
         def->count_rule != ::custom_recipe::CountRule::kQualityAndAttributeTier ||
         def->materials == nullptr || def->material_count == 0 || def->material_count > 8) {
         return recipe_error(kQolErrInvalidArgument, "invalid tier-up material definition");
@@ -1716,7 +1716,7 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
         if (candidates[i].level < min_level) min_level = candidates[i].level;
     }
     const int attribute_tier = ::custom_recipe::attribute_tier_from_quality_level(min_level);
-    if (quality_tier < 1 || attribute_tier < 1) return 1;
+    if (quality_tier < 0 || attribute_tier < 0) return 1;
     if (g_write_port == nullptr || g_write_port->write_native_option_value == nullptr) {
         log_message(2, "make item aborted: native option writer unavailable");
         return 1;

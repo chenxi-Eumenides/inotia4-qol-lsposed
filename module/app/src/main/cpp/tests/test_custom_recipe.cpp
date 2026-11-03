@@ -477,31 +477,31 @@ static void test_inject_bytes() {
 // §5.1(5) 材料需求数量：品质档位/属性等阶映射 + max(0, 品质+等阶 − F) 边界与单调性。
 // ---------------------------------------------------------------------------
 static void test_material_count() {
-    // 类别 → 品质档位：28=低级宝石 … 32=混沌宝石；越界一律 0（调用方据此放弃改写需求数）。
-    CHECK(cr::jewel_quality_tier_from_category(28) == 1);
-    CHECK(cr::jewel_quality_tier_from_category(29) == 2);
-    CHECK(cr::jewel_quality_tier_from_category(30) == 3);
-    CHECK(cr::jewel_quality_tier_from_category(31) == 4);
-    CHECK(cr::jewel_quality_tier_from_category(32) == 5);
-    CHECK(cr::jewel_quality_tier_from_category(27) == 0);
-    CHECK(cr::jewel_quality_tier_from_category(33) == 0);
-    CHECK(cr::jewel_quality_tier_from_category(0) == 0);
-    CHECK(cr::jewel_quality_tier_from_category(-1) == 0);
+    // 类别 → 品质档位：28=低级宝石 … 32=混沌宝石；越界一律 -1（调用方据此放弃改写需求数）。
+    CHECK(cr::jewel_quality_tier_from_category(28) == 0);
+    CHECK(cr::jewel_quality_tier_from_category(29) == 1);
+    CHECK(cr::jewel_quality_tier_from_category(30) == 2);
+    CHECK(cr::jewel_quality_tier_from_category(31) == 3);
+    CHECK(cr::jewel_quality_tier_from_category(32) == 4);
+    CHECK(cr::jewel_quality_tier_from_category(27) == -1);
+    CHECK(cr::jewel_quality_tier_from_category(33) == -1);
+    CHECK(cr::jewel_quality_tier_from_category(0) == -1);
+    CHECK(cr::jewel_quality_tier_from_category(-1) == -1);
     CHECK(cr::kJewelCategoryFirst == 28 && cr::kJewelCategoryLast == 32);
 
-    CHECK(cr::equipment_quality_tier_from_rarity(-1) == 0);
-    CHECK(cr::equipment_quality_tier_from_rarity(0) == 1);
-    CHECK(cr::equipment_quality_tier_from_rarity(4) == 5);
-    CHECK(cr::equipment_quality_tier_from_rarity(5) == 0);
+    CHECK(cr::equipment_quality_tier_from_rarity(-1) == -1);
+    CHECK(cr::equipment_quality_tier_from_rarity(0) == 0);
+    CHECK(cr::equipment_quality_tier_from_rarity(4) == 4);
+    CHECK(cr::equipment_quality_tier_from_rarity(5) == -1);
 
-    // 属性等阶 = quality.level + 1：0%→1 … 90%→5；金档（5）或越界 → 0（不可升阶）。
-    CHECK(cr::attribute_tier_from_quality_level(0) == 1);
-    CHECK(cr::attribute_tier_from_quality_level(1) == 2);
-    CHECK(cr::attribute_tier_from_quality_level(2) == 3);
-    CHECK(cr::attribute_tier_from_quality_level(3) == 4);
-    CHECK(cr::attribute_tier_from_quality_level(4) == 5);
-    CHECK(cr::attribute_tier_from_quality_level(5) == 0);
-    CHECK(cr::attribute_tier_from_quality_level(-1) == 0);
+    // 属性等阶 = quality.level：0%→0 … 90%→4；金档（5）或越界 → -1（不可升阶）。
+    CHECK(cr::attribute_tier_from_quality_level(0) == 0);
+    CHECK(cr::attribute_tier_from_quality_level(1) == 1);
+    CHECK(cr::attribute_tier_from_quality_level(2) == 2);
+    CHECK(cr::attribute_tier_from_quality_level(3) == 3);
+    CHECK(cr::attribute_tier_from_quality_level(4) == 4);
+    CHECK(cr::attribute_tier_from_quality_level(5) == -1);
+    CHECK(cr::attribute_tier_from_quality_level(-1) == -1);
 
     const cr::AttributeRange range{0, 100};
     CHECK(cr::affix_upgradable(kQolOk, 0, range));
@@ -511,54 +511,53 @@ static void test_material_count() {
     CHECK(!cr::affix_upgradable(kQolOk, 1, {10, 10}));
 
     // 满级 105 → 0（95 级起全部组合免费）；超上限同样 0，不得为负。
-    for (int cat = cr::kJewelCategoryFirst; cat <= cr::kJewelCategoryLast; ++cat) {
-        const int quality_tier = cr::jewel_quality_tier_from_category(cat);
-        CHECK(cr::material_count_for(1, quality_tier, 105) == 0);
-        CHECK(cr::material_count_for(3, quality_tier, 105) == 0);
+    for (int q = 0; q <= 4; ++q) {
+        CHECK(cr::material_count_for(0, q, 105) == 0);
+        CHECK(cr::material_count_for(2, q, 105) == 0);
     }
-    CHECK(cr::material_count_for(1, 5, 200) == 0);
+    CHECK(cr::material_count_for(0, 4, 200) == 0);
 
-    // 零费等级边界：最低组合 (1,1) 在 25 级免费、24 级仍为 1；最高组合 (5,5) 在 95 级免费、94 级仍为 1。
-    CHECK(cr::material_count_for(1, 1, 25) == 0);
-    CHECK(cr::material_count_for(1, 1, 24) == 1);
-    CHECK(cr::material_count_for(5, 5, 95) == 0);
-    CHECK(cr::material_count_for(5, 5, 94) == 1);
+    // 零费等级边界：最低组合 (0,0) 在 25 级免费、24 级仍为 1；最高组合 (4,4) 在 95 级免费、94 级仍为 1。
+    CHECK(cr::material_count_for(0, 0, 25) == 0);
+    CHECK(cr::material_count_for(0, 0, 24) == 1);
+    CHECK(cr::material_count_for(4, 4, 95) == 0);
+    CHECK(cr::material_count_for(4, 4, 94) == 1);
     // 自升组合 (g,g) 的零费等级随档位升高：25 / 43 / 60 / 78 / 95，且前一级为 1。
-    CHECK(cr::material_count_for(2, 2, 43) == 0);
-    CHECK(cr::material_count_for(2, 2, 42) == 1);
-    CHECK(cr::material_count_for(3, 3, 60) == 0);
-    CHECK(cr::material_count_for(3, 3, 59) == 1);
-    CHECK(cr::material_count_for(4, 4, 78) == 0);
-    CHECK(cr::material_count_for(4, 4, 77) == 1);
+    CHECK(cr::material_count_for(1, 1, 43) == 0);
+    CHECK(cr::material_count_for(1, 1, 42) == 1);
+    CHECK(cr::material_count_for(2, 2, 60) == 0);
+    CHECK(cr::material_count_for(2, 2, 59) == 1);
+    CHECK(cr::material_count_for(3, 3, 78) == 0);
+    CHECK(cr::material_count_for(3, 3, 77) == 1);
 
-    // 45 级 F=4：高级品质(3)+紫等阶(5) → 4 瓶；顶级品质(4)+灰等阶(1) → 1 瓶。
-    CHECK(cr::material_count_for(3, 5, 45) == 4);
-    CHECK(cr::material_count_for(4, 1, 45) == 1);
+    // 45 级 F=2：高级品质(2)+紫等阶(4) → 4 瓶；顶级品质(3)+灰等阶(0) → 1 瓶。
+    CHECK(cr::material_count_for(2, 4, 45) == 4);
+    CHECK(cr::material_count_for(3, 0, 45) == 1);
 
     // 低等级折扣为负：消耗 = 品质+属性等阶+|F|；负等级钳到 0，与 level=0 同值。
-    for (int g = 1; g <= 5; ++g) {
-        CHECK(cr::material_count_for(1, g, 0) == g + 2);
-        CHECK(cr::material_count_for(1, g, -5) == g + 2);
+    for (int a = 0; a <= 4; ++a) {
+        CHECK(cr::material_count_for(0, a, 0) == a + 3);
+        CHECK(cr::material_count_for(0, a, -5) == a + 3);
     }
-    CHECK(cr::material_count_for(2, 1, 0) == 4);  // 底价 品质+属性等阶 作加数
+    CHECK(cr::material_count_for(1, 0, 0) == 4);  // 底价 品质+属性等阶 作加数
 
     // 同一 level 下不同档位严格 +1 递增、非零两两互异：25 级 [0,1,2,3,4]、43 级 [0,0,0,1,2]。
-    for (int g = 1; g <= 5; ++g) {
-        CHECK(cr::material_count_for(1, g, 25) == g - 1);
-        CHECK(cr::material_count_for(1, g, 43) == (g >= 4 ? g - 3 : 0));
+    for (int a = 0; a <= 4; ++a) {
+        CHECK(cr::material_count_for(0, a, 25) == a);
+        CHECK(cr::material_count_for(0, a, 43) == (a >= 3 ? a - 2 : 0));
     }
 
-    // 非法输入 → 0（调用方据此保持原需求数，不会变成免费合成）。
-    CHECK(cr::material_count_for(0, 5, 0) == 0);
-    CHECK(cr::material_count_for(-1, 1, 0) == 0);
-    CHECK(cr::material_count_for(1, 0, 0) == 0);
+    // 非法输入 → -1（调用方据此保持原需求数，不会变成免费合成）。
+    CHECK(cr::material_count_for(-1, 0, 0) == -1);
+    CHECK(cr::material_count_for(0, 5, 0) == -1);
+    CHECK(cr::material_count_for(5, 0, 0) == -1);
 
     // 对等级单调不增，且始终非负，最终归 0。
-    for (int g = 1; g <= 5; ++g) {
-        int prev = cr::material_count_for(1, g, 0);
-        CHECK(prev == g + 2);
+    for (int a = 0; a <= 4; ++a) {
+        int prev = cr::material_count_for(0, a, 0);
+        CHECK(prev == a + 3);
         for (int lv = 1; lv <= cr::kMaxCharacterLevel; ++lv) {
-            const int cur = cr::material_count_for(1, g, lv);
+            const int cur = cr::material_count_for(0, a, lv);
             CHECK(cur <= prev);
             CHECK(cur >= 0);
             prev = cur;

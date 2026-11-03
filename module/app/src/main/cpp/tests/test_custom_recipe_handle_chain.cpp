@@ -1321,9 +1321,9 @@ void test_equipment_tier_up() {
     assert(g_native_option_written_value >= 60 && g_native_option_written_value <= 74);
     assert(g_jewel_write_calls == 0);  // 不写宝石词条
     assert(g_stuff_need_calls > 0);
-    // 稀有度 2 → 品质 3；可升阶词条最低 level=1 → 等阶 2；50 级 F=4 → 1 瓶。
+    // 稀有度 2 → 品质 2；最低可升阶 level 1 → 等阶 1；50 级 F=2 → 1 瓶。
     assert(g_stuff_need_counts[0] ==
-           custom_recipe::material_count_for(3, 2, g_character_level));
+           custom_recipe::material_count_for(2, 1, g_character_level));
     assert(g_stuff_need_sequence[0] > 0);
     assert(g_native_option_write_sequence > g_stuff_need_sequence[0]);
 

@@ -167,13 +167,13 @@ QolResult compute_tier_up_value(Tier current_tier, AttributeRange range,
 }
 
 int jewel_quality_tier_from_category(int category) {
-    if (category < kJewelCategoryFirst || category > kJewelCategoryLast) return 0;
-    return category - kJewelCategoryFirst + 1;
+    if (category < kJewelCategoryFirst || category > kJewelCategoryLast) return -1;
+    return category - kJewelCategoryFirst;
 }
 
 int equipment_quality_tier_from_rarity(int rarity) {
-    if (rarity < 0 || rarity > 4) return 0;
-    return rarity + 1;
+    if (rarity < 0 || rarity > 4) return -1;
+    return rarity;
 }
 
 bool affix_upgradable(int32_t status, int32_t level, AttributeRange range) {
@@ -181,35 +181,29 @@ bool affix_upgradable(int32_t status, int32_t level, AttributeRange range) {
 }
 
 int attribute_tier_from_quality_level(int quality_level) {
-    // 0..4 → 1..5；5 为金档（不可升阶）、越界为非法输入，一律 0 由调用方 fail-closed。
-    if (quality_level < 0 || quality_level > 4) return 0;
-    return quality_level + 1;
+    // 0..4 → 0..4；5 为金档（不可升阶）、越界为非法输入，一律 -1 由调用方 fail-closed。
+    if (quality_level < 0 || quality_level > 4) return -1;
+    return quality_level;
 }
 
 int material_count_for(int quality_tier, int attribute_tier, int character_level) {
-    // 零费等级端点：kFreeStartLevel = 最低组合（品质1+等阶1 = 2）恰好免费的等级；
-    // kFreeFullLevel = 最高组合（品质5+等阶5 = 10）恰好免费的等级。
+    // 品质/等阶均为 0..4，和的范围 [0,8]。
+    // F 随角色等级线性增长：25 级为 0（最低组合免费），95 级为 8（最高组合免费）。
     const int kFreeStartLevel = 25;
     const int kFreeFullLevel = 95;
-    // 折扣额度端点：kFreeStartLevel 级时折扣 = 最低组合和（2）、kFreeFullLevel 级时 = 最高组合和（10）。
-    // 改动阈值时须与品质+等阶的和范围 [2,10] 两端对齐，否则端点组合的零费等级会偏离预期。
-    const int kDiscountAtStart = 2;
-    const int kDiscountAtFull = 10;
+    const int kMaxTierSum = 8;
 
-    if (quality_tier < 1 || quality_tier > 5 || attribute_tier < 1 || attribute_tier > 5) return 0;
+    if (quality_tier < 0 || quality_tier > 4 || attribute_tier < 0 || attribute_tier > 4) return -1;
     int lv = character_level;
     if (lv < 0) lv = 0;
     if (lv > kMaxCharacterLevel) lv = kMaxCharacterLevel;
 
-    // 消耗 = max(0, quality_tier + attribute_tier − F)，
-    // F = kDiscountAtStart + floor((lv − kFreeStartLevel) × (kDiscountAtFull − kDiscountAtStart)
-    //                              / (kFreeFullLevel − kFreeStartLevel))。
+    // 消耗 = max(0, quality_tier + attribute_tier − F)，F = floor((lv − 25) × 8 / 70)。
     // C++ 整数除法向零取整；被除数为负时须修正为向下取整，否则低等级折扣偏大、零费等级提前。
     const int span = kFreeFullLevel - kFreeStartLevel;
-    const int scaled = (lv - kFreeStartLevel) * (kDiscountAtFull - kDiscountAtStart);
+    const int scaled = (lv - kFreeStartLevel) * kMaxTierSum;
     int discount = scaled / span;
     if (scaled < 0 && scaled % span != 0) --discount;
-    discount += kDiscountAtStart;
 
     const int price = quality_tier + attribute_tier;
     if (price <= discount) return 0;
