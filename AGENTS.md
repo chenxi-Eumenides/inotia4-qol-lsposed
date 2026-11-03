@@ -13,7 +13,7 @@
 - `scripts/`：开发、分析、数据和验证脚本。
 - `tools/`：第三方工具本体和静态工具页面，不放运行输出。
 - `apk/`：输入 APK 与静态数据。`game-apk/` 为输入包（`history/` 为历史版本），`decoded/` 为 apktool 解码结果（smali/res/assets/lib），`decompiled/` 为 jadx 反编译结果（sources/resources）；`static-data/` 顶层为 `json/` 与 `raw/`，`json/` 下按 `tables/`、`text/`、`maps/`、`snasys/` 分类。
-- `output/`：最终 APK 交付物。
+- `output/`：最终 APK 交付物。**agent 不得在 `output/` 内创建、修改、删除或移动任何文件**：该目录只允许脚本产出（`scripts/build-*.sh`、`scripts/patch-apk.sh`）以及用户本人手动放置。需要生成发布说明、清单、临时文本时写入 `.tmp/<task-name>/`。
 - `archive/`：历史实验和不可作为当前实现依据的材料。
 - 工具输出不得写入项目目录之外。
 - **Android 构建入口**：日常开发与验证只允许 `scripts/build-debug.sh`；`scripts/build-release.sh` 仅在用户明确要求 release 时使用；禁止直接执行 `./gradlew`、系统 `gradle` 或手写 Gradle 二进制路径。
@@ -43,5 +43,5 @@
 
 - 每个任务先创建独立目录，例如 `.tmp/<task-name>/`；禁止把日志、截图、反汇编、探针输出直接散落在 `.tmp/` 根目录。
 - 只允许保存本次任务可重建的中间文件、诊断日志、截图和临时输入；源码、可复用脚本、第三方工具、APK 交付物和长期证据不得写入 `.tmp/`。
-- 不得删除 `apk/`、`output/` 或 `archive/` 等内容。
+- 不得删除 `apk/`、`output/` 或 `archive/` 等内容；`output/` 连写入也不允许（见上文目录边界）。
 - `.tmp/` 已被 Git 忽略，不得使用强制添加将其纳入提交。
