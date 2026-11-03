@@ -12,6 +12,7 @@
 | 构建、部署与设备验收 | `guides/build-and-deploy.md` | `reference/api-reference.md`（涉及 API 验收时）、`reference/logging.md`（崩溃取证） |
 | 排查崩溃、读日志与符号化 | `reference/logging.md` | `guides/build-and-deploy.md` §3.3/§3.3.1 |
 | 修改源码或设计边界 | 根目录 `ARCHITECTURE.md` | `refactor/`、相关 `reference/plugins/` |
+| 入口 hook 原语 / hook 库选型 | `refactor/hook-engine-decision.md` | `ARCHITECTURE.md` §3.2、`patch/`、`hooks/` |
 | 插件审计 | `refactor/plugin-audit-playbook.md` | `refactor/audits/`、`refactor/issues.md` |
 | 插件重构架构指导 | `refactor/plugin-architecture-guide.md` | `refactor/extension-bag/final-architecture.md` |
 | 配置 `enable` 与插件生命周期方案评审 | `refactor/config-enable-lifecycle-proposal.md` | `ARCHITECTURE.md` §7.2/§8.2、`reference/api-reference.md` §7.6 |
@@ -51,6 +52,7 @@
 - `audits/`：插件审计记录与对应证据；后续审计沿用此目录。
 - `issues.md`：已确认问题台账。
 - `plugin-audit-playbook.md`：审计、修复、测试闭环流程。
+- `hook-engine-decision.md`：入口 hook 原语现状、4 字节短补丁边界、第三方 hook 库对比与选型结论。
 - `config-enable-lifecycle-proposal.md`：已被实现模型取代（superseded）；现行契约见 ARCHITECTURE §8.2 与 API 参考 §7.6。
 - `baseline.md`：脚本生成的结构基线。
 - `map.md`：脚本生成的当前源码结构统计；不定义目标架构。
