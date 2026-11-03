@@ -302,20 +302,21 @@ int g_popup_test_callback_calls = 0;
 
 char g_popup_test_raw_text[256]{};
 int g_popup_test_raw_calls = 0;
-uint32_t g_popup_test_raw_length = 0;
+// 第二参数是复制/归属标志（1=游戏自己复制），不是文本长度。
+uint32_t g_popup_test_raw_flag = 0;
 uint32_t g_popup_test_raw_x2 = 0;
 uint32_t g_popup_test_raw_x3 = 0;
 
 void fake_popup_create_yesno(char* text, uint32_t len, uint32_t x2, uint32_t x3,
                              void* ok, void* cancel, void* param) {
     ++g_popup_test_raw_calls;
-    g_popup_test_raw_length = len;
+    g_popup_test_raw_flag = len;
     g_popup_test_raw_x2 = x2;
     g_popup_test_raw_x3 = x3;
     g_popup_test_param = param;
     if (text != nullptr) {
-        std::snprintf(g_popup_test_raw_text, sizeof(g_popup_test_raw_text), "%.*s",
-                      static_cast<int>(len), text);
+        // 真实实现按 NUL 结尾度量文本，测试桩同样复制完整字符串。
+        std::snprintf(g_popup_test_raw_text, sizeof(g_popup_test_raw_text), "%s", text);
     }
     *reinterpret_cast<uint8_t*>(g_base + G_POPUP_ON_VMA) = 1;
     *reinterpret_cast<void**>(g_base + G_POPUP_FPOK_VMA) = ok;
@@ -768,7 +769,7 @@ int main() {
         CHECK(adapter->create_yes_no_text("任意文本", 12, 5, 0x55667788u,
                                           &fake_popup_callback, &fake_popup_callback).ok ==
               kQolOk);
-        CHECK(g_popup_test_raw_calls == 1 && g_popup_test_raw_length == 12 &&
+        CHECK(g_popup_test_raw_calls == 1 && g_popup_test_raw_flag == 1 &&
               g_popup_test_raw_x2 == 0 && g_popup_test_raw_x3 == 2 &&
               std::strcmp(g_popup_test_raw_text, "任意文本") == 0 &&
               reinterpret_cast<uintptr_t>(g_popup_test_param) == 0x55667788u);
