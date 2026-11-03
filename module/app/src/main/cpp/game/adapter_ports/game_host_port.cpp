@@ -798,6 +798,14 @@ QolResult call_world_close_popup() {
     return qol::game::world_close_popup_process() ? contracts::ok() : not_ready();
 }
 
+QolResult call_world_desc_set_off() {
+    if (!qol::game::game_host_is_main_thread() || fn_ui_desc_set_off == nullptr) {
+        return not_ready();
+    }
+    fn_ui_desc_set_off();
+    return contracts::ok();
+}
+
 QolResult call_world_restore_hud() {
     qol::game::world_restore_hud_gate();
     return contracts::ok();
@@ -965,7 +973,7 @@ const contracts::QolWorldActionApi& game_world_action_api() {
     static const contracts::QolWorldActionApi api = {
         &call_world_create_yesno, &call_world_minus_money, &call_world_map_change,
         &call_world_close_popup, &call_world_restore_hud, &call_world_show_banner,
-        &call_world_add_money, &call_world_cancel_tutorial};
+        &call_world_add_money, &call_world_cancel_tutorial, &call_world_desc_set_off};
     return api;
 }
 

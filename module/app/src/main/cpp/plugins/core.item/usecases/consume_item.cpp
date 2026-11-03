@@ -1,5 +1,7 @@
 #include "consume_item.h"
 
+#include <limits>
+
 uint32_t native_equip_sell_count(uint32_t field,
                                  const qol::contracts::QolItemCountApi* item_count) {
     // 原版 0x1261c4 的 b 段直读 + clamp（证据见头注释）：只解释低七位视图，
@@ -12,6 +14,15 @@ uint32_t native_equip_sell_count(uint32_t field,
     }
     const uint32_t b = canonical % 128u;
     return (b >= 1u && b <= 99u) ? b : 1u;
+}
+
+int64_t c18_detail_sell_price(int64_t unit_price, int32_t count) {
+    if (unit_price <= 0 || count <= 0) return 0;
+    const int64_t scaled = (unit_price * 65) / 100;
+    if (scaled <= 0 || static_cast<int64_t>(count) > std::numeric_limits<int64_t>::max() / scaled) {
+        return 0;
+    }
+    return scaled * static_cast<int64_t>(count);
 }
 
 VanillaSellRoute vanilla_sell_route(int32_t bag, bool count_encoded,

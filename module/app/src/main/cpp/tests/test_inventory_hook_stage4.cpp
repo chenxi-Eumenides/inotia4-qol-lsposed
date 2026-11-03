@@ -613,6 +613,13 @@ static void test_vanilla_sell_routing() {
     CHECK(F_UIEQUIP_OK_DESTROY_ITEM_VMA == 0xb83d0u);
     CHECK(F_UIEQUIP_BUTTON_DESTROY_EXE_VMA == 0xb6240u);
     CHECK(kUIEquipBagDescType == 2u);
+    CHECK(kVanillaSellPreviewFlag == 0x666u);
+
+    // c18 0x1260c4 结算：((unit*65)/100)*count，先截断再乘数量（17→11，×228→2508）。
+    CHECK(c18_detail_sell_price(17, 228) == 2508);
+    CHECK(c18_detail_sell_price(4, 3) == 6);
+    CHECK(c18_detail_sell_price(0, 1) == 0);
+    CHECK(c18_detail_sell_price(1, 0) == 0);
 
     // 原版可表示数量、非 count-encoded 物品与任务袋均透传；S2 编码才接管。
     const uint32_t canonical_counts[]{1u, 99u, 100u, 127u, 128u, 199u, 999u};
@@ -645,7 +652,6 @@ static void test_vanilla_sell_routing() {
     confirmation = preview;
     confirmation.item.slot = 0;
     CHECK(!vanilla_sell_detail_context_matches(preview, confirmation));
-
 }
 
 int main() {

@@ -39,6 +39,12 @@ uint32_t native_equip_sell_count(uint32_t field,
 // 桥后 LR 不可信（既有 MoveItem caller 日志即为桥地址）。
 enum class VanillaSellRoute : uint8_t { kBackup, kPreview, kTakeover };
 constexpr int32_t kVanillaBagDetailType = 2;
+// UIEquip_ButtonDestroyExe 的预演协议把 x23 置为该值后调用 UIEquip_OKDestroyItem；
+// monster 结算块 0x126298 据此只计算展示金额、不写钱不删物品（c18 0x1260c4 无此分支）。
+constexpr uint64_t kVanillaSellPreviewFlag = 0x666;
+// c18 背包详情结算块 0x1260c4：((unit*65)/100)*count（0x126108 `mov w1,#0x41` /
+// 0x126110 `mov w1,#0x64`）。用于确认框展示金额，必须与原版实际结算同序同舍入。
+int64_t c18_detail_sell_price(int64_t unit_price, int32_t count);
 
 VanillaSellRoute vanilla_sell_route(int32_t bag, bool count_encoded,
                                     uint32_t canonical_count, bool button_dry_run);

@@ -600,12 +600,14 @@
 - **操作**：启用堆叠上限，在装备页背包详情对可堆叠物品执行出售（按钮弹确认框→OK），核对确认框展示金额、实得金币与删除数量按 `128a+b` 全量；取消预演不得售出。
 - **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `<设备序列号>`、最新 debug APK SHA-256、`extensionBagEnabled`、堆叠上限开关；操作前记录目标物品原始 `+0x10`（含 a/b 拆段）与 `count=128a+b`、money 前后值。
 - **原版链(VMA)**：`UIEquip_ButtonDestroyExe@0xb6240`（按钮预演 `bl 0xb83d0`，进入前 `x23=0x666`）→ `UIEquip_OKDestroyItem@0xb83d0`（`0xb8468` `bl 0x1261c4`）→ `0x1261c4` 内联 `ldr w0,[x21,#0x10]` + `bl UTIL_GetBitValue(_,31,25)` 只读 b 段、clamp `b∈[1,99]?b:1`、`unit×count×7/10`；弹窗 OK 经 `UIPopupMsg_ButtonOKExe@0xcaa14 blr x1`。
-- **扩展接管点(文件:函数)**：`native_inventory_hook.cpp:ok_destroy_item_wrapper`（H-23）+ `button_destroy_exe_wrapper`（H-22 预演标记）；纯函数 `inventory_hook_stage4.cpp:vanilla_sell_route`/`vanilla_sell_money`；安装链第 13/15 个 hook。
+- **backup 寄存器协议**：`x23` 是预演标志、`x22` 会被 c18 背包结算块 `0x1260c4` 破坏；H-23 的 backup 必须经 `call_ok_destroy_backup_preserving_regs` 保存 `x19-x28` 并显式写 `x23`（预演 `0x666`/结算 `0`）。c18 按钮不预演，固定以 `formatArg=0/price=0` 创建弹窗；模块按 `0x1260c4` 的 `unit×65/100×count` 计算展示金额，用原生文本弹窗（`display_type=2`）显示价格，OK 仍走原版 `OKDestroyItem`（`x23=0`）。
+- **扩展接管点(文件:函数)**：`plugins/core.item/hooks/inventory_hooks.cpp:ok_destroy_item_wrapper`（H-23）+ `button_destroy_exe_wrapper`（H-22 预演标记）+ `c18_vanilla_sell_popup_price`/`create_c18_vanilla_sell_popup`；纯函数 `plugins/core.item/usecases/consume_item.cpp:vanilla_sell_route`/`c18_detail_sell_price`。
 - **共享状态读写**：wrapper 不取 `g_virtual_bag_mtx`；读 `G_UIEQUIP_DESC_TYPE_VMA`/`G_UIEQUIP_CUR_BAG_VMA`/`G_UIEQUIP_PANEL_CTRL_VMA` 面板上下文与物理槽对象；接管路径调 `fn_add_money`/`fn_minus_money`/`fn_remove_item_direct`/`fn_ui_equip_refresh_item_area`（不持扩展锁）。
 - **必须保持的不变式(引 R-xx)**：仅 `desc_type==2` 且 count-encoded 的背包详情接管（R-46/R-55）；金额 `unit×min(canonical,999)×7/10`，canonical 0/单价越界/结果越界拒绝（R-37/R-55）；关闭态、非背包详情、装备详情与校验失败逐指令 backup；按钮预演绝不结算。
 - **失败语义**：加钱失败直接返回 0 不删堆；提交前槽位复核失败/删除未生效则 `fn_minus_money` 退款；任一前置校验失败 backup 原版（fail-safe，不半执行）。
-- **Host 测试名(现有或「缺口」)**：`stage4_hook_tests::test_vanilla_sell_takeover`（两态路由、金额边界与越界拒绝、调用点常量）、`test_native_equip_sell_count`（原版 b 段语义 199→71 缺陷基线）、`test_equip_sell_redirect_mapping`（重定向映射常量证据，该点当前不入表）。
+- **Host 测试名(现有或「缺口」)**：`stage4_hook_tests::test_vanilla_sell_routing`（两态路由、`vanilla_sell_detail_context_matches`、`kVanillaSellPreviewFlag==0x666`、`c18_detail_sell_price` 17/228→2508）、`test_native_equip_sell_count`（原版 b 段语义 199→71 缺陷基线）、`test_equip_sell_redirect_mapping`（重定向映射常量证据，该点当前不入表）。
 - **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-41`：①启用态持有一堆 `200`（a=1,b=72）中药水，背包详情点出售，确认框展示金额应为 `unit×200×7/10`（对照原版缺陷按 71 结算），点 OK 后 money 增加该金额、整堆删除、背包刷新；②点出售后在确认框取消，预期不售出、数量与 money 不变；③关闭堆叠上限重复①，预期走原版 b 段语义（与原版一致）；④对装备详情（desc_type=0）重复出售，预期走原版路径；⑤`logcat` 出现 `hook install OK api=2 count=24` 与 `vanilla sell preview/committed ...`；⑥制造越界单价或加钱失败，预期不删堆并记 ERROR。
+- **已取证（2026-11-03 真机）**：monster v29 原版背包 0（canonical≤127）与背包 1（canonical>127）出售价格/结算正确、不再提前售出；c18 v586 原版背包 0 可堆叠与不可堆叠物品确认框均显示价格，OK 后金币增量一致且不再崩溃；扩展背包出售正常。Host `stage4_hook_tests` 189 passed / 0 failed。
 - **证据锚类型**：真机 + Host 纯函数 + 源码；行为断言待人工详情出售。
 
 ### VM-42 三个 UI 宿主页签随扩展背包开关挂载/卸载（R-58）

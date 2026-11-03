@@ -913,6 +913,101 @@ int put_jewel_wrapper(void* equip_item, void* jewel_item) {
     return stage4_put_jewel(equip_item, jewel_item, nullptr, g_backup_put_jewel, nullptr);
 }
 
+uint64_t call_ok_destroy_backup(bool preview);
+
+// c18 的 UIEquip_ButtonDestroyExe 不调用 OKDestroyItem 预演，而是直接以
+// formatArg=0/price=0 创建 YesNo 弹窗（0xb6258）。价格栏布局由第三参 formatArg=2
+// 选择，金额由第六参传入；原按钮两者都给 0，所以弹窗没有价格。这里按 c18 结算块
+// （0x1260c4：ITEM_GetSellPrice×65/100×count）算出展示金额，改用原版原生文本弹窗
+// （UIPopupMsg_CreateYesNo，display_type=2）显示「是否出售？」+ 价格。
+bool c18_vanilla_sell_popup_price(uint32_t* out_price) {
+    if (out_price == nullptr || g_game == nullptr || g_item_facts == nullptr ||
+        g_game->game_identity.read == nullptr) return false;
+    qol::contracts::QolGameIdentity identity{};
+    if (!qol::contracts::succeeded(g_game->game_identity.read(&identity)) ||
+        identity.series_name == nullptr || std::strcmp(identity.series_name, "c18") != 0) {
+        return false;
+    }
+    if (!qol::contracts::item_facts_api_size_valid(g_item_facts) ||
+        g_item_facts->detail_item_context == nullptr || g_item_facts->quote == nullptr ||
+        g_item_facts->category == nullptr || g_item_facts->is_no_sell == nullptr) {
+        return false;
+    }
+    qol::contracts::QolItemDetailContext detail{};
+    if (!qol::contracts::succeeded(g_item_facts->detail_item_context(&detail)) ||
+        detail.desc_type != kVanillaBagDetailType) return false;
+    if (detail.bag == 5 || detail.bag < 0 || detail.bag >= physical_bag_limit() ||
+        detail.slot < 0 || detail.slot >= kInvenSlotsPerBag || detail.item.slot == 0 ||
+        detail.item.generation == 0) {
+        return false;
+    }
+    void* item = s2_physical_slot_item(detail.bag, detail.slot);
+    if (item == nullptr) return false;
+    qol::contracts::QolItemHandle observed{};
+    if (!item_handle_for_hook_item(item, &observed) || observed.slot != detail.item.slot ||
+        observed.generation != detail.item.generation) {
+        return false;
+    }
+    qol::contracts::QolInventoryItemRef source_ref{};
+    if (source_for_item_handle(detail.item, &source_ref) != nullptr) return false;
+    int32_t category = 0;
+    int32_t no_sell = 0;
+    if (!qol::contracts::succeeded(g_item_facts->category(detail.item, &category)) ||
+        !qol::contracts::succeeded(g_item_facts->is_no_sell(category, &no_sell)) ||
+        category <= 0 || no_sell != 0) {
+        return false;
+    }
+    int64_t unit_price = 0;
+    int32_t count = 1;
+    if (item_count_is_encoded(item)) {
+        qol::contracts::QolSaleQuote quote{};
+        quote.struct_size = sizeof(quote);
+        if (!qol::contracts::succeeded(
+                g_item_facts->quote(detail.item, qol::contracts::kDetailSell, &quote)) ||
+            quote.struct_size < sizeof(quote) || quote.count <= 0 || quote.unit_price <= 0) {
+            return false;
+        }
+        unit_price = quote.unit_price;
+        count = quote.count;
+    } else {
+        // 不可堆叠物品（装备等）原版按数量 1 结算；quote 的 canonical 通道不适用，
+        // 直接取单价。
+        if (g_item_facts->sell_price == nullptr ||
+            !qol::contracts::succeeded(g_item_facts->sell_price(detail.item, &unit_price)) ||
+            unit_price <= 0) {
+            return false;
+        }
+    }
+    // c18 0x126108 `mov w1,#0x41` / 0x126110 `mov w1,#0x64`：先 unit*65/100 再乘数量。
+    const int64_t price = c18_detail_sell_price(unit_price, count);
+    if (price <= 0 || price > UINT32_MAX) return false;
+    *out_price = static_cast<uint32_t>(price);
+    return true;
+}
+
+void c18_vanilla_sell_ok(void*) {
+    (void)call_ok_destroy_backup(false);
+}
+
+void c18_vanilla_sell_cancel(void*) {}
+
+// c18 原按钮的 YesNo 弹窗固定 formatArg=0/price=0，没有价格栏；这里用原版原生
+// 文本弹窗（UIPopupMsg_CreateYesNo，display_type=2）显示「是否出售？」+ 价格。
+// OK 仍调用原版 UIEquip_OKDestroyItem（backup，x23=0 真实结算），金额与 65% 一致。
+bool create_c18_vanilla_sell_popup(uint32_t price) {
+    if (g_game == nullptr || g_game->world_action.create_yesno == nullptr) return false;
+    if (g_game->world_action.desc_set_off != nullptr) {
+        (void)g_game->world_action.desc_set_off();
+    }
+    static constexpr char kText[] = "是否出售？";
+    const QolResult result = g_game->world_action.create_yesno(
+        kText, static_cast<uint32_t>(sizeof(kText) - 1),
+        reinterpret_cast<void*>(&c18_vanilla_sell_ok),
+        reinterpret_cast<void*>(&c18_vanilla_sell_cancel),
+        reinterpret_cast<void*>(static_cast<uintptr_t>(price)));
+    return qol::contracts::succeeded(result);
+}
+
 // R-55：详情出售按钮函数级标记。原按钮在同一调用内先调 UIEquip_OKDestroyItem
 // 预演（x23=0x666）取确认框展示金额、再创建 YesNo 弹窗；预演期间置 thread_local
 // 标记，供 ok_destroy_item_wrapper 区分「预演」与「弹窗 OK 真实结算」。
@@ -924,7 +1019,11 @@ void button_destroy_exe_wrapper(void* button) {
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:UIEquip_ButtonDestroyExe"});
     if (!inventory_native_hook_support_enabled()) {
+        // 调试门禁关闭也要让原版预演看到 x23=0x666；否则 thunk 会把预演当结算。
+        const bool previous = g_in_equip_destroy_button;
+        g_in_equip_destroy_button = true;
         call_backup("hook:UIEquip_ButtonDestroyExe", g_backup_button_destroy_exe, button);
+        g_in_equip_destroy_button = previous;
         return;
     }
     if (g_sdk != nullptr && g_sdk->hooks.intercept_blocks != nullptr &&
@@ -938,6 +1037,14 @@ void button_destroy_exe_wrapper(void* button) {
     const auto* projection = qol::features::core_item::projection_callbacks();
     if (projection != nullptr && projection->handle_extension_sell != nullptr &&
         projection->handle_extension_sell()) {
+        return;
+    }
+    // c18：原按钮直接创建无价格栏的弹窗；改用原版原生文本弹窗显示价格，
+    // OK 仍走原版 OKDestroyItem（backup，x23=0）结算。其他变体保持原按钮预演流程。
+    uint32_t c18_price = 0;
+    if (c18_vanilla_sell_popup_price(&c18_price) &&
+        create_c18_vanilla_sell_popup(c18_price)) {
+        QOL_LOG_INFO(QolDomain::kInventory, "vanilla sell c18 popup price=%u", c18_price);
         return;
     }
     const bool previous = g_in_equip_destroy_button;
@@ -981,22 +1088,66 @@ void button_use_mercenary_seal_exe_wrapper(void* button) {
                 g_backup_button_use_mercenary_seal_exe, button);
 }
 
+// 原版出售协议用 x23 传预演标志（0x666），c18 背包结算块还会破坏 x22；两者都是
+// 被调用者保存寄存器，C++ wrapper 会正常使用。backup 必须在保存全部 x19-x28 后显式
+// 写 x23 再调用，返回后恢复：既让原版看到正确的预演/结算态，也保护 wrapper 的局部量
+// 与栈保护基准。
+#if defined(__aarch64__)
+__attribute__((naked)) uint64_t call_ok_destroy_backup_preserving_regs(void*, uint64_t) {
+    __asm__ volatile(
+        "stp x19, x20, [sp, #-96]!\n"
+        "stp x21, x22, [sp, #16]\n"
+        "stp x23, x24, [sp, #32]\n"
+        "stp x25, x26, [sp, #48]\n"
+        "stp x27, x28, [sp, #64]\n"
+        "stp x29, x30, [sp, #80]\n"
+        "mov x9, x0\n"
+        "mov x23, x1\n"
+        "blr x9\n"
+        "ldp x29, x30, [sp, #80]\n"
+        "ldp x27, x28, [sp, #64]\n"
+        "ldp x25, x26, [sp, #48]\n"
+        "ldp x23, x24, [sp, #32]\n"
+        "ldp x21, x22, [sp, #16]\n"
+        "ldp x19, x20, [sp], #96\n"
+        "ret\n");
+}
+#else
+uint64_t call_ok_destroy_backup_preserving_regs(void* fn, uint64_t) {
+    return fn == nullptr ? 0 : reinterpret_cast<uint64_t (*)()>(fn)();
+}
+#endif
+
+uint64_t call_ok_destroy_backup(bool preview) {
+    if (g_backup_ok_destroy_item == nullptr) {
+        backup_missing("hook:UIEquip_OKDestroyItem");
+        return 0;
+    }
+    return call_ok_destroy_backup_preserving_regs(
+        reinterpret_cast<void*>(g_backup_ok_destroy_item),
+        preview ? kVanillaSellPreviewFlag : 0u);
+}
+
 // R-55 原版背包详情出售接管（VM-41）。UIEquip_OKDestroyItem(0xb83d0) 无参：背包
 // 结算分支从面板上下文读 desc_type(0x304a43)/bag(0x304a41)/ctrl(0x3049e8)，再经
 // ControlObject_GetCursorIndex 取槽，随后调 0x1261c4 只按 b 段结算。两态由
 // button_destroy_exe_wrapper 设置的 thread_local 标记区分：按钮预演只回填展示金额、
 // 弹窗 OK 才真实结算（返回地址经 Dobby 桥后不可信，不作判定依据）。
 // 关闭态/非背包详情/校验失败一律 backup（fail-safe，不半执行）。
+//
+// backup 不能直接走普通 C++ 调用：原版出售协议用 x23 传预演标志（0x666），且 c18
+// 背包结算块会把 x22 当计数临时寄存器且不保存。两者都是被调用者保存寄存器，C++
+// wrapper 会正常使用；必须在 backup 前保存 x19-x28、显式写 x23，返回后恢复。
 uint64_t ok_destroy_item_wrapper() {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:UIEquip_OKDestroyItem"});
     if (!inventory_native_hook_support_enabled()) {
         g_has_vanilla_sell_preview_context = false;
-        return call_backup("hook:UIEquip_OKDestroyItem", g_backup_ok_destroy_item);
+        return call_ok_destroy_backup(g_in_equip_destroy_button);
     }
     const auto run_backup = []() -> uint64_t {
-        return call_backup("hook:UIEquip_OKDestroyItem", g_backup_ok_destroy_item);
+        return call_ok_destroy_backup(g_in_equip_destroy_button);
     };
     // The detail slot, item identity and display mode are sampled together; the UI control stays
     // private to Game Adapter.
@@ -1106,8 +1257,7 @@ uint64_t ok_destroy_item_wrapper() {
         QOL_LOG_INFO(QolDomain::kInventory,
             "vanilla sell preview bag=%d slot=%d category=%d canonical=%u count=%d unit=%lld price=%lld multiplier=%u/%u",
             bag, slot, category, canonical, quote.count, static_cast<long long>(quote.unit_price),
-            quote.multiplier_num, quote.multiplier_den,
-            static_cast<long long>(price));
+            static_cast<long long>(price), quote.multiplier_num, quote.multiplier_den);
         return static_cast<uint64_t>(price);
     }
 
@@ -1154,8 +1304,7 @@ uint64_t ok_destroy_item_wrapper() {
     QOL_LOG_INFO(QolDomain::kInventory,
         "vanilla sell committed bag=%d slot=%d category=%d canonical=%u count=%d unit=%lld price=%lld multiplier=%u/%u",
         bag, slot, category, canonical, quote.count, static_cast<long long>(quote.unit_price),
-        quote.multiplier_num, quote.multiplier_den,
-        static_cast<long long>(price));
+        static_cast<long long>(price), quote.multiplier_num, quote.multiplier_den);
     return 0;
 }
 

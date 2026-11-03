@@ -990,15 +990,34 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
   实得 546 而非 1540）。只重定向该读点而不改后续 clamp 会把 getter 的 canonical `>99`
   压成 1（证伪记录见 Hub §5.2 经验记录），因此改由回调层整体接管，复用统一 getter 的
   类别门控与模式解码。
+- **backup 寄存器协议（H-23 新增约束）**：原版预演把 `x23=0x666` 作为跨调用标志，
+  monster 结算块 `0x126298` 据此只算展示金额；c18 背包结算块 `0x1260c4` 还会把 `x22`
+  当计数临时寄存器且不保存。两者都是被调用者保存寄存器，普通 C++ 调用 backup 会让
+  wrapper 的局部量覆盖 `x23`、并让 c18 破坏 wrapper 的 `x22`（栈保护金丝雀读
+  `[x22+40]` 访问 `0x29` 崩溃）。因此 `call_ok_destroy_backup` 必须经
+  `call_ok_destroy_backup_preserving_regs`：保存 `x19-x28`、显式写 `x23`
+  （预演 `0x666` / 结算 `0`）、调用 backup、恢复全部寄存器。调试门禁关闭时按钮
+  wrapper 也要置预演标记，避免 thunk 把原版预演当结算。
+- **c18 确认框价格**：c18 的 `UIEquip_ButtonDestroyExe` 不调用 OKDestroyItem 预演，
+  而是固定以 `formatArg=0`/`price=0` 创建 YesNo 弹窗（`0xb6258`），所以原版确认框
+  没有价格栏。模块在按钮入口按 c18 结算块 `0x1260c4`
+  （`ITEM_GetSellPrice×65/100×count`，`0x126108/0x126110`）计算展示金额：可堆叠物品
+  用 `quote` 的 unit/count，不可堆叠物品用 `sell_price` 且 count=1；随后调用原版
+  原生文本弹窗（`UIPopupMsg_CreateYesNo`，`display_type=2`）显示「是否出售？」+ 价格，
+  OK 仍走原版 `UIEquip_OKDestroyItem`（backup，`x23=0`）结算。按钮前经
+  `world_action.desc_set_off` 隐藏详情面板，保持原版按钮的视觉语义。
 - **典型破坏方式**：在按钮预演阶段就真实结算（按下按钮即提前售出、取消不可回滚）；
-  用返回地址区分预演/弹窗 OK（经 Hook 桥后 LR 不可信）；接管后仍按原版 b 段计价；
-  加钱失败后继续删堆而不退款；把 `desc_type==1`（扩展/其它袋详情）也当背包结算。
-- **验证锚**：Host `stage4_hook_tests::test_vanilla_sell_takeover`
-  （`vanilla_sell_route` 两态四分支、`vanilla_sell_money` canonical
-  0/1/99/100/199/999 与越界拒绝、调用点常量 `0xb83d0`/`0xb6240`/`desc_type==2`）、
+  用普通 C++ 调用 backup（丢失 `x23` 预演标志或触发 c18 `x22` 崩溃）；用返回地址
+  区分预演/弹窗 OK（经 Hook 桥后 LR 不可信）；接管后仍按原版 b 段计价；加钱失败后
+  继续删堆而不退款；把 `desc_type==1`（扩展/其它袋详情）也当背包结算；c18 确认框
+  只改 price 不改 `formatArg`（价格栏布局仍为 0）。
+- **验证锚**：Host `stage4_hook_tests::test_vanilla_sell_routing`
+  （`vanilla_sell_route` 两态四分支、`vanilla_sell_detail_context_matches`、
+  `kVanillaSellPreviewFlag==0x666`、`c18_detail_sell_price` 17/228→2508）、
   `test_native_equip_sell_count`（原版 b 段语义 199→71 缺陷基线）；真机 `VM-41`：
-  启用态背包详情整堆出售按 canonical 全量计价、取消预演不售出、关闭态回原版
-  （待取证）。
+  monster v29 原版背包 0（canonical≤127）与背包 1（canonical>127）出售价格/结算
+  均正确、不再提前售出；c18 v586 原版背包 0 可堆叠与不可堆叠物品确认框均显示价格、
+  OK 后金额一致且不再崩溃；扩展背包出售保持正常。
 
 ### R-56 INVEN_RemoveItemData 物理不足必须从扩展袋按类别补扣
 

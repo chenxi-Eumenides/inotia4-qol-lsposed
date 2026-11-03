@@ -191,6 +191,8 @@ struct QolWorldActionApi {
     QolResult (*show_banner)(const char* text);
     QolResult (*add_money)(int64_t amount);
     QolResult (*cancel_tutorial)();
+    // 关闭物品详情面板（原版出售按钮创建确认框前调用；只隐藏面板，不清详情上下文）。
+    QolResult (*desc_set_off)();
 };
 
 // 按域只读面只提供事实查询；副作用不通过该面表达。
