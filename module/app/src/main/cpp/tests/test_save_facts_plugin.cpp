@@ -100,6 +100,7 @@ TestSaveWritePayload g_posted_payload{};
 uint64_t g_last_transition_token = 0;
 uint64_t g_next_lease_id = 0;
 bool g_fail_save_write = false;
+bool g_fail_ensure_in_operation = false;
 bool g_fail_logic_scheduler = false;
 uint64_t g_next_scheduler_task = 1;
 struct ScheduledTask { int32_t point; QolFrameHandler handler; void* ctx; uint64_t id; };
@@ -254,6 +255,7 @@ QolResult stub_reserve_in_operation(QolOwnerToken, const QolSlotOperationLease*,
     return error(kQolErrNotReady, "no reservation", 16);
 }
 QolResult stub_ensure_in_operation(QolOwnerToken, const QolSlotOperationLease*, int32_t) {
+    if (g_fail_ensure_in_operation) return error(kQolErrInternal, "ensure failed", 13);
     return ok();
 }
 QolResult stub_reset_in_operation(QolOwnerToken, const QolSlotOperationLease*, int32_t) {
@@ -613,6 +615,45 @@ int main() {
         CHECK(routed.code == kQolErrBlocked);
         CHECK(status.original.invoked == 0);
         qol::features::core_save::plugin_descriptor().on_disabled(context);
+    }
+
+    // F7: confirm 永久失败 → 超时 cancel → 后续 begin 可成功。
+    // 确认窗口只开一次（elapsed 不被每帧重置），ensure 持续失败时计时器持续推进，
+    // 600 帧后超时 cancel 收敛 pending；同槽 catch-up 被封锁不再自动 begin，
+    // 显式读档 begin（经 save_route 全路径）恢复可用并解除封锁。
+    {
+        descriptor.on_enabled(context);
+        g_adapter_world_ready = 0;
+        const auto& hooks = qol_runtime_hooks();
+        uint64_t hang_token = 0;
+        CHECK(hooks.save_transition_begin_thunk(0, 1, &hang_token) && hang_token != 0);
+        g_fail_ensure_in_operation = true;
+        g_adapter_world_ready = 1;
+        // 首次 RenderPre：打开确认窗口并尝试 confirm（ensure 失败），窗口只开一次。
+        CHECK(render_task->handler(10, render_task->ctx) != 0);
+        qol::features::core_save::TransitionResult in_flight{};
+        CHECK(qol::features::core_save::save_transition_query(hang_token, &in_flight).ok == kQolOk);
+        CHECK(in_flight.state == qol::features::core_save::TransitionResultState::kInProgress);
+        // LogicPre 推进确认期限：600 帧后超时 cancel。
+        for (uint64_t f = 11; f <= 700; ++f)
+            CHECK(logic_task->handler(static_cast<int64_t>(f), logic_task->ctx) != 0);
+        qol::features::core_save::TransitionResult settled{};
+        CHECK(qol::features::core_save::save_transition_query(hang_token, &settled).ok == kQolOk);
+        CHECK(settled.state == qol::features::core_save::TransitionResultState::kCancelled);
+        CHECK(!hooks.save_enter_ready());
+        // 超时收敛后同槽 catch-up 不再自动 begin（封锁生效，无新 pending 抖动）。
+        CHECK(render_task->handler(701, render_task->ctx) != 0);
+        uint64_t orphan_token = 0;
+        int32_t orphan_target = -1;
+        CHECK(!qol::features::core_save::save_transition_pending_observation(&orphan_token,
+                                                                            &orphan_target));
+        // 显式读档 begin 恢复可用，同时解除补加载封锁。
+        uint64_t next_token = 0;
+        CHECK(hooks.save_transition_begin_thunk(0, 1, &next_token) && next_token != 0);
+        CHECK(qol::features::core_save::save_transition_cancel(next_token).ok == kQolOk);
+        g_fail_ensure_in_operation = false;
+        g_adapter_world_ready = 0;
+        descriptor.on_disabled(context);
     }
 
     descriptor.deactivate(context);

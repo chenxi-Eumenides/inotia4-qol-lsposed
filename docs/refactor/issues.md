@@ -241,6 +241,12 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 | SE-11 | special_equip | 「常开无开关」与 Hidden toggle 冲突 | 已修注释；保留 Debug 禁用口 |
 | SE-12 | special_equip tests | 测试注释与断言相反 | 已修注释并补未知 `desc_type` 用例 |
 
+## 17. core.save（存档域，开放）
+
+| ID | 级 | 问题 | 证据 | 状态 |
+|---|---|---|---|---|
+| SAV-04 | P1 | 读档/新档失败一次即可锁死整个存档域：确认序（`ensure_in_operation` / journal 判定 / `slot_data_confirm_transition`）失败时只回退 phase 重试，pending 转换永不收敛并长期持有该槽 slot operation lease；此后所有 `save_transition_begin` 在 `already_pending` / `operation_busy` 处静默失败 —— 读档按钮不执行原版转换、新档同样被拒、删档报 `slot operation unavailable`。`save_transition.cpp` 原本全链路零日志，失败原因不可观测 | 真机日志 `apk/logs/qol-点击存档进入失败.log`（vivo V2218A / Android 16 / 模块 1.0.2）：23:52:28 首次进档 begin 成功且原版读档确实进入世界（23:52:29 世界 hook active），但 `slot data load` 与 `save enter fired` 全程缺失、session 始终 `not_admitted`；23:52:57 起 7 次 `save enter blocked by transition gate slot=0`、17 次 `new game begin rejected`、23:54:04 `slot operation unavailable slot=0`。对照：模拟器同代码基线（模块 1.0.1，core.save 源码与 HEAD 一致）读档正常，说明非版本回归 | 代码已实现（诊断 + 收敛）：begin/confirm/cancel/journal/provider/含 lease 占用来源的全失败分支 WARN（300 帧节流）；确认窗口只开一次、仅在确认成功后拆计时器、到期 cancel 收敛 pending 并封锁该槽补加载抖动；catch-up begin 同样武装计时器；期限由 LogicPre+RenderPre 双驱动。Host 11/11 受影响 target 通过（含新增 F7「confirm 永久失败→超时 cancel→后续 begin 可成功」），`scripts/build-debug.sh` 通过（`54849c2ffd07`）。**确认序失败的确切触发未定**（真机容器与存档不可得）：最可能是目标槽模块容器残留 prepared-stage `module.save.journal`（§7 冻结限制，按契约不得自动抹证据）或 `ensure_in_operation` 持续 IO 失败；待下次真机日志按新增 WARN 定案。真机复现取证 = NOT_ACCEPTED |
+
 ## 附录：已修复问题（存证）
 
 | ID | 归属 | 问题 | 修复与复验 |

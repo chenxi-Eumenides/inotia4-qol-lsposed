@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include "plugins/core.save/log.h"
+
 namespace qol::features::core_save {
 namespace {
 using namespace contracts;
@@ -501,22 +503,52 @@ QolResult slot_data_begin_transition(uint32_t reason, int32_t target) {
         return fail(kQolErrInvalidArgument, "invalid transition");
     std::vector<std::pair<QolSlotDataHandle, std::shared_ptr<Participant>>> old;
     QolSlotSession session_before{};
+    // 锁内只采集拒绝现场，锁外记日志；catch-up 观测每帧重入 begin，WARN 节流防刷屏。
+    bool unavailable = false;
+    int unavailable_available = 0;
+    int unavailable_busy = 0;
+    int unavailable_transitioning = 0;
+    uint32_t unavailable_session_state = 0;
+    int32_t unavailable_target = -1;
     {
         std::lock_guard<std::mutex> lock(g.mutex);
-        if (!g.available || g.busy || g.transitioning) return fail(kQolErrNotReady, "transition busy");
-        g.busy = true;
-        session_before = g.session;
-        g.session.state = value(QolSlotSessionState::kClosing);
-        for (auto& item : g.participants) {
-            cancel_work(item.first);
-            if (!item.second->closing) { ++item.second->references; old.push_back(item); }
+        unavailable = !g.available || g.busy || g.transitioning;
+        if (unavailable) {
+            unavailable_available = g.available ? 1 : 0;
+            unavailable_busy = g.busy ? 1 : 0;
+            unavailable_transitioning = g.transitioning ? 1 : 0;
+            unavailable_session_state = g.session.state;
+            unavailable_target = g.target;
+        } else {
+            g.busy = true;
+            session_before = g.session;
+            g.session.state = value(QolSlotSessionState::kClosing);
+            for (auto& item : g.participants) {
+                cancel_work(item.first);
+                if (!item.second->closing) { ++item.second->references; old.push_back(item); }
+            }
         }
+    }
+    if (unavailable) {
+        static CoreSaveLogThrottle throttle;
+        if (throttle.due(5000))
+            CS_LOG_WARN(kCoreSaveLogDomain,
+                         "slot data transition unavailable available=%d busy=%d "
+                         "transitioning=%d session_state=%u target=%d",
+                         unavailable_available, unavailable_busy, unavailable_transitioning,
+                         unavailable_session_state, unavailable_target);
+        return fail(kQolErrNotReady, "transition busy");
     }
     QolResult result = ok();
     for (auto& item : old) {
         if (session_before.state != value(QolSlotSessionState::kUnavailable) && callback_admitted(item.second)) {
             const auto detached = item.second->spec.prepare_detach(item.second->spec.user, &session_before, reason);
-            if (!succeeded(detached) && succeeded(result)) result = detached;
+            if (!succeeded(detached) && succeeded(result)) {
+                result = detached;
+                CS_LOG_WARN(kCoreSaveLogDomain,
+                             "slot data prepare_detach rejected section=%s code=%d",
+                             item.second->section.c_str(), detached.code);
+            }
         }
         std::lock_guard<std::mutex> lock(g.mutex);
         --item.second->references;
@@ -534,12 +566,48 @@ QolResult slot_data_begin_transition(uint32_t reason, int32_t target) {
 QolResult slot_data_confirm_transition(int32_t current_slot) {
     if (!main_thread()) return fail(kQolErrBlocked, "confirmation requires main thread");
     std::vector<QolSlotDataRequest> activation_requests;
+    // 锁内只采集拒绝现场，锁外记日志（confirm 重试每 30 帧一次，节流防刷屏）。
+    bool target_mismatch = false;
+    int32_t mismatch_current = -1;
+    int32_t mismatch_target = -1;
+    bool unavailable = false;
+    int unavailable_available = 0;
+    int unavailable_busy = 0;
+    int unavailable_transitioning = 0;
     {
         std::lock_guard<std::mutex> lock(g.mutex);
-        if (!g.available || g.busy || !g.transitioning || current_slot != g.target)
-            return fail(kQolErrConflict, "transition target mismatch");
-        if (g.session.epoch == std::numeric_limits<uint64_t>::max()) return fail(kQolErrInternal, "epoch exhausted");
-        g.busy = true;
+        if (!g.available || g.busy || !g.transitioning) {
+            unavailable = true;
+            unavailable_available = g.available ? 1 : 0;
+            unavailable_busy = g.busy ? 1 : 0;
+            unavailable_transitioning = g.transitioning ? 1 : 0;
+        } else if (current_slot != g.target) {
+            target_mismatch = true;
+            mismatch_current = current_slot;
+            mismatch_target = g.target;
+        } else if (g.session.epoch == std::numeric_limits<uint64_t>::max()) {
+            return fail(kQolErrInternal, "epoch exhausted");
+        } else {
+            g.busy = true;
+        }
+    }
+    if (unavailable) {
+        static CoreSaveLogThrottle throttle;
+        if (throttle.due(5000))
+            CS_LOG_WARN(kCoreSaveLogDomain,
+                         "slot data confirm unavailable available=%d busy=%d transitioning=%d "
+                         "current=%d",
+                         unavailable_available, unavailable_busy, unavailable_transitioning,
+                         current_slot);
+        return fail(kQolErrConflict, "transition target mismatch");
+    }
+    if (target_mismatch) {
+        static CoreSaveLogThrottle throttle;
+        if (throttle.due(5000))
+            CS_LOG_WARN(kCoreSaveLogDomain,
+                         "slot data confirm target mismatch current=%d target=%d",
+                         mismatch_current, mismatch_target);
+        return fail(kQolErrConflict, "transition target mismatch");
     }
     {
         std::lock_guard<std::mutex> lock(g.mutex);
@@ -555,12 +623,26 @@ QolResult slot_data_confirm_transition(int32_t current_slot) {
         }
     }
     slot_data_pump();
-    std::lock_guard<std::mutex> lock(g.mutex);
-    for (const auto request : activation_requests) {
-        const auto& status = g.requests.at(request);
-        if (status.state != value(QolSlotDataRequestState::kCompleted)) return status.result;
+    QolResult activation_failure = ok();
+    {
+        std::lock_guard<std::mutex> lock(g.mutex);
+        for (const auto request : activation_requests) {
+            const auto& status = g.requests.at(request);
+            if (status.state != value(QolSlotDataRequestState::kCompleted)) {
+                activation_failure = status.result;
+                break;
+            }
+        }
+        if (succeeded(activation_failure) && g.available)
+            g.session.state = value(QolSlotSessionState::kReady);
     }
-    if (g.available) g.session.state = value(QolSlotSessionState::kReady);
+    if (!succeeded(activation_failure)) {
+        static CoreSaveLogThrottle throttle;
+        if (throttle.due(5000))
+            CS_LOG_WARN(kCoreSaveLogDomain, "slot data activation failed code=%d",
+                         activation_failure.code);
+        return activation_failure;
+    }
     return ok();
 }
 #if defined(QOL_SLOT_DATA_TEST_SEAMS)

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "contracts/slot_operation.h"
+#include "plugins/core.save/log.h"
 #include "save_journal.h"
 #include "slot_data_provider.h"
 
@@ -16,6 +17,10 @@ using namespace qol::contracts;
 constexpr auto value = [](auto v) { return static_cast<uint32_t>(v); };
 QolResult fail(int32_t code, const char* text) {
     return error(code, text, static_cast<uint32_t>(std::strlen(text)));
+}
+// QolResult.message 可为 nullptr（contracts/result.h）：日志只做非空保护，不改返回值。
+const char* log_message_of(const QolResult& result) {
+    return result.message != nullptr ? result.message : "";
 }
 
 struct PendingTransition {
@@ -84,13 +89,31 @@ QolResult journal_check(int32_t slot, const QolSlotOperationLease* lease) {
     const auto read = g.backend->read_section(g.owner, slot, kSaveJournalSection, bytes.data(),
                                               bytes.size(), &size, &version);
     if (read.code == kQolErrNotFound) return ok();  // 无未决 journal。
-    if (!succeeded(read)) return read;              // 不可读≠缺失：阻断确认序。
+    if (!succeeded(read)) {                         // 不可读≠缺失：阻断确认序。
+        static CoreSaveLogThrottle throttle;
+        if (throttle.due(5000))
+            CS_LOG_WARN(kCoreSaveLogDomain, "journal read failed slot=%d code=%d", slot, read.code);
+        return read;
+    }
     SaveJournal journal;
     const auto decoded = decode_save_journal(version, slot, bytes.data(), size, &journal);
     if (decoded == JournalDecode::kValid && journal.stage == JournalStage::kOriginalConfirmed &&
         g.journal_verdict != nullptr)
         return g.journal_verdict(slot, lease, g.journal_ctx);
-    if (decoded == JournalDecode::kValid) return fail(kQolErrBlocked, "prepared journal pending");
+    if (decoded == JournalDecode::kValid) {
+        if (journal.stage == JournalStage::kPrepared) {
+            static CoreSaveLogThrottle throttle;
+            if (throttle.due(5000))
+                CS_LOG_WARN(kCoreSaveLogDomain,
+                             "journal pending stage=prepared slot=%d tx_id=%llu", slot,
+                             journal.tx_id);
+        }
+        return fail(kQolErrBlocked, "prepared journal pending");
+    }
+    static CoreSaveLogThrottle unresolved_throttle;
+    if (unresolved_throttle.due(5000))
+        CS_LOG_WARN(kCoreSaveLogDomain, "journal unresolved slot=%d decode=%d", slot,
+                     static_cast<int>(decoded));
     return fail(kQolErrBlocked, "unresolved save journal");
 }
 }  // namespace
@@ -142,20 +165,77 @@ void save_transition_set_journal_verdict(QolResult (*verdict)(int32_t, const Qol
 
 QolResult save_transition_begin(uint32_t kind, int32_t requested_slot, uint64_t* out_token) {
     if (out_token != nullptr) *out_token = 0;
-    if (!main_thread()) return fail(kQolErrBlocked, "transition requires main thread");
+    if (!main_thread()) {
+        // begin 失败路径也经 catch-up 每帧重入：WARN 节流防刷屏。
+        static CoreSaveLogThrottle throttle;
+        if (throttle.due(5000))
+            CS_LOG_WARN(kCoreSaveLogDomain,
+                         "transition begin rejected reason=not_main_thread kind=%u slot=%d",
+                         kind, requested_slot);
+        return fail(kQolErrBlocked, "transition requires main thread");
+    }
     if (out_token == nullptr || requested_slot < 0 || requested_slot > 2 ||
-        kind > value(TransitionKind::kBeginNew))
+        kind > value(TransitionKind::kBeginNew)) {
+        static CoreSaveLogThrottle throttle;
+        if (throttle.due(5000))
+            CS_LOG_WARN(kCoreSaveLogDomain,
+                         "transition begin rejected reason=invalid_argument kind=%u slot=%d",
+                         kind, requested_slot);
         return fail(kQolErrInvalidArgument, "invalid transition begin");
+    }
     QolSlotSession old_session{-1, 0, 0};
     if (!succeeded(qol::features::core_save::slot_data_api().session(&old_session)))
         old_session = QolSlotSession{-1, value(QolSlotSessionState::kUnavailable), 0};
+    // 锁内只采集失败现场，锁外记日志（日志不得进入 g.mutex 临界区）。
+    enum class BeginBlock { kNone, kAlreadyPending, kSlotHealth, kTokenExhausted } block =
+        BeginBlock::kNone;
+    uint64_t pending_token = 0;
+    uint32_t pending_kind = 0;
+    int32_t pending_target = -1;
+    uint32_t pending_phase = 0;
+    bool pending_lease_held = false;
     {
         std::lock_guard<std::mutex> lock(g.mutex);
-        if (g.has_pending) return fail(kQolErrBusy, "transition already pending");
-        if (g.transition_allowed != nullptr && !g.transition_allowed(requested_slot, g.gate_ctx))
-            return fail(kQolErrBusy, "slot health blocks transition");
-        if (g.next_token == std::numeric_limits<uint64_t>::max())
-            return fail(kQolErrInternal, "token exhausted");
+        if (g.has_pending) {
+            block = BeginBlock::kAlreadyPending;
+            pending_token = g.pending.id;
+            pending_kind = value(g.pending.kind);
+            pending_target = g.pending.target_slot;
+            pending_phase = value(g.pending.phase);
+            pending_lease_held = g.pending.lease_held;
+        } else if (g.transition_allowed != nullptr &&
+                   !g.transition_allowed(requested_slot, g.gate_ctx)) {
+            block = BeginBlock::kSlotHealth;
+        } else if (g.next_token == std::numeric_limits<uint64_t>::max()) {
+            block = BeginBlock::kTokenExhausted;
+        }
+    }
+    if (block == BeginBlock::kAlreadyPending) {
+        static CoreSaveLogThrottle throttle;
+        if (throttle.due(5000))
+            CS_LOG_WARN(kCoreSaveLogDomain,
+                         "transition begin rejected reason=already_pending kind=%u slot=%d "
+                         "pending_token=%llu pending_kind=%u pending_target=%d "
+                         "pending_phase=%u pending_lease_held=%d",
+                         kind, requested_slot, pending_token, pending_kind, pending_target,
+                         pending_phase, pending_lease_held ? 1 : 0);
+        return fail(kQolErrBusy, "transition already pending");
+    }
+    if (block == BeginBlock::kSlotHealth) {
+        static CoreSaveLogThrottle throttle;
+        if (throttle.due(5000))
+            CS_LOG_WARN(kCoreSaveLogDomain,
+                         "transition begin rejected reason=slot_health_blocked kind=%u slot=%d",
+                         kind, requested_slot);
+        return fail(kQolErrBusy, "slot health blocks transition");
+    }
+    if (block == BeginBlock::kTokenExhausted) {
+        static CoreSaveLogThrottle throttle;
+        if (throttle.due(5000))
+            CS_LOG_WARN(kCoreSaveLogDomain,
+                         "transition begin rejected reason=token_exhausted kind=%u slot=%d",
+                         kind, requested_slot);
+        return fail(kQolErrInternal, "token exhausted");
     }
     // API 请求槽直接作为 target；不读 current_slot 代替。
     uint32_t mask = 1u << requested_slot;
@@ -164,50 +244,114 @@ QolResult save_transition_begin(uint32_t kind, int32_t requested_slot, uint64_t*
         mask |= 1u << old_session.slot;  // 原子取得 old+target 两槽，一次 acquire。
     PendingTransition pending{};
     pending.lease.size = sizeof(pending.lease);
+    QolResult acquired = ok();
     {
         std::lock_guard<std::mutex> lock(g.mutex);
-        const auto acquired =
-            g.operation->acquire(g.operation->host_ctx, g.owner, mask, &pending.lease);
-        if (!succeeded(acquired)) return acquired;
-        pending.lease_held = true;
-        pending.id = g.next_token++;
-        pending.kind = static_cast<TransitionKind>(kind);
-        pending.target_slot = requested_slot;
-        pending.old_epoch = old_session.epoch;
-        pending.phase = TransitionPhase::kDetached;
+        acquired = g.operation->acquire(g.operation->host_ctx, g.owner, mask, &pending.lease);
+        if (succeeded(acquired)) {
+            pending.lease_held = true;
+            pending.id = g.next_token++;
+            pending.kind = static_cast<TransitionKind>(kind);
+            pending.target_slot = requested_slot;
+            pending.old_epoch = old_session.epoch;
+            pending.phase = TransitionPhase::kDetached;
+        }
+    }
+    if (!succeeded(acquired)) {
+        static CoreSaveLogThrottle throttle;
+        if (throttle.due(5000))
+            CS_LOG_WARN(kCoreSaveLogDomain,
+                         "transition begin rejected reason=operation_busy kind=%u slot=%d "
+                         "mask=0x%X code=%d message=%s",
+                         kind, requested_slot, mask, acquired.code, log_message_of(acquired));
+        return acquired;
     }
     // 关闭旧 session 准入；prepare_detach 在 provider 内部于基础设施锁之外执行。
     const uint32_t reason = value(QolSlotDataReason::kEnter);
     const auto began = qol::features::core_save::slot_data_begin_transition(reason, requested_slot);
     if (!succeeded(began)) {
-        std::lock_guard<std::mutex> lock(g.mutex);
-        release_lease(pending);
-        return began;  // prepare_detach 拒绝：阻止原版转换，lease 已退。
+        {
+            std::lock_guard<std::mutex> lock(g.mutex);
+            release_lease(pending);  // prepare_detach 拒绝：阻止原版转换，lease 已退。
+        }
+        static CoreSaveLogThrottle throttle;
+        if (throttle.due(5000))
+            CS_LOG_WARN(kCoreSaveLogDomain,
+                         "transition begin rejected reason=slot_data_rejected kind=%u slot=%d "
+                         "code=%d message=%s",
+                         kind, requested_slot, began.code, log_message_of(began));
+        return began;
     }
-    std::lock_guard<std::mutex> lock(g.mutex);
-    g.pending = pending;
-    g.has_pending = true;
-    g.ready_published = false;  // 新转换期间不允许 kEventSaveEnter 事件派发。
-    *out_token = pending.id;
+    {
+        std::lock_guard<std::mutex> lock(g.mutex);
+        g.pending = pending;
+        g.has_pending = true;
+        g.ready_published = false;  // 新转换期间不允许 kEventSaveEnter 事件派发。
+        *out_token = pending.id;
+    }
+    CS_LOG_INFO(kCoreSaveLogDomain, "transition begun kind=%u slot=%d token=%llu old_epoch=%llu",
+                 kind, requested_slot, pending.id, pending.old_epoch);
     return ok();
 }
 
 QolResult save_transition_confirm(uint64_t token_id, int32_t observed_slot) {
-    if (!main_thread()) return fail(kQolErrBlocked, "confirmation requires main thread");
+    if (!main_thread()) {
+        static CoreSaveLogThrottle throttle;
+        if (throttle.due(5000))
+            CS_LOG_WARN(kCoreSaveLogDomain,
+                         "transition confirm failed step=not_main_thread token=%llu target=%d",
+                         token_id, observed_slot);
+        return fail(kQolErrBlocked, "confirmation requires main thread");
+    }
+    // 锁内只采集失败现场，锁外记日志（节流防确认重试刷屏）。
+    enum class ConfirmReject { kNone, kLookup, kSlotMismatch, kInFlight } reject = ConfirmReject::kNone;
+    int32_t expected_target = -1;
     PendingTransition pending{};
     {
         std::lock_guard<std::mutex> lock(g.mutex);
         // 按 token id 显式复用；禁止按「槽相同」查找复用。
-        if (!g.has_pending || g.pending.id != token_id)
-            return fail(kQolErrNotFound, "transition token unknown");
-        if (observed_slot != g.pending.target_slot)
-            return fail(kQolErrConflict, "observed slot mismatch");
-        if (g.pending.phase == TransitionPhase::kConfirming ||
-            g.pending.phase == TransitionPhase::kTerminal)
-            return fail(kQolErrBusy, "confirmation in flight");
-        pending = g.pending;
-        pending.phase = TransitionPhase::kConfirming;
-        g.pending.phase = TransitionPhase::kConfirming;
+        if (!g.has_pending || g.pending.id != token_id) {
+            reject = ConfirmReject::kLookup;
+        } else if (observed_slot != g.pending.target_slot) {
+            reject = ConfirmReject::kSlotMismatch;
+            expected_target = g.pending.target_slot;
+        } else if (g.pending.phase == TransitionPhase::kConfirming ||
+                   g.pending.phase == TransitionPhase::kTerminal) {
+            reject = ConfirmReject::kInFlight;
+            expected_target = g.pending.target_slot;
+        } else {
+            pending = g.pending;
+            pending.phase = TransitionPhase::kConfirming;
+            g.pending.phase = TransitionPhase::kConfirming;
+        }
+    }
+    if (reject == ConfirmReject::kLookup) {
+        static CoreSaveLogThrottle throttle;
+        if (throttle.due(5000))
+            CS_LOG_WARN(kCoreSaveLogDomain,
+                         "transition confirm failed step=lookup token=%llu target=%d code=%d "
+                         "message=%s",
+                         token_id, observed_slot, kQolErrNotFound, "transition token unknown");
+        return fail(kQolErrNotFound, "transition token unknown");
+    }
+    if (reject == ConfirmReject::kSlotMismatch) {
+        static CoreSaveLogThrottle throttle;
+        if (throttle.due(5000))
+            CS_LOG_WARN(kCoreSaveLogDomain,
+                         "transition confirm failed step=slot_mismatch token=%llu observed=%d "
+                         "target=%d code=%d message=%s",
+                         token_id, observed_slot, expected_target, kQolErrConflict,
+                         "observed slot mismatch");
+        return fail(kQolErrConflict, "observed slot mismatch");
+    }
+    if (reject == ConfirmReject::kInFlight) {
+        static CoreSaveLogThrottle throttle;
+        if (throttle.due(5000))
+            CS_LOG_WARN(kCoreSaveLogDomain,
+                         "transition confirm failed step=in_flight token=%llu target=%d code=%d "
+                         "message=%s",
+                         token_id, expected_target, kQolErrBusy, "confirmation in flight");
+        return fail(kQolErrBusy, "confirmation in flight");
     }
     // 确认序第 1 步：新档 reset / 读档 ensure。均用已校验的请求槽。
     const auto prepared =
@@ -215,55 +359,101 @@ QolResult save_transition_confirm(uint64_t token_id, int32_t observed_slot) {
             ? g.backend->reset_in_operation(g.owner, &pending.lease, pending.target_slot)
             : g.backend->ensure_in_operation(g.owner, &pending.lease, pending.target_slot);
     if (!succeeded(prepared)) {
-        std::lock_guard<std::mutex> lock(g.mutex);
-        // 不消费 pending：token 与 lease 保留，可重试确认或取消。
-        g.pending.phase = TransitionPhase::kAwaitingWorld;
+        {
+            std::lock_guard<std::mutex> lock(g.mutex);
+            // 不消费 pending：token 与 lease 保留，可重试确认或取消。
+            g.pending.phase = TransitionPhase::kAwaitingWorld;
+        }
+        static CoreSaveLogThrottle throttle;
+        if (throttle.due(5000))
+            CS_LOG_WARN(kCoreSaveLogDomain,
+                         "transition confirm failed step=ensure token=%llu target=%d code=%d "
+                         "message=%s",
+                         token_id, pending.target_slot, prepared.code, log_message_of(prepared));
         return prepared;
     }
     // 第 2 步：未决 journal 严格分派（不盲目抹证据）；阻断则保持 pending。
     const auto verdict = journal_check(pending.target_slot, &pending.lease);
     if (!succeeded(verdict)) {
-        std::lock_guard<std::mutex> lock(g.mutex);
-        g.pending.phase = TransitionPhase::kAwaitingWorld;
+        {
+            std::lock_guard<std::mutex> lock(g.mutex);
+            g.pending.phase = TransitionPhase::kAwaitingWorld;
+        }
+        static CoreSaveLogThrottle throttle;
+        if (throttle.due(5000))
+            CS_LOG_WARN(kCoreSaveLogDomain,
+                         "transition confirm failed step=journal token=%llu target=%d code=%d "
+                         "message=%s",
+                         token_id, pending.target_slot, verdict.code, log_message_of(verdict));
         return verdict;
     }
     // 第 3..n 步：新 epoch → session_ready 通知 → SessionBound 加载 / Immediate 排空 →
     // ready 发布（provider confirm 内部完成 activate 派发与 pump）。
     const auto confirmed = qol::features::core_save::slot_data_confirm_transition(observed_slot);
     if (!succeeded(confirmed)) {
-        std::lock_guard<std::mutex> lock(g.mutex);
-        g.pending.phase = TransitionPhase::kAwaitingWorld;
+        {
+            std::lock_guard<std::mutex> lock(g.mutex);
+            g.pending.phase = TransitionPhase::kAwaitingWorld;
+        }
+        static CoreSaveLogThrottle throttle;
+        if (throttle.due(5000))
+            CS_LOG_WARN(kCoreSaveLogDomain,
+                         "transition confirm failed step=activate token=%llu target=%d code=%d "
+                         "message=%s",
+                         token_id, pending.target_slot, confirmed.code,
+                         log_message_of(confirmed));
         return confirmed;
     }
     QolSlotSession ready_session{-1, 0, 0};
     (void)qol::features::core_save::slot_data_api().session(&ready_session);
-    std::lock_guard<std::mutex> lock(g.mutex);
-    record_terminal(token_id, TransitionResult{TransitionResultState::kReady,
-                                               pending.target_slot, pending.old_epoch,
-                                               ready_session.epoch});
-    release_lease(g.pending);
-    g.pending.phase = TransitionPhase::kTerminal;
-    g.pending = PendingTransition{};
-    g.has_pending = false;
-    // 此后才允许 kEventSaveEnter 事件派发。
-    g.ready_published = true;
+    {
+        std::lock_guard<std::mutex> lock(g.mutex);
+        record_terminal(token_id, TransitionResult{TransitionResultState::kReady,
+                                                   pending.target_slot, pending.old_epoch,
+                                                   ready_session.epoch});
+        release_lease(g.pending);
+        g.pending.phase = TransitionPhase::kTerminal;
+        g.pending = PendingTransition{};
+        g.has_pending = false;
+        // 此后才允许 kEventSaveEnter 事件派发。
+        g.ready_published = true;
+    }
+    CS_LOG_INFO(kCoreSaveLogDomain,
+                 "transition ready token=%llu slot=%d old_epoch=%llu epoch=%llu", token_id,
+                 pending.target_slot, pending.old_epoch, ready_session.epoch);
     return ok();
 }
 
 QolResult save_transition_cancel(uint64_t token_id) {
     if (!main_thread()) return fail(kQolErrBlocked, "cancel requires main thread");
-    std::lock_guard<std::mutex> lock(g.mutex);
-    if (!g.has_pending || g.pending.id != token_id)
+    bool unknown = false;
+    int32_t cancelled_target = -1;
+    {
+        std::lock_guard<std::mutex> lock(g.mutex);
+        if (!g.has_pending || g.pending.id != token_id) {
+            unknown = true;
+        } else {
+            const PendingTransition cancelled = g.pending;
+            cancelled_target = cancelled.target_slot;
+            record_terminal(token_id, TransitionResult{TransitionResultState::kCancelled,
+                                                       cancelled.target_slot,
+                                                       cancelled.old_epoch,
+                                                       cancelled.old_epoch});
+            release_lease(g.pending);
+            g.pending = PendingTransition{};
+            g.has_pending = false;
+            // 只释放 token/lease；已删 dat 不伪装恢复（provider 撤销 transitioning，
+            // session 回 Unavailable）。保持原锁序：abandon 仍在 g.mutex 内执行，
+            // 不与并发 begin 的 provider transitioning 窗口交错。
+            (void)qol::features::core_save::slot_data_abandon_transition();
+        }
+    }
+    if (unknown) {
+        CS_LOG_WARN(kCoreSaveLogDomain, "transition cancel failed token=%llu step=lookup", token_id);
         return fail(kQolErrNotFound, "transition token unknown");
-    const PendingTransition cancelled = g.pending;
-    record_terminal(token_id, TransitionResult{TransitionResultState::kCancelled,
-                                               cancelled.target_slot, cancelled.old_epoch,
-                                               cancelled.old_epoch});
-    release_lease(g.pending);
-    g.pending = PendingTransition{};
-    g.has_pending = false;
-    // 只释放 token/lease；已删 dat 不伪装恢复（provider 撤销 transitioning，session 回 Unavailable）。
-    (void)qol::features::core_save::slot_data_abandon_transition();
+    }
+    CS_LOG_INFO(kCoreSaveLogDomain, "transition cancelled token=%llu slot=%d", token_id,
+                 cancelled_target);
     return ok();
 }
 
