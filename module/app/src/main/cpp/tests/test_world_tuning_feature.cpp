@@ -908,7 +908,7 @@ void test_exp_and_money() {
 void set_drop_rates(int32_t quantity, int32_t quality) {
     Rates rates = default_rates();
     rates.value[static_cast<uint32_t>(RateId::kDropQuantity)] = quantity;
-    rates.value[static_cast<uint32_t>(RateId::kDropQuality)] = quality;
+    rates.value[static_cast<uint32_t>(RateId::kDropReroll)] = quality;
     apply_rates(rates);
 }
 
@@ -971,7 +971,7 @@ void test_make_item_quality_wrapper() {
     assert(g_last_item != nullptr && g_last_item->category == 22 && g_last_item->level == 1);
     assert(g_make_item_calls == 1 && g_free_item_calls == 0);
 
-    // 背包参与：同类别取 Lv35（品质档 2 = 首抽 + 1 次重掷）。
+    // 背包参与：同类别取 Lv35（重抽档 2 = 首抽 + 1 次重掷）。
     set_drop_rates(1, 2);
     g_make_item_specs[0] = {31, 15, 0};
     g_make_item_specs[1] = {31, 35, 0};

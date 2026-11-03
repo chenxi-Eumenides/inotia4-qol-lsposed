@@ -31,7 +31,7 @@ const char* g_plugin_id = nullptr;
 
 std::atomic<int32_t> g_rates[kRateCount] = {
     kRateDefault, kRateDefault, kRateDefault, kRateDefault, kRateDefault, kRateDefault,
-    kDropQuantityDefault, kDropQualityDefault};
+    kDropQuantityDefault, kDropRerollDefault};
 
 // wrapper 入口函数指针类型：与游戏函数 ABI 一致。原函数入口由宿主经 on_resource_ready 交还。
 using AddDamageFn = void (*)(void*, void*, int32_t, int32_t, int32_t);
@@ -324,7 +324,7 @@ int32_t inven_add_money_wrapper(int64_t amount) {
 
 
 // ---------------------------------------------------------------------------
-// 掉落：数量倍率 = 整次结算次数；品质倍率 = 槽内造物重掷取同类别最优
+// 掉落：数量倍率 = 整次结算次数；重抽次数 = 槽内造物重掷取同类别最优
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -376,7 +376,7 @@ bool item_flag(const void* item, QolResult (*fn)(int32_t, int32_t*)) {
     return contracts::succeeded(fn(category, &value)) && value != 0;
 }
 
-// 品质重掷的类别分流：药水(2)/材料(4)不参与；卷轴/宝石(3)与背包/骰子(5)参与；
+// 重抽的类别分流：药水(2)/材料(4)不参与；卷轴/宝石(3)与背包/骰子(5)参与；
 // 徽章/技能书/神灯等其余 5 类物品不参与。subtype 来自槽的 lookup_key。
 DropQualityGroup quality_group(const void* item, int32_t subtype) {
     if (item == nullptr) return DropQualityGroup::kNone;
@@ -436,7 +436,7 @@ void* make_item_wrapper(int32_t category, int32_t lookup_key, int32_t flag) {
     if (first == nullptr) return nullptr;
     if (!g_gate.load(std::memory_order_relaxed) || !drop_context_active()) return first;
 
-    const int32_t rolls = rate_value(RateId::kDropQuality);
+    const int32_t rolls = rate_value(RateId::kDropReroll);
     if (rolls <= 1) return first;
     const DropQualityGroup group = quality_group(first, lookup_key);
     if (group == DropQualityGroup::kNone) return first;
@@ -479,7 +479,7 @@ void* make_equip_detail_wrapper(int32_t kind, int32_t min_level, int32_t max_lev
     if (first == nullptr) return nullptr;
     if (!g_gate.load(std::memory_order_relaxed) || !drop_context_active()) return first;
 
-    const int32_t rolls = rate_value(RateId::kDropQuality);
+    const int32_t rolls = rate_value(RateId::kDropReroll);
     if (rolls <= 1) return first;
     int32_t best_rarity = 0;
     if (!read_item_rarity(first, &best_rarity)) return first;

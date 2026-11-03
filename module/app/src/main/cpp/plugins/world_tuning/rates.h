@@ -18,7 +18,7 @@ enum class RateId : uint8_t {
     kDamageOut,
     kDamageIn,
     kDropQuantity,
-    kDropQuality,
+    kDropReroll,
     kCount,
 };
 
@@ -32,11 +32,11 @@ inline constexpr int32_t kDropQuantityLadder[] = {0, 1, 2, 3, 4, 5};
 inline constexpr uint32_t kDropQuantityLadderSize =
     sizeof(kDropQuantityLadder) / sizeof(kDropQuantityLadder[0]);
 inline constexpr int32_t kDropQuantityDefault = 1;
-// 掉落品质：重掷次数 1..5（1 = 不重掷）。
-inline constexpr int32_t kDropQualityLadder[] = {1, 2, 3, 4, 5};
-inline constexpr uint32_t kDropQualityLadderSize =
-    sizeof(kDropQualityLadder) / sizeof(kDropQualityLadder[0]);
-inline constexpr int32_t kDropQualityDefault = 1;
+// 掉落重抽：重掷次数 1..5（1 = 不重掷）。
+inline constexpr int32_t kDropRerollLadder[] = {1, 2, 3, 4, 5};
+inline constexpr uint32_t kDropRerollLadderSize =
+    sizeof(kDropRerollLadder) / sizeof(kDropRerollLadder[0]);
+inline constexpr int32_t kDropRerollDefault = 1;
 
 struct Rates {
     int32_t value[static_cast<uint32_t>(RateId::kCount)]{};
@@ -57,7 +57,7 @@ int32_t rate_default(RateId id);
 int32_t ladder_index(RateId id, int32_t value);
 int32_t ladder_shift(RateId id, int32_t value, int32_t delta);
 
-// 文本：通用倍率 → "×1.5"；掉落数量/品质 → "×N"（整数）。
+// 文本：通用倍率 → "×1.5"；掉落数量/重抽 → "×N"（整数）。
 std::string rate_display(RateId id, int32_t value);
 
 Rates default_rates();

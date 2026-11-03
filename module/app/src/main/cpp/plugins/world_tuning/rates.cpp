@@ -9,11 +9,11 @@ namespace {
 
 constexpr const char* kRateKeys[] = {
     "gold", "exp", "player_hp", "enemy_hp", "damage_out", "damage_in",
-    "drop_quantity", "drop_quality",
+    "drop_quantity", "drop_reroll",
 };
 constexpr const char* kRateNames[] = {
     "金币倍率", "经验倍率", "血量倍率", "敌怪血量倍率", "伤害倍率", "承伤倍率",
-    "掉落数量倍率", "掉落品质倍率",
+    "掉落数量倍率", "掉落重抽次数",
 };
 constexpr const char* kRateDescriptions[] = {
     "获得的金钱缩放", "获得的经验缩放", "玩家最大生命的缩放", "怪物最大生命的缩放", "对怪物造成的伤害缩放",
@@ -114,9 +114,9 @@ const int32_t* rate_ladder(RateId id, uint32_t* out_size) {
         case RateId::kDropQuantity:
             if (out_size != nullptr) *out_size = kDropQuantityLadderSize;
             return kDropQuantityLadder;
-        case RateId::kDropQuality:
-            if (out_size != nullptr) *out_size = kDropQualityLadderSize;
-            return kDropQualityLadder;
+        case RateId::kDropReroll:
+            if (out_size != nullptr) *out_size = kDropRerollLadderSize;
+            return kDropRerollLadder;
         default:
             if (out_size != nullptr) *out_size = kRateLadderSize;
             return kRateLadder;
@@ -126,7 +126,7 @@ const int32_t* rate_ladder(RateId id, uint32_t* out_size) {
 int32_t rate_default(RateId id) {
     switch (id) {
         case RateId::kDropQuantity: return kDropQuantityDefault;
-        case RateId::kDropQuality: return kDropQualityDefault;
+        case RateId::kDropReroll: return kDropRerollDefault;
         default: return kRateDefault;
     }
 }
@@ -153,7 +153,7 @@ int32_t ladder_shift(RateId id, int32_t value, int32_t delta) {
 
 std::string rate_display(RateId id, int32_t value) {
     char buffer[16]{};
-    if (id == RateId::kDropQuantity || id == RateId::kDropQuality) {
+    if (id == RateId::kDropQuantity || id == RateId::kDropReroll) {
         std::snprintf(buffer, sizeof(buffer), "×%d", value);
         return std::string(buffer);
     }
