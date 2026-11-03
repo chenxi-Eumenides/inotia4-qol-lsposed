@@ -44,7 +44,7 @@ QolResult compute_tier_up_value(Tier current_tier, AttributeRange range, Classif
                                 int32_t* out_new_value);
 
 // ---------------------------------------------------------------------------
-// 材料需求数量（custom-craft-recipe §4.7 / CountRule::kGradeAndLevel）
+// 材料需求数量（custom-craft-recipe §4.7 / CountRule::kQualityAndAttributeTier）
 // ---------------------------------------------------------------------------
 
 // 宝石类别（item+8 的 bits6-15）范围：28..32，与 ITEMSYSTEM_IsJewel 一致。
@@ -53,23 +53,31 @@ constexpr int kJewelCategoryLast = 32;
 // 角色等级上限（EXP 表 105 级）。
 constexpr int kMaxCharacterLevel = 105;
 
-// 宝石类别 → 档位 1..5：28=低级宝石、29=中级、30=高级、31=顶级、32=混沌。
+// 宝石类别 → 品质档位 1..5：28=低级宝石、29=中级、30=高级、31=顶级、32=混沌。
 // 不在 [28,32] 内返回 0（调用方应据此放弃改写需求数，fail-closed）。
-int jewel_grade_from_category(int category);
+int jewel_quality_tier_from_category(int category);
 
-// 装备稀有度（ITEMSYSTEM_GetRarity 0..4 = 白/绿/蓝/黄/紫）→ 材料档位 1..5；越界返回 0。
-int equipment_grade_from_rarity(int rarity);
+// 装备稀有度（ITEMSYSTEM_GetRarity 0..4 = 白/绿/蓝/黄/紫）→ 品质档位 1..5；越界返回 0。
+int equipment_quality_tier_from_rarity(int rarity);
 
 // 词条可升阶：质量查询 status==kQolOk、level 在 [0,4]、区间非退化（max>min）。
 bool affix_upgradable(int32_t status, int32_t level, AttributeRange range);
 
-// 材料需求数量 = max(0, base_count + grade − F)，组合底价 base_count+grade 随档位 +1 递增；
-// F 为随等级线性增长的折扣额度：F = F1 + floor((level − L1) × (F2 − F1) / (L2 − L1))，
-// L1=25、L2=95、F1=2、F2=10（语义见实现内阈值注释，可调整）。
-// 纯整数 floor 运算。level 钳到 [0,105]；base_count<1 或 grade<1 → 返回 0 由调用方处理。
-// 边界：level=24 → (1,1)=1、level=25 → (1,1)=0（最低组合零费）；level=94 → (5,5)=1、level≥95 全部组合 0。
-// 同一 level 下非零消耗两两互异且随 base_count+grade 严格 +1 递增（如 25 级 [0,1,2,3,4]、43 级 [0,0,0,1,2]）。
-int material_count_for(int base_count, int grade, int level);
+// 属性等阶 = attribute.quality 的 level + 1：0%→1、30%→2、60%→3、75%→4、90%→5。
+// level 5（金档，不可升阶）或越界 → 0（调用方 fail-closed）。
+int attribute_tier_from_quality_level(int quality_level);
+
+// 材料需求数量 = max(0, quality_tier + attribute_tier − F)，
+// F = 2 + floor((clamp(character_level, 0, 105) − 25) × 8 / 70)。
+// quality_tier 为品质档位（宝石类别 / 装备稀有度 → 1..5）、attribute_tier 为属性等阶
+// （attribute.quality 的 level + 1，见 attribute_tier_from_quality_level）。
+// 端点：character_level=25 时 F=2，最低组合「品质1+等阶1」恰好免费；
+// character_level=95 时 F=10，最高组合「品质5+等阶5」恰好免费。
+// floor 为向 −∞ 取整；C++ 整数除法向零，被除数为负时须修正（见实现），否则低等级折扣偏大、
+// 零费等级提前。
+// quality_tier / attribute_tier 不在 1..5 → 返回 0（调用方据此保持原需求数，不会变成免费合成）。
+// 同一 level 下非零消耗随品质+等阶之和严格 +1 递增（如 25 级 [0,1,2,3,4]、43 级 [0,0,0,1,2]）。
+int material_count_for(int quality_tier, int attribute_tier, int character_level);
 
 // ---- 3 格隐式配方的放料/扣料数量判定（纯逻辑，host 可测；需求见 §2.8）----
 // 语义：**每格 = 1 件**。不可堆叠物品 = 1 个对象（同一对象不得占两格）；

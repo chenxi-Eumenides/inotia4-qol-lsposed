@@ -21,8 +21,8 @@ enum class Kind : uint8_t {
 
 // 材料需求数量的计算规则（配方的固有属性，随 Def 声明）。
 enum class CountRule : uint8_t {
-    kFixed,            // 直接用 Material::count
-    kGradeAndLevel,    // ceil(Material::count × 目标档位 × (105 − 角色等级) / 105)
+    kFixed,                    // 直接用 Material::count
+    kQualityAndAttributeTier,  // max(0, 品质档位 + 属性等阶 − F(角色等级))，见 rules.h
 };
 
 // 配方形式：声明该配方借用哪个原版 UIMix type（0..4）的面板形态与提交流程。

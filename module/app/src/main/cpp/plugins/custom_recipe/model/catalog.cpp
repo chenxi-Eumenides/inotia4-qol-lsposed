@@ -48,8 +48,11 @@ const Material kTierUpMaterials[] = {
 // （放料不转调原函数、合成前置查表 + 原生 YesNo 回调）；产物 = `three_slot_recipes` 命中项的
 // `product`。材料显示仍镜像原版 record 12（`{28,3}` / 费用文本 188）以保持该页格位与费用显示不变。
 // 第 2 条「升阶」= kTierUp：借 type 3 形态，材料需求数量
-// = ceil(1 × 目标档位 × (105 − 角色等级) / 105)（见 CountRule::kGradeAndLevel）；
-// 宝石档位按类别、装备档位按稀有度计算，105 级为 0 瓶；费用 0 由 hook 强制。
+// = max(0, 品质档位 + 属性等阶 − F)，F = 2 + floor((等级 − 25) × 8 / 70)
+// （见 CountRule::kQualityAndAttributeTier 与 rules.h 的 material_count_for）；
+// 品质档位：宝石按类别（28..32 → 1..5）、装备按稀有度（0..4 → 1..5）；
+// 属性等阶：宝石取 quality.level+1、装备取可升阶词条最低 level+1；
+// 25 级起最低组合 0 瓶、95 级起全部组合 0 瓶；费用 0 由 hook 强制。
 const Def kCatalog[] = {
     {kNativeLabelWordId, Kind::kThreeSlotCraft, kNativeMaterials,
      static_cast<uint8_t>(sizeof(kNativeMaterials) / sizeof(kNativeMaterials[0])),
@@ -57,7 +60,8 @@ const Def kCatalog[] = {
      kPageGroupJewelCraft},
     {kTierUpLabelWordId, Kind::kTierUp, kTierUpMaterials,
      static_cast<uint8_t>(sizeof(kTierUpMaterials) / sizeof(kTierUpMaterials[0])),
-     /*cost_word_id=*/kTierUpCostWordId, CountRule::kGradeAndLevel, Form::kTargetAndCreate,
+     /*cost_word_id=*/kTierUpCostWordId, CountRule::kQualityAndAttributeTier,
+     Form::kTargetAndCreate,
      kPageGroupJewelCraft},
 };
 

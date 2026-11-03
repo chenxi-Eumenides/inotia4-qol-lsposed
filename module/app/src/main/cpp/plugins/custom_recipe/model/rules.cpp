@@ -166,12 +166,12 @@ QolResult compute_tier_up_value(Tier current_tier, AttributeRange range,
     return qol::contracts::ok();
 }
 
-int jewel_grade_from_category(int category) {
+int jewel_quality_tier_from_category(int category) {
     if (category < kJewelCategoryFirst || category > kJewelCategoryLast) return 0;
     return category - kJewelCategoryFirst + 1;
 }
 
-int equipment_grade_from_rarity(int rarity) {
+int equipment_quality_tier_from_rarity(int rarity) {
     if (rarity < 0 || rarity > 4) return 0;
     return rarity + 1;
 }
@@ -180,22 +180,28 @@ bool affix_upgradable(int32_t status, int32_t level, AttributeRange range) {
     return status == kQolOk && level >= 0 && level < 5 && range.max > range.min;
 }
 
-int material_count_for(int base_count, int grade, int level) {
-    // 零费等级阈值：kFreeStartLevel = 最低底价组合（base+grade=2）恰好免费的等级；
-    // kFreeFullLevel = 最高底价组合（base+grade=10）恰好免费的等级。
+int attribute_tier_from_quality_level(int quality_level) {
+    // 0..4 → 1..5；5 为金档（不可升阶）、越界为非法输入，一律 0 由调用方 fail-closed。
+    if (quality_level < 0 || quality_level > 4) return 0;
+    return quality_level + 1;
+}
+
+int material_count_for(int quality_tier, int attribute_tier, int character_level) {
+    // 零费等级端点：kFreeStartLevel = 最低组合（品质1+等阶1 = 2）恰好免费的等级；
+    // kFreeFullLevel = 最高组合（品质5+等阶5 = 10）恰好免费的等级。
     const int kFreeStartLevel = 25;
     const int kFreeFullLevel = 95;
-    // 折扣额度端点：kFreeStartLevel 级时折扣 = 最低底价、kFreeFullLevel 级时折扣 = 最高底价。
-    // 改动阈值时须与档位 1..5 推导出的底价范围 [2,10] 两端对齐，否则端点档位的零费等级会偏离预期。
+    // 折扣额度端点：kFreeStartLevel 级时折扣 = 最低组合和（2）、kFreeFullLevel 级时 = 最高组合和（10）。
+    // 改动阈值时须与品质+等阶的和范围 [2,10] 两端对齐，否则端点组合的零费等级会偏离预期。
     const int kDiscountAtStart = 2;
     const int kDiscountAtFull = 10;
 
-    if (base_count < 1 || grade < 1) return 0;
-    int lv = level;
+    if (quality_tier < 1 || quality_tier > 5 || attribute_tier < 1 || attribute_tier > 5) return 0;
+    int lv = character_level;
     if (lv < 0) lv = 0;
     if (lv > kMaxCharacterLevel) lv = kMaxCharacterLevel;
 
-    // 消耗 = max(0, base_count + grade − F)，
+    // 消耗 = max(0, quality_tier + attribute_tier − F)，
     // F = kDiscountAtStart + floor((lv − kFreeStartLevel) × (kDiscountAtFull − kDiscountAtStart)
     //                              / (kFreeFullLevel − kFreeStartLevel))。
     // C++ 整数除法向零取整；被除数为负时须修正为向下取整，否则低等级折扣偏大、零费等级提前。
@@ -205,7 +211,7 @@ int material_count_for(int base_count, int grade, int level) {
     if (scaled < 0 && scaled % span != 0) --discount;
     discount += kDiscountAtStart;
 
-    const int price = base_count + grade;
+    const int price = quality_tier + attribute_tier;
     if (price <= discount) return 0;
     return price - discount;
 }

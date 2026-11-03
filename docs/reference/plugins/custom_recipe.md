@@ -95,7 +95,7 @@ UIMix 控件。
 | 入口 | Kind | 形式 | 说明 |
 |---|---|---|---|
 | 「合成」（label wordId 35216，记录下标 69） | `kThreeSlotCraft` | `kMultiInputCreate`（type 1） | 三格隐式配方；材料显示镜像原版 record 12，费用由 hook 强制 0。三同类档位宝石命中规则 3-6 时**委托原版 `UIMix_StartMix` 执行**（见 §6.3 委托分支），其余规则走插件管线。 |
-| 「升阶」（label wordId 35291，记录下标 70） | `kTierUp` | `kTargetAndCreate`（type 3） | 目标为宝石或真实装备；材料数量按 `ceil(1 × 档位 × (105 − 等级) / 105)`，宝石档位取类别（28..32 → 1..5），装备档位取稀有度 + 1（0..4 → 1..5）；满级 0 瓶。 |
+| 「升阶」（label wordId 35291，记录下标 70） | `kTierUp` | `kTargetAndCreate`（type 3） | 目标为宝石或真实装备；材料数量 = `max(0, 品质档位 + 属性等阶 − F)`，`F = 2 + floor((等级 − 25) × 8 / 70)`；品质档位宝石取类别（28..32 → 1..5）、装备取稀有度（0..4 → 1..5），属性等阶宝石取 `quality.level + 1`、装备取可升阶词条最低 `level + 1`；25 级起最低组合 0 瓶、95 级起全部组合 0 瓶。 |
 
 注入记录布局 12 字节（RECIPEBASE）与 3 字节（MIXTUREBASE），由 `table/table.cpp` 的纯构造器
 生成；组位只保留模块自己的位，停用时还原原版段组位。
@@ -208,9 +208,14 @@ H-05 补扣承担。
   status 成功、level 0..4、`max > min` 的词条进入候选，再用同一个 typed 闭区间随机源抽一条。
   宝石词条（`jewel_options[]` / type 1）与 `enchant_options[]`（附魔）不参与候选，也不会被写。
 - 新值：与宝石相同，`compute_tier_up_value` 在下一档闭区间内随机取值。
-- 材料档位：宝石由 `jewel_grade_from_category`（类别 28..32 → 1..5）给出；装备由
-  `equipment_grade_from_rarity`（稀有度 0..4 → 1..5）给出。数量仍为
-  `ceil(1 × 档位 × (105 − 角色等级) / 105)`，满级 0 瓶。
+- 材料消耗输入 = 品质档位 + 属性等阶：品质档位宝石由 `jewel_quality_tier_from_category`
+  （类别 28..32 → 1..5）给出、装备由 `equipment_quality_tier_from_rarity`（稀有度 0..4 → 1..5）
+  给出；属性等阶宝石取 `quality.level + 1`（0%→1、30%→2、60%→3、75%→4、90%→5，金档不可升阶）、
+  装备取全部可升阶词条（type 0、status ok、level 0..4、`max > min`）的最低 `level + 1`。
+  数量 = `max(0, 品质档位 + 属性等阶 − F)`，`F = 2 + floor((等级 − 25) × 8 / 70)`：
+  25 级时 F=2（最低组合免费）、95 级时 F=10（最高组合免费）。
+  面板显示（`api_material_needs`）经 `tier_up_cost_inputs_for_item` 取输入；执行
+  （`api_make_item`）从已查询的 `quality` / 候选词条取同一语义的输入，保证两边口径一致。
 - `api_make_item` 的提交顺序：
   - 宝石：quality 查询 → 与 item word 交叉核对 → 材料需求前置校验 → 计算候选（随机）→
     **先提交 need 写入** → **最后写 jewel word**。

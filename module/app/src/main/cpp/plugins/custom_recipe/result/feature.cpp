@@ -244,36 +244,6 @@ QolResult query_jewel_fact(qol::contracts::QolItemHandle item, uint16_t* out_cat
     return contracts::ok();
 }
 
-QolResult material_grade_for_item(qol::contracts::QolItemHandle item, int* out_grade) {
-    if (out_grade == nullptr) {
-        return recipe_error(kQolErrInvalidArgument, "null material grade output");
-    }
-    *out_grade = 0;
-    uint16_t category = 0;
-    bool is_jewel = false;
-    QolResult result = query_jewel_fact(item, &category, &is_jewel);
-    if (result.ok != kQolOk) return result;
-    if (is_jewel) {
-        *out_grade = ::custom_recipe::jewel_grade_from_category(static_cast<int>(category));
-        return contracts::ok();
-    }
-    qol::contracts::QolItemType item_type = qol::contracts::QolItemType::kUnknown;
-    result = read_item_type(item, &item_type);
-    if (result.ok != kQolOk) return result;
-    if (item_type != qol::contracts::QolItemType::kEquipment) return contracts::ok();
-    if (g_item_facts->view == nullptr) {
-        return recipe_error(kQolErrNotReady, "equipment inventory view unavailable");
-    }
-    qol::contracts::QolItemInventoryView view{};
-    result = g_item_facts->view(item, &view);
-    if (result.ok != kQolOk) return result;
-    if ((view.fields & qol::contracts::kQolItemInventoryHasRarity) == 0) {
-        return recipe_error(kQolErrNotReady, "equipment rarity unavailable");
-    }
-    *out_grade = ::custom_recipe::equipment_grade_from_rarity(view.rarity);
-    return contracts::ok();
-}
-
 QolResult quality_error(int32_t code, const char* message) {
     return contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
 }
@@ -335,6 +305,88 @@ QolResult query_jewel_quality(qol::contracts::QolItemHandle item,
     return contracts::ok();
 }
 
+// 升阶材料消耗的两项输入：品质档位（宝石类别 / 装备稀有度）与属性等阶
+// （宝石 quality.level+1 / 装备可升阶词条最低 level+1）。
+// 面板显示（api_material_needs）用本函数；执行路径（api_make_item）从已查询的
+// quality / 候选词条取同一语义的输入，避免面板显示与实扣口径分叉。
+QolResult tier_up_cost_inputs_for_item(qol::contracts::QolItemHandle item,
+                                       int* out_quality_tier, int* out_attribute_tier) {
+    if (out_quality_tier == nullptr || out_attribute_tier == nullptr) {
+        return recipe_error(kQolErrInvalidArgument, "null tier-up cost input output");
+    }
+    *out_quality_tier = 0;
+    *out_attribute_tier = 0;
+    uint16_t category = 0;
+    bool is_jewel = false;
+    QolResult result = query_jewel_fact(item, &category, &is_jewel);
+    if (result.ok != kQolOk) return result;
+    if (is_jewel) {
+        *out_quality_tier =
+            ::custom_recipe::jewel_quality_tier_from_category(static_cast<int>(category));
+        const qol::contracts::AttributeQualityApi* api = nullptr;
+        qol::contracts::AttributeQualityItem quality{};
+        result = query_jewel_quality(item, &api, &quality);
+        if (result.ok != kQolOk) return result;
+        *out_attribute_tier =
+            ::custom_recipe::attribute_tier_from_quality_level(quality.quality.level);
+        if (*out_quality_tier < 1 || *out_attribute_tier < 1) {
+            return recipe_error(kQolErrNotReady, "jewel tier-up cost inputs unavailable");
+        }
+        return contracts::ok();
+    }
+    qol::contracts::QolItemType item_type = qol::contracts::QolItemType::kUnknown;
+    result = read_item_type(item, &item_type);
+    if (result.ok != kQolOk) return result;
+    if (item_type != qol::contracts::QolItemType::kEquipment) {
+        return recipe_error(kQolErrInvalidArgument, "tier-up target is not jewel or equipment");
+    }
+    if (g_item_facts->view == nullptr) {
+        return recipe_error(kQolErrNotReady, "equipment inventory view unavailable");
+    }
+    qol::contracts::QolItemInventoryView view{};
+    result = g_item_facts->view(item, &view);
+    if (result.ok != kQolOk) return result;
+    if ((view.fields & qol::contracts::kQolItemInventoryHasRarity) == 0) {
+        return recipe_error(kQolErrNotReady, "equipment rarity unavailable");
+    }
+    if ((view.fields & qol::contracts::kQolItemInventoryHasNativeOptions) == 0 ||
+        (view.fields & qol::contracts::kQolItemInventoryOptionsTruncated) != 0 ||
+        view.native_option_count == 0 ||
+        view.native_option_count > qol::contracts::kQolItemInventoryNativeOptionCapacity) {
+        return recipe_error(kQolErrNotReady, "equipment native options unavailable");
+    }
+    *out_quality_tier = ::custom_recipe::equipment_quality_tier_from_rarity(view.rarity);
+    const qol::contracts::AttributeQualityApi* api = nullptr;
+    result = require_attribute_quality_api(&api);
+    if (result.ok != kQolOk) return result;
+    // 可升阶词条（type 0、status ok、level 0..4、区间非退化）中取最低 level 作等阶输入。
+    int min_level = -1;
+    for (uint32_t i = 0; i < view.native_option_count; ++i) {
+        const qol::contracts::QolItemInventoryOptionView& option = view.native_options[i];
+        if (option.type != static_cast<int32_t>(
+                               qol::contracts::QolItemInventoryOptionType::kNative)) {
+            continue;
+        }
+        qol::contracts::AttributeQualityItem context{};
+        const QolResult queried =
+            api->query_option_context(item, option.id, option.value, nullptr, &context);
+        if (queried.ok != kQolOk ||
+            !::custom_recipe::affix_upgradable(context.status, context.quality.level,
+                                               context.range)) {
+            continue;
+        }
+        if (min_level < 0 || context.quality.level < min_level) min_level = context.quality.level;
+    }
+    if (min_level < 0) {
+        return recipe_error(kQolErrNotFound, "no upgradable equipment affix");
+    }
+    *out_attribute_tier = ::custom_recipe::attribute_tier_from_quality_level(min_level);
+    if (*out_quality_tier < 1 || *out_attribute_tier < 1) {
+        return recipe_error(kQolErrNotReady, "equipment tier-up cost inputs unavailable");
+    }
+    return contracts::ok();
+}
+
 struct QualityEvaluationContext {
     const contracts::AttributeQualityApi* api;
 };
@@ -371,15 +423,17 @@ int64_t form_borrowed_type(::custom_recipe::Form form) {
 struct MaterialNeedPlan {
     uint8_t count = 0;
     int32_t needs[8]{};
-    int grade = 0;
-    int32_t level = 0;
+    int quality_tier = 0;
+    int attribute_tier = 0;
+    int32_t character_level = 0;
 };
 
 // 先完整验证需求，再由调用方依序写入 stuffList。
-QolResult prepare_material_needs(const ::custom_recipe::Def* def, int grade,
-                                 MaterialNeedPlan* out_plan) {
-    if (def == nullptr || out_plan == nullptr || grade < 1 || grade > 5 ||
-        def->count_rule != ::custom_recipe::CountRule::kGradeAndLevel ||
+QolResult prepare_material_needs(const ::custom_recipe::Def* def, int quality_tier,
+                                 int attribute_tier, MaterialNeedPlan* out_plan) {
+    if (def == nullptr || out_plan == nullptr || quality_tier < 1 || quality_tier > 5 ||
+        attribute_tier < 1 || attribute_tier > 5 ||
+        def->count_rule != ::custom_recipe::CountRule::kQualityAndAttributeTier ||
         def->materials == nullptr || def->material_count == 0 || def->material_count > 8) {
         return recipe_error(kQolErrInvalidArgument, "invalid tier-up material definition");
     }
@@ -395,14 +449,16 @@ QolResult prepare_material_needs(const ::custom_recipe::Def* def, int grade,
 
     MaterialNeedPlan plan{};
     plan.count = def->material_count;
-    plan.grade = grade;
-    plan.level = level;
+    plan.quality_tier = quality_tier;
+    plan.attribute_tier = attribute_tier;
+    plan.character_level = level;
     for (uint8_t i = 0; i < def->material_count; ++i) {
+        // 条目数据仍须合法（item_id/count 非零）；消耗数量只由品质+等阶+等级决定，
+        // 不随条目 count 缩放（升阶材料以 1 瓶为基准）。
         if (def->materials[i].item_id == 0 || def->materials[i].count == 0) {
             return recipe_error(kQolErrInternal, "invalid tier-up material entry");
         }
-        plan.needs[i] = ::custom_recipe::material_count_for(
-            def->materials[i].count, grade, level);
+        plan.needs[i] = ::custom_recipe::material_count_for(quality_tier, attribute_tier, level);
         if (plan.needs[i] < 0) {
             return recipe_error(kQolErrInternal, "invalid material need");
         }
@@ -423,8 +479,10 @@ QolResult write_material_needs(const ::custom_recipe::Def* def,
         }
     }
     if (g_verify_log_budget.fetch_sub(1) > 0) {
-        log_message(0, "material needs grade=%d level=%d count=%u first=%d", plan.grade,
-                    plan.level, static_cast<uint32_t>(plan.count), plan.needs[0]);
+        log_message(0,
+                    "material needs quality_tier=%d attribute_tier=%d level=%d count=%u first=%d",
+                    plan.quality_tier, plan.attribute_tier, plan.character_level,
+                    static_cast<uint32_t>(plan.count), plan.needs[0]);
     }
     return contracts::ok();
 }
@@ -1472,15 +1530,21 @@ void api_material_needs(const result::CraftMaterialNeedInput* in,
     }
     if (in == nullptr || out == nullptr) return;
     const ::custom_recipe::Def* def = ::custom_recipe::def_for_mix_type(in->mix_type);
-    if (def == nullptr || def->count_rule != ::custom_recipe::CountRule::kGradeAndLevel) return;
-    int grade = 0;
-    if (material_grade_for_item(in->item, &grade).ok != kQolOk || grade < 1) return;
+    if (def == nullptr ||
+        def->count_rule != ::custom_recipe::CountRule::kQualityAndAttributeTier) {
+        return;
+    }
+    int quality_tier = 0;
+    int attribute_tier = 0;
+    if (tier_up_cost_inputs_for_item(in->item, &quality_tier, &attribute_tier).ok != kQolOk) {
+        return;
+    }
     if (def->material_count == 0) return;
     int count = def->material_count;
     if (count > 8) count = 8;
     out->count = count;
     for (int i = 0; i < count; ++i) {
-        out->needs[i] = ::custom_recipe::material_count_for(def->materials[i].count, grade,
+        out->needs[i] = ::custom_recipe::material_count_for(quality_tier, attribute_tier,
                                                             in->character_level);
     }
 }
@@ -1521,9 +1585,13 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
             log_message(2, "make item aborted: jewel writer unavailable");
             return 1;
         }
-        const int grade = ::custom_recipe::jewel_grade_from_category(static_cast<int>(category));
+        const int quality_tier =
+            ::custom_recipe::jewel_quality_tier_from_category(static_cast<int>(category));
+        const int attribute_tier =
+            ::custom_recipe::attribute_tier_from_quality_level(current.quality.level);
         MaterialNeedPlan material_plan{};
-        const QolResult material_result = prepare_material_needs(def, grade, &material_plan);
+        const QolResult material_result =
+            prepare_material_needs(def, quality_tier, attribute_tier, &material_plan);
         if (material_result.ok != kQolOk) {
             log_message(2, "make item aborted: material precheck failed code=%d",
                         material_result.code);
@@ -1641,14 +1709,21 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
         return 1;
     }
     if ((view.fields & qol::contracts::kQolItemInventoryHasRarity) == 0) return 1;
-    const int grade = ::custom_recipe::equipment_grade_from_rarity(view.rarity);
-    if (grade < 1 || grade > 5) return 1;
+    const int quality_tier = ::custom_recipe::equipment_quality_tier_from_rarity(view.rarity);
+    // 消耗输入的属性等阶取全部候选（可升阶词条）的最低 level：与面板显示共用同一语义。
+    int min_level = candidates[0].level;
+    for (uint32_t i = 1; i < candidate_count; ++i) {
+        if (candidates[i].level < min_level) min_level = candidates[i].level;
+    }
+    const int attribute_tier = ::custom_recipe::attribute_tier_from_quality_level(min_level);
+    if (quality_tier < 1 || attribute_tier < 1) return 1;
     if (g_write_port == nullptr || g_write_port->write_native_option_value == nullptr) {
         log_message(2, "make item aborted: native option writer unavailable");
         return 1;
     }
     MaterialNeedPlan material_plan{};
-    const QolResult material_result = prepare_material_needs(def, grade, &material_plan);
+    const QolResult material_result =
+        prepare_material_needs(def, quality_tier, attribute_tier, &material_plan);
     if (material_result.ok != kQolOk) {
         log_message(2, "make item aborted: material precheck failed code=%d", material_result.code);
         return 1;
