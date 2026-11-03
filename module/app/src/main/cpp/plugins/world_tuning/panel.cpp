@@ -126,7 +126,7 @@ void draw_row(QolUiHandle row, uint32_t index) {
     if (name != nullptr) {
         (void)g_components->draw_control_text(row, name, 16, 22, contracts::ui_theme::kTextGold, 0, 1);
     }
-    const std::string value = rate_display(g_rates.value[index]);
+    const std::string value = rate_display(id, g_rates.value[index]);
     (void)g_components->draw_control_text(row, value.c_str(), kValueCenterX, 24,
         contracts::ui_theme::kTextNormal, 2, 1);
 }
@@ -151,14 +151,17 @@ void sync_arrow_states() {
     if (g_components == nullptr || g_components->arrow_button_set_enabled == nullptr) return;
     const bool config_ready = rates_config_available();
     for (uint32_t row = 0; row < kRowCount; ++row) {
-        const int32_t index = ladder_index(g_confirmed.value[row]);
+        const auto id = static_cast<RateId>(row);
+        uint32_t ladder_size = 0;
+        (void)rate_ladder(id, &ladder_size);
+        const int32_t index = ladder_index(id, g_confirmed.value[row]);
         // 只禁用正在保存的行；其它行保持原状态，避免整屏箭头闪动。
         const bool pending = g_pending_row == static_cast<int>(row);
         for (int side = 0; side < 2; ++side) {
             QolUiHandle handle = g_arrows[row][side];
             if (handle == nullptr) continue;
             const bool at_edge = index < 0 ||
-                (side == 0 ? index == 0 : index == static_cast<int32_t>(kRateLadderSize) - 1);
+                (side == 0 ? index == 0 : index == static_cast<int32_t>(ladder_size) - 1);
             const bool enabled = config_ready && !pending && !at_edge;
             if (g_arrow_enabled[row][side] == enabled) continue;
             g_arrow_enabled[row][side] = enabled;
@@ -201,7 +204,7 @@ void arrow_clicked(void* user) {
     const uint32_t row = context->row;
     if (!rates_config_available()) return;
     const int32_t current = g_confirmed.value[row];
-    const int32_t next = ladder_shift(current, context->delta);
+    const int32_t next = ladder_shift(static_cast<RateId>(row), current, context->delta);
     if (next == current) return;
     Rates candidate = g_confirmed;
     candidate.value[row] = next;

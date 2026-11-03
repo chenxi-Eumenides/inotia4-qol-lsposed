@@ -13,15 +13,15 @@ void test_ladder_and_metadata() {
     assert(kRateLadderSize == 10);
     assert(kRateLadder[0] == 10 && kRateLadder[4] == 100 && kRateLadder[9] == 500);
     assert(kRateDefault == 100);
-    assert(ladder_index(100) == 4);
-    assert(ladder_index(101) == -1);
-    assert(ladder_index(0) == -1);
-    assert(ladder_shift(100, -1) == 80);
-    assert(ladder_shift(100, 1) == 120);
-    assert(ladder_shift(10, -1) == 10);
-    assert(ladder_shift(500, 1) == 500);
-    assert(ladder_shift(100, 0) == 100);
-    assert(ladder_shift(101, 1) == 101);
+    assert(ladder_index(RateId::kGold, 100) == 4);
+    assert(ladder_index(RateId::kGold, 101) == -1);
+    assert(ladder_index(RateId::kGold, 0) == -1);
+    assert(ladder_shift(RateId::kGold, 100, -1) == 80);
+    assert(ladder_shift(RateId::kGold, 100, 1) == 120);
+    assert(ladder_shift(RateId::kGold, 10, -1) == 10);
+    assert(ladder_shift(RateId::kGold, 500, 1) == 500);
+    assert(ladder_shift(RateId::kGold, 100, 0) == 100);
+    assert(ladder_shift(RateId::kGold, 101, 1) == 101);
 
     assert(std::strcmp(rate_key(RateId::kGold), "gold") == 0);
     assert(std::strcmp(rate_name(RateId::kGold), "金币倍率") == 0);
@@ -37,16 +37,35 @@ void test_ladder_and_metadata() {
     assert(rate_supported(RateId::kEnemyHp));
     assert(rate_supported(RateId::kDamageOut));
     assert(rate_supported(RateId::kDamageIn));
+    assert(rate_supported(RateId::kDropQuantity));
+    assert(rate_supported(RateId::kDropQuality));
+    assert(std::strcmp(rate_key(RateId::kDropQuantity), "drop_quantity") == 0);
+    assert(std::strcmp(rate_key(RateId::kDropQuality), "drop_quality") == 0);
+    assert(kDropQuantityLadderSize == 6 && kDropQuantityLadder[0] == 0 &&
+           kDropQuantityLadder[5] == 5);
+    assert(kDropQualityLadderSize == 5 && kDropQualityLadder[0] == 1 &&
+           kDropQualityLadder[4] == 5);
+    assert(ladder_shift(RateId::kDropQuantity, 1, 1) == 2);
+    assert(ladder_shift(RateId::kDropQuantity, 0, -1) == 0);
+    assert(ladder_shift(RateId::kDropQuantity, 5, 1) == 5);
+    assert(ladder_shift(RateId::kDropQuality, 1, -1) == 1);
+    assert(ladder_shift(RateId::kDropQuality, 5, 1) == 5);
+    assert(rate_display(RateId::kDropQuantity, 0) == "×0");
+    assert(rate_display(RateId::kDropQuality, 3) == "×3");
 
-    assert(rate_display(10) == "×0.1");
-    assert(rate_display(100) == "×1.0");
-    assert(rate_display(150) == "×1.5");
-    assert(rate_display(500) == "×5.0");
+    assert(rate_display(RateId::kGold, 10) == "×0.1");
+    assert(rate_display(RateId::kGold, 100) == "×1.0");
+    assert(rate_display(RateId::kGold, 150) == "×1.5");
+    assert(rate_display(RateId::kGold, 500) == "×5.0");
 }
 
 void test_roundtrip_and_defaults() {
     Rates defaults = default_rates();
-    for (int32_t value : defaults.value) assert(value == 100);
+    for (uint32_t i = 0; i < static_cast<uint32_t>(RateId::kCount); ++i) {
+        assert(defaults.value[i] == rate_default(static_cast<RateId>(i)));
+    }
+    assert(defaults.value[static_cast<uint32_t>(RateId::kDropQuantity)] == 1);
+    assert(defaults.value[static_cast<uint32_t>(RateId::kDropQuality)] == 1);
 
     Rates rates = defaults;
     rates.value[static_cast<uint32_t>(RateId::kEnemyHp)] = 50;
@@ -85,6 +104,9 @@ void test_decode_rejects_invalid() {
     assert(reject("{\"enemy_hp\":100}x"));
     assert(reject("{\"enemy_hp\":-100}"));
     assert(reject("{\"enemy_hp\":999999999}"));
+    assert(reject("{\"drop_quantity\":6}"));
+    assert(reject("{\"drop_quality\":0}"));
+    assert(reject("{\"drop_quality\":6}"));
 }
 
 // 旧配置兼容：移速倍率已移除，已持久化的 rates JSON 仍可能带 move_speed 键，解析须容忍。
@@ -110,14 +132,15 @@ void test_legacy_move_speed_key() {
     const char* legacy_only = "{\"move_speed\":100}";
     assert(decode_rates(legacy_only, static_cast<uint32_t>(std::strlen(legacy_only)), &parsed));
     for (uint32_t i = 0; i < static_cast<uint32_t>(RateId::kCount); ++i) {
-        assert(parsed.value[i] == 100);
+        assert(parsed.value[i] == rate_default(static_cast<RateId>(i)));
     }
 
     // encode 不再输出 move_speed。
     const std::string json = encode_rates(default_rates());
     assert(json.find("move_speed") == std::string::npos);
     assert(json == "{\"gold\":100,\"exp\":100,\"player_hp\":100,\"enemy_hp\":100,"
-                   "\"damage_out\":100,\"damage_in\":100}");
+                   "\"damage_out\":100,\"damage_in\":100,"
+                   "\"drop_quantity\":1,\"drop_quality\":1}");
 
     // validate_config 同样容忍旧 move_speed 键。
     assert(validate_rates_config("rates", legacy, static_cast<uint32_t>(std::strlen(legacy))).ok ==

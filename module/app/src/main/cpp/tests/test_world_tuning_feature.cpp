@@ -100,6 +100,9 @@ QolResult fake_enter(InFlightHandle handle) {
     } else if (std::strcmp(handle.resource_id, kResourceIdAddExperience) == 0) {
         // exp/gold 也在途计数，归入 total 即可。
     } else if (std::strcmp(handle.resource_id, kResourceIdAddMoney) == 0) {
+    } else if (std::strcmp(handle.resource_id, kResourceIdDropItem) == 0) {
+    } else if (std::strcmp(handle.resource_id, kResourceIdMakeItem) == 0) {
+    } else if (std::strcmp(handle.resource_id, kResourceIdMakeEquipDetail) == 0) {
     } else {
         assert(false && "unexpected in-flight resource id");
     }
@@ -115,6 +118,9 @@ QolResult fake_leave(InFlightHandle handle) {
         ++g_attr_leaves;
     } else if (std::strcmp(handle.resource_id, kResourceIdAddExperience) == 0) {
     } else if (std::strcmp(handle.resource_id, kResourceIdAddMoney) == 0) {
+    } else if (std::strcmp(handle.resource_id, kResourceIdDropItem) == 0) {
+    } else if (std::strcmp(handle.resource_id, kResourceIdMakeItem) == 0) {
+    } else if (std::strcmp(handle.resource_id, kResourceIdMakeEquipDetail) == 0) {
     } else {
         assert(false && "unexpected in-flight resource id");
     }
@@ -210,6 +216,110 @@ int32_t fake_money_backup(int64_t amount) {
     return 1;
 }
 
+
+// ---- 掉落域 fake：ITEM* 用 FakeDropItem 承载类别/等级/稀有度，free 只记录次数 ----
+struct FakeDropItem {
+    int32_t category = 0;
+    int32_t level = 0;
+    int32_t rarity = 0;
+    int32_t freed = 0;
+};
+struct FakeItemSpec {
+    int32_t category = 0;
+    int32_t level = 0;
+    int32_t rarity = 0;
+};
+FakeDropItem g_fake_items[64]{};
+int g_fake_item_next = 0;
+FakeItemSpec g_make_item_specs[8]{};
+int g_make_item_spec_count = 0;
+int g_make_item_spec_index = 0;
+FakeItemSpec g_equip_specs[8]{};
+int g_equip_spec_count = 0;
+int g_equip_spec_index = 0;
+int g_drop_item_calls = 0;
+int g_make_item_calls = 0;
+int g_equip_detail_calls = 0;
+int g_free_item_calls = 0;
+FakeDropItem* g_last_item = nullptr;
+void (*g_drop_invoke)() = nullptr;
+
+void* next_fake_item(const FakeItemSpec& spec) {
+    FakeDropItem& item = g_fake_items[g_fake_item_next++ % 64];
+    item = FakeDropItem{};
+    item.category = spec.category;
+    item.level = spec.level;
+    item.rarity = spec.rarity;
+    return &item;
+}
+
+void fake_drop_item_backup(void*) {
+    ++g_drop_item_calls;
+    if (g_drop_invoke != nullptr) g_drop_invoke();
+}
+
+void* fake_make_item_backup(int32_t, int32_t, int32_t) {
+    ++g_make_item_calls;
+    int index = g_make_item_spec_index < g_make_item_spec_count
+                    ? g_make_item_spec_index
+                    : (g_make_item_spec_count > 0 ? g_make_item_spec_count - 1 : 0);
+    ++g_make_item_spec_index;
+    FakeItemSpec spec{};
+    if (g_make_item_spec_count > 0) spec = g_make_item_specs[index];
+    return next_fake_item(spec);
+}
+
+void* fake_equip_detail_backup(int32_t, int32_t, int32_t, int32_t, int32_t) {
+    ++g_equip_detail_calls;
+    int index = g_equip_spec_index < g_equip_spec_count
+                    ? g_equip_spec_index
+                    : (g_equip_spec_count > 0 ? g_equip_spec_count - 1 : 0);
+    ++g_equip_spec_index;
+    FakeItemSpec spec{};
+    if (g_equip_spec_count > 0) spec = g_equip_specs[index];
+    return next_fake_item(spec);
+}
+
+QolResult fake_item_category(const void* item, int32_t* out) {
+    if (item == nullptr || out == nullptr) return error(kQolErrInvalidArgument, "bad", 3);
+    *out = static_cast<const FakeDropItem*>(item)->category;
+    return ok();
+}
+
+QolResult fake_item_level(const void* item, int32_t* out) {
+    if (item == nullptr || out == nullptr) return error(kQolErrInvalidArgument, "bad", 3);
+    *out = static_cast<const FakeDropItem*>(item)->level;
+    return ok();
+}
+
+QolResult fake_item_rarity(const void* item, int32_t* out) {
+    if (item == nullptr || out == nullptr) return error(kQolErrInvalidArgument, "bad", 3);
+    *out = static_cast<const FakeDropItem*>(item)->rarity;
+    return ok();
+}
+
+QolResult fake_free_item(void* item) {
+    ++g_free_item_calls;
+    if (item != nullptr) static_cast<FakeDropItem*>(item)->freed = 1;
+    return ok();
+}
+
+QolResult fake_predicate(int32_t category, int32_t* out, int32_t expected) {
+    if (out == nullptr) return error(kQolErrInvalidArgument, "bad", 3);
+    *out = category == expected ? 1 : 0;
+    return ok();
+}
+
+QolResult fake_is_scroll(int32_t category, int32_t* out) {
+    return fake_predicate(category, out, 24);
+}
+QolResult fake_is_bag(int32_t category, int32_t* out) {
+    return fake_predicate(category, out, 31);
+}
+QolResult fake_is_dice(int32_t category, int32_t* out) {
+    return fake_predicate(category, out, 32);
+}
+
 void reset_counters() {
     g_require_calls = 0;
     g_party_calls = 0;
@@ -225,6 +335,17 @@ void reset_counters() {
     g_attr_backup_calls = 0;
     g_exp_backup_calls = 0;
     g_money_backup_calls = 0;
+    g_drop_item_calls = 0;
+    g_make_item_calls = 0;
+    g_equip_detail_calls = 0;
+    g_free_item_calls = 0;
+    g_make_item_spec_count = 0;
+    g_make_item_spec_index = 0;
+    g_equip_spec_count = 0;
+    g_equip_spec_index = 0;
+    g_fake_item_next = 0;
+    g_last_item = nullptr;
+    g_drop_invoke = nullptr;
     g_last_exp = 0;
     g_last_money = 0;
     g_in_flight_enters = 0;
@@ -269,8 +390,16 @@ void setup_fake_interfaces() {
     g_extras.read.max_hp = &fake_max_hp;
     g_extras.read.hp = &fake_hp;
 
+    g_game.abi = {sizeof(QolGameHost), kGameHostMajor, kGameHostMinor};
     g_game.character_write.max_hp = &fake_write_max_hp;
     g_game.character_write.hp = &fake_write_hp;
+    g_game.item_category.category = &fake_item_category;
+    g_game.read_only.item.equip_level = &fake_item_level;
+    g_game.read_only.item.rarity = &fake_item_rarity;
+    g_game.read_only.item.is_enchant_scroll = &fake_is_scroll;
+    g_game.read_only.item.is_backpack_category = &fake_is_bag;
+    g_game.read_only.item.is_dice = &fake_is_dice;
+    g_game.inventory_write.free_item = &fake_free_item;
 
     g_facts.type = &fake_type;
     g_facts.is_active_player_group = &fake_active_group;
@@ -307,6 +436,12 @@ void install_success() {
                                  reinterpret_cast<void*>(&fake_exp_backup));
     descriptor.on_resource_ready(g_context, kResourceIdAddMoney,
                                  reinterpret_cast<void*>(&fake_money_backup));
+    descriptor.on_resource_ready(g_context, kResourceIdDropItem,
+                                 reinterpret_cast<void*>(&fake_drop_item_backup));
+    descriptor.on_resource_ready(g_context, kResourceIdMakeItem,
+                                 reinterpret_cast<void*>(&fake_make_item_backup));
+    descriptor.on_resource_ready(g_context, kResourceIdMakeEquipDetail,
+                                 reinterpret_cast<void*>(&fake_equip_detail_backup));
 }
 
 template <typename Invoke>
@@ -335,7 +470,7 @@ void test_descriptor() {
     assert(std::strcmp(descriptor.requires[0].id, kCharacterFactsCapabilityId) == 0);
     assert(descriptor.optional_count == 2);
     assert(descriptor.validate_config == &validate_rates_config);
-    assert(descriptor.resources_count == 4);
+    assert(descriptor.resources_count == 7);
     assert(descriptor.provides_count == 0);
     assert(descriptor.provides == nullptr);
     assert(std::strcmp(descriptor.resources[0].id, kResourceIdAddDamage) == 0);
@@ -350,7 +485,17 @@ void test_descriptor() {
     assert(std::strcmp(descriptor.resources[2].symbol, "F_ADD_EXP_VMA") == 0);
     assert(std::strcmp(descriptor.resources[3].id, kResourceIdAddMoney) == 0);
     assert(std::strcmp(descriptor.resources[3].symbol, "F_ADD_MONEY_VMA") == 0);
-    for (uint32_t i = 0; i < 4; ++i) {
+    assert(std::strcmp(descriptor.resources[4].id, kResourceIdDropItem) == 0);
+    assert(std::strcmp(descriptor.resources[4].symbol, "F_CHARSYSTEM_DROP_ITEM_VMA") == 0);
+    assert(descriptor.resources[4].handler == reinterpret_cast<void*>(&drop_item_wrapper));
+    assert(std::strcmp(descriptor.resources[5].id, kResourceIdMakeItem) == 0);
+    assert(std::strcmp(descriptor.resources[5].symbol, "F_MAKE_ITEM_VMA") == 0);
+    assert(descriptor.resources[5].handler == reinterpret_cast<void*>(&make_item_wrapper));
+    assert(std::strcmp(descriptor.resources[6].id, kResourceIdMakeEquipDetail) == 0);
+    assert(std::strcmp(descriptor.resources[6].symbol, "F_MAKE_EQUIP_DETAIL_VMA") == 0);
+    assert(descriptor.resources[6].handler ==
+           reinterpret_cast<void*>(&make_equip_detail_wrapper));
+    for (uint32_t i = 0; i < 7; ++i) {
         assert(descriptor.resources[i].requirement == ResourceRequirement::kOptional);
         assert(descriptor.resources[i].failure == ResourceFailure::kFailSoft);
     }
@@ -692,6 +837,12 @@ void test_max_hp_wrapper() {
                                  reinterpret_cast<void*>(&fake_exp_backup));
     descriptor.on_resource_ready(g_context, kResourceIdAddMoney,
                                  reinterpret_cast<void*>(&fake_money_backup));
+    descriptor.on_resource_ready(g_context, kResourceIdDropItem,
+                                 reinterpret_cast<void*>(&fake_drop_item_backup));
+    descriptor.on_resource_ready(g_context, kResourceIdMakeItem,
+                                 reinterpret_cast<void*>(&fake_make_item_backup));
+    descriptor.on_resource_ready(g_context, kResourceIdMakeEquipDetail,
+                                 reinterpret_cast<void*>(&fake_equip_detail_backup));
 }
 
 void test_deactivate_residual_wrappers() {
@@ -753,6 +904,127 @@ void test_exp_and_money() {
     assert(g_last_money == 100);
 }
 
+
+void set_drop_rates(int32_t quantity, int32_t quality) {
+    Rates rates = default_rates();
+    rates.value[static_cast<uint32_t>(RateId::kDropQuantity)] = quantity;
+    rates.value[static_cast<uint32_t>(RateId::kDropQuality)] = quality;
+    apply_rates(rates);
+}
+
+void test_drop_quantity_wrapper() {
+    install_success();
+    const auto& descriptor = plugin_descriptor();
+    descriptor.on_enabled(g_context);
+    g_drop_invoke = nullptr;
+
+    set_drop_rates(3, 1);
+    g_drop_item_calls = 0;
+    drop_item_wrapper(nullptr);
+    assert(g_drop_item_calls == 3);
+
+    set_drop_rates(0, 1);
+    g_drop_item_calls = 0;
+    drop_item_wrapper(nullptr);
+    assert(g_drop_item_calls == 0);
+
+    set_drop_rates(1, 1);
+    g_drop_item_calls = 0;
+    drop_item_wrapper(nullptr);
+    assert(g_drop_item_calls == 1);
+
+    descriptor.on_disabled(g_context);
+    g_drop_item_calls = 0;
+    drop_item_wrapper(nullptr);
+    assert(g_drop_item_calls == 1);
+}
+
+void test_make_item_quality_wrapper() {
+    install_success();
+    const auto& descriptor = plugin_descriptor();
+    descriptor.on_enabled(g_context);
+    set_drop_rates(1, 3);
+
+    // 首抽卷轴(Lv30)，重掷出宝石(Lv90)与卷轴(Lv60)：只保留同类别卷轴，取 Lv60。
+    g_make_item_specs[0] = {24, 30, 0};
+    g_make_item_specs[1] = {25, 90, 0};
+    g_make_item_specs[2] = {24, 60, 0};
+    g_make_item_spec_count = 3;
+    g_make_item_spec_index = 0;
+    g_make_item_calls = 0;
+    g_free_item_calls = 0;
+    g_drop_invoke = [] { g_last_item = static_cast<FakeDropItem*>(make_item_wrapper(0, 3, 0)); };
+    drop_item_wrapper(nullptr);
+    assert(g_last_item != nullptr && g_last_item->category == 24 && g_last_item->level == 60);
+    assert(g_make_item_calls == 3);
+    assert(g_free_item_calls == 2);
+
+    // 药水不参与：只调用一次，不重掷。
+    g_make_item_specs[0] = {22, 1, 0};
+    g_make_item_specs[1] = {22, 99, 0};
+    g_make_item_spec_count = 2;
+    g_make_item_spec_index = 0;
+    g_make_item_calls = 0;
+    g_free_item_calls = 0;
+    g_drop_invoke = [] { g_last_item = static_cast<FakeDropItem*>(make_item_wrapper(0, 2, 0)); };
+    drop_item_wrapper(nullptr);
+    assert(g_last_item != nullptr && g_last_item->category == 22 && g_last_item->level == 1);
+    assert(g_make_item_calls == 1 && g_free_item_calls == 0);
+
+    // 背包参与：同类别取 Lv35（品质档 2 = 首抽 + 1 次重掷）。
+    set_drop_rates(1, 2);
+    g_make_item_specs[0] = {31, 15, 0};
+    g_make_item_specs[1] = {31, 35, 0};
+    g_make_item_spec_count = 2;
+    g_make_item_spec_index = 0;
+    g_make_item_calls = 0;
+    g_free_item_calls = 0;
+    g_drop_invoke = [] { g_last_item = static_cast<FakeDropItem*>(make_item_wrapper(0, 5, 0)); };
+    drop_item_wrapper(nullptr);
+    assert(g_last_item != nullptr && g_last_item->category == 31 && g_last_item->level == 35);
+    assert(g_make_item_calls == 2 && g_free_item_calls == 1);
+
+    // 掉落上下文外（商店/合成）不重掷。
+    g_make_item_specs[0] = {24, 30, 0};
+    g_make_item_spec_count = 1;
+    g_make_item_spec_index = 0;
+    g_make_item_calls = 0;
+    g_drop_invoke = nullptr;
+    (void)make_item_wrapper(0, 3, 0);
+    assert(g_make_item_calls == 1);
+}
+
+void test_make_equip_detail_quality_wrapper() {
+    install_success();
+    const auto& descriptor = plugin_descriptor();
+    descriptor.on_enabled(g_context);
+    set_drop_rates(1, 3);
+
+    // 稀有度 0 -> 2 -> 1：取 rarity 2，释放另外两件。
+    g_equip_specs[0] = {241, 2, 0};
+    g_equip_specs[1] = {390, 3, 2};
+    g_equip_specs[2] = {408, 1, 1};
+    g_equip_spec_count = 3;
+    g_equip_spec_index = 0;
+    g_equip_detail_calls = 0;
+    g_free_item_calls = 0;
+    g_drop_invoke = [] {
+        g_last_item = static_cast<FakeDropItem*>(make_equip_detail_wrapper(0, 1, 5, -1, 0));
+    };
+    drop_item_wrapper(nullptr);
+    assert(g_last_item != nullptr && g_last_item->rarity == 2);
+    assert(g_equip_detail_calls == 3 && g_free_item_calls == 2);
+
+    // 掉落上下文外不重掷。
+    g_equip_specs[0] = {241, 2, 0};
+    g_equip_spec_count = 1;
+    g_equip_spec_index = 0;
+    g_equip_detail_calls = 0;
+    g_drop_invoke = nullptr;
+    (void)make_equip_detail_wrapper(0, 1, 5, -1, 0);
+    assert(g_equip_detail_calls == 1);
+}
+
 void test_panel_contract() {
     const auto& provider = panel_provider();
     assert(std::strcmp(provider.panel_id, "world_tuning") == 0);
@@ -776,6 +1048,9 @@ int main() {
     test_max_hp_wrapper();
     test_deactivate_residual_wrappers();
     test_exp_and_money();
+    test_drop_quantity_wrapper();
+    test_make_item_quality_wrapper();
+    test_make_equip_detail_quality_wrapper();
     test_panel_contract();
     assert(g_in_flight_enters == g_in_flight_leaves);
     return 0;

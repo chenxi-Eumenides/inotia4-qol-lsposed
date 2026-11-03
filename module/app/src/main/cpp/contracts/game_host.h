@@ -56,6 +56,12 @@ struct QolAttrRangeC18Api {
     QolResult (*jewel_generation_range)(int32_t attribute_type, QolItemHandle item,
                                         int32_t* out_min, int32_t* out_max);
 };
+// 原始 ITEM* → 物品类别（ITEMDATABASE 行号）。掉落 hook 在造物后按类别分流品质重掷：
+// 卷轴/宝石/背包/骰子参与，药水/材料/神灯等不参与。适配层负责变体差异：C18 的物品 id
+// 扩到 12bit（bits[6..16) | bits[1:0]<<10），其余变体（含 unknown）按原版 10bit 读取。
+struct QolItemCategoryApi {
+    QolResult (*category)(const void* item, int32_t* out_category);
+};
 struct QolReadApi {
     QolAttrRangeReadApi attr_range;
 };
@@ -246,6 +252,7 @@ struct QolGameHost {
     QolItemAbiDispatchApi item_abi;
     QolGameIdentityApi game_identity;
     QolAttrRangeC18Api attr_range_c18;
+    QolItemCategoryApi item_category;
 };
 
 static_assert(std::is_standard_layout<QolGameHost>::value,
@@ -261,8 +268,11 @@ static_assert(offsetof(QolGameHost, game_identity) ==
 static_assert(offsetof(QolGameHost, attr_range_c18) ==
                   offsetof(QolGameHost, game_identity) + sizeof(QolGameIdentityApi),
               "QolGameHost attr_range_c18 ABI offset changed");
-static_assert(sizeof(QolGameHost) ==
+static_assert(offsetof(QolGameHost, item_category) ==
                   offsetof(QolGameHost, attr_range_c18) + sizeof(QolAttrRangeC18Api),
+              "QolGameHost item_category ABI offset changed");
+static_assert(sizeof(QolGameHost) ==
+                  offsetof(QolGameHost, item_category) + sizeof(QolItemCategoryApi),
               "QolGameHost ABI size changed");
 
 constexpr uint16_t kGameHostMajor = 2;
@@ -274,6 +284,8 @@ constexpr uint16_t kGameHostSavedBagMinor = 7;
 constexpr uint16_t kGameHostTwoHandedMinor = 8;
 // 2.9 appended the C18L gem generation-range tail used by attribute_quality.
 constexpr uint16_t kGameHostC18JewelRangeMinor = 9;
-constexpr uint16_t kGameHostMinor = kGameHostC18JewelRangeMinor;
+// 2.10 appended the raw-item category tail used by world_tuning drop quality reroll.
+constexpr uint16_t kGameHostItemCategoryMinor = 10;
+constexpr uint16_t kGameHostMinor = kGameHostItemCategoryMinor;
 
 }  // namespace qol::contracts

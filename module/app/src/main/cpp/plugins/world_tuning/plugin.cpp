@@ -103,6 +103,48 @@ const contracts::ResourceClaim kResources[] = {
         120,
         reinterpret_cast<void*>(&inven_add_money_wrapper),
     },
+    {
+        kResourceIdDropItem,
+        "F_CHARSYSTEM_DROP_ITEM_VMA",
+        contracts::ResourceMechanism::kEntryHook,
+        contracts::ResourcePolicy::kPrivate,
+        contracts::ResourceRequirement::kOptional,
+        contracts::ResourceFailure::kFailSoft,
+        true,
+        kPluginId,
+        "死亡掉落整次结算入口；数量倍率重复调用，品质重掷在上下文内生效",
+        nullptr,
+        120,
+        reinterpret_cast<void*>(&drop_item_wrapper),
+    },
+    {
+        kResourceIdMakeItem,
+        "F_MAKE_ITEM_VMA",
+        contracts::ResourceMechanism::kEntryHook,
+        contracts::ResourcePolicy::kPrivate,
+        contracts::ResourceRequirement::kOptional,
+        contracts::ResourceFailure::kFailSoft,
+        true,
+        kPluginId,
+        "掉落槽内造物（卷轴/宝石/背包/骰子）；品质倍率按同类别重掷取最优",
+        nullptr,
+        120,
+        reinterpret_cast<void*>(&make_item_wrapper),
+    },
+    {
+        kResourceIdMakeEquipDetail,
+        "F_MAKE_EQUIP_DETAIL_VMA",
+        contracts::ResourceMechanism::kEntryHook,
+        contracts::ResourcePolicy::kPrivate,
+        contracts::ResourceRequirement::kOptional,
+        contracts::ResourceFailure::kFailSoft,
+        true,
+        kPluginId,
+        "装备候选选取；kind/等级段固定，品质倍率只重掷候选稀有度",
+        nullptr,
+        120,
+        reinterpret_cast<void*>(&make_equip_detail_wrapper),
+    },
 };
 
 void clear_install_state() {
@@ -249,7 +291,7 @@ const contracts::PluginDescriptor kDescriptor = {
     1, kRequires,          // requires=character.facts
     2, kOptionalRequires,  // optional=ui_panels + ui_components
     0, nullptr,            // provides
-    4, kResources,
+    7, kResources,
     0, nullptr,            // jni
     &plugin_install,
     &plugin_deactivate,

@@ -671,6 +671,24 @@ QolResult read_item_equip_level(const void* item, int32_t* out) {
     return contracts::ok();
 }
 
+// 原始 ITEM* → 物品类别（ITEMDATABASE 行号）。变体差异只在这里收口：
+// C18 把物品 id 扩到 12bit（bits[6..16) | bits[1:0]<<10），其余变体（含 unknown）按原版
+// 10bit 读取。读取失败/空指针返回 InvalidArgument，调用方按 fail-soft 放弃重掷。
+QolResult read_item_category(const void* item, int32_t* out) {
+    if (item == nullptr || out == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    const uint16_t raw =
+        *reinterpret_cast<const uint16_t*>(static_cast<const uint8_t*>(item) + I_TYPE);
+    int32_t category = static_cast<int32_t>(
+        (raw >> I_TYPE_CATEGORY_SHIFT) & I_TYPE_CATEGORY_MASK);
+    if (qol::game_variant_init() && qol::game_variant().series == qol::GameSeries::kC18) {
+        category |= static_cast<int32_t>(raw & 0x3u) << 10;
+    }
+    *out = category;
+    return contracts::ok();
+}
+
 QolResult read_item_dice(int32_t category, int32_t* out) {
     if (category < 0 || out == nullptr) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
@@ -964,6 +982,7 @@ contracts::QolGameHost make_game_host() {
                       &game_shortcut_item_category};
     host.game_identity = {&game_query_identity};
     host.attr_range_c18 = {&read_attr_jewel_generation_range};
+    host.item_category = {&read_item_category};
     return host;
 }
 

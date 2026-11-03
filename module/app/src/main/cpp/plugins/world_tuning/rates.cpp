@@ -9,15 +9,18 @@ namespace {
 
 constexpr const char* kRateKeys[] = {
     "gold", "exp", "player_hp", "enemy_hp", "damage_out", "damage_in",
+    "drop_quantity", "drop_quality",
 };
 constexpr const char* kRateNames[] = {
     "金币倍率", "经验倍率", "血量倍率", "敌怪血量倍率", "伤害倍率", "承伤倍率",
+    "掉落数量倍率", "掉落品质倍率",
 };
 constexpr const char* kRateDescriptions[] = {
     "获得的金钱缩放", "获得的经验缩放", "玩家最大生命的缩放", "怪物最大生命的缩放", "对怪物造成的伤害缩放",
     "受到的伤害缩放，数值越低越耐打",
+    "每次击杀的掉落结算次数", "可重掷的掉落物取同类别最优（卷轴/宝石/背包/骰子）",
 };
-constexpr bool kRateSupported[] = {true, true, false, true, true, true};
+constexpr bool kRateSupported[] = {true, true, false, true, true, true, true, true};
 constexpr uint32_t kRateCount = static_cast<uint32_t>(RateId::kCount);
 
 // 旧配置兼容：移速倍率已从面板与 encode_rates 中移除，但已持久化的 rates JSON 仍可能带
@@ -31,7 +34,7 @@ static_assert(sizeof(kRateDescriptions) / sizeof(kRateDescriptions[0]) == kRateC
 static_assert(sizeof(kRateSupported) / sizeof(kRateSupported[0]) == kRateCount,
               "rate support table size");
 
-bool valid_rate(int32_t value) { return ladder_index(value) >= 0; }
+bool valid_rate(RateId id, int32_t value) { return ladder_index(id, value) >= 0; }
 
 void skip_space(const char** cursor, const char* end) {
     while (*cursor < end && (**cursor == ' ' || **cursor == '\t' || **cursor == '\n' ||
@@ -106,24 +109,54 @@ const char* rate_description(RateId id) {
     return index < kRateCount ? kRateDescriptions[index] : nullptr;
 }
 
-int32_t ladder_index(int32_t value) {
-    for (uint32_t i = 0; i < kRateLadderSize; ++i) {
-        if (kRateLadder[i] == value) return static_cast<int32_t>(i);
+const int32_t* rate_ladder(RateId id, uint32_t* out_size) {
+    switch (id) {
+        case RateId::kDropQuantity:
+            if (out_size != nullptr) *out_size = kDropQuantityLadderSize;
+            return kDropQuantityLadder;
+        case RateId::kDropQuality:
+            if (out_size != nullptr) *out_size = kDropQualityLadderSize;
+            return kDropQualityLadder;
+        default:
+            if (out_size != nullptr) *out_size = kRateLadderSize;
+            return kRateLadder;
+    }
+}
+
+int32_t rate_default(RateId id) {
+    switch (id) {
+        case RateId::kDropQuantity: return kDropQuantityDefault;
+        case RateId::kDropQuality: return kDropQualityDefault;
+        default: return kRateDefault;
+    }
+}
+
+int32_t ladder_index(RateId id, int32_t value) {
+    uint32_t size = 0;
+    const int32_t* ladder = rate_ladder(id, &size);
+    for (uint32_t i = 0; i < size; ++i) {
+        if (ladder[i] == value) return static_cast<int32_t>(i);
     }
     return -1;
 }
 
-int32_t ladder_shift(int32_t value, int32_t delta) {
-    const int32_t index = ladder_index(value);
+int32_t ladder_shift(RateId id, int32_t value, int32_t delta) {
+    uint32_t size = 0;
+    const int32_t* ladder = rate_ladder(id, &size);
+    const int32_t index = ladder_index(id, value);
     if (index < 0 || delta == 0) return value;
     int64_t target = static_cast<int64_t>(index) + delta;
     if (target < 0) target = 0;
-    if (target >= static_cast<int64_t>(kRateLadderSize)) target = kRateLadderSize - 1;
-    return kRateLadder[target];
+    if (target >= static_cast<int64_t>(size)) target = static_cast<int64_t>(size) - 1;
+    return ladder[target];
 }
 
-std::string rate_display(int32_t value) {
+std::string rate_display(RateId id, int32_t value) {
     char buffer[16]{};
+    if (id == RateId::kDropQuantity || id == RateId::kDropQuality) {
+        std::snprintf(buffer, sizeof(buffer), "×%d", value);
+        return std::string(buffer);
+    }
     const int whole = value / 100;
     const int fraction = (value % 100) / 10;
     std::snprintf(buffer, sizeof(buffer), "×%d.%d", whole, fraction);
@@ -132,7 +165,9 @@ std::string rate_display(int32_t value) {
 
 Rates default_rates() {
     Rates rates{};
-    for (uint32_t i = 0; i < kRateCount; ++i) rates.value[i] = kRateDefault;
+    for (uint32_t i = 0; i < kRateCount; ++i) {
+        rates.value[i] = rate_default(static_cast<RateId>(i));
+    }
     return rates;
 }
 
@@ -165,7 +200,7 @@ bool decode_rates(const char* json, uint32_t size, Rates* out) {
             if (!read_string(&cursor, end, key, sizeof(key))) return false;
             if (!consume(&cursor, end, ':')) return false;
             int32_t value = 0;
-            if (!read_int(&cursor, end, &value) || !valid_rate(value)) return false;
+            if (!read_int(&cursor, end, &value)) return false;
             uint32_t index = kRateCount;
             for (uint32_t i = 0; i < kRateCount; ++i) {
                 if (std::strcmp(key, kRateKeys[i]) == 0) {
@@ -173,11 +208,15 @@ bool decode_rates(const char* json, uint32_t size, Rates* out) {
                     break;
                 }
             }
+            if (index < kRateCount && !valid_rate(static_cast<RateId>(index), value)) {
+                return false;
+            }
             // 旧配置的 move_speed 键：值仍要求合法档位，读取后忽略，不写入 rates。
             const bool legacy_move_speed = index == kRateCount &&
                 std::strcmp(key, kLegacyMoveSpeedKey) == 0;
             if (index == kRateCount && !legacy_move_speed) return false;
             if (legacy_move_speed) {
+                if (!valid_rate(RateId::kGold, value)) return false;
                 if (seen_legacy_move_speed) return false;
                 seen_legacy_move_speed = true;
             } else {

@@ -790,6 +790,11 @@ constexpr uintptr_t F_IS_ITEMBOX_VMA = 0x10cda0;     // int (int32_t category) �
 constexpr uintptr_t F_IS_PACK_ITEM_VMA = 0x10cdb0;  // int (int32_t category) ITEMSYSTEM_IsPackItem，礼盒/包裹类
 constexpr uintptr_t F_IS_USE_AFTER_CONFIRM_VMA = 0x10cca4; // int (int32_t category) ITEMSYSTEM_IsUseAfterConfirm，需确认后使用的物品
 constexpr uintptr_t F_MAKE_ITEM_VMA = 0x10c6c8;      // void* (int32_t category, int32_t lookup_key, int32_t flag) ITEMSYSTEM_MakeItem 创建物品对象；arg2 是静态表查找/品质参数非数量（产物量=0x10ca3c CAL 公式，域 ≤99）
+// 掉落域入口（owner=world_tuning）：死亡掉落整次结算；monster 变体把入口改成 b 0x1b58f8，
+// resolve_hook_entry 会跟随该跳转后再装 hook，专用掉落逻辑仍会执行。
+constexpr uintptr_t F_CHARSYSTEM_DROP_ITEM_VMA = 0xf4d30;   // void (void* ch) CHARSYSTEM_DropItem
+// 装备候选选取（owner=world_tuning）：kind/min/max 已由 MakeEquipEx 固定，重掷只影响候选物品。
+constexpr uintptr_t F_MAKE_EQUIP_DETAIL_VMA = 0x10dcd0;     // void* (int32 kind, int32 min, int32 max, int32 item, int32 option) ITEMSYSTEM_MakeEquipDetail
 constexpr uintptr_t F_CREATE_ITEM_VMA = 0x10be9c;    // void* (int32_t category, int32_t, int32_t, int32_t) ITEMSYSTEM_CreateItem 创建物品对象（无 search_tbl 校验，OP 直调可靠）
 // ---- 堆叠上限 patch 点所在函数 VMA（stack-limit-999，v0.5.18；符号名见 libgame-symbols.txt）----
 constexpr uintptr_t F_ITEMSYSTEM_DIVIDE_VMA = 0x1083f8;       // ITEMSYSTEM_Divide 拆堆

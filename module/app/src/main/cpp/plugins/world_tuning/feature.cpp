@@ -19,7 +19,7 @@ enum class Side {
 };
 
 constexpr uint32_t kRateCount = static_cast<uint32_t>(RateId::kCount);
-static_assert(kRateCount == 6, "rates table size");
+static_assert(kRateCount == 8, "rates table size");
 
 std::atomic<bool> g_gate{false};
 const contracts::QolHostSdk* g_sdk = nullptr;
@@ -30,18 +30,29 @@ contracts::QolOwnerToken g_owner{};
 const char* g_plugin_id = nullptr;
 
 std::atomic<int32_t> g_rates[kRateCount] = {
-    kRateDefault, kRateDefault, kRateDefault, kRateDefault, kRateDefault, kRateDefault};
+    kRateDefault, kRateDefault, kRateDefault, kRateDefault, kRateDefault, kRateDefault,
+    kDropQuantityDefault, kDropQualityDefault};
 
 // wrapper 入口函数指针类型：与游戏函数 ABI 一致。原函数入口由宿主经 on_resource_ready 交还。
 using AddDamageFn = void (*)(void*, void*, int32_t, int32_t, int32_t);
 using UpdateAttrFromMonsterFn = void (*)(void*, int32_t);
 using AddExperienceFn = int32_t (*)(void*, int32_t, uint8_t);
 using AddMoneyFn = int32_t (*)(int64_t);
+using DropItemFn = void (*)(void*);
+using MakeItemFn = void* (*)(int32_t, int32_t, int32_t);
+using MakeEquipDetailFn = void* (*)(int32_t, int32_t, int32_t, int32_t, int32_t);
 
 std::atomic<void*> g_backup_add_damage{nullptr};
 std::atomic<void*> g_backup_update_attr_from_monster{nullptr};
 std::atomic<void*> g_backup_add_experience{nullptr};
 std::atomic<void*> g_backup_add_money{nullptr};
+std::atomic<void*> g_backup_drop_item{nullptr};
+std::atomic<void*> g_backup_make_item{nullptr};
+std::atomic<void*> g_backup_make_equip_detail{nullptr};
+
+// 掉落上下文：只在 DropItem wrapper 的同步调用栈内为非 0，用于把掉落结算与商店/合成/
+// 开箱的同一批 maker 调用隔离开。仅游戏线程访问。
+thread_local uint32_t g_drop_depth = 0;
 
 // 诊断（真机验收用）：异常态只记一次，避免热路径反复刷日志。
 std::atomic<bool> g_faction_deps_missing_logged{false};
@@ -311,6 +322,187 @@ int32_t inven_add_money_wrapper(int64_t amount) {
     return backup(out);
 }
 
+
+// ---------------------------------------------------------------------------
+// 掉落：数量倍率 = 整次结算次数；品质倍率 = 槽内造物重掷取同类别最优
+// ---------------------------------------------------------------------------
+
+namespace {
+
+enum class DropQualityGroup { kNone, kScroll, kGem, kBag, kDice };
+
+bool drop_context_active() { return g_drop_depth != 0; }
+
+bool read_item_category(const void* item, int32_t* out) {
+    const auto* game = g_game;
+    if (game == nullptr || game->abi.minor < contracts::kGameHostItemCategoryMinor ||
+        game->item_category.category == nullptr || item == nullptr || out == nullptr) {
+        return false;
+    }
+    return contracts::succeeded(game->item_category.category(item, out));
+}
+
+bool read_item_level(const void* item, int32_t* out) {
+    const auto* game = g_game;
+    if (game == nullptr || game->read_only.item.equip_level == nullptr || item == nullptr ||
+        out == nullptr) {
+        return false;
+    }
+    return contracts::succeeded(game->read_only.item.equip_level(item, out));
+}
+
+bool read_item_rarity(const void* item, int32_t* out) {
+    const auto* game = g_game;
+    if (game == nullptr || game->read_only.item.rarity == nullptr || item == nullptr ||
+        out == nullptr) {
+        return false;
+    }
+    return contracts::succeeded(game->read_only.item.rarity(item, out));
+}
+
+bool free_item(void* item) {
+    const auto* game = g_game;
+    if (game == nullptr || game->inventory_write.free_item == nullptr || item == nullptr) {
+        return false;
+    }
+    return contracts::succeeded(game->inventory_write.free_item(item));
+}
+
+bool item_flag(const void* item, QolResult (*fn)(int32_t, int32_t*)) {
+    if (fn == nullptr) return false;
+    int32_t category = 0;
+    if (!read_item_category(item, &category)) return false;
+    int32_t value = 0;
+    return contracts::succeeded(fn(category, &value)) && value != 0;
+}
+
+// 品质重掷的类别分流：药水(2)/材料(4)不参与；卷轴/宝石(3)与背包/骰子(5)参与；
+// 徽章/技能书/神灯等其余 5 类物品不参与。subtype 来自槽的 lookup_key。
+DropQualityGroup quality_group(const void* item, int32_t subtype) {
+    if (item == nullptr) return DropQualityGroup::kNone;
+    const auto* game = g_game;
+    if (game == nullptr) return DropQualityGroup::kNone;
+    if (subtype == 3) {
+        if (game->read_only.item.is_enchant_scroll == nullptr) {
+            return DropQualityGroup::kNone;
+        }
+        if (item_flag(item, game->read_only.item.is_enchant_scroll)) {
+            return DropQualityGroup::kScroll;
+        }
+        return DropQualityGroup::kGem;
+    }
+    if (subtype == 5) {
+        if (game->read_only.item.is_dice == nullptr ||
+            game->read_only.item.is_backpack_category == nullptr) {
+            return DropQualityGroup::kNone;
+        }
+        if (item_flag(item, game->read_only.item.is_dice)) return DropQualityGroup::kDice;
+        if (item_flag(item, game->read_only.item.is_backpack_category)) {
+            return DropQualityGroup::kBag;
+        }
+        return DropQualityGroup::kNone;
+    }
+    return DropQualityGroup::kNone;
+}
+
+}  // namespace
+
+void drop_item_wrapper(void* ch) {
+    const auto* sdk = g_sdk;
+    const contracts::InFlightGuard guard(
+        sdk == nullptr ? nullptr : &sdk->in_flight, {kResourceIdDropItem});
+    const DropItemFn backup =
+        reinterpret_cast<DropItemFn>(g_backup_drop_item.load(std::memory_order_acquire));
+    if (backup == nullptr) return;
+    if (!g_gate.load(std::memory_order_relaxed)) {
+        backup(ch);
+        return;
+    }
+    const int32_t rounds = rate_value(RateId::kDropQuantity);
+    if (rounds <= 0) return;
+    ++g_drop_depth;
+    for (int32_t i = 0; i < rounds; ++i) backup(ch);
+    --g_drop_depth;
+}
+
+void* make_item_wrapper(int32_t category, int32_t lookup_key, int32_t flag) {
+    const auto* sdk = g_sdk;
+    const contracts::InFlightGuard guard(
+        sdk == nullptr ? nullptr : &sdk->in_flight, {kResourceIdMakeItem});
+    const MakeItemFn backup =
+        reinterpret_cast<MakeItemFn>(g_backup_make_item.load(std::memory_order_acquire));
+    if (backup == nullptr) return nullptr;
+    void* first = backup(category, lookup_key, flag);
+    if (first == nullptr) return nullptr;
+    if (!g_gate.load(std::memory_order_relaxed) || !drop_context_active()) return first;
+
+    const int32_t rolls = rate_value(RateId::kDropQuality);
+    if (rolls <= 1) return first;
+    const DropQualityGroup group = quality_group(first, lookup_key);
+    if (group == DropQualityGroup::kNone) return first;
+
+    int32_t best_level = 0;
+    if (!read_item_level(first, &best_level)) return first;
+    void* best = first;
+    for (int32_t i = 1; i < rolls; ++i) {
+        void* candidate = backup(category, lookup_key, flag);
+        if (candidate == nullptr) continue;
+        if (quality_group(candidate, lookup_key) != group) {
+            (void)free_item(candidate);
+            continue;
+        }
+        int32_t level = 0;
+        if (!read_item_level(candidate, &level)) {
+            (void)free_item(candidate);
+            continue;
+        }
+        if (level > best_level) {
+            (void)free_item(best);
+            best = candidate;
+            best_level = level;
+        } else {
+            (void)free_item(candidate);
+        }
+    }
+    return best;
+}
+
+void* make_equip_detail_wrapper(int32_t kind, int32_t min_level, int32_t max_level,
+                                int32_t item, int32_t option) {
+    const auto* sdk = g_sdk;
+    const contracts::InFlightGuard guard(
+        sdk == nullptr ? nullptr : &sdk->in_flight, {kResourceIdMakeEquipDetail});
+    const MakeEquipDetailFn backup = reinterpret_cast<MakeEquipDetailFn>(
+        g_backup_make_equip_detail.load(std::memory_order_acquire));
+    if (backup == nullptr) return nullptr;
+    void* first = backup(kind, min_level, max_level, item, option);
+    if (first == nullptr) return nullptr;
+    if (!g_gate.load(std::memory_order_relaxed) || !drop_context_active()) return first;
+
+    const int32_t rolls = rate_value(RateId::kDropQuality);
+    if (rolls <= 1) return first;
+    int32_t best_rarity = 0;
+    if (!read_item_rarity(first, &best_rarity)) return first;
+    void* best = first;
+    for (int32_t i = 1; i < rolls; ++i) {
+        void* candidate = backup(kind, min_level, max_level, item, option);
+        if (candidate == nullptr) continue;
+        int32_t rarity = 0;
+        if (!read_item_rarity(candidate, &rarity)) {
+            (void)free_item(candidate);
+            continue;
+        }
+        if (rarity > best_rarity) {
+            (void)free_item(best);
+            best = candidate;
+            best_rarity = rarity;
+        } else {
+            (void)free_item(candidate);
+        }
+    }
+    return best;
+}
+
 // ---------------------------------------------------------------------------
 // 生命周期与倍率
 // ---------------------------------------------------------------------------
@@ -430,6 +622,18 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
     }
     if (std::strcmp(resource_id, kResourceIdAddMoney) == 0) {
         g_backup_add_money.store(backup, std::memory_order_release);
+        return 0;
+    }
+    if (std::strcmp(resource_id, kResourceIdDropItem) == 0) {
+        g_backup_drop_item.store(backup, std::memory_order_release);
+        return 0;
+    }
+    if (std::strcmp(resource_id, kResourceIdMakeItem) == 0) {
+        g_backup_make_item.store(backup, std::memory_order_release);
+        return 0;
+    }
+    if (std::strcmp(resource_id, kResourceIdMakeEquipDetail) == 0) {
+        g_backup_make_equip_detail.store(backup, std::memory_order_release);
         return 0;
     }
     log_warn("unknown resource id: %s", resource_id);

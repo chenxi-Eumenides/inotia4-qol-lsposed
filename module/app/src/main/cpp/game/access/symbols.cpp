@@ -99,6 +99,9 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
     {"F_INVEN_SAVE_ITEM_DIRECT_VMA", F_INVEN_SAVE_ITEM_DIRECT_VMA},
     {"F_ITEMSYSTEM_DIVIDE_VMA", F_ITEMSYSTEM_DIVIDE_VMA},
     {"F_MAKE_ITEM_VMA", F_MAKE_ITEM_VMA},
+    // 掉落域入口（owner=world_tuning）：整次掉落结算 + 装备候选选取。
+    {"F_CHARSYSTEM_DROP_ITEM_VMA", F_CHARSYSTEM_DROP_ITEM_VMA},
+    {"F_MAKE_EQUIP_DETAIL_VMA", F_MAKE_EQUIP_DETAIL_VMA},
     {"F_INVEN_REMOVE_ITEM_DATA_VMA", F_INVEN_REMOVE_ITEM_DATA_VMA},
     // 合成器界面层入口 hook（owner=craft_ui，C2 Step 3 声明式化）：12 条 wrapper 的挂载点；
     // handler 在 plugins/custom_recipe/ui/runtime.cpp 取址。

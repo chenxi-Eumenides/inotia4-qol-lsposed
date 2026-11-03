@@ -17,13 +17,26 @@ enum class RateId : uint8_t {
     kEnemyHp,
     kDamageOut,
     kDamageIn,
+    kDropQuantity,
+    kDropQuality,
     kCount,
 };
 
-// 统一档位（百分比，100 = 不修改）。面板左右箭头只在这组值之间移动。
+// 通用档位（百分比，100 = 不修改）。面板左右箭头只在这组值之间移动。
 inline constexpr int32_t kRateLadder[] = {10, 30, 50, 80, 100, 120, 150, 200, 300, 500};
 inline constexpr uint32_t kRateLadderSize = sizeof(kRateLadder) / sizeof(kRateLadder[0]);
 inline constexpr int32_t kRateDefault = 100;
+
+// 掉落数量：整数倍率 0..5（0 = 不掉落）。不参与百分比档位。
+inline constexpr int32_t kDropQuantityLadder[] = {0, 1, 2, 3, 4, 5};
+inline constexpr uint32_t kDropQuantityLadderSize =
+    sizeof(kDropQuantityLadder) / sizeof(kDropQuantityLadder[0]);
+inline constexpr int32_t kDropQuantityDefault = 1;
+// 掉落品质：重掷次数 1..5（1 = 不重掷）。
+inline constexpr int32_t kDropQualityLadder[] = {1, 2, 3, 4, 5};
+inline constexpr uint32_t kDropQualityLadderSize =
+    sizeof(kDropQualityLadder) / sizeof(kDropQualityLadder[0]);
+inline constexpr int32_t kDropQualityDefault = 1;
 
 struct Rates {
     int32_t value[static_cast<uint32_t>(RateId::kCount)]{};
@@ -36,12 +49,16 @@ const char* rate_key(RateId id);         // 配置 JSON 键名
 const char* rate_name(RateId id);        // 面板行标题
 const char* rate_description(RateId id); // 面板行副标题
 
-// 档位查找与移动。非法值返回 -1 / 原值。
-int32_t ladder_index(int32_t value);
-int32_t ladder_shift(int32_t value, int32_t delta);
+// 按行档位表；未知 id 返回通用档位。
+const int32_t* rate_ladder(RateId id, uint32_t* out_size);
+int32_t rate_default(RateId id);
 
-// 文本：百分比整数 → "×1.5"（一位小数，去掉多余 0）。
-std::string rate_display(int32_t value);
+// 档位查找与移动。非法值返回 -1 / 原值。
+int32_t ladder_index(RateId id, int32_t value);
+int32_t ladder_shift(RateId id, int32_t value, int32_t delta);
+
+// 文本：通用倍率 → "×1.5"；掉落数量/品质 → "×N"（整数）。
+std::string rate_display(RateId id, int32_t value);
 
 Rates default_rates();
 // 把 rates 编码为单行 JSON 对象（字段顺序固定，整数）。

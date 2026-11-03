@@ -48,6 +48,9 @@ inline constexpr const char* kResourceIdAddDamage = "hook:CHAR_AddDamage";
 inline constexpr const char* kResourceIdUpdateAttrFromMonster = "hook:CHAR_UpdateAttrFromMonster";
 inline constexpr const char* kResourceIdAddExperience = "hook:CHAR_AddExperience";
 inline constexpr const char* kResourceIdAddMoney = "hook:INVEN_AddMoney";
+inline constexpr const char* kResourceIdDropItem = "hook:CHARSYSTEM_DropItem";
+inline constexpr const char* kResourceIdMakeItem = "hook:ITEMSYSTEM_MakeItem";
+inline constexpr const char* kResourceIdMakeEquipDetail = "hook:ITEMSYSTEM_MakeEquipDetail";
 
 // 门禁开关：true = 业务生效；false = wrapper 空转透传（fail-closed）。任意线程可读。
 void set_gate(bool enabled);
@@ -75,5 +78,9 @@ void char_add_damage_wrapper(void* attacker, void* victim, int32_t damage, int32
 void char_update_attr_from_monster_wrapper(void* ch, int32_t attr);
 int32_t char_add_experience_wrapper(void* ch, int32_t amount, uint8_t flag);
 int32_t inven_add_money_wrapper(int64_t amount);
+void drop_item_wrapper(void* ch);
+void* make_item_wrapper(int32_t category, int32_t lookup_key, int32_t flag);
+void* make_equip_detail_wrapper(int32_t kind, int32_t min_level, int32_t max_level,
+                                int32_t item, int32_t option);
 
 }  // namespace qol::features::world_tuning
