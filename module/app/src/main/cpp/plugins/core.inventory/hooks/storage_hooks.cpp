@@ -1184,6 +1184,21 @@ int save_item_wrapper(void* item) {
     return 0;
 }
 
+// 原生袋直写封装（空槽写入与同身份合并共用）。原版 SaveItemDirect 的加语义只写
+// b 段（bits25–31），sum≥128 的进位必须由模块补写 a 段，否则 127+1 写成 b=0、
+// 99+99 写成 b=70（canonical 停在小七位视图）。capture 在 backup 前读取目标堆
+// 旧全量，backup 后仅在原版确实写了 b 时回写 128a+b；空槽/不同身份不命中 occupant。
+int call_save_item_direct_native(void* item, int32_t bag, int32_t slot, const char* op) {
+    uint32_t source_count = 0;
+    if (item != nullptr) item_count_effective(item, &source_count);
+    S2MergeCapture merge{};
+    s2_capture_merge(item, bag, slot, static_cast<int32_t>(source_count), &merge);
+    const int result =
+        call_backup("hook:INVEN_SaveItemDirect", g_backup_save_item_direct, item, bag, slot);
+    s2_merge_writeback(merge, op);
+    return result;
+}
+
 int save_item_direct_wrapper(void* item, int32_t bag, int32_t slot) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
@@ -1200,10 +1215,12 @@ int save_item_direct_wrapper(void* item, int32_t bag, int32_t slot) {
             // space0：resolver 选中的原生袋/槽直写（含原生同身份合并语义）。
             // space1：pending.bag 已是原生扁平袋号（kQolOriginalBagCount + bag），
             // 与既有 variant pending 兼容，同样走原生 backup 直写。
+            // 这两条分支是经营/拾取入库的常规路径（FindSaveSlot→SaveItem→SaveItemDirect），
+            // 合并进位与无 pending 路径同等需要 S2 写回，不能在此提前返回。
             if (pending.space_id == qol::contracts::kQolBagSpaceOriginal ||
                 pending.space_id == qol::contracts::kQolBagSpaceVariant) {
-                return call_backup("hook:INVEN_SaveItemDirect", g_backup_save_item_direct, item,
-                                   pending.bag, pending.slot);
+                return call_save_item_direct_native(item, pending.bag, pending.slot,
+                                                    "SaveItemDirect/pending");
             }
             if (pending.space_id >= qol::contracts::kQolBagSpaceFirstRegistered) {
                 return import_registered_item_direct(item, pending.space_id, pending.bag,
@@ -1230,14 +1247,7 @@ int save_item_direct_wrapper(void* item, int32_t bag, int32_t slot) {
     //（+0xe8/+0x110/+0x168 三处 SetBitValue 写点），合并可能 ITEMPOOL_Free(item)，
     // 因此入参对象全量必须在 backup 前读取。原版返回值不可信（决策册 §2.2），
     // 成败判定改用「目标槽指针未替换 + 字段等于原版预测 b 写」。
-    uint32_t source_count = 0;
-    if (item != nullptr) item_count_effective(item, &source_count);
-    S2MergeCapture merge{};
-    s2_capture_merge(item, bag, slot, static_cast<int32_t>(source_count), &merge);
-    const int result = call_backup("hook:INVEN_SaveItemDirect", g_backup_save_item_direct,
-                                   item, bag, slot);
-    s2_merge_writeback(merge, "SaveItemDirect");
-    return result;
+    return call_save_item_direct_native(item, bag, slot, "SaveItemDirect");
 }
 
 int remove_item_data_wrapper(int32_t category, int32_t count) {
