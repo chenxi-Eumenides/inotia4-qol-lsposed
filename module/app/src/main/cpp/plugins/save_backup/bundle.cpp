@@ -778,6 +778,20 @@ C18NativeBagLayout c18_native_bag_layout(const std::string& version_label) {
     return C18NativeBagLayout::kModern96;
 }
 
+// c18_native_bag_layout() 的互逆映射（见 bundle.h 声明处注释）。字面量与上方常量区间
+// 对应："v507" 是 kC18LegacyBagFirstVersion，"v521" 是 kC18LegacyBagLastVersion + 1；
+// 证据变化时需与该常量一同更新。
+const char* c18_native_bag_version_for_layout(C18NativeBagLayout layout) {
+    switch (layout) {
+        case C18NativeBagLayout::kLegacy192:
+            return "v507";
+        case C18NativeBagLayout::kModern96:
+            return "v521";
+        default:
+            return nullptr;
+    }
+}
+
 bool validate_c18_native_bag_image(const C18NativeBagImage& image) {
     if (image.source_slot < 0 || image.source_slot > 2) return false;
     if (image.source_version.empty() || image.source_version.size() > UINT16_MAX) return false;

@@ -386,42 +386,27 @@ static std::string autobackup_fingerprint(int slot, const std::string& data_dir,
         text += name + " " + std::to_string(stamp.size) + " " +
                 std::to_string(stamp.mtime_sec) + " " + std::to_string(stamp.mtime_nsec) + "\n";
     }
-    const auto ctx = save_backup::state::snapshot();
-    qol::contracts::QolGameIdentity identity{};
-    if (ctx.game == nullptr || ctx.game->game_identity.read == nullptr ||
-        !qol::contracts::succeeded(ctx.game->game_identity.read(&identity)) ||
-        identity.series_name == nullptr || identity.version_label == nullptr) {
-        text += "c18 identity-unavailable\n";
-    } else if (std::strcmp(identity.series_name, "c18") != 0 &&
-               (ctx.game->target.has_capability == nullptr ||
-                ctx.game->target.has_capability(
-                    qol::contracts::kQolTargetCapabilityC18NativeBagLayoutCandidate) == 0)) {
-        text += "c18 none\n";
+    // C18 指纹与导出同口径：只看文件状态（per-slot 存在即参与；都不存在时只看 shared fallback），
+    // 不读 game_identity/能力位。文件头版本字符串 "v1" 保持不变。
+    text += "c18\n";
+    if (data_dir.empty()) {
+        text += "directory-unavailable\n";
     } else {
-        const std::string version(identity.version_label);
-        const save_backup::C18NativeBagLayout layout =
-            save_backup::c18_native_bag_layout(version);
-        text += "c18 " + version + " " + std::to_string(static_cast<int>(layout)) + " ";
-        if (std::strcmp(identity.series_name, "c18") != 0 || identity.known == 0 ||
-            (layout != save_backup::C18NativeBagLayout::kLegacy192 &&
-             layout != save_backup::C18NativeBagLayout::kModern96)) {
-            text += "unavailable\n";
-        } else if (!data_dir.empty()) {
-            const bool legacy = layout == save_backup::C18NativeBagLayout::kLegacy192;
-            const std::string primary = data_dir + "/C18L" + (legacy ? "bag" : "wh") +
-                                        std::to_string(slot + 1) + ".dat";
-            struct stat primary_info{};
-            std::string source = primary;
-            if (::lstat(primary.c_str(), &primary_info) != 0 && errno == ENOENT) {
-                source = data_dir + "/C18Lbag.dat";
+        const std::vector<std::string> c18_paths =
+            qol::features::save_backup::list_c18_native_bag_files(data_dir, slot);
+        for (const std::string& path : c18_paths) {
+            const FileStamp stamp = file_stamp(path);
+            text += path.substr(data_dir.size()) + " " + std::to_string(stamp.exists ? 1 : 0) +
+                    " " + std::to_string(stamp.size) + " " + std::to_string(stamp.mtime_sec) +
+                    " " + std::to_string(stamp.mtime_nsec) + "\n";
+        }
+        if (c18_paths.empty()) {
+            const FileStamp shared = file_stamp(data_dir + "/C18Lbag.dat");
+            if (shared.exists) {
+                text += "shared " + std::to_string(shared.size) + " " +
+                        std::to_string(shared.mtime_sec) + " " +
+                        std::to_string(shared.mtime_nsec) + "\n";
             }
-            const FileStamp stamp = file_stamp(source);
-            text += source.substr(data_dir.size()) + " " + std::to_string(stamp.exists ? 1 : 0) +
-                    " " + std::to_string(stamp.size) + " " +
-                    std::to_string(stamp.mtime_sec) + " " +
-                    std::to_string(stamp.mtime_nsec) + "\n";
-        } else {
-            text += "directory-unavailable\n";
         }
     }
     return text;
@@ -508,23 +493,9 @@ bool bridge_locate_save_directory(std::string& out) {
     return locate_save_directory_at(save_backup::state::snapshot().data_dir, out) == 0;
 }
 
-bool bridge_read_game_identity(qol::contracts::QolGameIdentity& out) {
-    out = qol::contracts::QolGameIdentity{};
-    const auto ctx = save_backup::state::snapshot();
-    return ctx.game != nullptr && ctx.game->game_identity.read != nullptr &&
-           qol::contracts::succeeded(ctx.game->game_identity.read(&out));
-}
-
 bool bridge_get_data_directory(std::string& out) {
     out = save_backup::state::snapshot().data_dir;
     return !out.empty();
-}
-
-bool bridge_has_c18_candidate_capability() {
-    const auto ctx = save_backup::state::snapshot();
-    return ctx.game != nullptr && ctx.game->target.has_capability != nullptr &&
-           ctx.game->target.has_capability(
-               qol::contracts::kQolTargetCapabilityC18NativeBagLayoutCandidate) != 0;
 }
 
 bool bridge_read_file(const std::string& path, std::vector<uint8_t>& out) {
@@ -540,10 +511,9 @@ int bridge_encrypt_process(void* data, int32_t len, int32_t mode, const char* ke
 }
 
 const qol::features::save_backup::BackupFilesSource kBackupFilesSource{
-    &bridge_collect_dat,       &bridge_collect_sidecar, &bridge_locate_save_directory,
-    &bridge_read_file,         &bridge_encrypt_available, &bridge_hub_key,
-    &bridge_encrypt_process,   &bridge_read_game_identity, &bridge_get_data_directory,
-    &bridge_has_c18_candidate_capability,
+    &bridge_collect_dat,        &bridge_collect_sidecar,   &bridge_locate_save_directory,
+    &bridge_read_file,          &bridge_encrypt_available, &bridge_hub_key,
+    &bridge_encrypt_process,    &bridge_get_data_directory,
 };
 
 void bind_backup_files_source() { qol::features::save_backup::backup_files_bind_source(kBackupFilesSource); }

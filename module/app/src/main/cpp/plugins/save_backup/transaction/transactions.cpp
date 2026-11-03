@@ -526,7 +526,9 @@ void slot_deleted_sync(int32_t slot) {
     if (locate_save_directory_at(save_backup::state::snapshot().data_dir, save_dir) == 0) {
         wh_names = qol::features::save_backup::list_warehouse_companions(save_dir, slot);
     }
-    const bool data_trash_needed = !wh_names.empty();
+    const std::vector<std::string> c18_paths = qol::features::save_backup::list_c18_native_bag_files(
+        save_backup::state::snapshot().data_dir, slot);
+    const bool data_trash_needed = !wh_names.empty() || !c18_paths.empty();
     const std::string data_trash =
         data_trash_needed ? save_dir + "/.sb-trash-" + id : std::string();
     const std::string primary = saves_dir + "/slot-" + std::to_string(slot) + ".qol-save";
@@ -539,6 +541,11 @@ void slot_deleted_sync(int32_t slot) {
     };
     for (const std::string& wh_name : wh_names) {
         entries.push_back({data_trash + "/" + wh_name, save_dir + "/" + wh_name});
+    }
+    // C18 per-slot 文件在 data_dir 根、data trash 在其子目录 save_dir 下，同一文件系统。
+    // 共享 C18Lbag.dat 是游戏 selector 的全局 fallback，不属于单槽，hook 不删。
+    for (const std::string& c18_path : c18_paths) {
+        entries.push_back({data_trash + "/" + file_name_of(c18_path), c18_path});
     }
     auto cleanup_trash_dirs = [&]() {
         remove_dir_if_empty(trash_dir);
@@ -600,6 +607,21 @@ void slot_deleted_sync(int32_t slot) {
             return;
         }
     }
+    // C18 per-slot 文件按 entries 追加顺序移动（dat 已被游戏删除 → sidecar → wh4 → C18）；
+    // 失败由 restore_trash_entries 逆序回滚。
+    for (const std::string& c18_path : c18_paths) {
+        const std::string target = data_trash + "/" + file_name_of(c18_path);
+        if (::rename(c18_path.c_str(), target.c_str()) != 0) {
+            SB_LOG_WARN("slot delete hook: c18 move failed slot=%d file=%s", slot,
+                        c18_path.c_str());
+            (void)restore_trash_entries(entries);
+            remove_file(index_path);
+            cleanup_trash_dirs();
+            slot_operation_release(&guard);
+            save_backup::port::mark_stale();
+            return;
+        }
+    }
     bool unlink_failed = false;
     for (const TrashEntry& entry : entries) {
         if (!file_exists(entry.trash_path)) continue;
@@ -622,7 +644,8 @@ void slot_deleted_sync(int32_t slot) {
     remove_file(index_path);
     cleanup_trash_dirs();
     slot_operation_release(&guard);
-    SB_LOG("slot delete hook: removed sidecar/wh4 slot=%d wh4=%zu", slot, wh_names.size());
+    SB_LOG("slot delete hook: removed sidecar/wh4/c18 slot=%d wh4=%zu c18=%zu", slot,
+           wh_names.size(), c18_paths.size());
     // 游戏删档后槽文件已变：槽区结构不再代表磁盘状态，下一次读取必须重载。
     save_backup::port::mark_stale();
 }
@@ -1120,7 +1143,9 @@ std::string delete_slot_json(int slot) {
                                  probe_status == ContainerStatus::kCorrupt;
     const std::vector<std::string> wh_names =
         qol::features::save_backup::list_warehouse_companions(save_dir, slot);
-    if (!dat_existed && !sidecar_existed && wh_names.empty()) {
+    const std::vector<std::string> c18_paths = qol::features::save_backup::list_c18_native_bag_files(
+        save_backup::state::snapshot().data_dir, slot);
+    if (!dat_existed && !sidecar_existed && wh_names.empty() && c18_paths.empty()) {
         return result_error("save not found");
     }
     lk.unlock();
@@ -1130,7 +1155,7 @@ std::string delete_slot_json(int slot) {
 
     const std::string id = next_transaction_id();
     const std::string dat_trash = save_dir + "/.sb-trash-" + id;
-    const bool dat_trash_needed = dat_existed || !wh_names.empty();
+    const bool dat_trash_needed = dat_existed || !wh_names.empty() || !c18_paths.empty();
     std::string saves_dir;
     std::string sidecar_trash;
     if (sidecar_existed) {
@@ -1153,7 +1178,7 @@ std::string delete_slot_json(int slot) {
     const std::string index_path = backups_dir + "/.trash-" + id + ".index";
 
     std::vector<TrashEntry> entries;
-    // 顺序与注册表一致：dat → sidecar → wh4；失败回滚逆序。
+    // 顺序与注册表一致：dat → sidecar → wh4 → C18 per-slot；失败回滚逆序。
     if (dat_existed) {
         entries.push_back({dat_trash + "/" + file_name_of(dat_path), dat_path});
     }
@@ -1167,6 +1192,12 @@ std::string delete_slot_json(int slot) {
     }
     for (const std::string& wh_name : wh_names) {
         entries.push_back({dat_trash + "/" + wh_name, save_dir + "/" + wh_name});
+    }
+    // C18 per-slot 文件在 data_dir 根、dat trash 在其子目录 save_dir 下，同一文件系统，
+    // rename 合法。共享 data_dir/C18Lbag.dat 是游戏 selector 的全局 fallback，不属于单槽，
+    // 删单槽时故意不删。
+    for (const std::string& c18_path : c18_paths) {
+        entries.push_back({dat_trash + "/" + file_name_of(c18_path), c18_path});
     }
 
     auto cleanup_trash_dirs = [&]() {
@@ -1243,6 +1274,14 @@ std::string delete_slot_json(int slot) {
                 break;
         }
     }
+    // C18 per-slot 文件按 entries 追加顺序移动（在 wh4 之后）；失败回滚逆序处理。
+    for (const std::string& c18_path : c18_paths) {
+        const std::string target = dat_trash + "/" + file_name_of(c18_path);
+        if (::rename(c18_path.c_str(), target.c_str()) != 0) {
+            SB_LOG("save slot delete c18 move failed: %s", c18_path.c_str());
+            return fail_after_moves("delete save failed");
+        }
+    }
 
     // 第二阶段：逐文件 unlink；失败时把尚未删除的文件移回。
     for (const TrashEntry& entry : entries) {
@@ -1262,8 +1301,8 @@ std::string delete_slot_json(int slot) {
     remove_file(index_path);
     cleanup_trash_dirs();
     slot_operation_release(&guard);
-    SB_LOG("save slot deleted: slot=%d (dat=%d sidecar=%d wh4=%zu)", slot, dat_existed,
-           sidecar_existed, wh_names.size());
+    SB_LOG("save slot deleted: slot=%d (dat=%d sidecar=%d wh4=%zu c18=%zu)", slot, dat_existed,
+           sidecar_existed, wh_names.size(), c18_paths.size());
     // 槽文件已删除：槽区结构不再代表磁盘状态，下一次读取必须重载。
     save_backup::port::mark_stale();
     return save_backup::api::deleted_slot_response(slot);

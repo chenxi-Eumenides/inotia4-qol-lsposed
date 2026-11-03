@@ -67,6 +67,11 @@ struct C18NativeBagImage {
 // v507-v520 为 192 条旧布局；v521 及以上统一 96 条新布局（C18Lwh）；无法解析的标签 kUnknown。
 // 首个 192 条版本由实现内常量 kC18LegacyBagFirstVersion 定义，证据变化时只改该常量。
 C18NativeBagLayout c18_native_bag_layout(const std::string& version_label);
+// 上一函数的逆映射：把文件自描述的 record count 对应的布局映射回 c18_native_bag_layout()
+// 可解析的标签（kLegacy192 → "v507"，kModern96 → "v521"）。仅用于导出时给
+// C18NativeBagImage.source_version 赋值（导出不读游戏版本标签）；导入转换只看 record_count。
+// 其余布局返回 nullptr。
+const char* c18_native_bag_version_for_layout(C18NativeBagLayout layout);
 bool validate_c18_native_bag_image(const C18NativeBagImage& image);
 bool c18_native_bag_record_empty(const uint8_t* record, size_t size);
 // raw file parser checks C18BAG01, version=1, header count and exact total length. A per-slot path

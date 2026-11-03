@@ -425,6 +425,11 @@ std::vector<uint8_t> make_c18_file(uint32_t count, int slot, uint8_t fill,
     return bytes;
 }
 
+bool write_c18_file(const std::string& path, uint32_t count, int slot, uint8_t fill) {
+    const std::vector<uint8_t> bytes = make_c18_file(count, slot, fill);
+    return write_file(path, std::string(bytes.begin(), bytes.end()));
+}
+
 std::string write_v3_bundle(const std::string& root) {
     std::vector<uint8_t> plain(16, 0);
     plain[8] = 4;
@@ -811,16 +816,37 @@ int main() {
     CHECK(qol::infra::slot_operation::acquire(g_occupier, 1, &verify).ok == kQolOk);
     CHECK(qol::infra::slot_operation::release(g_occupier, &verify).ok == kQolOk);
 
-    // ---- 删槽：无占用时放行；dat/sidecar/wh4/trash/index 全部清理 ----
+    // ---- 删槽：无占用时放行；dat/sidecar/wh4/C18/trash/index 全部清理 ----
     const std::string delete_wh = save_dir + "/save0.dat.wh4-0000000000000004";
     CHECK(write_file(delete_wh, "WH4-DELETE"));
+    // C18 per-slot 文件按存在性参与删槽；共享 C18Lbag.dat 是游戏 selector 的全局
+    // fallback，不属于单槽，删单槽不能删它。
+    const std::string slot1_c18 = data_dir + "/C18Lbag2.dat";
+    CHECK(write_c18_file(slot1_c18, save_backup::kC18NativeBagLegacyRecordCount, 1, 0x31));
+    const std::string slot2_c18 = data_dir + "/C18Lwh3.dat";
+    CHECK(write_c18_file(slot2_c18, save_backup::kC18NativeBagModernRecordCount, 2, 0x32));
+    const std::string shared_c18 = data_dir + "/C18Lbag.dat";
+    CHECK(write_c18_file(shared_c18, save_backup::kC18NativeBagModernRecordCount, 0, 0x33));
     const std::string deleted = save_backup_delete_slot_json(0);
     CHECK(body_ok(deleted));
     CHECK(::access(dat_path.c_str(), F_OK) != 0);
     CHECK(::access(delete_wh.c_str(), F_OK) != 0);
+    CHECK(::access(slot1_c18.c_str(), F_OK) == 0);  // 属于其他槽，不删
+    CHECK(::access(slot2_c18.c_str(), F_OK) == 0);
+    CHECK(::access(shared_c18.c_str(), F_OK) == 0);  // 共享 fallback 不删
     CHECK(!has_entry_prefix(save_dir, ".sb-trash-"));
     CHECK(!has_entry_prefix(root + "/saves", ".sb-trash-"));
     CHECK(!has_entry_prefix(root + "/backups", ".trash-"));
+
+    // ---- 删槽（只有 C18 文件、无 dat/sidecar/wh4）：该槽仍能删除 ----
+    const std::string deleted_slot1 = save_backup_delete_slot_json(1);
+    CHECK(body_ok(deleted_slot1));
+    CHECK(::access(slot1_c18.c_str(), F_OK) != 0);  // C18Lbag2.dat 已删
+    CHECK(::access(slot2_c18.c_str(), F_OK) == 0);
+    CHECK(::access(shared_c18.c_str(), F_OK) == 0);
+    // 清理 slot2 per-slot 与共享文件，避免影响后续自动备份与 C18 段用例。
+    CHECK(::unlink(slot2_c18.c_str()) == 0);
+    CHECK(::unlink(shared_c18.c_str()) == 0);
 
     // ---- 删槽 unlink 失败：dat/sidecar/wh4 全部移回，内容不变 ----
     CHECK(write_file(dat_path, original_dat));
@@ -1228,15 +1254,17 @@ int main() {
     // ---- C18 normalized image：共享 fallback 只读收集、跨版 materialize、版本门禁与回滚 ----
     {
         const std::string c18_backups_dir = root + "/backups";
+        // 导出不再读 game_identity/能力位：unknown + candidate 且无 C18 文件时
+        // 收集成功、不产生 C18 image。
         g_test_series = "unknown";
         g_test_version.clear();
         g_test_identity_known = 0;
         g_test_c18_candidate = 1;
         qol::features::save_backup::SlotSnapshot unknown_c18_snapshot;
         std::string unknown_c18_error;
-        CHECK(!qol::features::save_backup::collect_slot_snapshot(
+        CHECK(qol::features::save_backup::collect_slot_snapshot(
             0, unknown_c18_snapshot, unknown_c18_error));
-        CHECK(unknown_c18_error == "C18 game version unsupported");
+        CHECK(!unknown_c18_snapshot.c18_native_bag.present);
 
         g_test_series = "c18";
         g_test_version = "v586";
@@ -1256,7 +1284,8 @@ int main() {
         save_backup::ParsedBundle exported_parsed;
         CHECK(save_backup::parse_bundle(exported.data(), exported.size(), exported_parsed));
         CHECK(exported_parsed.has_c18_native_bag);
-        CHECK(exported_parsed.c18_native_bag.source_version == "v586");
+        // source_version 由文件头 record count 合成（96 条 → v521），不取游戏版本标签。
+        CHECK(exported_parsed.c18_native_bag.source_version == "v521");
         CHECK(exported_parsed.c18_native_bag.source_slot == 0);
         CHECK(exported_parsed.c18_native_bag.record_count ==
               save_backup::kC18NativeBagModernRecordCount);
@@ -1309,10 +1338,11 @@ int main() {
         CHECK(modern_target[0x13] == 2);
         CHECK(::unlink(modern_target_path.c_str()) == 0);
         CHECK(::unlink(shared_path.c_str()) == 0);
+        // per-slot 与 shared 都不存在：收集成功且不产生 image（不再报 "C18 bag file not found"）。
         qol::features::save_backup::SlotSnapshot missing_c18_snapshot;
-        CHECK(!qol::features::save_backup::collect_slot_snapshot(
+        CHECK(qol::features::save_backup::collect_slot_snapshot(
             0, missing_c18_snapshot, c18_snapshot_error));
-        CHECK(c18_snapshot_error == "C18 bag file not found");
+        CHECK(!missing_c18_snapshot.c18_native_bag.present);
 
         // v3 没有 C18 段：目标 C18 必须在 dat/sidecar 修改前拒绝。
         g_test_version = "v520";
@@ -1325,6 +1355,10 @@ int main() {
         CHECK(qol::features::save_backup::collect_slot_snapshot(
             1, old_slot1_snapshot, c18_snapshot_error));
         CHECK(old_slot1_snapshot.c18_native_bag.present);
+        // legacy 192 条 per-slot 文件按存在性收集，source_version 由 record count 合成。
+        CHECK(old_slot1_snapshot.c18_native_bag.image.source_version == "v507");
+        CHECK(old_slot1_snapshot.c18_native_bag.image.record_count ==
+              save_backup::kC18NativeBagLegacyRecordCount);
         const std::array<uint8_t, 3> old_reserved{0x44, 0x55, 0x66};
         CHECK(old_slot1_snapshot.c18_native_bag.image.header_reserved ==
               old_reserved);

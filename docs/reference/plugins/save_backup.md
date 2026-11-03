@@ -188,7 +188,7 @@ Kotlin postAndAwait
 
 ### 6.1 导出
 
-1. 取槽明文（`save.facts.load_data`）、sidecar、wh4 伴生文件；若运行版本为支持 native bag 的 C18L，则从当前活动 per-slot 文件或其 shared fallback 收集一份 C18 image。
+1. 取槽明文（`save.facts.load_data`）、sidecar、wh4 伴生文件；C18 image 只看文件是否存在：per-slot `C18Lwh{N}.dat`/`C18Lbag{N}.dat` 存在即收集（`C18Lwh` 优先），都不存在时回退 shared `C18Lbag.dat`；不看游戏变体/版本标签，布局由文件头 record count 决定；source version 标签由 record count 合成（192→`v507`，96→`v521`）。
 2. 有外部 wh4 时尝试剥离 block3 内嵌 `WH96v002` 段。
 3. C18 文件严格校验 magic/version/count/slot/精确长度；记录体保持 opaque。C18 image 按原始文件字节读取，不调用会 `system()` 复制文件的游戏 selector，也不调用 `SAVE_Save` / C18 helper 改写当前槽；C18 文件无设备密钥加密证据，不做加解密。
 4. 计算 checksum、构造 meta/bundle、CRC32。
@@ -212,18 +212,18 @@ Kotlin postAndAwait
 - 两族使用相同 `C18BAG01` magic、20-byte header 和记录 schema；header count 是一致性字段，loader 的循环数由目标版本代码固定，不由 header count 决定，因此必须写完整目标数量记录。
 - 导入旧目标时，96 条源记录后补 96 条全零；导入新目标时，192 条源记录只取前 96 条，尾部直接丢弃且不另存。bundle 源 image 不变；导入只覆盖目标版本活动文件，不写 shared fallback，也不写另一族副本。
 - 历史 v514/v520→v586 未发现 `bagN`→`whN` 游戏迁移；此备份行为是用户确认的单 image 规范化策略，不表示游戏本身会迁移。
-- `data_dir/C18Lbag.dat` 只作为 primary 缺失时的只读 shared fallback，fallback header 可为 96 或 192 条；导入时 materialize 到目标版本 per-slot primary。目标不是 C18 或布局未知时整段跳过，不写任何 C18 文件；目标已有文件保持原字节。导出时 primary 与 shared 都不存在则 fail-closed；导入旧备份（bundle 无 image）时按目标布局生成空 image（全零记录），扩展背包为空。
+- `data_dir/C18Lbag.dat` 只作为 primary 缺失时的只读 shared fallback，fallback header 可为 96 或 192 条；导入时 materialize 到目标版本 per-slot primary。目标不是 C18 或布局未知时整段跳过，不写任何 C18 文件；目标已有文件保持原字节。导出时 primary 与 shared 都不存在时该槽不产生 C18 image（不报错）；文件存在但损坏（magic/count/长度不符或非普通文件）时导出失败。导入旧备份（bundle 无 image）时按目标布局生成空 image（全零记录），扩展背包为空。
 
 ### 6.3 删除
 
 - 删备份：checksum 定位 → 重算 payload checksum → `unlink` 单文件。
-- 删槽：dat、sidecar、wh4 分别移入同文件系统 `.sb-trash-<id>/`，写 `.trash-<id>.index`，全部成功后统一 unlink；失败移回；启动时 `save_backup_recover_deletes` 恢复。
-- 游戏内删档 hook：原函数返回后调用 `save_backup_slot_deleted_sync`，只清该槽 sidecar/wh4 并 `mark_stale`。
+- 删槽：dat、sidecar、wh4 与该槽 per-slot C18 文件分别移入同文件系统 `.sb-trash-<id>/`，写 `.trash-<id>.index`，全部成功后统一 unlink；失败移回；启动时 `save_backup_recover_deletes` 恢复。共享 `data_dir/C18Lbag.dat` 不属于单槽（游戏 selector 的全局 fallback），不删除。
+- 游戏内删档 hook：原函数返回后调用 `save_backup_slot_deleted_sync`，清理该槽 sidecar/wh4/per-slot C18 文件并 `mark_stale`。
 
 ### 6.4 自动备份
 
 - `save.pre_save` 观察者在保存写盘前触发。
-- 以 dat/sidecar/wh4 及当前 C18 活动 primary/shared fallback 的 size+mtime 指纹判断是否跳过。
+- 以 dat/sidecar/wh4 及 C18 per-slot 文件的 size+mtime 指纹判断是否跳过；无 per-slot 文件时以 shared `C18Lbag.dat` 的 size+mtime 参与指纹。
 - 每槽一份 `autosave_sN.qol.bak` 原子覆盖；失败只记 WARN，不阻断保存。
 - 自动备份不进入 `backups/` 顶层列表、去重、导入、删除扫描。
 
@@ -273,9 +273,9 @@ Kotlin postAndAwait
 | `backup name collision` | `_1.._99` 用尽 |
 | `warehouse read failed` / `warehouse file too large` / `warehouse limit exceeded` | wh4 收集/容量失败 |
 | `load failed` | 明文读取失败 |
-| `game identity unavailable` / `C18 game version unsupported` | 导出时运行时身份不可读或未知 C18 候选版本（导入时改为跳过 C18 数据，不报错） |
-| `C18 data directory unavailable` | C18 活动文件无法从 Native init 的动态 `data_dir` 定位 |
-| `C18 bag file not found` / `C18 bag file unreadable or corrupt` | C18 primary 与 shared fallback 均不可用，或文件 header/count/长度不符合证据 |
+| `game identity unavailable` / `C18 game version unsupported` | 导入时目标身份不可读、非 C18 或布局未知导致 C18 段拒绝（导出侧不再产生这两个错误；导出按文件存在驱动） |
+| `C18 data directory unavailable` | 导入写 C18 活动文件时无法从 Native init 的动态 `data_dir` 定位 |
+| `C18 bag file unreadable or corrupt` | 导出收集到的 C18 文件非普通文件或 header/count/长度不符合证据（per-slot 与 shared 都不存在时不报错、不产生 image） |
 | `C18 bag image invalid` / `C18 bag file write failed` | normalized image 转换失败或活动 per-slot 文件写入失败 |
 | `command unavailable` | typed command 未注册/post 失败 |
 | `ticket unavailable` / `ticket timeout` | Kotlin 票据回取失败/超时 |

@@ -5,7 +5,9 @@
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
+#include <utility>
 
 #include "log.h"
 
@@ -19,8 +21,7 @@ BackupFilesSource g_source{};
 bool source_ready() {
     return g_source.read_original_dat != nullptr && g_source.read_module_sidecar != nullptr &&
            g_source.locate_save_directory != nullptr && g_source.read_file_bytes != nullptr &&
-           g_source.read_game_identity != nullptr && g_source.get_data_directory != nullptr &&
-           g_source.has_c18_candidate_capability != nullptr;
+           g_source.get_data_directory != nullptr;
 }
 
 bool ends_with(const std::string& value, const char* suffix) {
@@ -122,114 +123,99 @@ bool collect_warehouse(int slot, SlotSnapshot& out, std::string& err) {
     return true;
 }
 
-bool collect_c18_native_bag(int slot, SlotSnapshot& out, std::string& err) {
-    qol::contracts::QolGameIdentity identity{};
-    if (!g_source.read_game_identity(identity) || identity.series_name == nullptr ||
-        identity.version_label == nullptr) {
-        err = "game identity unavailable";
-        return false;
-    }
-    const bool identity_is_c18 = std::strcmp(identity.series_name, "c18") == 0;
-    const bool c18_candidate =
-        identity_is_c18 || g_source.has_c18_candidate_capability();
-    if (!c18_candidate) return true;
-    if (!identity_is_c18) {
-        err = "C18 game version unsupported";
-        return false;
-    }
+// per-slot C18 原生背包文件族名：modern（C18Lwh，96 条）在前，legacy（C18Lbag，192 条）在后。
+// 导出探测与删槽列表共用该顺序。
+constexpr const char* kC18SlotFileFamilies[] = {"C18Lwh", "C18Lbag"};
 
-    const std::string version(identity.version_label);
-    const ::save_backup::C18NativeBagLayout layout =
-        ::save_backup::c18_native_bag_layout(version);
-    if (identity.known == 0) {
-        err = "C18 game version unsupported";
-        return false;
-    }
-    if (layout == ::save_backup::C18NativeBagLayout::kUnsupported) return true;
-    if (layout == ::save_backup::C18NativeBagLayout::kUnknown) {
-        err = "C18 game version unsupported";
-        return false;
-    }
-    std::string data_dir;
-    if (!g_source.get_data_directory(data_dir) || data_dir.empty()) {
-        err = "C18 data directory unavailable";
-        return false;
-    }
+// C18 原生背包文件探测结果：absent（ENOENT，调用方跳过/回退）、error（err 已置）、read（已解析）。
+enum class C18BagProbe : uint8_t { kAbsent = 0, kError = 1, kRead = 2 };
 
-    const bool legacy = layout == ::save_backup::C18NativeBagLayout::kLegacy192;
-    const uint32_t expected_count = legacy ? ::save_backup::kC18NativeBagLegacyRecordCount
-                                           : ::save_backup::kC18NativeBagModernRecordCount;
-    const std::string primary = data_dir + "/C18L" + (legacy ? "bag" : "wh") +
-                                std::to_string(slot + 1) + ".dat";
-    struct stat primary_info{};
-    if (::lstat(primary.c_str(), &primary_info) == 0) {
-        const size_t expected_size = ::save_backup::kC18NativeBagHeaderBytes +
-                                     static_cast<size_t>(expected_count) *
-                                         ::save_backup::kC18NativeBagRecordBytes;
-        if (!S_ISREG(primary_info.st_mode) || primary_info.st_size < 0 ||
-            static_cast<uint64_t>(primary_info.st_size) != expected_size) {
-            err = "C18 bag file unreadable or corrupt";
-            return false;
-        }
-        std::vector<uint8_t> bytes;
-        uint32_t record_count = 0;
-        std::array<uint8_t, 3> header_reserved{};
-        if (!g_source.read_file_bytes(primary, bytes) ||
-            !::save_backup::parse_c18_native_bag_file(bytes.data(), bytes.size(), slot,
-                                                       expected_count, false, record_count,
-                                                       header_reserved,
-                                                       out.c18_native_bag.image.records)) {
-            err = "C18 bag file unreadable or corrupt";
-            return false;
-        }
-        out.c18_native_bag.image.source_version = version;
-        out.c18_native_bag.image.source_slot = slot;
-        out.c18_native_bag.image.record_count = record_count;
-        out.c18_native_bag.image.header_reserved = header_reserved;
-        out.c18_native_bag.present = true;
-        return true;
+// lstat 探测 + 普通/大小预检 + 读文件 + 解析。布局由文件头 record count 决定
+//（allow_either_count=true），不看游戏变体/版本标签；expected_slot 为 per-slot 槽号或 -1（shared）。
+C18BagProbe read_c18_bag_file(const std::string& path, int expected_slot, uint32_t& out_count,
+                              std::array<uint8_t, 3>& out_reserved, std::vector<uint8_t>& out_records,
+                              std::string& err) {
+    struct stat info{};
+    if (::lstat(path.c_str(), &info) != 0) {
+        if (errno == ENOENT) return C18BagProbe::kAbsent;
+        err = "C18 bag file unreadable or corrupt";
+        return C18BagProbe::kError;
     }
-    if (errno != ENOENT) {
+    if (!S_ISREG(info.st_mode) || info.st_size <= 0 ||
+        static_cast<uint64_t>(info.st_size) > ::save_backup::kC18NativeBagMaxImageBytes) {
+        err = "C18 bag file unreadable or corrupt";
+        return C18BagProbe::kError;
+    }
+    std::vector<uint8_t> bytes;
+    if (!g_source.read_file_bytes(path, bytes) ||
+        !::save_backup::parse_c18_native_bag_file(bytes.data(), bytes.size(), expected_slot, 0,
+                                                  true, out_count, out_reserved, out_records)) {
+        err = "C18 bag file unreadable or corrupt";
+        return C18BagProbe::kError;
+    }
+    return C18BagProbe::kRead;
+}
+
+// 解析成功后填充 image：source_version 由 record count 经布局逆映射合成（导出不读游戏版本）。
+bool fill_c18_bag_image(int slot, uint32_t count, const std::array<uint8_t, 3>& reserved,
+                        std::vector<uint8_t>& records, ::save_backup::C18NativeBagImage& image,
+                        std::string& err) {
+    const char* version = ::save_backup::c18_native_bag_version_for_layout(
+        count == ::save_backup::kC18NativeBagLegacyRecordCount
+            ? ::save_backup::C18NativeBagLayout::kLegacy192
+            : ::save_backup::C18NativeBagLayout::kModern96);
+    if (version == nullptr) {
+        // parse 已保证 count ∈ {96, 192}，此路径不可达；防御式兜底走既有错误串。
         err = "C18 bag file unreadable or corrupt";
         return false;
+    }
+    image.source_version = version;
+    image.source_slot = slot;
+    image.record_count = count;
+    image.header_reserved = reserved;
+    image.records = std::move(records);
+    return true;
+}
+
+bool collect_c18_native_bag(int slot, SlotSnapshot& out, std::string& err) {
+    // 是否导出 C18 只看对应文件是否存在，不看游戏变体/身份；不调用任何游戏函数。
+    std::string data_dir;
+    if (!g_source.get_data_directory(data_dir) || data_dir.empty()) {
+        SB_LOG("save backup export slot=%d: c18 bag absent", slot);
+        return true;
+    }
+    const std::string slot_suffix = std::to_string(slot + 1) + ".dat";
+    uint32_t count = 0;
+    std::array<uint8_t, 3> reserved{};
+    std::vector<uint8_t> records;
+    for (const char* family : kC18SlotFileFamilies) {
+        const std::string path = data_dir + "/" + family + slot_suffix;
+        const C18BagProbe probe = read_c18_bag_file(path, slot, count, reserved, records, err);
+        if (probe == C18BagProbe::kError) return false;
+        if (probe == C18BagProbe::kAbsent) continue;
+        if (!fill_c18_bag_image(slot, count, reserved, records, out.c18_native_bag.image, err)) {
+            return false;
+        }
+        out.c18_native_bag.present = true;
+        SB_LOG("save backup export slot=%d: c18 bag source=%s records=%u", slot, path.c_str(),
+               count);
+        return true;
     }
 
     // Game's built-in selector may copy the shared file into a per-slot path. Never invoke it:
     // export reads the fallback only and does not mutate game state or files.
     const std::string shared = data_dir + "/C18Lbag.dat";
-    struct stat shared_info{};
-    if (::lstat(shared.c_str(), &shared_info) != 0) {
-        err = errno == ENOENT ? "C18 bag file not found" : "C18 bag file unreadable or corrupt";
+    const C18BagProbe probe = read_c18_bag_file(shared, -1, count, reserved, records, err);
+    if (probe == C18BagProbe::kError) return false;
+    if (probe == C18BagProbe::kAbsent) {
+        SB_LOG("save backup export slot=%d: c18 bag absent", slot);
+        return true;
+    }
+    if (!fill_c18_bag_image(slot, count, reserved, records, out.c18_native_bag.image, err)) {
         return false;
     }
-    const size_t shared_legacy_size = ::save_backup::kC18NativeBagHeaderBytes +
-                                      static_cast<size_t>(::save_backup::kC18NativeBagLegacyRecordCount) *
-                                          ::save_backup::kC18NativeBagRecordBytes;
-    const size_t shared_modern_size = ::save_backup::kC18NativeBagHeaderBytes +
-                                      static_cast<size_t>(::save_backup::kC18NativeBagModernRecordCount) *
-                                          ::save_backup::kC18NativeBagRecordBytes;
-    if (!S_ISREG(shared_info.st_mode) || shared_info.st_size < 0 ||
-        (static_cast<uint64_t>(shared_info.st_size) != shared_legacy_size &&
-         static_cast<uint64_t>(shared_info.st_size) != shared_modern_size)) {
-        err = "C18 bag file unreadable or corrupt";
-        return false;
-    }
-    std::vector<uint8_t> bytes;
-    uint32_t record_count = 0;
-    std::array<uint8_t, 3> header_reserved{};
-    if (!g_source.read_file_bytes(shared, bytes) ||
-        !::save_backup::parse_c18_native_bag_file(bytes.data(), bytes.size(), -1, 0, true,
-                                                   record_count,
-                                                   header_reserved,
-                                                   out.c18_native_bag.image.records)) {
-        err = "C18 bag file unreadable or corrupt";
-        return false;
-    }
-    out.c18_native_bag.image.source_version = version;
-    out.c18_native_bag.image.source_slot = slot;
-    out.c18_native_bag.image.record_count = record_count;
-    out.c18_native_bag.image.header_reserved = header_reserved;
     out.c18_native_bag.present = true;
+    SB_LOG("save backup export slot=%d: c18 bag source=%s records=%u", slot, shared.c_str(), count);
     return true;
 }
 
@@ -266,6 +252,20 @@ std::vector<std::string> list_warehouse_companions(const std::string& save_dir, 
     ::closedir(dir);
     std::sort(names.begin(), names.end());
     return names;
+}
+
+std::vector<std::string> list_c18_native_bag_files(const std::string& data_dir, int slot) {
+    std::vector<std::string> paths;
+    if (slot < 0 || slot > 2) return paths;
+    const std::string slot_suffix = std::to_string(slot + 1) + ".dat";
+    for (const char* family : kC18SlotFileFamilies) {
+        const std::string path = data_dir + "/" + family + slot_suffix;
+        struct stat info{};
+        if (::lstat(path.c_str(), &info) == 0 && S_ISREG(info.st_mode)) {
+            paths.push_back(path);
+        }
+    }
+    return paths;
 }
 
 void backup_files_bind_source(const BackupFilesSource& source) { g_source = source; }
