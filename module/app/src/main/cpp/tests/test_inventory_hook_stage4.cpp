@@ -587,25 +587,6 @@ static void test_remove_data_extension_shortfall() {
     CHECK(inventory_stage::remove_data_extension_shortfall(5, 6, 4) == 4);
 }
 
-// VM-38：ITEMSYSTEM_MakeItem 数量回写计划——arg2 是静态表查找/品质参数
-//（CHARSYSTEM_DropItem 传 2..5、DEALSYSTEM_MakeSale 传 5）而非数量，产物量由
-// 原版 CAL 公式写点（≤99，b 写即全量）生成。任何入参组合都不得触发回写，
-// 否则掉落物一落地数量即被污染成 arg2（真机实证：药水 2/卷轴 3/材料 4）。
-static void test_make_item_writeback_count() {
-    // 掉落品质分支实参组合（category 2/3/4 与 arg2 2..5 的交叉）。
-    for (int32_t category = 2; category <= 4; ++category) {
-        for (int32_t arg2 = 2; arg2 <= 5; ++arg2) {
-            CHECK(stage4_make_item_writeback_count(category, arg2, 0) == 0u);
-            CHECK(stage4_make_item_writeback_count(category, arg2, 1) == 0u);
-        }
-    }
-    // 商店货架（MakeSale arg2=5）与退化/边界入参。
-    CHECK(stage4_make_item_writeback_count(1, 5, 0) == 0u);
-    CHECK(stage4_make_item_writeback_count(0, 0, 0) == 0u);
-    CHECK(stage4_make_item_writeback_count(-1, 99, 127) == 0u);
-    CHECK(stage4_make_item_writeback_count(401, 999, -1) == 0u);
-}
-
 // VM-41：原版背包详情出售接管判定 + 金额（R-55）。调用点常量与 game_symbols.h
 // 同源；启用/关闭两态、canonical 0/1/99/100/199/999、越界拒绝全覆盖。
 static void test_vanilla_sell_routing() {
@@ -661,7 +642,6 @@ int main() {
     test_get_cumulate_count_facade();
     test_remove_item_data_plan();
     test_remove_data_extension_shortfall();
-    test_make_item_writeback_count();
     test_vanilla_sell_routing();
     test_object_operations();
     test_unequip_to_inven();

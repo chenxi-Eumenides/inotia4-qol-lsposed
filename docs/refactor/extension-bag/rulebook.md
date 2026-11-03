@@ -227,11 +227,11 @@
 
 ### 3.1 24 个常驻 Native Hook
 
-安装链是唯一清单，当前必须保持以下 24 个且不增不减（下表为 H-01..H-23 既有 23 个；
-H-24 为 R-63 佣兵徽章使用函数级接管新增，安装证据见 R-63，23 个既有 + H-24 = 24，与
-源码安装日志 `count=24` 一致。H-17 为 S2 读侧统一 getter，H-18..H-21 为 S2 写侧进位框架
-追加，其中 H-20 `ITEMSYSTEM_MakeItem` 数量回写已撤销、wrapper 纯透传，见 R-52；
-H-22/H-23 为 R-55 原版背包详情出售接管追加）：
+安装链是唯一清单，当前必须保持以下 23 个且不增不减（下表为 H-01..H-23 既有 23 个，
+其中 H-20 已移除；H-24 为 R-63 佣兵徽章使用函数级接管新增，安装证据见 R-63，
+22 个既有 + H-24 = 23，与源码 claims 表一致。H-17 为 S2 读侧统一 getter，
+H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` 数量回写已撤销、
+整个 hook 已从 claims 移除，见 R-52；H-22/H-23 为 R-55 原版背包详情出售接管追加）：
 
 | 编号 | 目标 | wrapper | 安装证据 |
 |---|---|---|---|
@@ -254,7 +254,7 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
 | H-17 | `ITEM_GetCumulateCount` | `get_cumulate_count_wrapper`；S2 读侧统一解码（R-49）：count-encoded 类别按模式视图解码 `+0x10`（启用态 `128a+b`、关闭态读 b（0–127，不夹 99），R-47 决策 b），非可堆叠/类别未知（kUnknown）original-first backup（R-46 fail-closed） | `native_inventory_hook.cpp`（wrapper，分流在 `inventory_hook_stage4.cpp:stage4_get_cumulate_count`）、安装链第 4 个 |
 | H-18 | `INVEN_SaveItemDirect` | `save_item_direct_wrapper`；同身份堆叠合并时采集目标槽旧全量、backup 后确认原版 b 写再回写 a+b（R-45/R-49） | `native_inventory_hook.cpp:save_item_direct_wrapper`、安装链第 20 个 |
 | H-19 | `ITEMSYSTEM_Divide` | `item_system_divide_wrapper`；拆堆源堆借位与新对象设值（R-45/R-49） | `native_inventory_hook.cpp:item_system_divide_wrapper`、安装链第 21 个 |
-| H-20 | `ITEMSYSTEM_MakeItem` | `make_item_wrapper`；**数量回写已撤销**（arg2 是静态表查找/品质参数非数量，R-52/VM-38），wrapper 纯透传、回写计划经纯函数 `stage4_make_item_writeback_count` 恒 0 | `native_inventory_hook.cpp:make_item_wrapper`、安装链第 22 个 |
+| H-20 | `ITEMSYSTEM_MakeItem` | **hook 已移除**：数量回写撤销后 wrapper 已无行为（arg2 是静态表查找/品质参数非数量，R-52/VM-38），`make_item_wrapper` 与 `stage4_make_item_writeback_count` 已删除，入口留给需要 MakeItem 语义的插件 | 已从 claims 表移除 |
 | H-21 | `INVEN_RemoveItemData` | `remove_item_data_wrapper`；快照/重扫 + `stage4_remove_item_data_plan` 修正部分删堆（R-45/R-49），并做扩展桥接（R-56）：物理实扣不足时按 category 从扩展袋补扣 | `native_inventory_hook.cpp:remove_item_data_wrapper`、安装链第 23 个 |
 | H-22 | `UIEquip_ButtonDestroyExe` | `button_destroy_exe_wrapper`；R-55 预演标记源：进入按钮执行时置 thread_local，供 H-23 区分「按钮预演」与「弹窗 OK 真实结算」 | `native_inventory_hook.cpp:button_destroy_exe_wrapper`、安装链第 13 个 |
 | H-23 | `UIEquip_OKDestroyItem` | `ok_destroy_item_wrapper`；R-55 原版背包详情出售接管：启用态弹窗 OK 完全接管结算（canonical 全量、`unit×count×7/10` 加钱、删整堆、刷新），按钮预演只回填展示金额；关闭态/非背包详情/校验失败 backup | `native_inventory_hook.cpp:ok_destroy_item_wrapper`、安装链第 15 个 |

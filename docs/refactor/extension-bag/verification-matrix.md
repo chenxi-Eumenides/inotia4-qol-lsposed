@@ -556,16 +556,16 @@
 - **证据锚类型**：真机 + Host codec + 源码；重定向安装日志已在部署流程取证，行为断言待人工商店操作。
 - **插件审计批 2026-10-17 口径修订**：getter 关闭态读取 b（0–127、不夹 99）；拆堆关闭态由原版写 b，模块 S2 写回跳过。新增用户复测见 VM-36，不代表本卡全量 PASS。
 
-### VM-38 拾取/掉落可堆叠物品数量为 1（MakeItem 回写撤销）
+### VM-38 拾取/掉落可堆叠物品数量为 1（MakeItem 回写撤销，hook 已移除）
 
 - **操作**：启用扩展袋，拾取/掉落/生成可堆叠物品，核对一次入库数量为 1，不随类别/品质参数放大。
 - **设备/APK/快照前置（按 VM-12 SOP）**：记录真机、APK SHA-256、`extensionBagEnabled`；记录拾取前后原版袋与扩展袋数量。
 - **原版链(VMA)**：`CHARSYSTEM_DropItem`（`0xf50b4/0xf50fc/0xf5144/0xf515c`，`ITEMSYSTEM_MakeItem(category, 2..5, flag)`）、`DEALSYSTEM_MakeSale`（`0xf6a90`，arg2=5）、`ITEMSYSTEM_MakeItem@0x10c6c8`（数量写点 `0x10ca3c` = `CAL_Calculate` 公式）。
-- **扩展接管点(文件:函数)**：`native_inventory_hook.cpp:make_item_wrapper`（纯透传）+ `inventory_hook_stage4.cpp:stage4_make_item_writeback_count`（恒 0）。
+- **扩展接管点(文件:函数)**：无。`core.item` 已移除 `hook:ITEMSYSTEM_MakeItem`（原 `make_item_wrapper` 纯透传、`stage4_make_item_writeback_count` 恒 0 已删除）；数量由原版 `0x10ca3c` CAL 写点生成，模块没有数量写点。
 - **共享状态读写**：wrapper 不取 `g_virtual_bag_mtx`；不做数量写（R-44/R-46）。
 - **必须保持的不变式(引 R-xx)**：产物数量恒等于原版公式值（域 ≤99，b 写即全量）；arg2/category/flag 不得进入数量位（R-52）。
 - **失败语义**：拿不到可信数量源时不写（恒 0），保持原版产物。
-- **Host 测试名(现有或「缺口」)**：`stage4_hook_tests::test_make_item_writeback_count`（掉落品质 2..5、商店 arg2=5、边界/负数/未知类别全部 0）。
+- **Host 测试名(现有或「缺口」)**：缺口。原 `stage4_hook_tests::test_make_item_writeback_count` 已随 hook 移除删除；数量由原版 CAL 写点生成，无模块写点可测。
 - **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-38`：①启用态拾取药水/卷轴/材料各一次，预期各得 1 个（对照缺陷 2/3/4）；②击杀怪物掉落可堆叠物，预期落地数量 1；③关闭扩展重复①，预期不变。
 - **证据锚类型**：真机 + Host 纯函数 + 源码；行为断言待人工拾取。
 
@@ -880,7 +880,7 @@
 | R-48 | VM-32、VM-35 | `test_stack_codec_mode_invariance` 覆盖 99/127/128/217/999 两态写入/解码一致与切换模式不改值；`test_virtual_bag_cross_config_roundtrip` 覆盖 99/127/128/217/999 跨配置三往返与旧 `encodingVersion` 字段宽容忽略；无版本标识（sidecar 不写、读到即忽略）与读侧 getter 依赖真机（VM-32 步骤③④、VM-35 全流程）。 |
 | R-49 | VM-32、VM-33、VM-34、VM-36 | 读侧 getter hook 已落地（S2-P2：`native_inventory_hook.cpp:get_cumulate_count_wrapper` → `inventory_hook_stage4.cpp:stage4_get_cumulate_count`，wrapper 门控 Host `test_get_cumulate_count_s2`）；999 未应用时读取 b（0–127、不夹 99），模块 S2 写回跳过、原版只写 b；应用后调用方级 S2 写回按 S2-P3 执行。VM-36 记载插件审计批新增真机复测，不代表相关卡全量 PASS。 |
 | R-51 | VM-37 | 重定向表 `g_stack_getter_redirect_patches` + `apply_s2_getter_redirects`（5 条 `mov x0,xN; bl ITEM_GetCumulateCount`）已落地；Host `test_sell_divide_s2_read_window` 断言 getter 两态解码等价与十位窗口伪修复反例；真机重定向安装日志已在部署流程取证，商店整堆/部分出售行为归 VM-37。装备页详情结算点 `0x1261c4` 当前不在表内（由 R-55 H-23 接管，归 VM-41）。 |
-| R-52 | VM-38 | `make_item_wrapper` 纯透传 + `stage4_make_item_writeback_count`（恒 0）已落地；Host `stage4_hook_tests::test_make_item_writeback_count` 覆盖掉落品质 2..5、商店 arg2=5 与边界；真机拾取/掉落数量归 VM-38。 |
+| R-52 | VM-38 | `core.item` 已移除 `hook:ITEMSYSTEM_MakeItem`（原 `make_item_wrapper` 纯透传、`stage4_make_item_writeback_count` 恒 0 一并删除）；数量恒由原版 CAL 写点生成；真机拾取/掉落数量归 VM-38。 |
 | R-53 | VM-39 | `adopt_merge_into`（model 纯函数）+ `virtual_bag_merge_native_item`（backup 前）+ `virtual_bag_adopt_native_item`（backup 失败后）合并前置查找已落地；Host `test_adopt_merge_plan` 覆盖同类合并/身份不同/上限/关闭态/非可堆叠；真机拾取（原版有空/满）归 VM-39。 |
 | R-54 | VM-40 | `HostCapacityGuard` RAII + `ext2orig_requires_host_capacity_restore`/`ext2orig_should_switch_display_bag` 已落地；Host `test_ext2orig_host_guards` 覆盖宿主/非宿主/非投影判定；真机投影拖入宿主袋归 VM-40。 |
 | R-55 | VM-41 | `ok_destroy_item_wrapper`（H-23）+ `button_destroy_exe_wrapper`（H-22 预演标记）+ `vanilla_sell_route`/`vanilla_sell_money` 已落地；Host `test_vanilla_sell_takeover` 覆盖两态路由与金额边界，`test_native_equip_sell_count` 固化原版 b 段缺陷基线；真机背包详情出售归 VM-41。 |

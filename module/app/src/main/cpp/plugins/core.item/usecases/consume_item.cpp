@@ -45,16 +45,6 @@ bool vanilla_sell_detail_context_matches(
            preview.item.generation == confirmation.item.generation;
 }
 
-uint32_t stage4_make_item_writeback_count(int32_t category, int32_t arg2, int32_t flag) {
-    // MakeItem 的 arg2 是静态表查找/品质参数而非数量（证据见头注释）；产物数量
-    // 由原版 CAL 公式写点生成且 ≤99（b 写即全量）。任何入参都不构成回写依据，
-    // 恒 0 = wrapper 纯透传（fail-closed：拿不到可信数量源就不写，R-46/R-49）。
-    (void)category;
-    (void)arg2;
-    (void)flag;
-    return 0;
-}
-
 int stage4_equip_item(void* character, int32_t bag, int32_t slot, int32_t equip_slot,
                       Stage4ItemAt item_at, Stage4IdentifyItem identify,
                       Stage4EquipExtension extension_equip,

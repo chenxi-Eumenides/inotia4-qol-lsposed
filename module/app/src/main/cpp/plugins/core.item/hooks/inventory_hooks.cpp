@@ -41,7 +41,6 @@ using CharUseItemExFn = int (*)(void*, void*, int);
 using CharProcessShortcutFn = int (*)(void*, int);
 using ShortcutGetStateFn = int (*)(void*, void*);
 using ItemSystemDivideFn = void* (*)(void*, int32_t);
-using MakeItemFn = void* (*)(int32_t, int32_t, int32_t);
 
 const qol::contracts::QolHostSdk* g_sdk = nullptr;
 const qol::contracts::QolGameHost* g_game = nullptr;
@@ -154,9 +153,9 @@ UiEquipOkDestroyItemFn g_backup_ok_destroy_item = nullptr;
 CharUseItemExFn g_backup_char_use_item_ex = nullptr;
 CharProcessShortcutFn g_backup_char_process_shortcut = nullptr;
 ShortcutGetStateFn g_backup_shortcut_get_state = nullptr;
-// S2 写侧进位框架 H-18/H-19（ITEMSYSTEM_Divide/MakeItem）的 backup。
+// S2 写侧进位框架 H-18（ITEMSYSTEM_Divide）的 backup。
+// H-19（ITEMSYSTEM_MakeItem）回写已撤销且无剩余行为，claim 已移除（R-52/VM-38）。
 ItemSystemDivideFn g_backup_item_system_divide = nullptr;
-MakeItemFn g_backup_make_item = nullptr;
 
 thread_local bool g_in_unequip_item_to_inven = false;
 thread_local uint64_t g_active_shortcut_trace = 0;
@@ -294,7 +293,7 @@ bool item_count_extended_applied() {
 // | INVEN_RemoveItemData          | 1    | 减（批量删除） | category/count 入参            | 多堆遍历（bag0..5 顺序）  | 已实现（core.inventory storage_hooks）：快照/重扫 + stage4_remove_item_data_plan 修正部分删堆（整删消失堆只求和）；遍历顺序已冻结（0x1040a8：外层 bag 0..5 × 内层槽，Getter 读 cum、`b.lt` 判部分删）；R-56 扩展桥接：物理实扣不足按 category 从扩展袋补扣 |
 // | INVEN_SaveItemData            | 1    | 加（批量创建） | category/count 入参            | 多堆/空槽                 | 无需接管：可堆叠分支 `cmp w20,#0x62; b.gt`（0x104694 区）>98 每堆写 99、≤98 写 count，每笔 ≤99 ≤127 b 写即全量；不可堆叠分支每件数量 1；category=0 分支是加钱（INVEN_AddMoney），无数量写 |
 // | INVEN_ConsumeItem             | 1    | 减（1）        | 恒 1 + 对象旧全量              | item 入参                 | 已实现（core.inventory storage_hooks；b≤1 借位预置 + 回写） |
-// | ITEMSYSTEM_MakeItem           | 1    | 设（装备强化 marker，非数量） | CAL_Calculate 结果 | CreatePerfectItem 返回装备 | 勘误（反汇编 0x10c6c8）：原登记「设（创建量）count 入参 arg2」错误——真实 ABI 是 `void* (category, lookup_key, luck)`（0x10c6d8 `mov w23,w1` 用于静态表 uint16 匹配、0x10c6e4 存 w2 作品质门槛比较，均非数量）；唯一 31/25 写点 0x10ca3c 仅对可强化装备写强化 marker（可堆叠类别 bit0=0 不进该分支，产物数量恒由 CreateItem 写 b=1，S2 完整）。旧 make_item_wrapper 把 x1（lookup_key）当 count 回写，导致拾取 1 个得 lookup_key 个（药水 2/卷轴 3/材料 4，真机实证）；H-20 已整体移除，原 hook 名保留编号不复用 |
+// | ITEMSYSTEM_MakeItem           | 1    | 设（装备强化 marker，非数量） | CAL_Calculate 结果 | CreatePerfectItem 返回装备 | 无需接管：真实 ABI 是 `void* (category, lookup_key, luck)`（0x10c6d8 `mov w23,w1` 用于静态表匹配、0x10c6e4 存 w2 作品质门槛，均非数量）；唯一 31/25 写点 0x10ca3c 只对可强化装备写强化 marker，可堆叠类产物数量恒由 CreateItem 写 b=1。历史上曾把 lookup_key 当 count 回写，导致掉落物一落地数量被污染成 2/3/4/5（R-52/VM-38）；回写撤销后该 hook 已无任何行为，claim 已从本表移除，入口留给需要 MakeItem 语义的插件 |
 // | ITEMSYSTEM_ProcessUnpack      | 1    | 设（产物量）   | 拆包表 u8 字段（表项 +0x4）    | CreatePerfectItem 产物    | 无需接管：产物量 = 拆包表只读静态数据（模块无任何写点），原版数量域 ≤99 ≤127，b 写即全量；开放边界：静态表若含 >99 值需数据审计复核（VM 取证抽查） |
 // | MAPITEMSYSTEM_CreateItem      | 1    | 设（生成量）   | count 入参（w1）               | CreateItem 产物（尾调 Add，返回值非对象） | 无需接管：4 个调用点 count 域全部为原版静态数据——UINpc_ExeNpcTask 0xc2f60 `mov w1,#1`、EVTSYSTEM_Process 0xfc710 事件表字段、QUESTSYSTEM_ApplyReward 0x1238e4 任务表 u16；掉落/任务数量设计域 ≤99 ≤127；开放边界：若未来发现丢弃/移仓路径把 S2 全量（>127）作 count 传入本函数则需复核（当前全量反汇编未见该路径） |
 // | NetworkStore_InitializeMenuData | 1  | 设（货架量）   | 网络商品数据 +0x18 字段        | CreateItem 产物           | 待勘察：数量来自网络数据（0x15b7b0+0x25xx 写点 `[x25+0x18]` 解引用），离线不可达无法冻结值域；勘察方法：联网抓包/内存 dump 商品表 +0x18 域，或真机挂回调记录 |
@@ -647,26 +646,6 @@ void* item_system_divide_wrapper(void* item, int32_t count) {
     return new_item;
 }
 
-void* make_item_wrapper(int32_t category, int32_t arg2, int32_t flag) {
-    const qol::contracts::InFlightGuard in_flight_guard(
-        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
-        {"hook:ITEMSYSTEM_MakeItem"});
-    if (!inventory_native_hook_support_enabled())
-        return call_backup("hook:ITEMSYSTEM_MakeItem", g_backup_make_item,
-                           category, arg2, flag);
-    // ITEMSYSTEM_MakeItem（0x10c6c8）：反汇编证明 arg2（w1）是与静态表 +0x2 域
-    // 匹配的查找/品质参数——CHARSYSTEM_DropItem 传 2..5（掉落品质分支）、
-    // DEALSYSTEM_MakeSale 传 5——不是数量；产物数量 = CAL_Calculate 掉落公式
-    //（原版写点 0x10ca3c `SetBitValue(31,25,公式值)`，公式域 ≤99，b 写即全量，
-    // 无需接管，R-49）。曾把 arg2 当 count 回写（`count>1` 恒真）导致掉落物一
-    // 落地数量即被污染成 2/3/4/5（真机实证：药水 2/卷轴 3/材料 4，VM-38）。
-    // 现在数量回写计划经纯函数 stage4_make_item_writeback_count（恒 0 = 不写），
-    // wrapper 纯透传，仅保留观察日志。
-    void* item = call_backup("hook:ITEMSYSTEM_MakeItem", g_backup_make_item,
-                             category, arg2, flag);
-    static_cast<void>(stage4_make_item_writeback_count(category, arg2, flag));
-    return item;
-}
 int provider_equip_item(void* character, int32_t flat_bag, int32_t slot) {
     const auto* state_write = qol::features::core_item::g_item_state_write;
     const auto* extras = qol::features::core_item::g_character_extras_port;
@@ -1491,7 +1470,6 @@ const qol::contracts::ResourceClaim kInventoryHookClaims[] = {
                          button_use_mercenary_seal_exe_wrapper),
     INVENTORY_HOOK_CLAIM("hook:ITEMSYSTEM_Divide", "F_ITEMSYSTEM_DIVIDE_VMA",
                          item_system_divide_wrapper),
-    INVENTORY_HOOK_CLAIM("hook:ITEMSYSTEM_MakeItem", "F_MAKE_ITEM_VMA", make_item_wrapper),
 };
 #undef INVENTORY_HOOK_CLAIM
 
@@ -1514,7 +1492,6 @@ void** backup_slot_for_handler(void* handler) {
     BACKUP_SLOT(char_process_shortcut_wrapper, g_backup_char_process_shortcut);
     BACKUP_SLOT(shortcut_get_state_wrapper, g_backup_shortcut_get_state);
     BACKUP_SLOT(item_system_divide_wrapper, g_backup_item_system_divide);
-    BACKUP_SLOT(make_item_wrapper, g_backup_make_item);
 #undef BACKUP_SLOT
     return nullptr;
 }

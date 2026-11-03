@@ -51,14 +51,6 @@ VanillaSellRoute vanilla_sell_route(int32_t bag, bool count_encoded,
 bool vanilla_sell_detail_context_matches(
     const qol::contracts::QolItemDetailContext& preview,
     const qol::contracts::QolItemDetailContext& confirmation);
-// ITEMSYSTEM_MakeItem 数量回写计划（VM-38 缺陷修复，纯函数供 Host 断言）。
-// 反汇编证明（0x10c6c8，基线 .tmp/dualmode-full.asm）：arg2（w1）是与静态表
-// +0x2 域匹配的查找/品质参数（CHARSYSTEM_DropItem 传 2..5、DEALSYSTEM_MakeSale
-// 传 5），不是数量；产物数量 = CAL_Calculate 掉落公式（原版写点 0x10ca3c
-// `SetBitValue(31,25,公式值)`，公式域 ≤99，b 写即全量）。因此 MakeItem 恒
-// 返回 0 = 不回写数量；任何把 arg2 写入数量位的路径都会把掉落物数量污染成
-// 2/3/4/5（真机实证：药水 2/卷轴 3/材料 4）。
-uint32_t stage4_make_item_writeback_count(int32_t category, int32_t arg2, int32_t flag);
 
 using Stage4IdentifyItem = bool (*)(void* item, int32_t* bag, int32_t* slot);
 using Stage4ItemAt = void* (*)(int32_t bag, int32_t slot);

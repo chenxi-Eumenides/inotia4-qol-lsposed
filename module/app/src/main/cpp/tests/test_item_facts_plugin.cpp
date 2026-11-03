@@ -216,8 +216,8 @@ int main() {
     CHECK(std::strcmp(descriptor.features[0].id, "core.item.provider") == 0);
     CHECK(!descriptor.deactivate_allowed);
     // ptrslot:MOVE_MERGE_GOT 与 5 条装备页 UI hook 已迁往 extension_bag；core.item 只保留
-    // 11 条 inventory claims。
-    CHECK(descriptor.resources_count == 11 && descriptor.resources != nullptr);
+    // 10 条 inventory claims（MakeItem 空转 hook 已移除）。
+    CHECK(descriptor.resources_count == 10 && descriptor.resources != nullptr);
     for (uint32_t i = 0; i < descriptor.resources_count; ++i) {
         CHECK(descriptor.resources[i].owner != nullptr &&
               std::strcmp(descriptor.resources[i].owner, "core.item") == 0);

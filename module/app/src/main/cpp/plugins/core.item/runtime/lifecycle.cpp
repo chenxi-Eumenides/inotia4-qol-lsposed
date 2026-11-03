@@ -44,7 +44,8 @@ void apply_native_bag_limit() {
 }
 
 // Inventory claims；merge ptrslot 与 5 条装备页 UI hook 已迁往 extension_bag。
-constexpr uint32_t kInventoryResourceCount = 11;
+// MakeItem 空转 hook 已移除，claims 表为 10 条（运行时以 claims 返回值计数）。
+constexpr uint32_t kInventoryResourceCount = 10;
 constexpr uint32_t kMaxResources = 32;
 static_assert(kInventoryResourceCount <= kMaxResources,
               "core.item resource table capacity");
