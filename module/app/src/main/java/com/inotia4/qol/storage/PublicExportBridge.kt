@@ -38,12 +38,16 @@ object PublicExportBridge {
                 toast(context, "导出失败：模块目录不可用")
                 return@submit
             }
-            val sources = listOf("qol-crash.log.prev", "java-crash.log.prev")
-                .map { File(root, it) }
-                .filter { it.isFile }
+            // 上一会话的完整取证集合：主日志（含轮转件）+ 两处崩溃现场。
+            val sources = listOf(
+                "qol.log.prev",
+                "qol.log.prev.1",
+                "qol-crash.log.prev",
+                "java-crash.log.prev",
+            ).map { File(root, it) }.filter { it.isFile }
             if (sources.isEmpty()) {
-                LogFile.info(LogDomain.PLATFORM, "public export logs skipped: no .prev crash logs under ${root.path}")
-                toast(context, "没有可导出的日志（.prev 需日志轮转后生成）")
+                LogFile.info(LogDomain.PLATFORM, "public export logs skipped: no prev-session logs under ${root.path}")
+                toast(context, "没有可导出的日志（.prev 需至少重启过一次游戏后生成）")
                 return@submit
             }
             var exported = 0

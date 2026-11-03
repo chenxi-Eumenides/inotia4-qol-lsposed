@@ -576,8 +576,8 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
      contracts::FeatureType::kEntry, "存档备份", "存档备份并支持跨设备导入导出",
       nullptr, &open_manager_feature, "打开", -2},
     {"save_backup.export_crash_logs", 1, contracts::FeatureCategory::kGeneral,
-     contracts::FeatureType::kEntry, "导出崩溃日志",
-     "把 qol-crash.log.prev、java-crash.log.prev 复制到 Download/qol/", nullptr,
+     contracts::FeatureType::kEntry, "导出日志",
+     "把上一会话的 qol.log.prev、qol.log.prev.1 与崩溃现场复制到 Download/qol/", nullptr,
      &export_crash_logs_feature, "导出", -2},
 };
 

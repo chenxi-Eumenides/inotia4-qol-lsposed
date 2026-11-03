@@ -139,7 +139,7 @@ descriptor 只注册一个 `page` entry feature：
 | Owner | Feature ID | 显示名称 | 默认 | Category | 类型 | Priority |
 |---|---|---|---:|---|---|---:|
 | `module.platform` | `debug.logging` | DEBUG日志 | 0 | General | toggle | -3 |
-| `save_backup` | `save_backup.export_crash_logs` | 导出崩溃日志 | 1 | General | entry | -2 |
+| `save_backup` | `save_backup.export_crash_logs` | 导出日志 | 1 | General | entry | -2 |
 | `module.security` | `op.enabled` | 高级权限 | 0 | General | toggle | -4 |
 
 当前 Debug 构建开启 `QOL_DEBUG_COMPONENTS` 时 catalog 共 35 项，其中 15 项属于 Hidden；Release 隐藏 Hidden 分类后显示 20 项（14 toggle、2 choice、4 entry）。`core.api / api.enabled`、两个 Host-owned features 与 `save_backup / save_backup.export_crash_logs` 都是 General，在 Debug/Release 均显示，core features 并非全部 Hidden；`extension_bag / move_merge.drag_merge` 是 BasicOptimization 项。设置页的 `page` 不计入上述 catalog 数量。
