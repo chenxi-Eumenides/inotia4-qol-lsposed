@@ -26,6 +26,9 @@ constexpr uint32_t kRateCount = static_cast<uint32_t>(RateId::kCount);
 // 旧配置兼容：移速倍率已从面板与 encode_rates 中移除，但已持久化的 rates JSON 仍可能带
 // move_speed 键。解析时读取并忽略该键，不能因它把整份 rates 判为非法。
 constexpr const char* kLegacyMoveSpeedKey = "move_speed";
+// 旧配置兼容：drop_quality 已改名为 drop_reroll（档位同为 1..5），覆盖升级时旧 config.json
+// 仍带旧键。解析时按 drop_reroll 的别名读入，避免整份 rates 被判非法。
+constexpr const char* kLegacyDropQualityKey = "drop_quality";
 
 static_assert(sizeof(kRateKeys) / sizeof(kRateKeys[0]) == kRateCount, "rate key table size");
 static_assert(sizeof(kRateNames) / sizeof(kRateNames[0]) == kRateCount, "rate name table size");
@@ -188,6 +191,8 @@ bool decode_rates(const char* json, uint32_t size, Rates* out) {
     Rates parsed = default_rates();
     bool seen[kRateCount]{};
     bool seen_legacy_move_speed = false;
+    bool seen_legacy_drop_quality = false;
+    int32_t legacy_drop_quality = 0;
     const char* cursor = json;
     const char* end = json + size;
     if (!consume(&cursor, end, '{')) return false;
@@ -208,21 +213,24 @@ bool decode_rates(const char* json, uint32_t size, Rates* out) {
                     break;
                 }
             }
-            if (index < kRateCount && !valid_rate(static_cast<RateId>(index), value)) {
-                return false;
-            }
-            // 旧配置的 move_speed 键：值仍要求合法档位，读取后忽略，不写入 rates。
-            const bool legacy_move_speed = index == kRateCount &&
-                std::strcmp(key, kLegacyMoveSpeedKey) == 0;
-            if (index == kRateCount && !legacy_move_speed) return false;
-            if (legacy_move_speed) {
-                if (!valid_rate(RateId::kGold, value)) return false;
-                if (seen_legacy_move_speed) return false;
-                seen_legacy_move_speed = true;
-            } else {
+            if (index < kRateCount) {
+                if (!valid_rate(static_cast<RateId>(index), value)) return false;
                 if (seen[index]) return false;
                 seen[index] = true;
                 parsed.value[index] = value;
+            } else if (std::strcmp(key, kLegacyMoveSpeedKey) == 0) {
+                // 旧配置的 move_speed 键：值仍要求合法档位，读取后忽略，不写入 rates。
+                if (!valid_rate(RateId::kGold, value)) return false;
+                if (seen_legacy_move_speed) return false;
+                seen_legacy_move_speed = true;
+            } else if (std::strcmp(key, kLegacyDropQualityKey) == 0) {
+                // 旧配置的 drop_quality 键：作为 drop_reroll 别名读入；显式 drop_reroll 优先。
+                if (!valid_rate(RateId::kDropReroll, value)) return false;
+                if (seen_legacy_drop_quality) return false;
+                seen_legacy_drop_quality = true;
+                legacy_drop_quality = value;
+            } else {
+                return false;
             }
             skip_space(&cursor, end);
             if (cursor < end && *cursor == ',') {
@@ -232,6 +240,10 @@ bool decode_rates(const char* json, uint32_t size, Rates* out) {
             if (!consume(&cursor, end, '}')) return false;
             break;
         }
+    }
+    const uint32_t reroll_index = static_cast<uint32_t>(RateId::kDropReroll);
+    if (seen_legacy_drop_quality && !seen[reroll_index]) {
+        parsed.value[reroll_index] = legacy_drop_quality;
     }
     skip_space(&cursor, end);
     if (cursor != end) return false;

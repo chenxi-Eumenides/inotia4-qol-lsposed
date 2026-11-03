@@ -153,6 +153,42 @@ void test_legacy_move_speed_key() {
     assert(reject("{\"move_speed\":100,\"unknown\":100}"));
 }
 
+void test_legacy_drop_quality_key() {
+    // 1.0.1 持久化的 rates 带旧键 drop_quality；1.0.2 改名为 drop_reroll 后须能读入。
+    const char* legacy =
+        "{\"gold\":500,\"exp\":500,\"player_hp\":100,\"enemy_hp\":10,\"damage_out\":500,"
+        "\"damage_in\":10,\"drop_quantity\":1,\"drop_quality\":5}";
+    Rates parsed{};
+    assert(decode_rates(legacy, static_cast<uint32_t>(std::strlen(legacy)), &parsed));
+    assert(parsed.value[static_cast<uint32_t>(RateId::kDropQuantity)] == 1);
+    assert(parsed.value[static_cast<uint32_t>(RateId::kDropReroll)] == 5);
+    assert(parsed.value[static_cast<uint32_t>(RateId::kGold)] == 500);
+
+    // 只有旧键时也按别名生效，其余字段回默认值。
+    const char* legacy_only = "{\"drop_quality\":3}";
+    assert(decode_rates(legacy_only, static_cast<uint32_t>(std::strlen(legacy_only)), &parsed));
+    assert(parsed.value[static_cast<uint32_t>(RateId::kDropReroll)] == 3);
+    assert(parsed.value[static_cast<uint32_t>(RateId::kGold)] == rate_default(RateId::kGold));
+
+    // 显式 drop_reroll 与旧键并存时以新键为准。
+    const char* both = "{\"drop_quality\":2,\"drop_reroll\":4}";
+    assert(decode_rates(both, static_cast<uint32_t>(std::strlen(both)), &parsed));
+    assert(parsed.value[static_cast<uint32_t>(RateId::kDropReroll)] == 4);
+
+    // validate_config 同样接受旧键，档位与重复规则和现行字段一致。
+    assert(validate_rates_config("rates", legacy, static_cast<uint32_t>(std::strlen(legacy))).ok ==
+           kQolOk);
+    const char* bad_zero = "{\"drop_quality\":0}";
+    assert(!decode_rates(bad_zero, static_cast<uint32_t>(std::strlen(bad_zero)), &parsed));
+    const char* bad_high = "{\"drop_quality\":6}";
+    assert(!decode_rates(bad_high, static_cast<uint32_t>(std::strlen(bad_high)), &parsed));
+    const char* duplicate = "{\"drop_quality\":2,\"drop_quality\":3}";
+    assert(!decode_rates(duplicate, static_cast<uint32_t>(std::strlen(duplicate)), &parsed));
+
+    // encode 只输出新键。
+    assert(encode_rates(parsed).find("drop_quality") == std::string::npos);
+}
+
 void test_validate_config() {
     const char* good = "{\"enemy_hp\":50}";
     assert(validate_rates_config("rates", good, static_cast<uint32_t>(std::strlen(good))).ok ==
@@ -197,6 +233,7 @@ int main() {
     test_roundtrip_and_defaults();
     test_decode_rejects_invalid();
     test_legacy_move_speed_key();
+    test_legacy_drop_quality_key();
     test_validate_config();
     test_scaling();
     return 0;
