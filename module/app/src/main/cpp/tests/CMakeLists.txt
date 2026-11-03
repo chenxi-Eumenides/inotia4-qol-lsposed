@@ -720,6 +720,8 @@ add_executable(hooks_registry_tests
     test_hooks_registry.cpp
     ${CPP_DIR}/hooks/registry.cpp
     ${CPP_DIR}/hooks/install.cpp
+    ${CPP_DIR}/patch/call_patch.cpp
+    ${CPP_DIR}/patch/short_hook.cpp
 )
 target_include_directories(hooks_registry_tests PRIVATE
     ${CPP_DIR}
@@ -774,6 +776,8 @@ add_executable(plugin_registry_tests
     ${CPP_DIR}/infra/config.cpp
     ${CPP_DIR}/infra/events.cpp
     ${CPP_DIR}/infra/log/qol_log.cpp
+    ${CPP_DIR}/patch/call_patch.cpp
+    ${CPP_DIR}/patch/short_hook.cpp
 )
 target_include_directories(plugin_registry_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -795,6 +799,8 @@ add_executable(hooks_transaction_tests
     ${CPP_DIR}/hooks/registry.cpp
     ${CPP_DIR}/hooks/install.cpp
     ${CPP_DIR}/hooks/transaction.cpp
+    ${CPP_DIR}/patch/call_patch.cpp
+    ${CPP_DIR}/patch/short_hook.cpp
 )
 target_include_directories(hooks_transaction_tests PRIVATE
     ${CPP_DIR}
@@ -835,6 +841,8 @@ set(FEATURE_REGISTRY_TEST_SOURCES
     ${CPP_DIR}/host/http_endpoint_binder.cpp
     ${CPP_DIR}/hooks/registry.cpp
     ${CPP_DIR}/hooks/install.cpp
+    ${CPP_DIR}/patch/call_patch.cpp
+    ${CPP_DIR}/patch/short_hook.cpp
     ${CPP_DIR}/hooks/transaction.cpp
     ${CPP_DIR}/game/access/patches.cpp
     ${CPP_DIR}/game/read/item_class.cpp

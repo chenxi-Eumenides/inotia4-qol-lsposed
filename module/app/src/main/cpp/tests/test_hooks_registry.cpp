@@ -4,10 +4,16 @@
 
 #include "hooks/install.h"
 #include "hooks/registry.h"
+#include "infra/log/qol_log.h"
 
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+
+// call_patch 的日志符号在 host 测试里只需空实现。
+void qol_log_write(QolLogLevel, QolDomain, const char*, int, const char*, ...) {}
+void qol_log_set_debug_enabled(bool) {}
+bool qol_log_debug_enabled() { return false; }
 
 static int g_pass = 0;
 static int g_fail = 0;

@@ -5,6 +5,7 @@
 
 #include <cstring>
 
+#include "hooks/install.h"
 #include "hooks/registry.h"
 
 namespace qol::hooks {
@@ -348,28 +349,21 @@ bool install_step(Tx& tx, TxStep* out) {
         want = g_deps.gate_on(claim.gate);
     }
 
-    void* backup = nullptr;
-    const int rc = g_deps.hook_fn(reinterpret_cast<void*>(entry), claim.handler, &backup);
-    if (rc != 0) {
-        return fail_install_resource(tx, claim, 1, "native hook failed", out);
-    }
-    if (backup == nullptr) {
-        // 成功但未交还原函数入口：hook 已物理安装，无 backup 的 wrapper 会跳过原调用，
-        // 必须先撤销。撤销成功按资源失败策略处理；撤销失败则登记 tombstone + isolated 并硬失败。
-        const bool unhooked = g_deps.unhook_fn != nullptr &&
-                              g_deps.unhook_fn(reinterpret_cast<void*>(entry)) == 0;
-        if (unhooked) {
-            return fail_install_resource(tx, claim, 1, "resource_ready_failed", out);
+    // 统一走 install_claim_entry_hook：远址时它会先取近址 thunk，避免 hook 原语写
+    // 12/16 字节绝对跳转覆盖入口之后的指令。
+    const InstallOutcome installed =
+        install_claim_entry_hook(claim, entry, g_deps.hook_fn, g_deps.unhook_fn, want);
+    if (installed.ok != 0) {
+        // 撤销失败时 hook 仍物理在场并已登记 tombstone/isolated，必须按硬失败回滚，
+        // 不能走 fail-soft 把入口重新标记为可重试。
+        if (installed.error != nullptr && std::strcmp(installed.error, "native unhook failed") == 0) {
+            return fail_install(tx, claim.id, installed.error, out);
         }
-        runtime_set(claim.id, entry, nullptr);
-        set_state(claim.id, contracts::ResourceState::kTombstone);
-        isolated_set(claim.id, true);
-        return fail_install(tx, claim.id, "native unhook failed", out);
+        return fail_install_resource(tx, claim, 1, installed.error, out);
     }
+    void* backup = installed.backup;
 
     runtime_set(claim.id, entry, backup);
-    set_state(claim.id, want ? contracts::ResourceState::kLive
-                             : contracts::ResourceState::kDisabled);
     tx.entries[index].installed = true;
     ++tx.step;
     out->resource_id = claim.id;

@@ -2,6 +2,9 @@
 
 // 入口 hook 安装引擎实现（见 hooks/install.h 的接口契约）。
 
+#include <cstring>
+#include <mutex>
+
 #include "hooks/registry.h"
 
 namespace qol::hooks {
@@ -15,7 +18,16 @@ ReleaseOutcome release_failure(const char* error) {
     return ReleaseOutcome{1, error};
 }
 
+bool is_branch_trampoline(uintptr_t entry) {
+    const uint32_t word = *reinterpret_cast<const uint32_t*>(entry);
+    return (word & 0xFC000000u) == 0x14000000u;
+}
+
+const ShortHookOps* g_short_hook_ops = nullptr;
+
 }  // namespace
+
+void set_short_hook_ops(const ShortHookOps* ops) { g_short_hook_ops = ops; }
 
 InstallOutcome install_claim_entry_hook(const contracts::ResourceClaim& claim,
                                         uintptr_t resolved_entry,
@@ -36,6 +48,22 @@ InstallOutcome install_claim_entry_hook(const contracts::ResourceClaim& claim,
     }
 
     void* backup = nullptr;
+
+    // 无条件 b 跳板入口：用 4 字节短补丁，避免 hook 原语写 12/16 字节绝对跳转时覆盖
+    // 入口之后的指令（monster 改版把入口改成 `b <隐藏段桩>`，桩会跳回入口 +8）。
+    if (g_short_hook_ops != nullptr && g_short_hook_ops->install != nullptr &&
+        is_branch_trampoline(resolved_entry)) {
+        void* short_backup = nullptr;
+        const int32_t short_rc = g_short_hook_ops->install(resolved_entry, claim.handler, &short_backup);
+        if (short_rc != 0) {
+            return failure("short hook failed");
+        }
+        backup = short_backup;
+        set_state(claim.id, gate_on ? contracts::ResourceState::kLive
+                                    : contracts::ResourceState::kDisabled);
+        return InstallOutcome{0, nullptr, backup};
+    }
+
     // 机制本体由宿主注入；本层只按声明传参并解释返回值。
     const int rc = hook_fn(reinterpret_cast<void*>(resolved_entry), claim.handler, &backup);
     if (rc != 0) {
@@ -73,6 +101,16 @@ ReleaseOutcome release_claim_entry_hook(const contracts::ResourceClaim& claim,
         return release_failure("not ready");
     }
     if (in_flight_count(claim.id) != 0) return release_failure("resource still in flight");
+
+    if (g_short_hook_ops != nullptr && g_short_hook_ops->contains != nullptr &&
+        g_short_hook_ops->contains(resolved_entry)) {
+        if (g_short_hook_ops->remove == nullptr || !g_short_hook_ops->remove(resolved_entry)) {
+            return release_failure("short hook revert failed");
+        }
+        set_state(claim.id, contracts::ResourceState::kFree);
+        runtime_clear(claim.id);
+        return ReleaseOutcome{0, nullptr};
+    }
 
     // unhook 原语以原函数入口为句柄（LSPosed unhook 语义）；失败不改登记表。
     const int rc = unhook_fn(reinterpret_cast<void*>(resolved_entry));

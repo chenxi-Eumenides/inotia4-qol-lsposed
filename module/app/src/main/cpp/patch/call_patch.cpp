@@ -450,6 +450,34 @@ void call_patch_test_release_thunk_slot(void* slot) {
 }
 #endif
 
+uintptr_t call_patch_acquire_near_entry(uintptr_t near_addr, void* handler) {
+    if (near_addr == 0 || handler == nullptr) return 0;
+    std::lock_guard<std::mutex> lock(g_call_patch_mtx);
+    AllocationFailure failure;
+    void* slot = acquire_thunk_slot_locked(near_addr, &failure);
+    if (slot == nullptr) {
+        log_thunk_allocation_failure(near_addr, handler, failure);
+        return 0;
+    }
+    emit_branch_thunk(slot, reinterpret_cast<uintptr_t>(handler));
+    return reinterpret_cast<uintptr_t>(slot);
+}
+
+void call_patch_release_near_entry(uintptr_t thunk) {
+    if (thunk == 0) return;
+    std::lock_guard<std::mutex> lock(g_call_patch_mtx);
+    release_thunk_slot_locked(reinterpret_cast<void*>(thunk));
+}
+
+void* call_patch_acquire_near_slot(uintptr_t near_addr) {
+    if (near_addr == 0) return nullptr;
+    std::lock_guard<std::mutex> lock(g_call_patch_mtx);
+    AllocationFailure failure;
+    void* slot = acquire_thunk_slot_locked(near_addr, &failure);
+    if (slot == nullptr) log_thunk_allocation_failure(near_addr, nullptr, failure);
+    return slot;
+}
+
 bool call_patch_install_bl(uintptr_t call_addr, uint32_t expected_word, void* wrapper) {
     if (call_addr == 0 || wrapper == nullptr) return false;
     std::lock_guard<std::mutex> lock(g_call_patch_mtx);

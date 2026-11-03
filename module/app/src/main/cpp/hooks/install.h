@@ -18,6 +18,17 @@ namespace qol::hooks {
 // 成功返回 0 并把 backup 写出。
 using NativeHookFn = int (*)(void* target, void* replacement, void** backup);
 
+// 4 字节短跳机制由宿主注入（hooks/ 不依赖 patch/）。
+// install 成功时写出 backup（trampoline），返回 0；contains/remove 以入口地址为句柄。
+struct ShortHookOps {
+    int32_t (*install)(uintptr_t entry, void* handler, void** backup);
+    bool (*remove)(uintptr_t entry);
+    bool (*contains)(uintptr_t entry);
+};
+
+// 装配期注入短跳机制；未注入时 b 跳板入口退回宿主 hook 原语（Host 测试路径）。
+void set_short_hook_ops(const ShortHookOps* ops);
+
 // ok 非 0 = 失败；error 为静态字符串（成功时为 nullptr）。
 struct InstallOutcome {
     int32_t ok;

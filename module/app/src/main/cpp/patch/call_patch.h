@@ -35,6 +35,22 @@ bool call_patch_revert_bl(uintptr_t call_addr, uint32_t original_word);
 // 不改写并返回 false；当前指令字 == new_word 视为已安装，幂等返回 true。
 bool call_patch_install_word(uintptr_t addr, uint32_t expected_word, uint32_t new_word);
 
+// 为 inline hook 提供一个近址替换入口：在 near_addr ±128MB 内取 thunk 槽并写入
+// `ldr x16, #8; br x16` + handler 字面量，返回 thunk 运行期地址；0 = 分配失败（未改写任何代码）。
+//
+// 用途：LSPosed 注入的 hook 原语按「目标与替换入口的距离」选择补丁宽度——128MB 内写
+// 单条 4 字节 b，超出则写 12/16 字节绝对跳转并覆盖后续指令。把替换入口换成近址 thunk 后，
+// 原语只会改写入口第一条指令，被 hook 函数体内部其它分支的落点不会被覆盖。
+uintptr_t call_patch_acquire_near_entry(uintptr_t near_addr, void* handler);
+
+// 归还 call_patch_acquire_near_entry 取得的 thunk 槽；调用方必须先完成 unhook，
+// 保证没有执行流仍停在 thunk 上。
+void call_patch_release_near_entry(uintptr_t thunk);
+
+// 取一个空的近址 32B 槽（±128MB 内、可执行、未写内容），供调用方自行写入短跳/跳板；
+// 0 = 分配失败。归还用 call_patch_release_near_entry。
+void* call_patch_acquire_near_slot(uintptr_t near_addr);
+
 // B 尾调用重定向（kBranchRedirect）：站点为 B 指令；在 call_addr ±128MB 内复用 thunk 池
 // 分配 thunk（`ldr x16, #8; br x16; .quad handler`）并把 B 改指 thunk；返回 thunk 运行期
 // 地址，0 = 失败（超范围分配不到 / 原字不符 / 地址非法；均不改写任何字节）。B 不改写 x30，

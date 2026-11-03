@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "patch/call_patch.h"
+#include "patch/short_hook.h"
 #include "patch/native_hook.h"
 #include "patch/save_enter.h"
 #include "patch/save_exit.h"
@@ -94,8 +95,23 @@
 #include "patch/instr_patch.h"
 #include "patch/ptr_slot.h"
 #include "host/adapters.h"
+#include "hooks/install.h"
 
 namespace qol::host {
+
+namespace {
+
+int32_t short_hook_install_bridge(uintptr_t entry, void* handler, void** backup) {
+    return qol::patch::short_hook_install_adapter(entry, handler, backup);
+}
+
+const qol::hooks::ShortHookOps kShortHookOps{
+    &short_hook_install_bridge,
+    &qol::patch::short_hook_remove,
+    &qol::patch::short_hook_contains,
+};
+
+}  // namespace
 
 // T2h-B'：向 infra game_cache 注入 legacy builder（K1，行为/线程逐字不变）。
 // slot 编号与 core/native/game_cache.cpp 的 CacheSlot 表一致。
@@ -538,6 +554,9 @@ bool assembly_init() {
         &branch_return_install,
         &branch_return_revert,
     });
+
+    // 入口 hook 的短跳机制由宿主注入（hooks/ 不依赖 patch/）。
+    hooks::set_short_hook_ops(&kShortHookOps);
 
     // 事务引擎依赖（运行期生命周期路径）与生命周期命令执行入口。
     hooks::tx_set_deps(qol::hooks::TxDeps{

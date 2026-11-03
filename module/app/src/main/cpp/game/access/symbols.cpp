@@ -134,10 +134,10 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
 };
 
 // 解析可安装 hook 的入口地址。
-// monster 全系把 CHAR_AddDamage 入口改写成无条件 b 跳板（v20 `b 0x14e280`；v23-v27 `b 0x7450b8`，
-// 落于第二可执行段）。跳板入口先 `stp x0..x8` 保存 x0-x7 再修改寄存器，故跳板目标处 ABI 与函数
-// 入口完全一致，在目标处 hook 与原位等价；而 inline hook 若需重定位一条 26 位 b，跨 ±128MB 的
-// 偏移会失效。因此这里主动跟随一次，目标必须 4 字节对齐且落在已加载的可执行映射内。
+// 不再跟随入口处的无条件 b 跳板：monster 改版把入口改写成 `b <隐藏段桩>`，桩返回时会跳到
+// 入口 +8；而 LSPosed 的 hook 原语在远址时固定写 12 字节 `adrp/add/br`，会覆盖该落点。
+// 安装层改为对 b 跳板入口使用 4 字节短补丁（patch/short_hook），只改写入口第一条指令。
+// out_followed 仍上报“入口是 b 跳板”，供诊断使用。
 uintptr_t hookable_entry(uintptr_t symbol_entry, bool* out_followed) {
     *out_followed = false;
     if (symbol_entry == 0 || !game_memory_accessible(reinterpret_cast<void*>(symbol_entry), 4, 'r')) {
@@ -146,22 +146,12 @@ uintptr_t hookable_entry(uintptr_t symbol_entry, bool* out_followed) {
     const uint32_t word = *reinterpret_cast<const uint32_t*>(symbol_entry);
     constexpr uint32_t k_branch_mask = 0xFC000000u;   // b/bl/ret 等 opcode 掩码
     constexpr uint32_t k_b_opcode = 0x14000000u;      // B（无条件、不写 x30）
-    if ((word & k_branch_mask) != k_b_opcode) {
-        // 非跳板：入口必须落在可执行映射内，否则按未解析处理（fail-closed）。
-        // 旧自研安装引擎曾对每个目标做同一判定（引擎已在 B2a-1 删除）；声明式安装改为在
-        // 解析层收口，避免把不可执行地址交给 hook 原语。
-        return game_memory_accessible(reinterpret_cast<void*>(symbol_entry), 4, 'x')
-                   ? symbol_entry
-                   : 0;
+    if (!game_memory_accessible(reinterpret_cast<void*>(symbol_entry), 4, 'x')) {
+        // 非跳板入口必须落在可执行映射内，否则按未解析处理（fail-closed）。
+        return 0;
     }
-
-    int64_t offset = static_cast<int64_t>(word & 0x03FFFFFFu);
-    if ((offset & 0x02000000) != 0) offset -= 0x04000000;  // 26 位有符号立即数
-    const uintptr_t target = symbol_entry + static_cast<uintptr_t>(offset * 4);
-    if ((target & 0x3u) != 0) return symbol_entry;
-    if (!game_memory_accessible(reinterpret_cast<void*>(target), 8, 'x')) return symbol_entry;
-    *out_followed = true;
-    return target;
+    if ((word & k_branch_mask) == k_b_opcode) *out_followed = true;
+    return symbol_entry;
 }
 
 }  // namespace
