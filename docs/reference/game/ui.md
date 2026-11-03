@@ -155,6 +155,8 @@ MainActivity（壳，com.com2us.inotia4 仅剩壳类）
 
 **UIPopupMsg 完整 API**（自定义对话框的关键，全部具名符号）：`UIPopupMsg_CreateYesNo/CreateNone/CreateFromTextData/CreateTextScrollControl/SetLayout/GetBaseControl/GetMainControl/GetOKButtonControl/GetTextHeight/Process/Event/Free/ButtonOKExe/ButtonCancelExe/DrawButton/DrawText/DrawDisplayTypeRectBackground/TextScrollDraw` + 全局 `UIPopupMsg_bOn/pText/fpOK/fpCancel/i32Type/i32DisplayType/i32YesNoType/i32Param/i32EventWaitFrame`。
 
+`UIPopupMsg_CreateYesNo(char* text, uint8_t copy_flag, uint32_t, uint32_t display_type, ...)` 的**第二个参数不是文本长度**，而是复制/归属标志：`UIPopupMsg_Create` 用 `uxtb` 取低 8 位，交给 `UTIL_CopyText` 决定「malloc 一份」（bit0=1）还是「只存调用方指针」（bit0=0），并把同一个字节存进全局标志供 `UIPopupMsg_Free` → `UTIL_ReleaseText` 决定是否 `MEM_Free`。传非 0/1 的值（例如直接传字节长度）会按位判断：奇数长度侥幸走复制路径；**偶数长度会保存调用方静态缓冲却仍然 free 它**，破坏堆并让后续 `CreateButtonControl` 崩溃。调用方应固定传 `1`，文本由游戏 `strlen` 度量。
+
 ## 5. 绘制原语与资源
 
 | 类别 | 符号 | 用途 |
