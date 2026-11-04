@@ -1,5 +1,5 @@
 // 统一自动落槽顺序（placement resolver）与 FindSaveSlot 托管路径的 host 测试：
-// 全局六步顺序、payload 身份门、堆叠上限预检、scope 限定、任务袋排除、
+// 自动落槽顺序（v603 关闭 space1）、payload 身份门、堆叠上限预检、scope 限定、任务袋排除、
 // wrapper 的扩展堆优先与"构造失败/无目标不回退原生"，以及 move_item 自动目标
 // 优先已有堆。原生 space0/space1 与注册源 space2 均为 fake 读面。
 
@@ -418,12 +418,30 @@ QolResult fake_native_save_domain(int32_t, int32_t* out) {
 
 QolResult bind_find_item_backup(qol::contracts::QolFindItemAbiFn) { return ok_result(); }
 
+const char* g_fake_series_name = "c18";
+const char* g_fake_version_label = "v589";
+
+QolResult fake_game_identity(qol::contracts::QolGameIdentity* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    *out = {};
+    out->series_name = g_fake_series_name;
+    out->version_label = g_fake_version_label;
+    out->known = 1;
+    return ok_result();
+}
+
 qol::contracts::QolGameHost make_game() {
     qol::contracts::QolGameHost game{};
     game.abi.major = qol::contracts::kGameHostMajor;
     game.abi.minor = qol::contracts::kGameHostSavedBagMinor;
     game.read_only.item.native_save_domain = &fake_native_save_domain;
     game.item_abi.bind_find_item_backup = &bind_find_item_backup;
+    game.game_identity.read = &fake_game_identity;
+    return game;
+}
+
+const qol::contracts::QolGameHost& placement_test_game() {
+    static const qol::contracts::QolGameHost game = make_game();
     return game;
 }
 
@@ -434,11 +452,32 @@ int fake_native_find_save_slot(void*, int8_t*) {
 }
 
 void attach_hooks(const qol::contracts::QolHostSdk& sdk, const qol::contracts::QolItemPort& port) {
-    static const qol::contracts::QolGameHost game = make_game();
-    assert(qol::features::core_inventory::hooks::attach(&sdk, &game, &port));
+    assert(qol::features::core_inventory::hooks::attach(&sdk, &placement_test_game(), &port));
     assert(qol::features::core_inventory::hooks::bind_backup(
                "hook:INVEN_FindSaveSlot",
                reinterpret_cast<void*>(&fake_native_find_save_slot)) == 0);
+}
+
+void test_attach_maps_c18_v603_identity(const qol::contracts::QolHostSdk& sdk,
+                                        const qol::contracts::QolItemPort& port) {
+    const auto auto_save_for = [&](const char* series, const char* version) {
+        g_fake_series_name = series;
+        g_fake_version_label = version;
+        assert(qol::features::core_inventory::hooks::attach(&sdk, &placement_test_game(),
+                                                            &port));
+        return qol::features::core_inventory::g_c18_native_bag_auto_save;
+    };
+    // 只有 c18 + v603 关闭；其他 C18 版本、未知版本与其它变体都必须保持旧行为。
+    assert(!auto_save_for("c18", "v603"));
+    assert(auto_save_for("c18", "v589"));
+    assert(auto_save_for("c18", "v520"));
+    assert(auto_save_for("c18", ""));
+    assert(auto_save_for("c18", "v999"));
+    assert(auto_save_for("monster", "v29"));
+    assert(auto_save_for("original", "v1.3.2"));
+    assert(auto_save_for("overhaul", "20260810"));
+    g_fake_series_name = "c18";
+    g_fake_version_label = "v589";
 }
 
 // ---------------------------------------------------------------------------
@@ -533,9 +572,55 @@ void test_global_order_c18_merge_beats_native_empty() {
     QolBagTransfer transfer{};
     make_transfer(&transfer, 10, 3, 1, 7);
     placement::PlacementTarget target{};
+    // 变体仍提供 C18 背包时：C18 合并（步骤 3）先于原生空槽（步骤 4）。
     assert(placement::resolve_placement(transfer, true, -1, -1, &target));
-    // C18 合并（步骤 3）先于原生空槽（步骤 4）。
     expect_target(target, qol::contracts::kQolBagSpaceVariant, 0, 3, true);
+}
+
+void test_c18_bag_removed_skips_auto_placement() {
+    reset_grid();
+    uint8_t payload[kPayloadSize];
+    make_payload(payload, kPayloadSize, 1, 7);
+    place_native(1, 0, 3, 10, 7, payload, kPayloadSize, 999);
+    QolBagTransfer transfer{};
+    make_transfer(&transfer, 10, 3, 1, 7);
+    placement::PlacementTarget target{};
+    // C18L v603：C18 背包已移除 → C18 合并不参与，落原生空槽。
+    qol::features::core_inventory::g_c18_native_bag_auto_save = false;
+    assert(placement::resolve_placement(transfer, true, -1, -1, &target));
+    expect_target(target, qol::contracts::kQolBagSpaceOriginal, 0, 0, false);
+    // 原生 0..4 + 注册源全满、C18 仍空 → 无自动目标（保持背包已满语义）。
+    for (int bag = 0; bag < 5; ++bag) fill_native_bag(0, bag);
+    uint8_t filler[kPayloadSize];
+    make_filler_payload(filler);
+    for (int bag = 0; bag < kRegBags; ++bag) {
+        for (int slot = 0; slot < kSlotsPerBag; ++slot) {
+            place_reg(bag, slot, 10, 1, filler, kPayloadSize, 999);
+        }
+    }
+    assert(!placement::resolve_placement(transfer, true, -1, -1, &target));
+    qol::features::core_inventory::g_c18_native_bag_auto_save = true;
+}
+
+void test_explicit_c18_scope_still_supported_when_removed() {
+    reset_grid();
+    // 显式目标 space=1 不受“C18 背包已移除”影响：用户主动移动仍按原语义落槽，
+    // 否则已在追加袋内的数据会变成不可移动的孤儿。
+    uint8_t payload[kPayloadSize];
+    make_payload(payload, kPayloadSize, 1, 7);
+    place_native(1, 0, 3, 10, 7, payload, kPayloadSize, 999);
+    QolBagTransfer transfer{};
+    make_transfer(&transfer, 10, 3, 1, 7);
+    placement::PlacementTarget target{};
+    qol::features::core_inventory::g_c18_native_bag_auto_save = false;
+    assert(placement::resolve_placement(transfer, true,
+                                        qol::contracts::kQolBagSpaceVariant, -1, &target));
+    expect_target(target, qol::contracts::kQolBagSpaceVariant, 0, 3, true);
+    reset_grid();
+    assert(placement::resolve_placement(transfer, true,
+                                        qol::contracts::kQolBagSpaceVariant, -1, &target));
+    expect_target(target, qol::contracts::kQolBagSpaceVariant, 0, 0, false);
+    qol::features::core_inventory::g_c18_native_bag_auto_save = true;
 }
 
 void test_global_order_native_empty_before_registered_empty() {
@@ -550,7 +635,7 @@ void test_global_order_native_empty_before_registered_empty() {
     for (int bag = 0; bag < 5; ++bag) fill_native_bag(0, bag);
     assert(placement::resolve_placement(transfer, true, -1, -1, &target));
     expect_target(target, kRegSpace, 0, 0, false);
-    // 注册源也满 → C18 空槽兜底。
+    // 注册源也满 → C18 空槽兜底（变体仍提供 C18 背包的旧行为）。
     uint8_t payload[kPayloadSize];
     make_filler_payload(payload);
     for (int bag = 0; bag < kRegBags; ++bag) {
@@ -662,6 +747,8 @@ void test_wrapper_prefers_extension_merge() {
 
 void test_wrapper_no_target_returns_zero_without_native_fallback() {
     reset_grid();
+    // C18L v603 场景：C18 背包已移除，即使 space1 全空也不能成为目标。
+    qol::features::core_inventory::g_c18_native_bag_auto_save = false;
     // 托管域物品（注册源身份 A 堆，99+99 超自身 count_limit=100 → 无合并候选），
     // 其余全部槽位被不同身份占位填满 → resolver 无目标 → 返回 0，
     // 且不回退原生 FindSaveSlot。
@@ -671,11 +758,7 @@ void test_wrapper_no_target_returns_zero_without_native_fallback() {
     uint8_t filler[kPayloadSize];
     make_filler_payload(filler);
     for (int bag = 0; bag < 5; ++bag) fill_native_bag(0, bag);
-    for (int bag = 0; bag < 2; ++bag) {
-        for (int slot = 0; slot < kSlotsPerBag; ++slot) {
-            place_native(1, bag, slot, 10, 1, filler, kPayloadSize, 999);
-        }
-    }
+    // space=1（C18 追加袋）不参与自动落槽；即使全空也不得成为目标。
     for (int bag = 0; bag < kRegBags; ++bag) {
         for (int slot = 0; slot < kSlotsPerBag; ++slot) {
             if (bag == 0 && slot == 0) continue;
@@ -691,6 +774,7 @@ void test_wrapper_no_target_returns_zero_without_native_fallback() {
         &hook_item, &out_slot);
     assert(result == 0);
     assert(g_native_find_save_slot_calls == 0);
+    qol::features::core_inventory::g_c18_native_bag_auto_save = true;
 }
 
 void test_move_item_auto_target_prefers_merge() {
@@ -756,11 +840,14 @@ int main() {
 
     static qol::contracts::QolHostSdk sdk = make_sdk();
     attach_hooks(sdk, port);
+    test_attach_maps_c18_v603_identity(sdk, port);
     register_reg_source();
 
     test_global_order_extension_merge_beats_native_empty();
     test_global_order_native_merge_first();
     test_global_order_c18_merge_beats_native_empty();
+    test_c18_bag_removed_skips_auto_placement();
+    test_explicit_c18_scope_still_supported_when_removed();
     test_global_order_native_empty_before_registered_empty();
     test_same_category_different_payload_never_merges();
     test_stackable_false_skips_all_merge_steps();

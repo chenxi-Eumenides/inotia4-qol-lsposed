@@ -19,6 +19,11 @@ extern const contracts::QolItemPort* g_port;
 extern const contracts::QolItemInventoryStateWritePort* g_item_state_write;
 extern const contracts::QolItemMoneyWritePort* g_item_money_write;
 
+// 当前变体是否仍把 C18 追加袋（space=1）作为自动入库目标。C18L v603 移除了 C18 背包，
+// attach 时经模块已有的 game_identity 接口判定（series=c18 且 version=v603）后关闭；
+// 其余变体与未知后续版本保持 true。只影响自动落槽与空槽统计，显式 move/transfer 不受影响。
+extern bool g_c18_native_bag_auto_save;
+
 namespace bags {
 
 // 原生物理袋扫描上界（不含）：原版袋数 + C18 探测到的追加袋数，由 item port 统一夹取。

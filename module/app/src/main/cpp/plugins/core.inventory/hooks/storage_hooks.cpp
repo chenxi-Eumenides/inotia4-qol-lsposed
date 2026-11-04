@@ -756,8 +756,13 @@ int64_t count_empty_slots_all(int32_t needed) {
     if (g_port != nullptr && qol::contracts::qol_item_port_bag_space_size_valid(g_port) &&
         g_port->read.bag_count != nullptr && g_port->read.bag_info != nullptr &&
         g_port->read.item_at != nullptr) {
-        for (int32_t space = qol::contracts::kQolBagSpaceOriginal;
-             space <= qol::contracts::kQolBagSpaceVariant; ++space) {
+        // 统计域与自动落槽域一致：原生 space0（bag 0..4）+ 仍提供 C18 背包时的 space1。
+        // C18L v603 已移除 C18 背包，由变体能力位关闭 space1 统计，避免预检通过、
+        // 实际入库却写进不可见的追加袋。
+        const int32_t last_space = g_c18_native_bag_auto_save
+                                       ? qol::contracts::kQolBagSpaceVariant
+                                       : qol::contracts::kQolBagSpaceOriginal;
+        for (int32_t space = qol::contracts::kQolBagSpaceOriginal; space <= last_space; ++space) {
             int32_t bag_count = 0;
             if (!qol::contracts::succeeded(g_port->read.bag_count(space, &bag_count)) ||
                 bag_count < 0) {
@@ -1396,6 +1401,27 @@ void** backup_slot_for_handler(void* handler) {
     return nullptr;
 }
 
+// C18L v603 移除了原生追加背包。该事实无法由二进制签名区分（APK 仍保留 C18BAG01/
+// C18Lbag.dat 标记），插件侧按模块提供的 game_identity 接口临时判定；其他 C18 版本与
+// 未知后续版本保持旧行为，实测确认移除后再扩充此表。
+bool game_identity_removed_c18_native_bags(const qol::contracts::QolGameHost* game) {
+    if (game == nullptr || game->abi.minor < qol::contracts::kGameHostIdentityMinor ||
+        game->game_identity.read == nullptr) {
+        return false;
+    }
+    qol::contracts::QolGameIdentity identity{};
+    if (!qol::contracts::succeeded(game->game_identity.read(&identity)) ||
+        identity.series_name == nullptr || identity.version_label == nullptr) {
+        return false;
+    }
+    if (std::strcmp(identity.series_name, "c18") != 0) return false;
+    static constexpr const char* kC18NativeBagRemovedVersions[] = {"v603"};
+    for (const char* removed : kC18NativeBagRemovedVersions) {
+        if (std::strcmp(identity.version_label, removed) == 0) return true;
+    }
+    return false;
+}
+
 }  // namespace
 
 bool attach(const qol::contracts::QolHostSdk* sdk, const qol::contracts::QolGameHost* game,
@@ -1404,6 +1430,7 @@ bool attach(const qol::contracts::QolHostSdk* sdk, const qol::contracts::QolGame
     g_sdk = sdk;
     g_game = game;
     g_port = port;
+    g_c18_native_bag_auto_save = !game_identity_removed_c18_native_bags(game);
     core_inventory_log_bind_sdk(sdk);
     if (g_game->item_abi.bind_find_item_backup == nullptr) return false;
     QOL_LOG_INFO(QolDomain::kInventory, "storage hooks attached hooks=12");
@@ -1414,6 +1441,7 @@ void detach() {
     g_sdk = nullptr;
     g_game = nullptr;
     g_port = nullptr;
+    g_c18_native_bag_auto_save = true;
     g_backup_have_item = nullptr;
     g_backup_get_item_count = nullptr;
     g_backup_get_cumulate_count = nullptr;

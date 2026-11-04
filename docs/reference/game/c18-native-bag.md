@@ -83,6 +83,11 @@
 3. 不要假设 6 是“扩展袋起点”或哨兵；C18 下 6 是真实原生袋。
 4. 不要缓存袋对象/物品裸指针跨帧；用 handle（slot+generation）。
 5. 需要 UI 页签/rect 时，必须在背包面板打开且通过 UI 适配层获取。
+6. **C18L v603 已移除原生追加背包**：`core.inventory` 经模块 `game_identity` 接口按
+   `series_name=="c18" && version_label=="v603"` 判定，自动入库与 `INVEN_IsHavingEmptySlot`
+   空槽统计都排除 `space=1`（其追加袋不在背包页签呈现，写入后不可见）；显式移动/读取/枚举
+   保持原语义。其他 C18 版本与未知后续版本保持六步旧行为。规则见
+   `docs/refactor/extension-bag/rulebook.md` R-67。
 
 ## 9. 已知限制
 

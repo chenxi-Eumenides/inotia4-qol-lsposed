@@ -965,6 +965,30 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
   丢弃与幂等）；既有 `test_place_plan`、`test_equip_bag`、`test_unequip_bag`、
   `test_virtual_bag_state` 保持通过（`host_tests: 2595 passed, 0 failed`）；真机 `VM-50`。
 
+### R-67 C18 背包被移除的版本，自动落槽不得进入 space=1
+
+- **规则一句话**：C18L **v603** 移除了原生追加背包（`space=1`）；该版本的自动入库与
+  `INVEN_IsHavingEmptySlot` 空槽统计都不得包含 `space=1`。判定在插件内完成：
+  `core.inventory` 经模块已有的 `game_identity` 接口读取 `series_name=="c18"` 且
+  `version_label=="v603"`（不修改模块本体、不新增能力位）。**其他 C18 版本与未知后续
+  版本保持六步旧行为**，实测确认移除后再把版本加入版本表。
+- **为什么**：原生 `INVEN_IsHavingEmptySlot` 只扫描 bag 0..4，C18 v603 的
+  `INVEN_FindSaveSlot` 上界同样是 5——游戏自身从不把物品自动写进追加袋；v603 的追加袋也
+  不在背包页签中呈现。旧六步自动落槽在原版袋 + 扩展袋全满时写入 `space=1 bag=0 slot=0/1`，
+  玩家在原版/扩展袋都看不到，表现为「背包已满仍能拾取且物品丢失」（真机 2026-11-05：
+  原版 bag0 16/16、扩展 bag0 4/4 全满，日志 `FindSaveSlot resolved ... space=1 bag=0`）。
+- **边界**：读取、枚举、API 与 autosell 仍按原语义访问 `space=1`；显式移动
+  `scope_space=kQolBagSpaceVariant` 的合并/空槽行为也保持不变（否则已存在于追加袋的数据
+  会变成不可移动的孤儿）。本条只约束**该版本**的自动写入目标与空槽统计。
+- **典型破坏方式**：对所有 C18 版本一刀切关闭 space=1（会回退其他版本的既有行为）；
+  只在 `FindSaveSlot` 关闭而 `IsHavingEmptySlot` 仍统计（预检通过、落槽失败不一致）；
+  或把显式移动一并禁用。
+- **验证锚**：Host `test_inventory_placement`
+  （`test_global_order_c18_merge_beats_native_empty` 锁其他版本旧行为、
+  `test_c18_bag_removed_skips_auto_placement`、`test_explicit_c18_scope_still_supported_when_removed`、
+  `test_wrapper_no_target_returns_zero_without_native_fallback`）；真机 `VM-20`
+  （v603 全满拾取走背包已满，物品留地）。
+
 ## §6 禁止事项汇总
 
 > 仅列本册特有事项；通用依赖方向、符号来源和裸地址规则以根目录 `ARCHITECTURE.md` 为准。

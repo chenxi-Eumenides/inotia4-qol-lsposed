@@ -302,7 +302,7 @@ target_compile_features(inventory_hook_native_compile PRIVATE cxx_std_17)
 set_target_properties(inventory_hook_native_compile PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 
-# 统一自动落槽顺序：placement resolver 六步顺序/身份门/上限预检/scope、
+# 统一自动落槽顺序：placement resolver 六步顺序/C18 v603 关闭/身份门/上限预检/scope、
 # FindSaveSlot 托管路径（扩展堆优先、不回退原生）与 move_item 自动目标。
 add_executable(inventory_placement_tests
     test_inventory_placement.cpp

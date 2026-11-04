@@ -234,18 +234,21 @@ bool resolve_placement(const contracts::QolBagTransfer& transfer, bool stackable
     if (scope_space < 0) {
         // 全局严格六步：原生合并 → 注册源合并（注册序）→ C18 合并 →
         // 原生空槽 → 注册源空槽（注册序）→ C18 空槽。
+        // C18 追加袋只在变体仍提供该背包时参与自动落槽；C18L v603 已移除 C18 背包
+        // （原生 IsHavingEmptySlot/FindSaveSlot 也只扫 0..4），由变体能力位关闭这两步。
+        const bool c18_auto = qol::features::core_inventory::g_c18_native_bag_auto_save;
         if (stackable &&
             scan_native_merge(qol::contracts::kQolBagSpaceOriginal, transfer, -1, out)) {
             return true;
         }
         if (stackable && scan_registered_sources(transfer, true, -1, out)) return true;
-        if (stackable &&
+        if (c18_auto && stackable &&
             scan_native_merge(qol::contracts::kQolBagSpaceVariant, transfer, -1, out)) {
             return true;
         }
         if (scan_native_empty(qol::contracts::kQolBagSpaceOriginal, -1, out)) return true;
         if (scan_registered_sources(transfer, false, -1, out)) return true;
-        if (scan_native_empty(qol::contracts::kQolBagSpaceVariant, -1, out)) return true;
+        if (c18_auto && scan_native_empty(qol::contracts::kQolBagSpaceVariant, -1, out)) return true;
         return false;
     }
 
