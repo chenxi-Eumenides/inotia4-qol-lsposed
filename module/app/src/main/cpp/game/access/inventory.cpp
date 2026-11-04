@@ -92,6 +92,14 @@ bool probe_c18_bag_count(int32_t* out_count) {
 }
 
 NativeBagLayout probe_native_bag_layout() {
+    // C18 布局探测只在具备该能力的构建上执行。原版/改版/怪物构建的镜像正好结束于
+    // G_C18_BAG_TABLE_VMA（原版 bss 末尾 = base+0x735000），无条件探测会把映射边界外
+    // 的地址当成可读页。判定用能力位而不是 series==kC18：未命中 md5 表但带
+    // C18BAG01/C18Lbag.dat 配对签名的构建同样会在 fallback 中置该位
+    // （game/variants/game_variant.cpp 的 fallback_variant）。
+    if ((qol::game_variant().capabilities & qol::kCapC18NativeBagLayoutCandidate) == 0) {
+        return {reinterpret_cast<uint8_t*>(g_inven), contracts::kQolOriginalBagCount};
+    }
     int32_t count = 0;
     if (probe_c18_bag_count(&count)) {
         return {reinterpret_cast<uint8_t*>(g_base + G_C18_SLOT_TABLE_VMA), count};
