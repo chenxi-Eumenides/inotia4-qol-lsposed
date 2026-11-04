@@ -111,12 +111,11 @@ bool game_state_gate(int32_t* out) {
 }
 
 ::QolResult for_each_space_slot(int32_t space_id, BagSlotFn callback, void* ctx) {
-    const auto* port = item_port();
-    if (!contracts::qol_item_port_bag_space_size_valid(port) ||
-        port->read.for_each_space_slot == nullptr) {
+    const auto* api = inventory_access_api();
+    if (api == nullptr) {
         return contracts::error(kQolErrNotReady, "not ready", 9);
     }
-    return port->read.for_each_space_slot(space_id, callback, ctx);
+    return api->native_for_each_space_slot(space_id, callback, ctx);
 }
 
 void refresh_item_count(InventoryItemRef* ref) {

@@ -26,10 +26,10 @@
 | descriptor | id `core.item`，version `0.1.0`，`deactivate_allowed=false`。 |
 | required capabilities | 0 项。 |
 | provides | 5 项：`item.facts`、`item.state`、`inventory.action`、`inventory.slot`、`inventory.projection`；能力名称、版本与用途见[对外契约](core.item.md)的“对外能力”。`inventory_refresh`、`inventory.bag_source`、`move_merge.control` 不再由本插件提供。 |
-| Game ports | 5 项：`QOL_PORT_ITEM` 3.8、`QOL_PORT_ITEM_MONEY_WRITE` 1.0、`QOL_PORT_ITEM_DICE_WRITE` 1.1、`QOL_PORT_ITEM_INVENTORY_STATE_WRITE` 2.4、`QOL_PORT_CHARACTER_EXTRAS` 1.2。`QOL_PORT_MOVE_MERGE` 已迁 `extension_bag`。 |
-| optional requires | 6 项：`character.state` 1.0、`http.registry` 1.1、`http.dispatch` 1.1、`world.facts` 2.0、`inventory.bag_source`（由 `core.inventory` 提供）、`inventory_refresh`（由 `extension_bag` 提供）。 |
+| Game ports | 5 项：`QOL_PORT_ITEM` 5.0（单点低层原语；空间化袋读经 `inventory.access` 1.1）、`QOL_PORT_ITEM_MONEY_WRITE` 1.0、`QOL_PORT_ITEM_DICE_WRITE` 1.1、`QOL_PORT_ITEM_INVENTORY_STATE_WRITE` 2.4、`QOL_PORT_CHARACTER_EXTRAS` 1.2。`QOL_PORT_MOVE_MERGE` 已迁 `extension_bag`。 |
+| optional requires | 7 项：`character.state` 1.0、`http.registry` 1.1、`http.dispatch` 1.1、`world.facts` 2.0、`inventory.bag_source`（由 `core.inventory` 提供）、`inventory.access` 1.1（原生空间袋读）、`inventory_refresh`（由 `extension_bag` 提供）。 |
 
-`world.facts` 缺失时出售以 `kSymbolsUnresolved` 失败，不继续扣款或移除物品。`inventory_refresh` 缺失时出售结算后的原版刷新退化为 no-op；`inventory.bag_source` 缺失时注册源查询为空。其余 optional requires 不构成安装依赖。
+`world.facts` 缺失时出售以 `kSymbolsUnresolved` 失败，不继续扣款或移除物品。`inventory_refresh` 缺失时出售结算后的原版刷新退化为 no-op；`inventory.bag_source` 缺失时注册源查询为空；`inventory.access` 缺失时原生空间袋读返回 NotReady。其余 optional requires 不构成安装依赖。
 
 ### Features 与资源
 
@@ -56,7 +56,8 @@ hook 入口覆盖库存动作和诊断绑定；快捷栏三个 optional hook 仅
 | 禁止项 | 不得调用 `INVEN_GetBagSize(index)` 做校验：该函数接受索引 18，但索引 18 的表项不是袋对象，解引用会崩溃（v520 实测 tombstone 于 `INVEN_GetBagSize+24`）。 |
 | count 计算 | `highest_valid_index + 1`，夹取到 `[6,32]`，再减去原版前缀 6 得到改版袋空间袋数。 |
 | 布局提示 | `kQolTargetCapabilityC18NativeBagLayoutCandidate` 是 bit 3（`1<<3`），只表示布局候选；候选注释仍要求 `2×5` 拓扑准入。 |
-| 缓存 | `native_bag_layout()` 1 秒 TTL 缓存；`invalidate_native_bag_layout_cache()` 可显式失效（读档/布局变化）。`inventory_for_each_space_slot` 对袋槽表整段只校验一次，逐槽仅校验物品指针。 |
+| 门控 | 探测只在 `capabilities & kCapC18NativeBagLayoutCandidate` 的构建上执行；其它构建直接返回 `{g_inven, 6}`，不再读 `0x735000`（原版镜像边界正好在该地址）。 |
+| 缓存 | `native_bag_layout()` 1 秒 TTL 缓存；`invalidate_native_bag_layout_cache()` 可显式失效（读档/布局变化）。插件侧空间枚举由 `inventory.access` 1.1 的 `native_for_each_space_slot` 组合 `item_ref_at` 逐槽读取。 |
 
 探测位于 Host/game access，不由插件直接读取地址。v520 实测：GOT 表 18 项；`0x735000` 仅 6 项；索引 18 为非袋残留指针。
 ## 读取、快照与刷新

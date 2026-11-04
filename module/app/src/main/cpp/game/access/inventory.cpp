@@ -19,10 +19,12 @@ constexpr const char* kNotFound = "inventory slot is empty";
 constexpr const char* kNotReady = "inventory not ready";
 
 // 原生袋布局探测会扫描 C18 GOT 袋表并对每个候选袋做 game_memory_accessible；
-// set_current_bag / inventory_bag_info 每帧多次调用，必须缓存。布局只在读档/
+// set_current_bag / 空间化袋读取每帧多次调用，必须缓存。布局只在读档/
 // 袋数变化时改变，1 秒 TTL 足以覆盖 UI 刷新，同时避免跨存档长期陈旧。
 NativeBagLayout g_native_bag_layout_cache{};
 bool g_native_bag_layout_valid = false;
+// 最近一次布局探测是否命中 C18 原生袋布局（与 cache 同步更新）。
+bool g_native_bag_layout_c18 = false;
 std::chrono::steady_clock::time_point g_native_bag_layout_at{};
 constexpr auto kNativeBagLayoutTtl = std::chrono::seconds(1);
 
@@ -98,12 +100,15 @@ NativeBagLayout probe_native_bag_layout() {
     // C18BAG01/C18Lbag.dat 配对签名的构建同样会在 fallback 中置该位
     // （game/variants/game_variant.cpp 的 fallback_variant）。
     if ((qol::game_variant().capabilities & qol::kCapC18NativeBagLayoutCandidate) == 0) {
+        g_native_bag_layout_c18 = false;
         return {reinterpret_cast<uint8_t*>(g_inven), contracts::kQolOriginalBagCount};
     }
     int32_t count = 0;
     if (probe_c18_bag_count(&count)) {
+        g_native_bag_layout_c18 = true;
         return {reinterpret_cast<uint8_t*>(g_base + G_C18_SLOT_TABLE_VMA), count};
     }
+    g_native_bag_layout_c18 = false;
     return {reinterpret_cast<uint8_t*>(g_inven), contracts::kQolOriginalBagCount};
 }
 
@@ -397,7 +402,33 @@ void invalidate_native_bag_layout_cache() {
     g_native_bag_layout_valid = false;
 }
 
-QolResult inventory_bag_count(int32_t space_id, int32_t* out_count) {
+QolResult native_bag_layout_info(contracts::QolNativeBagLayout* out) {
+    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    const NativeBagLayout layout = native_bag_layout();
+    out->bag_limit = layout.bag_limit;
+    out->c18_layout = g_native_bag_layout_c18 ? 1 : 0;
+    return contracts::ok();
+}
+
+QolResult native_bag_capacity_ref(const contracts::QolBagRef* ref, int32_t* out_capacity) {
+    if (ref == nullptr || out_capacity == nullptr || ref->bag < 0 ||
+        (ref->space_id != contracts::kQolBagSpaceOriginal &&
+         ref->space_id != contracts::kQolBagSpaceVariant)) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    const NativeBagLayout layout = native_bag_layout();
+    const int32_t native_bag = ref->bag +
+        (ref->space_id == contracts::kQolBagSpaceVariant ? kC18FirstNativeBag : 0);
+    if (native_bag < 0 || native_bag >= layout.bag_limit) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    return native_bag_capacity(ref->space_id, ref->bag, out_capacity);
+}
+
+// 模块内部写路径使用：原生空间袋数。space 0 = 原版 6 袋；space 1 = C18 布局追加袋数，
+// 无 C18 布局返回 NotReady。插件侧的空间语义由 core.inventory 的 inventory.access
+// v1.1 提供（native_bag_count），不经 Item Port。
+QolResult native_space_bag_count(int32_t space_id, int32_t* out_count) {
     if (out_count == nullptr || space_id < contracts::kQolBagSpaceOriginal) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
     }
@@ -414,111 +445,21 @@ QolResult inventory_bag_count(int32_t space_id, int32_t* out_count) {
     return unsupported_space();
 }
 
-QolResult inventory_bag_info(const contracts::QolBagRef* ref,
-                             contracts::QolBagInfo* out_info) {
-    if (ref == nullptr || out_info == nullptr || ref->space_id < contracts::kQolBagSpaceOriginal ||
-        ref->bag < 0) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    *out_info = {};
-    int32_t bag_count = 0;
-    QolResult result = inventory_bag_count(ref->space_id, &bag_count);
-    if (!contracts::succeeded(result)) return result;
-    if (ref->bag >= bag_count) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-
-    const NativeBagLayout layout = native_bag_layout();
-    if (layout.slots == nullptr) return error_result(kQolErrNotReady, kNotReady);
-    int32_t capacity = 0;
-    result = native_bag_capacity(ref->space_id, ref->bag, &capacity);
-    if (!contracts::succeeded(result)) return result;
-    int32_t occupied_slots = 0;
-    const int32_t native_bag = ref->bag +
-        (ref->space_id == contracts::kQolBagSpaceVariant ? kC18FirstNativeBag : 0);
-    for (int32_t slot = 0; slot < 16; ++slot) {
-        auto* slot_address = reinterpret_cast<void**>(layout.slots +
-            static_cast<size_t>(native_bag) * 0x80 + static_cast<size_t>(slot) * sizeof(void*));
-        if (!game_memory_accessible(slot_address, sizeof(*slot_address), 'r')) {
-            return error_result(kQolErrNotReady, kNotReady);
-        }
-        if (*slot_address != nullptr) ++occupied_slots;
-    }
-    out_info->capacity = capacity;
-    out_info->occupied_slots = occupied_slots;
-    return contracts::ok();
-}
-
-QolResult inventory_space_item_at(const contracts::QolBagRef* ref, int32_t slot,
-                                  contracts::QolInventoryItemRef* out) {
+// 模块内部写路径使用的原生空间物品读取（槽地址、物品指针和类别均校验）。
+QolResult native_space_item_at(const contracts::QolBagRef* ref, int32_t slot,
+                               contracts::QolInventoryItemRef* out) {
     if (ref == nullptr || out == nullptr || ref->space_id < contracts::kQolBagSpaceOriginal ||
         ref->bag < 0 || slot < 0 || slot >= 16) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
     }
     *out = {};
     int32_t bag_count = 0;
-    QolResult result = inventory_bag_count(ref->space_id, &bag_count);
+    QolResult result = native_space_bag_count(ref->space_id, &bag_count);
     if (!contracts::succeeded(result)) return result;
     if (ref->bag >= bag_count) return error_result(kQolErrInvalidArgument, kInvalidArgument);
 
     const NativeBagLayout layout = native_bag_layout();
     return native_item_ref_at(layout, ref->space_id, ref->bag, slot, out);
-}
-
-QolResult inventory_space_item_pointer(const contracts::QolBagRef* ref, int32_t slot,
-                                       void** out) {
-    if (ref == nullptr || out == nullptr || ref->space_id < contracts::kQolBagSpaceOriginal ||
-        ref->bag < 0 || slot < 0 || slot >= 16) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    *out = nullptr;
-    int32_t bag_count = 0;
-    QolResult result = inventory_bag_count(ref->space_id, &bag_count);
-    if (!contracts::succeeded(result)) return result;
-    if (ref->bag >= bag_count) return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    const NativeBagLayout layout = native_bag_layout();
-    if (layout.slots == nullptr) return error_result(kQolErrNotReady, kNotReady);
-    const int32_t native_bag = ref->bag +
-        (ref->space_id == contracts::kQolBagSpaceVariant ? kC18FirstNativeBag : 0);
-    auto* slot_address = reinterpret_cast<void**>(layout.slots +
-        static_cast<size_t>(native_bag) * 0x80 + static_cast<size_t>(slot) * sizeof(void*));
-    if (!game_memory_accessible(slot_address, sizeof(*slot_address), 'r')) {
-        return error_result(kQolErrNotReady, kNotReady);
-    }
-    if (*slot_address == nullptr) return error_result(kQolErrNotFound, kNotFound);
-    *out = *slot_address;
-    return contracts::ok();
-}
-
-QolResult inventory_for_each_space_slot(int32_t space_id,
-                                        contracts::QolInventoryBagSlotFn callback, void* ctx) {
-    if (space_id < contracts::kQolBagSpaceOriginal || callback == nullptr) {
-        return error_result(kQolErrInvalidArgument, kInvalidArgument);
-    }
-    int32_t bag_count = 0;
-    QolResult result = inventory_bag_count(space_id, &bag_count);
-    if (!contracts::succeeded(result)) return result;
-    const NativeBagLayout layout = native_bag_layout();
-    if (layout.slots == nullptr) return error_result(kQolErrNotReady, kNotReady);
-    // 袋槽表整段只校验一次；逐槽 native_item_ref_at 会重复 game_memory_accessible，
-    // autosell 每次扫描 6*16 槽时形成主要开销。物品指针仍逐项校验，保持 fail-closed。
-    const int32_t native_offset =
-        space_id == contracts::kQolBagSpaceVariant ? kC18FirstNativeBag : 0;
-    const int32_t total_bags = bag_count + native_offset;
-    if (total_bags <= 0 || total_bags > contracts::kQolMaxNativeBagCount) {
-        return error_result(kQolErrNotReady, kNotReady);
-    }
-    if (!game_memory_accessible(layout.slots, static_cast<size_t>(total_bags) * 0x80, 'r')) {
-        return error_result(kQolErrNotReady, kNotReady);
-    }
-    contracts::QolInventoryItemRef item{};
-    for (int32_t bag = 0; bag < bag_count; ++bag) {
-        for (int32_t slot = 0; slot < 16; ++slot) {
-            result = native_item_ref_at_impl(layout, space_id, bag, slot, &item, false);
-            if (result.code == kQolErrNotFound) continue;
-            if (!contracts::succeeded(result)) return result;
-            if (callback(&item, ctx) != 0) return contracts::ok();
-        }
-    }
-    return contracts::ok();
 }
 
 QolResult physical_item_at(int32_t bag, int32_t slot, void** out_item) {
@@ -584,7 +525,7 @@ QolResult native_space_slot_address(const contracts::QolBagRef* ref, int32_t slo
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
     }
     int32_t bag_count = 0;
-    QolResult result = inventory_bag_count(ref->space_id, &bag_count);
+    QolResult result = native_space_bag_count(ref->space_id, &bag_count);
     if (!contracts::succeeded(result)) return result;
     if (ref->bag >= bag_count) return error_result(kQolErrInvalidArgument, kInvalidArgument);
     const NativeBagLayout layout = native_bag_layout();
@@ -604,6 +545,16 @@ QolResult native_space_slot_address(const contracts::QolBagRef* ref, int32_t slo
 }
 
 }  // namespace
+
+QolResult native_slot_occupied(const contracts::QolBagRef* ref, int32_t slot,
+                               int32_t* out_occupied) {
+    if (out_occupied == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    void** address = nullptr;
+    const QolResult result = native_space_slot_address(ref, slot, &address);
+    if (!contracts::succeeded(result)) return result;
+    *out_occupied = *address != nullptr ? 1 : 0;
+    return contracts::ok();
+}
 
 QolResult set_native_space_item(const contracts::QolBagRef* ref, int32_t slot, void* item) {
     void** slot_address = nullptr;

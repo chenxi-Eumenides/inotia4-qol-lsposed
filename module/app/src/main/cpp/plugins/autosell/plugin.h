@@ -4,6 +4,7 @@
 #include "../../contracts/game_host.h"
 #include "../../contracts/world_facts.h"
 #include "../../contracts/item_facts.h"
+#include "../../contracts/inventory_access.h"
 #include "../../contracts/ui.h"
 #include "../../contracts/game_ports/inventory_extras_port.h"
 #include "../../contracts/game_ports/item_port.h"
@@ -22,5 +23,6 @@ const contracts::ItemFactsApi* item_facts();
 const contracts::UiStateApi* ui_state();
 const contracts::QolInventoryExtrasPort* inventory_extras();
 const contracts::QolItemPort* item_port();
+const contracts::QolInventoryAccessApi* inventory_access_api();
 
 }  // namespace qol::features::autosell

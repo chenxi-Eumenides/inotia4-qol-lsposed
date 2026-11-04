@@ -1,4 +1,5 @@
 #include "plugins/core.item/runtime/core_item_internal.h"
+#include "plugins/core.item/api/native_inventory.h"
 
 #include <cstring>
 #include <limits>
@@ -149,10 +150,10 @@ QolResult build_inventory_json(std::string* out) {
     }
 
     int32_t c18_bag_count = 0;
-    if (contracts::qol_item_port_bag_space_size_valid(g_port) &&
-        g_port->read.bag_count != nullptr) {
+    if (contracts::qol_item_port_native_bag_size_valid(g_port) &&
+        inventory_native_api() != nullptr) {
         const QolResult count_result =
-            g_port->read.bag_count(contracts::kQolBagSpaceVariant, &c18_bag_count);
+            inventory_native_api()->native_bag_count(contracts::kQolBagSpaceVariant, &c18_bag_count);
         if (!contracts::succeeded(count_result)) {
             if (count_result.code != kQolErrUnsupported && count_result.code != kQolErrNotReady) {
                 return count_result;
@@ -162,12 +163,12 @@ QolResult build_inventory_json(std::string* out) {
     }
     if (c18_bag_count < 0) c18_bag_count = 0;
     for (int32_t bag = 0; bag < c18_bag_count; ++bag) {
-        if (g_port->read.bag_info == nullptr || g_port->read.item_at == nullptr) {
+        if (inventory_native_api() == nullptr) {
             return error_result(kQolErrUnsupported, "c18 bag read unavailable");
         }
         const contracts::QolBagRef ref{contracts::kQolBagSpaceVariant, bag};
         contracts::QolBagInfo info{};
-        const QolResult info_result = g_port->read.bag_info(&ref, &info);
+        const QolResult info_result = inventory_native_api()->native_bag_info(&ref, &info);
         if (!contracts::succeeded(info_result)) return info_result;
         if (info.capacity < 0 || info.occupied_slots < 0) {
             return error_result(kQolErrInvalidArgument, "invalid c18 bag info");
@@ -178,7 +179,7 @@ QolResult build_inventory_json(std::string* out) {
         int32_t filled = 0;
         for (int32_t slot = 0; slot < info.capacity; ++slot) {
             contracts::QolInventoryItemRef item_ref{};
-            const QolResult ref_result = g_port->read.item_at(&ref, slot, &item_ref);
+            const QolResult ref_result = inventory_native_api()->native_item_at(&ref, slot, &item_ref);
             if (!contracts::succeeded(ref_result)) {
                 if (ref_result.code == kQolErrNotFound) continue;
                 return ref_result;

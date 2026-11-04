@@ -1,4 +1,5 @@
 #include "native_transport.h"
+#include "plugins/core.inventory/api/access.h"
 
 #include "plugins/core.inventory/hooks/placement.h"
 #include "plugins/core.inventory/runtime/context.h"
@@ -32,16 +33,14 @@ QolResult invalid_argument() {
 }
 
 QolResult find_empty_bag(int32_t space, contracts::QolBagRef* out_ref) {
-    if (out_ref == nullptr || g_port == nullptr ||
-        !contracts::qol_item_port_bag_space_size_valid(g_port) ||
-        g_port->read.bag_count == nullptr || g_port->read.bag_info == nullptr ||
-        g_port->read.item_at == nullptr) {
+    if (out_ref == nullptr ||
+        !contracts::qol_inventory_access_api_valid(&inventory_access_api())) {
         static constexpr char kMessage[] = "native bag scan unavailable";
         return unsupported(kMessage, static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
 
     int32_t bag_count = 0;
-    QolResult result = g_port->read.bag_count(space, &bag_count);
+    QolResult result = inventory_access_api().native_bag_count(space, &bag_count);
     if (!contracts::succeeded(result)) return result;
     if (bag_count < 0) {
         static constexpr char kMessage[] = "invalid native bag count";
@@ -55,7 +54,7 @@ QolResult find_empty_bag(int32_t space, contracts::QolBagRef* out_ref) {
         }
         const contracts::QolBagRef ref{space, bag};
         contracts::QolBagInfo info{};
-        result = g_port->read.bag_info(&ref, &info);
+        result = inventory_access_api().native_bag_info(&ref, &info);
         if (!contracts::succeeded(result)) return result;
         if (info.capacity < 0) {
             static constexpr char kMessage[] = "invalid native bag capacity";
@@ -63,7 +62,7 @@ QolResult find_empty_bag(int32_t space, contracts::QolBagRef* out_ref) {
         }
         for (int32_t slot = 0; slot < info.capacity; ++slot) {
             contracts::QolInventoryItemRef item{};
-            result = g_port->read.item_at(&ref, slot, &item);
+            result = inventory_access_api().native_item_at(&ref, slot, &item);
             if (result.code == kQolErrNotFound) {
                 *out_ref = ref;
                 return contracts::ok();
@@ -197,10 +196,9 @@ QolResult import_item(const BagTransfer& transfer, int32_t target_space,
     }
 
     contracts::QolItemHandle target_item = item;
-    if (g_port != nullptr && contracts::qol_item_port_bag_space_size_valid(g_port) &&
-        g_port->read.item_at != nullptr) {
+    if (contracts::qol_inventory_access_api_valid(&inventory_access_api())) {
         contracts::QolInventoryItemRef target{};
-        const QolResult read_target = g_port->read.item_at(&ref, actual_slot, &target);
+        const QolResult read_target = inventory_access_api().native_item_at(&ref, actual_slot, &target);
         if (contracts::succeeded(read_target) && valid_handle(target.item)) {
             target_item = target.item;
         }
@@ -241,15 +239,13 @@ QolResult locate(int32_t space, contracts::QolItemHandle item,
         !valid_handle(item)) {
         return invalid_argument();
     }
-    if (g_port == nullptr || !contracts::qol_item_port_bag_space_size_valid(g_port) ||
-        g_port->read.bag_count == nullptr || g_port->read.bag_info == nullptr ||
-        g_port->read.item_at == nullptr) {
+    if (!contracts::qol_inventory_access_api_valid(&inventory_access_api())) {
         static constexpr char kMessage[] = "native bag scan unavailable";
         return unsupported(kMessage, static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
 
     int32_t bag_count = 0;
-    QolResult result = g_port->read.bag_count(space, &bag_count);
+    QolResult result = inventory_access_api().native_bag_count(space, &bag_count);
     if (!contracts::succeeded(result)) return result;
     if (bag_count < 0) {
         static constexpr char kMessage[] = "invalid native bag count";
@@ -259,7 +255,7 @@ QolResult locate(int32_t space, contracts::QolItemHandle item,
     for (int32_t bag = 0; bag < bag_count; ++bag) {
         const contracts::QolBagRef ref{space, bag};
         contracts::QolBagInfo info{};
-        result = g_port->read.bag_info(&ref, &info);
+        result = inventory_access_api().native_bag_info(&ref, &info);
         if (!contracts::succeeded(result)) return result;
         if (info.capacity < 0) {
             static constexpr char kMessage[] = "invalid native bag capacity";
@@ -267,7 +263,7 @@ QolResult locate(int32_t space, contracts::QolItemHandle item,
         }
         for (int32_t slot = 0; slot < info.capacity; ++slot) {
             contracts::QolInventoryItemRef candidate{};
-            result = g_port->read.item_at(&ref, slot, &candidate);
+            result = inventory_access_api().native_item_at(&ref, slot, &candidate);
             if (result.code == kQolErrNotFound) continue;
             if (!contracts::succeeded(result)) return result;
             if (candidate.item.slot == item.slot &&

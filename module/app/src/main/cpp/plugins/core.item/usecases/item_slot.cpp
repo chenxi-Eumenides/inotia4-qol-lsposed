@@ -4,6 +4,7 @@
 #include <initializer_list>
 
 #include "contracts/bag.h"
+#include "plugins/core.item/api/native_inventory.h"
 
 namespace qol::features::core_item {
 const contracts::QolBagSource* find_bag_source(int32_t space_id);
@@ -25,9 +26,8 @@ QolResult slot_error(int32_t code, const char* message, uint32_t length) {
 bool item_facts_ready() {
     return contracts::item_facts_api_size_valid(g_item_facts) &&
            g_item_facts->item_ref_at != nullptr && g_item_port != nullptr &&
-           g_item_port->read.bag_count != nullptr && g_item_port->read.bag_info != nullptr &&
-           g_item_port->read.item_at != nullptr &&
-           contracts::qol_item_port_bag_space_size_valid(g_item_port);
+            qol::features::core_item::inventory_native_api() != nullptr &&
+           contracts::qol_item_port_native_bag_size_valid(g_item_port);
 }
 
 bool space_count(int32_t space_id, int32_t* out_count) {
@@ -45,7 +45,7 @@ bool space_count(int32_t space_id, int32_t* out_count) {
         return true;
     }
     int32_t count = 0;
-    const QolResult result = g_item_port->read.bag_count(space_id, &count);
+    const QolResult result = qol::features::core_item::inventory_native_api()->native_bag_count(space_id, &count);
     if (!contracts::succeeded(result)) {
         if (space_id != contracts::kQolBagSpaceOriginal &&
             (result.code == kQolErrUnsupported || result.code == kQolErrNotReady)) {
@@ -135,7 +135,7 @@ bool bag_capacity(const contracts::QolBagRef& ref, int32_t* out_capacity) {
         return true;
     }
     contracts::QolBagInfo info{};
-    if (!contracts::succeeded(g_item_port->read.bag_info(&ref, &info)) || info.capacity < 0) {
+    if (!contracts::succeeded(qol::features::core_item::inventory_native_api()->native_bag_info(&ref, &info)) || info.capacity < 0) {
         return false;
     }
     *out_capacity = info.capacity;
@@ -197,7 +197,7 @@ QolResult ref_at(const contracts::QolBagRef& bag, int32_t slot,
                    ? source->item_at(bag.bag, slot, out)
                    : slot_error(kQolErrUnsupported, "registered bag source unavailable", 33);
     }
-    return g_item_port->read.item_at(&bag, slot, out);
+    return qol::features::core_item::inventory_native_api()->native_item_at(&bag, slot, out);
 }
 
 QolResult resolve_slot(int32_t bag, int32_t slot, contracts::QolInventorySlotView* out) {

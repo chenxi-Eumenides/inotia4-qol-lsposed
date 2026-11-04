@@ -44,15 +44,18 @@ struct NativeBagLayout {
 };
 NativeBagLayout native_bag_layout();
 void invalidate_native_bag_layout_cache();
-QolResult inventory_bag_count(int32_t space_id, int32_t* out_count);
-QolResult inventory_bag_info(const contracts::QolBagRef* ref,
-                             contracts::QolBagInfo* out_info);
-QolResult inventory_space_item_at(const contracts::QolBagRef* ref, int32_t slot,
-                                  contracts::QolInventoryItemRef* out);
-QolResult inventory_space_item_pointer(const contracts::QolBagRef* ref, int32_t slot,
-                                       void** out);
-QolResult inventory_for_each_space_slot(int32_t space_id,
-                                        contracts::QolInventoryBagSlotFn callback, void* ctx);
+// 原生袋布局事实：非 C18 时 bag_limit=6、c18_layout=0。
+QolResult native_bag_layout_info(contracts::QolNativeBagLayout* out);
+// 原生袋容量（space_id + bag 换算扁平袋号后走 INVEN_GetBagSize）。
+QolResult native_bag_capacity_ref(const contracts::QolBagRef* ref, int32_t* out_capacity);
+// 槽是否被占用；槽地址不可读返回 NotReady。
+QolResult native_slot_occupied(const contracts::QolBagRef* ref, int32_t slot,
+                               int32_t* out_occupied);
+// 模块内部写路径使用，不对插件暴露（插件侧空间语义见 core.inventory 的
+// inventory.access v1.1）。
+QolResult native_space_bag_count(int32_t space_id, int32_t* out_count);
+QolResult native_space_item_at(const contracts::QolBagRef* ref, int32_t slot,
+                               contracts::QolInventoryItemRef* out);
 QolResult desc_type(int32_t* out_type);
 QolResult set_desc_type(int32_t type);
 QolResult bag_capacity_word(int32_t bag, uint32_t* out_word);

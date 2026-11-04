@@ -32,10 +32,10 @@
 |---|---|
 | id / version | `autosell` / `0.1.0`（`plugins/autosell/plugin.cpp`） |
 | required capabilities | 6 项；id/版本/用途见对外契约的“能力与开关”。 |
-| optional capabilities | 3 项：`inventory.bag_source`、`http.registry`、`ui_panels`。 |
+| optional capabilities | 4 项：`inventory.bag_source`、`inventory.access` 1.1、`http.registry`、`ui_panels`。 |
 | provides | 0 项。 |
 | resources | 1 项：背包入口 call patch。 |
-| ports | 2 项：`QOL_PORT_INVENTORY_EXTRAS` 1.1（保留的只读 extras 入口）、`QOL_PORT_ITEM` 3.8（`for_each_space_slot` 扫描 `space=0` 原版袋与 `space=1` C18 追加袋）。 |
+| ports | 2 项：`QOL_PORT_INVENTORY_EXTRAS` 1.1（只读 extras 入口）、`QOL_PORT_ITEM` 5.0（单点低层原语）。空间枚举经 `inventory.access` 1.1 的 `native_for_each_space_slot`。 |
 | features | 1 项：`autosell.auto_sell`，默认 `0`，`kGameplay`/`kToggle`，`display_priority=-1`，callback 为 no-op。 |
 | HTTP route metadata | 2 条：GET/POST `/api/feature/autosell/config`，owner `autosell`，`op_gated=false`，`lease_required=true`。 |
 | JNI | descriptor `jni_count=0`；实际存在 4 个 JNI 导出（见“已知限制与风险”）。 |
@@ -80,9 +80,9 @@ required capabilities 在 `plugin.cpp` 声明；`inventory.bag_source` 1.2 是�
 - `remove_task_if_any()` 先递增取消纪元，再在 `g_task_mtx` 内移除任务；扫描在每个槽和每次出售前检查纪元，已进入 `inventory.action.sell` 的单笔事务允许完成（`scan.cpp`）。
 - `sync_task()` 在 `g_task_mtx` 内二次复核 global/session/config，避免检查与注册之间的迟到窗口；重复调用不会重复注册（`scan.cpp`）。
 - `save_enter` 校验 slot 后同步任务；`save_exit` 调 `autosell_store_reject_session()` 并移除任务（`scan.cpp`）。
-- 原版物理袋：`scan_physical_bags` 通过 `QOL_PORT_ITEM.for_each_space_slot(space=0)` 枚举 `bag 0..4`；不再使用 legacy `for_each_bag_slot`，避免关闭背包面板后枚举为空。
-- 枚举性能：`for_each_space_slot` 在 game/access 层对袋槽表整段只校验一次，逐槽仅校验物品指针；autosell 的扫描语义、取消纪元和失败门禁不变。
-- 注册源扫描：`scan_body` 在物理袋后先调用 `scan_variant_bags`（`space=1` C18 原生追加袋，经 `QOL_PORT_ITEM.for_each_space_slot`），再调用 `scan_registered_sources`（`inventory.bag_source` 1.2 的 `source_count/source_at`，`space>=2`）。每个引用校验句柄/category、`refresh_item_count` 后进入 `process_ref`；每类遍历错误按 code 变化限速 WARN，`kQolErrNotReady` 静默。取消纪元同样在回调内检查。
+- 原版物理袋：`scan_physical_bags` 通过 `inventory.access` 1.1 的 `native_for_each_space_slot(space=0)` 枚举 `bag 0..4`；不再使用 legacy `for_each_bag_slot`，避免关闭背包面板后枚举为空。
+- 枚举性能：`native_for_each_space_slot` 由 core.inventory 组合 `item_ref_at` 逐槽读取；autosell 的扫描语义、取消纪元和失败门禁不变。
+- 注册源扫描：`scan_body` 在物理袋后先调用 `scan_variant_bags`（`space=1` C18 原生追加袋，经 `inventory.access` 1.1 的 `native_for_each_space_slot`），再调用 `scan_registered_sources`（`inventory.bag_source` 1.2 的 `source_count/source_at`，`space>=2`）。每个引用校验句柄/category、`refresh_item_count` 后进入 `process_ref`；每类遍历错误按 code 变化限速 WARN，`kQolErrNotReady` 静默。取消纪元同样在回调内检查。
 
 ### 配置快照与计数
 
@@ -152,8 +152,8 @@ HTTP POST / 游戏内面板
 ```text
 scheduler (每 20 帧)
   → autosell_tick: global/session/config + scan_gates
-  → for_each_space_slot(space=0, bag 0..4)
-  → scan_variant_bags (QOL_PORT_ITEM.for_each_space_slot space=1)
+  → native_for_each_space_slot(space=0, bag 0..4)
+  → scan_variant_bags (inventory.access native_for_each_space_slot space=1)
   → scan_registered_sources (inventory.bag_source 1.2 source_count/source_at → for_each_item, space>=2)
   → refresh_item_count
   → autosell_build_view (item.facts + 注入的 attribute.quality)
@@ -215,7 +215,7 @@ save_exit → reject session → remove task
 | `autosell_slot_data_tests` | slot-data load/capture/complete、revision/dirty、无 session 拒绝、重试路径。 |
 | `autosell_plugin_tests` | descriptor/资源/feature、required/optional 能力、2 个 port、install/deactivate 对面板 provider 的登记/反登记；扫描/UI 以桩替代。 |
 | `autosell_scan_gates_tests` | 纯门禁顺序、短路、面板查询失败软处理、reason 名称。 |
-| `autosell_scan_task_tests` | global/session/config 门控、scheduler add/remove 去重、重复 sync 幂等、面板关闭重置 20 帧计时器；`for_each_space_slot` 以桩替代。 |
+| `autosell_scan_task_tests` | global/session/config 门控、scheduler add/remove 去重、重复 sync 幂等、面板关闭重置 20 帧计时器；`native_for_each_space_slot` 以桩替代。 |
 | `inventory_action_sell_tests` | core.item 原生出售、provider 空间预读/export/remove/import、回滚与 stale 语义。 |
 
 以上 target 的源文件为 `tests/test_autosell_*.cpp`，CMake 注册见 `tests/CMakeLists.txt`。

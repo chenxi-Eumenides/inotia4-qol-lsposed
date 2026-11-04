@@ -131,7 +131,7 @@ QolResult find_native_item_slot(contracts::QolItemHandle handle, const NativeBag
     for (int32_t space_id : {contracts::kQolBagSpaceOriginal, contracts::kQolBagSpaceVariant}) {
         if (space_id == contracts::kQolBagSpaceVariant && layout.bag_limit <= 6) continue;
         int32_t bag_count = 0;
-        QolResult result = inventory_bag_count(space_id, &bag_count);
+        QolResult result = native_space_bag_count(space_id, &bag_count);
         if (!contracts::succeeded(result)) {
             if (space_id == contracts::kQolBagSpaceVariant && result.code == kQolErrNotReady) continue;
             return result;
@@ -142,7 +142,7 @@ QolResult find_native_item_slot(contracts::QolItemHandle handle, const NativeBag
             const contracts::QolBagRef ref{space_id, bag};
             for (int32_t slot = 0; slot < 16; ++slot) {
                 contracts::QolInventoryItemRef item_ref{};
-                result = inventory_space_item_at(&ref, slot, &item_ref);
+                result = native_space_item_at(&ref, slot, &item_ref);
                 if (result.code == kQolErrNotFound) continue;
                 if (!contracts::succeeded(result)) return result;
                 if (item_ref.item.slot == handle.slot &&
@@ -365,12 +365,12 @@ QolResult place_item(const contracts::QolBagRef* ref, int32_t slot,
         return item_error(out, result, "item count unavailable");
     }
 
-    contracts::QolBagInfo info{};
-    result = inventory_bag_info(ref, &info);
+    int32_t capacity = 0;
+    result = native_bag_capacity_ref(ref, &capacity);
     if (!contracts::succeeded(result)) {
         return item_error(out, result, "native bag unavailable");
     }
-    const int32_t slot_limit = info.capacity < 16 ? info.capacity : 16;
+    const int32_t slot_limit = capacity < 16 ? capacity : 16;
     if (slot_limit <= 0 || (slot >= 0 && slot >= slot_limit)) {
         return item_error(out, kQolErrInvalidArgument, "invalid native bag slot");
     }
@@ -381,7 +381,7 @@ QolResult place_item(const contracts::QolBagRef* ref, int32_t slot,
     bool found_empty = false;
     for (int32_t candidate = begin; candidate < end; ++candidate) {
         contracts::QolInventoryItemRef target{};
-        result = inventory_space_item_at(ref, candidate, &target);
+        result = native_space_item_at(ref, candidate, &target);
         if (result.code == kQolErrNotFound) {
             target_slot = candidate;
             found_empty = true;
@@ -767,10 +767,10 @@ QolResult move_handle(contracts::QolItemHandle handle, int32_t count,
         return item_error(out, kQolErrUnsupported, "item stack encoding unavailable");
     }
 
-    contracts::QolBagInfo bag_info{};
-    result = inventory_bag_info(ref, &bag_info);
+    int32_t capacity = 0;
+    result = native_bag_capacity_ref(ref, &capacity);
     if (!contracts::succeeded(result)) return item_error(out, result, "native bag unavailable");
-    const int32_t slot_limit = bag_info.capacity < 16 ? bag_info.capacity : 16;
+    const int32_t slot_limit = capacity < 16 ? capacity : 16;
     if (slot_limit <= 0 || (slot >= 0 && slot >= slot_limit)) {
         return item_error(out, kQolErrInvalidArgument, "invalid native bag slot");
     }
@@ -783,7 +783,7 @@ QolResult move_handle(contracts::QolItemHandle handle, int32_t count,
     const int32_t last = slot == -1 ? slot_limit : slot + 1;
     for (int32_t candidate = first; candidate < last; ++candidate) {
         contracts::QolInventoryItemRef target{};
-        result = inventory_space_item_at(ref, candidate, &target);
+        result = native_space_item_at(ref, candidate, &target);
         if (result.code == kQolErrNotFound) {
             target_slot = candidate;
             target_empty = true;

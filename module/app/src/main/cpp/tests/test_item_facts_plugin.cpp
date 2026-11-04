@@ -1,4 +1,5 @@
 #include "contracts/item_facts.h"
+#include "contracts/inventory_access.h"
 #include "contracts/bag.h"
 #include "contracts/inventory_slot.h"
 #include "contracts/inventory_action.h"
@@ -54,8 +55,8 @@ static_assert(offsetof(qol::contracts::QolItemPortReadApi, quote) ==
                       sizeof(decltype(qol::contracts::QolItemPortReadApi::count_encoding)),
                "Item Port quote must be tail-appended");
 static_assert(offsetof(qol::contracts::QolItemPortReadApi, serialize_item) ==
-                  offsetof(qol::contracts::QolItemPortReadApi, for_each_space_slot) +
-                      sizeof(decltype(qol::contracts::QolItemPortReadApi::for_each_space_slot)),
+                  offsetof(qol::contracts::QolItemPortReadApi, quote) +
+                      sizeof(decltype(qol::contracts::QolItemPortReadApi::quote)),
               "Item Port transfer primitive must be tail-appended");
 static_assert(std::is_same<decltype(qol::contracts::QolItemPortReadApi::serialize_item),
                            QolResult (*)(qol::contracts::QolItemHandle, uint8_t*, uint32_t,
@@ -137,8 +138,8 @@ static_assert(sizeof(qol::contracts::QolInventoryItemRef) ==
 int main() {
     CHECK(qol::contracts::kItemFactsVersion.major == 4 &&
           qol::contracts::kItemFactsVersion.minor == 0);
-    CHECK(qol::contracts::kQolPortItemVersion.major == 4 &&
-          qol::contracts::kQolPortItemVersion.minor == 1);
+    CHECK(qol::contracts::kQolPortItemVersion.major == 5 &&
+          qol::contracts::kQolPortItemVersion.minor == 0);
     CHECK(qol::contracts::kQolPortCharacterExtrasVersion.major == 1 &&
           qol::contracts::kQolPortCharacterExtrasVersion.minor == 2);
     qol::contracts::ItemFactsApi old_size_api{};
@@ -171,8 +172,8 @@ int main() {
         {2, 0}, {qol::contracts::kQolPortItemVersion.major,
                  qol::contracts::kQolPortItemVersion.minor}));
     CHECK(qol::contracts::satisfies(qol::contracts::kItemFactsVersion, {4, 0}));
-    CHECK(qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {4, 0}));
-    CHECK(qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {4, 0}));
+    CHECK(qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {5, 0}));
+    CHECK(qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {5, 0}));
     const auto& descriptor = qol::features::core_item::plugin_descriptor();
     CHECK(std::strcmp(descriptor.id, "core.item") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
@@ -180,7 +181,7 @@ int main() {
     // 合并 inventory_hooks 后新增 world.facts optional：匹配与物品事实按调用时 require，
     // 缺失时只降级对应行为，不阻断 item.facts。
     // 库存刷新 trampoline（inventory_refresh）owner 迁往 extension_bag 后改为 optional。
-    CHECK(descriptor.optional_count == 6 && descriptor.optional_requires != nullptr);
+    CHECK(descriptor.optional_count == 7 && descriptor.optional_requires != nullptr);
     CHECK(std::strcmp(descriptor.optional_requires[0].id,
                       qol::contracts::kCharacterStateCapabilityId) == 0);
     CHECK(descriptor.optional_requires[0].range.major == qol::contracts::kCharacterStateVersion.major);
@@ -207,10 +208,16 @@ int main() {
     CHECK(descriptor.optional_requires[4].range.min_minor ==
           qol::contracts::kBagSourceVersion.minor);
     CHECK(std::strcmp(descriptor.optional_requires[5].id,
-                      qol::contracts::kInventoryRefreshCapabilityId) == 0);
+                      qol::contracts::kInventoryAccessCapabilityId) == 0);
     CHECK(descriptor.optional_requires[5].range.major ==
-          qol::contracts::kInventoryRefreshVersionMajor);
+          qol::contracts::kInventoryAccessVersion.major);
     CHECK(descriptor.optional_requires[5].range.min_minor ==
+          qol::contracts::kInventoryAccessVersion.minor);
+    CHECK(std::strcmp(descriptor.optional_requires[6].id,
+                      qol::contracts::kInventoryRefreshCapabilityId) == 0);
+    CHECK(descriptor.optional_requires[6].range.major ==
+          qol::contracts::kInventoryRefreshVersionMajor);
+    CHECK(descriptor.optional_requires[6].range.min_minor ==
           qol::contracts::kInventoryRefreshVersionMinor);
     CHECK(descriptor.feature_count == 1 && descriptor.features != nullptr);
     CHECK(std::strcmp(descriptor.features[0].id, "core.item.provider") == 0);

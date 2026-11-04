@@ -1,4 +1,5 @@
 #include "plugins/core.item/runtime/core_item_internal.h"
+#include "plugins/core.item/api/native_inventory.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -153,12 +154,12 @@ bool write_space_count(int32_t space_id, int32_t* out_count) {
         *out_count = count;
         return true;
     }
-    if (out_count == nullptr || g_port == nullptr || g_port->read.bag_count == nullptr ||
-        !contracts::qol_item_port_bag_space_size_valid(g_port)) {
+    if (out_count == nullptr || g_port == nullptr || inventory_native_api() == nullptr ||
+        !contracts::qol_item_port_native_bag_size_valid(g_port)) {
         return false;
     }
     int32_t count = 0;
-    const QolResult result = g_port->read.bag_count(space_id, &count);
+    const QolResult result = inventory_native_api()->native_bag_count(space_id, &count);
     if (!contracts::succeeded(result)) {
         if (space_id != contracts::kQolBagSpaceOriginal &&
             (result.code == kQolErrUnsupported || result.code == kQolErrNotReady)) {
@@ -241,9 +242,9 @@ WriteRefStatus resolve_write_ref(int32_t requested_bag, bool has_space, int32_t 
     const contracts::QolBagRef bag_ref{ref.space_id, ref.bag};
     contracts::QolBagInfo info{};
     const QolResult info_result =
-        g_port != nullptr && g_port->read.bag_info != nullptr &&
-                contracts::qol_item_port_bag_space_size_valid(g_port)
-            ? g_port->read.bag_info(&bag_ref, &info)
+        g_port != nullptr && inventory_native_api() != nullptr &&
+                contracts::qol_item_port_native_bag_size_valid(g_port)
+            ? inventory_native_api()->native_bag_info(&bag_ref, &info)
             : contracts::error(kQolErrUnsupported, "bag info unavailable", 21);
     if (!contracts::succeeded(info_result) || info.capacity < 0 ||
         ((!allow_auto_slot || slot >= 0) && slot >= info.capacity)) {

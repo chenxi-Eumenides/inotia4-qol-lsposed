@@ -34,12 +34,16 @@
 #include "bags/snapshot_sdk.h"
 
 #include "plugins/core.item/api/bag_source.h"
+#include "plugins/core.item/api/native_inventory.h"
 #include "plugins/core.item/api/projection.h"
 #include "plugins/core.item/runtime/core_item_internal.h"
 
 #if !defined(QOL_CORE_ITEM_BAG_SOURCE_SEPARATE)
 // 宿主测试直接编译 plugin.cpp，不读取插件 CMake 源清单；插件 target 单独编译该实现。
 #include "plugins/core.item/api/bag_source.cpp"
+#endif
+#if !defined(QOL_CORE_ITEM_NATIVE_INVENTORY_SEPARATE)
+#include "plugins/core.item/api/native_inventory.cpp"
 #endif
 #if !defined(QOL_CORE_ITEM_PROJECTION_SEPARATE)
 #include "plugins/core.item/api/projection.cpp"
@@ -89,6 +93,8 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
     // 袋源注册表由 core.inventory 提供；缺失时注册源查询为空，原生路径不受影响。
     {contracts::kBagSourceCapabilityId,
      {contracts::kBagSourceVersion.major, contracts::kBagSourceVersion.minor}},
+    {contracts::kInventoryAccessCapabilityId,
+     {contracts::kInventoryAccessVersion.major, contracts::kInventoryAccessVersion.minor}},
     // 原版刷新 trampoline 由 extension_bag 提供（owner 自本插件迁出）；缺失时出售结算
     // 后的刷新退化为 no-op，不影响其余行为。
     {contracts::kInventoryRefreshCapabilityId,

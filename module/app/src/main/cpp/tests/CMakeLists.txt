@@ -307,6 +307,9 @@ set_target_properties(inventory_hook_native_compile PROPERTIES
 add_executable(inventory_placement_tests
     test_inventory_placement.cpp
     ${CPP_DIR}/plugins/core.inventory/api/bag_source.cpp
+    ${CPP_DIR}/plugins/core.inventory/api/access.cpp
+    ${CPP_DIR}/plugins/core.inventory/store/inventory_store.cpp
+    ${CPP_DIR}/plugins/core.inventory/store/slot_table.cpp
     ${CPP_DIR}/plugins/core.inventory/bags/snapshot_store.cpp
     ${CPP_DIR}/plugins/core.inventory/hooks/inventory_logging.cpp
     ${CPP_DIR}/plugins/core.inventory/hooks/placement.cpp
@@ -317,6 +320,7 @@ add_executable(inventory_placement_tests
 )
 target_include_directories(inventory_placement_tests PRIVATE
     ${CPP_DIR}
+    ${CPP_DIR}/plugins/core.inventory
 )
 target_compile_features(inventory_placement_tests PRIVATE cxx_std_17)
 set_target_properties(inventory_placement_tests PROPERTIES
@@ -327,6 +331,7 @@ add_test(NAME inventory_placement_tests COMMAND inventory_placement_tests)
 # negotiation, physical-original route, and money/remove/refund ordering.
 add_executable(inventory_action_sell_tests
     test_inventory_action_sell.cpp
+    ${CPP_DIR}/plugins/core.item/api/native_inventory.cpp
     ${CPP_DIR}/plugins/core.item/usecases/sell_item.cpp
     ${CPP_DIR}/plugins/core.item/usecases/item_action.cpp
 )
@@ -338,6 +343,7 @@ add_test(NAME inventory_action_sell_tests COMMAND inventory_action_sell_tests)
 # v3.3: create / place / discard_handle lifecycle and legacy struct_size compatibility.
 add_executable(inventory_action_lifecycle_tests
     test_inventory_action_lifecycle.cpp
+    ${CPP_DIR}/plugins/core.item/api/native_inventory.cpp
     ${CPP_DIR}/plugins/core.item/usecases/item_action.cpp
 )
 target_include_directories(inventory_action_lifecycle_tests PRIVATE ${CPP_DIR})

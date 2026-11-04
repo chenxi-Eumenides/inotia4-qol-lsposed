@@ -1,4 +1,5 @@
 #include "move_item.h"
+#include "plugins/core.inventory/api/access.h"
 
 #include "plugins/core.inventory/api/bag_source.h"
 #include "plugins/core.inventory/hooks/inventory_logging.h"
@@ -46,12 +47,11 @@ bool valid_handle(contracts::QolItemHandle item) {
 QolResult source_item_at(const contracts::QolBagRef& ref, int32_t slot,
                          contracts::QolInventoryItemRef* out) {
     if (is_native_space(ref.space_id)) {
-        if (g_port == nullptr || !contracts::qol_item_port_bag_space_size_valid(g_port) ||
-            g_port->read.item_at == nullptr) {
+        if (!contracts::qol_inventory_access_api_valid(&inventory_access_api())) {
             static constexpr char kMessage[] = "native bag read unavailable";
             return unsupported(kMessage, static_cast<uint32_t>(sizeof(kMessage) - 1));
         }
-        return g_port->read.item_at(&ref, slot, out);
+        return inventory_access_api().native_item_at(&ref, slot, out);
     }
     const contracts::QolBagSource* source = find_bag_source(ref.space_id);
     if (source == nullptr || source->item_at == nullptr) {
@@ -66,12 +66,11 @@ QolResult find_empty_slot(const contracts::QolBagRef& ref, int32_t* out_slot) {
     contracts::QolBagInfo info{};
     QolResult result{};
     if (is_native_space(ref.space_id)) {
-        if (g_port == nullptr || !contracts::qol_item_port_bag_space_size_valid(g_port) ||
-            g_port->read.bag_info == nullptr || g_port->read.item_at == nullptr) {
+        if (!contracts::qol_inventory_access_api_valid(&inventory_access_api())) {
             static constexpr char kMessage[] = "native bag read unavailable";
             return unsupported(kMessage, static_cast<uint32_t>(sizeof(kMessage) - 1));
         }
-        result = g_port->read.bag_info(&ref, &info);
+        result = inventory_access_api().native_bag_info(&ref, &info);
         if (!contracts::succeeded(result)) return result;
         if (info.capacity < 0) {
             static constexpr char kMessage[] = "invalid target bag capacity";
@@ -80,7 +79,7 @@ QolResult find_empty_slot(const contracts::QolBagRef& ref, int32_t* out_slot) {
         }
         for (int32_t slot = 0; slot < info.capacity; ++slot) {
             contracts::QolInventoryItemRef item{};
-            result = g_port->read.item_at(&ref, slot, &item);
+            result = inventory_access_api().native_item_at(&ref, slot, &item);
             if (result.code == kQolErrNotFound) {
                 *out_slot = slot;
                 return contracts::ok();

@@ -1,4 +1,5 @@
 #include "plugins/core.item/runtime/core_item_internal.h"
+#include "plugins/core.item/api/native_inventory.h"
 
 #include <cstring>
 
@@ -24,19 +25,19 @@ void log_message(const contracts::QolHostSdk* sdk, const char* message) {
 
 // 物理扫描上界 = 原版袋数 + C18 探测到的追加袋数，最终夹到 item port 布局容量。
 void apply_native_bag_limit() {
-    if (g_port == nullptr || g_port->read.bag_count == nullptr ||
-        !contracts::qol_item_port_bag_space_size_valid(g_port)) {
+    if (g_port == nullptr || inventory_native_api() == nullptr ||
+        !contracts::qol_item_port_native_bag_size_valid(g_port)) {
         return;
     }
     int32_t limit = contracts::kQolOriginalBagCount;
     int32_t original = 0;
     if (contracts::succeeded(
-            g_port->read.bag_count(contracts::kQolBagSpaceOriginal, &original)) &&
+            inventory_native_api()->native_bag_count(contracts::kQolBagSpaceOriginal, &original)) &&
         original > 0) {
         limit = original;
     }
     int32_t c18 = 0;
-    if (contracts::succeeded(g_port->read.bag_count(contracts::kQolBagSpaceVariant, &c18)) &&
+    if (contracts::succeeded(inventory_native_api()->native_bag_count(contracts::kQolBagSpaceVariant, &c18)) &&
         c18 > 0) {
         limit += c18;
     }
@@ -86,6 +87,7 @@ void stop_frame_task(const contracts::QolHostSdk* sdk) {
 int plugin_install(contracts::PluginContext& ctx) {
     reset_ports();
     reset_bag_sources();
+    reset_native_inventory();
     bags::inventory_snapshot_store().clear();
     g_sdk = ctx.sdk;
     g_frame_task = 0;
@@ -159,6 +161,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     bind_bag_source_sdk(g_sdk);
+    bind_native_inventory_sdk(g_sdk);
     if (!shop::initialize_snapshot(g_sdk)) {
         g_snapshot.destroy();
         reset_ports();
@@ -197,6 +200,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     g_snapshot.destroy();
     bags::inventory_snapshot_store().clear();
     reset_bag_sources();
+    reset_native_inventory();
     log_message(ctx.sdk, "[core.item] provider deactivate");
     if (g_sdk != nullptr && g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
         (void)g_sdk->ticket_result.unregister_typed_result_handler(kItemWriteHandlerId);

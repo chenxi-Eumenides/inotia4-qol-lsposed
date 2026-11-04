@@ -1,4 +1,5 @@
 #include "storage_hooks.h"
+#include "plugins/core.inventory/api/access.h"
 
 #include <algorithm>
 #include <array>
@@ -655,7 +656,7 @@ bool build_transfer_for_hook_item(void* item, qol::contracts::QolBagTransfer* ou
                                   int32_t* out_category, uint32_t* out_payload_size) {
     if (item == nullptr || out_transfer == nullptr) return false;
     const auto* port = g_port;
-    if (port == nullptr || !qol::contracts::qol_item_port_bag_space_size_valid(port) ||
+    if (port == nullptr || !qol::contracts::qol_item_port_native_bag_size_valid(port) ||
         port->read.serialize_item == nullptr || port->read.category == nullptr) {
         return false;
     }
@@ -753,9 +754,7 @@ int registered_source_item_count(int32_t category) {
 
 int64_t count_empty_slots_all(int32_t needed) {
     int64_t empty = 0;
-    if (g_port != nullptr && qol::contracts::qol_item_port_bag_space_size_valid(g_port) &&
-        g_port->read.bag_count != nullptr && g_port->read.bag_info != nullptr &&
-        g_port->read.item_at != nullptr) {
+    if (qol::contracts::qol_inventory_access_api_valid(&inventory_access_api())) {
         // 统计域与自动落槽域一致：原生 space0（bag 0..4）+ 仍提供 C18 背包时的 space1。
         // C18L v603 已移除 C18 背包，由变体能力位关闭 space1 统计，避免预检通过、
         // 实际入库却写进不可见的追加袋。
@@ -764,7 +763,7 @@ int64_t count_empty_slots_all(int32_t needed) {
                                        : qol::contracts::kQolBagSpaceOriginal;
         for (int32_t space = qol::contracts::kQolBagSpaceOriginal; space <= last_space; ++space) {
             int32_t bag_count = 0;
-            if (!qol::contracts::succeeded(g_port->read.bag_count(space, &bag_count)) ||
+            if (!qol::contracts::succeeded(inventory_access_api().native_bag_count(space, &bag_count)) ||
                 bag_count < 0) {
                 continue;
             }
@@ -775,13 +774,13 @@ int64_t count_empty_slots_all(int32_t needed) {
                 }
                 qol::contracts::QolBagRef ref{space, bag};
                 qol::contracts::QolBagInfo info{};
-                if (!qol::contracts::succeeded(g_port->read.bag_info(&ref, &info)) ||
+                if (!qol::contracts::succeeded(inventory_access_api().native_bag_info(&ref, &info)) ||
                     info.capacity < 0) {
                     continue;
                 }
                 for (int32_t slot = 0; slot < info.capacity; ++slot) {
                     qol::contracts::QolInventoryItemRef item{};
-                    const QolResult result = g_port->read.item_at(&ref, slot, &item);
+                    const QolResult result = inventory_access_api().native_item_at(&ref, slot, &item);
                     if (result.code == kQolErrNotFound) ++empty;
                     if (empty >= needed) return empty;
                 }
@@ -914,9 +913,7 @@ int is_having_empty_slot_wrapper(int32_t needed, int32_t include_task_bag) {
         return call_backup("hook:INVEN_IsHavingEmptySlot", g_backup_is_having_empty_slot,
                            needed, include_task_bag);
     }
-    if (g_port == nullptr || !qol::contracts::qol_item_port_bag_space_size_valid(g_port) ||
-        g_port->read.bag_count == nullptr || g_port->read.bag_info == nullptr ||
-        g_port->read.item_at == nullptr) {
+    if (!qol::contracts::qol_inventory_access_api_valid(&inventory_access_api())) {
         return call_backup("hook:INVEN_IsHavingEmptySlot", g_backup_is_having_empty_slot,
                            needed, include_task_bag);
     }

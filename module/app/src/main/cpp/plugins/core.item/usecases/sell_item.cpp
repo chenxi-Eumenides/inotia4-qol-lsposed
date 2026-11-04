@@ -1,4 +1,5 @@
 #include "sell_item.h"
+#include "plugins/core.item/api/native_inventory.h"
 
 #include "../hooks/claims.h"
 #include "../hooks/inventory_hooks.h"
@@ -106,8 +107,8 @@ contracts::InventorySellResult sell_item(contracts::QolActionRef ref,
     if (world_facts == nullptr || world_facts->state == nullptr || g_action_game == nullptr ||
         g_item_facts == nullptr ||
         g_item_facts->is_no_sell == nullptr || g_item_port == nullptr ||
-        !contracts::qol_item_port_bag_space_size_valid(g_item_port) ||
-        g_item_port->read.item_at == nullptr) {
+        !contracts::qol_item_port_native_bag_size_valid(g_item_port) ||
+        core_item::inventory_native_api() == nullptr) {
         return result;
     }
     if (ref.space_id == contracts::kQolBagSpaceOriginal &&
@@ -133,7 +134,7 @@ contracts::InventorySellResult sell_item(contracts::QolActionRef ref,
         read_bag_source->item_at != nullptr) {
         read = read_bag_source->item_at(ref.bag, ref.slot, &item);
     } else {
-        read = g_item_port->read.item_at(&bag, ref.slot, &item);
+        read = qol::features::core_item::inventory_native_api()->native_item_at(&bag, ref.slot, &item);
     }
     if (!contracts::succeeded(read)) {
         result.status = read.code == kQolErrNotFound
@@ -273,7 +274,7 @@ bool attach(const contracts::QolHostSdk* sdk, const contracts::QolGameHost* game
             const contracts::ItemFactsApi* item_facts) {
     const contracts::QolItemPort* const item_port = detail::bound_item_port();
     if (sdk == nullptr || game == nullptr || !contracts::item_facts_api_size_valid(item_facts) ||
-        item_port == nullptr || !contracts::qol_item_port_bag_space_size_valid(item_port) ||
+        item_port == nullptr || !contracts::qol_item_port_native_bag_size_valid(item_port) ||
         !inventory_native_hook_bind_sdk(sdk) || !inventory_native_hook_bind_game(game) ||
         !inventory_native_hook_bind_item_facts(item_facts)) {
         detach();

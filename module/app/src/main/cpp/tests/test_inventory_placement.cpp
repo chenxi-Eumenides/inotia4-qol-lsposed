@@ -163,36 +163,41 @@ void fill_native_bag(int space, int bag) {
 // fake item port
 // ---------------------------------------------------------------------------
 
-QolResult port_bag_count(int32_t space_id, int32_t* out) {
+QolResult port_native_bag_layout(qol::contracts::QolNativeBagLayout* out) {
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
-    if (space_id == qol::contracts::kQolBagSpaceOriginal) {
-        *out = 6;
-        return ok_result();
-    }
-    if (space_id == qol::contracts::kQolBagSpaceVariant) {
-        *out = 2;
-        return ok_result();
-    }
-    return not_found();
-}
-
-QolResult port_bag_info(const QolBagRef* ref, qol::contracts::QolBagInfo* out) {
-    if (ref == nullptr || out == nullptr || ref->space_id < 0 || ref->space_id > 1 ||
-        ref->bag < 0 || ref->bag >= 8) {
-        return qol::contracts::error(kQolErrInvalidArgument, "bad bag ref", 11);
-    }
-    *out = qol::contracts::QolBagInfo{kSlotsPerBag, 0};
+    *out = {8, 1};
     return ok_result();
 }
 
-QolResult port_item_at(const QolBagRef* ref, int32_t slot, QolInventoryItemRef* out) {
-    if (ref == nullptr || out == nullptr || slot < 0 || slot >= kSlotsPerBag) {
+QolResult port_bag_capacity(const QolBagRef* ref, int32_t* out) {
+    if (ref == nullptr || out == nullptr || ref->space_id < 0 || ref->space_id > 1 ||
+        ref->bag < 0 || ref->bag >= (ref->space_id == 0 ? 6 : 2)) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad bag ref", 11);
+    }
+    *out = kSlotsPerBag;
+    return ok_result();
+}
+
+QolResult port_slot_occupied(const QolBagRef* ref, int32_t slot, int32_t* out) {
+    if (ref == nullptr || out == nullptr || ref->space_id < 0 || ref->space_id > 1 ||
+        ref->bag < 0 || ref->bag >= (ref->space_id == 0 ? 6 : 2) || slot < 0 ||
+        slot >= kSlotsPerBag) {
         return qol::contracts::error(kQolErrInvalidArgument, "bad slot", 9);
     }
-    const FakeItem& cell = g_native[ref->space_id][ref->bag][slot];
+    *out = g_native[ref->space_id][ref->bag][slot].occupied ? 1 : 0;
+    return ok_result();
+}
+
+QolResult port_item_ref_at(int32_t flat_bag, int32_t slot, QolInventoryItemRef* out) {
+    if (out == nullptr || flat_bag < 0 || flat_bag >= 8 || slot < 0 || slot >= kSlotsPerBag) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad slot", 9);
+    }
+    const int32_t space = flat_bag < 6 ? 0 : 1;
+    const int32_t bag = flat_bag < 6 ? flat_bag : flat_bag - 6;
+    const FakeItem& cell = g_native[space][bag][slot];
     if (!cell.occupied) return not_found();
-    *out = QolInventoryItemRef{0, ref->bag, slot, cell.category, cell.count,
-                               native_handle(ref->space_id, ref->bag, slot), ref->space_id};
+    *out = QolInventoryItemRef{0, bag, slot, cell.category, cell.count,
+                               native_handle(space, bag, slot), space};
     return ok_result();
 }
 
@@ -249,9 +254,10 @@ qol::contracts::QolItemPort make_port() {
     qol::contracts::QolItemPort port{};
     port.abi_version = qol::contracts::kQolPortItemVersion;
     port.struct_size = sizeof(qol::contracts::QolItemPort);
-    port.read.bag_count = &port_bag_count;
-    port.read.bag_info = &port_bag_info;
-    port.read.item_at = &port_item_at;
+    port.read.native_bag_layout = &port_native_bag_layout;
+    port.read.bag_capacity = &port_bag_capacity;
+    port.read.slot_occupied = &port_slot_occupied;
+    port.read.item_ref_at = &port_item_ref_at;
     port.read.serialize_item = &port_serialize;
     port.read.category = &port_category;
     port.read.cumulate_count = &port_cumulate_count;

@@ -772,7 +772,7 @@ NativeBagLayout native_bag_layout() {
     return {slots, 6};
 }
 
-QolResult inventory_bag_count(int32_t space_id, int32_t* out_count) {
+QolResult native_space_bag_count(int32_t space_id, int32_t* out_count) {
     if (out_count == nullptr || space_id != contracts::kQolBagSpaceOriginal) {
         return contracts::error(kQolErrNotReady, "native bag unavailable", 22);
     }
@@ -780,8 +780,8 @@ QolResult inventory_bag_count(int32_t space_id, int32_t* out_count) {
     return contracts::ok();
 }
 
-QolResult inventory_space_item_at(const contracts::QolBagRef* ref, int32_t slot,
-                                  contracts::QolInventoryItemRef* out) {
+QolResult native_space_item_at(const contracts::QolBagRef* ref, int32_t slot,
+                               contracts::QolInventoryItemRef* out) {
     if (ref == nullptr || out == nullptr) {
         return contracts::error(kQolErrInvalidArgument, "invalid item lookup", 19);
     }

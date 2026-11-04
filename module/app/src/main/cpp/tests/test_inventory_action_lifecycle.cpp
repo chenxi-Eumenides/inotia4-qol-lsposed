@@ -2,10 +2,12 @@
 #include "contracts/game_ports/item_inventory_state_write_port.h"
 #include "contracts/host_sdk.h"
 #include "contracts/inventory_action.h"
+#include "contracts/inventory_access.h"
 #include "contracts/inventory_transfer.h"
 #include "contracts/item_facts.h"
 #include "infra/log/qol_log.h"
 #include "plugins/core.item/runtime/context.h"
+#include "plugins/core.item/api/native_inventory.h"
 #include "plugins/core.item/usecases/item_action.h"
 
 #include <cstddef>
@@ -322,6 +324,45 @@ QolResult fake_capability_require(const char* id, QolVersionRange, const void** 
         *out = &g_transfer_api;
         return ok();
     }
+    if (std::strcmp(id, kInventoryAccessCapabilityId) == 0) {
+        static const QolInventoryAccessApi inventory_api = [] {
+            QolInventoryAccessApi api{};
+            api.struct_size = sizeof(api);
+            api.item_at = [](void*, const QolInventorySlotRef*, QolInventoryItemRef*) -> QolResult { return fail(kQolErrUnsupported, "unused"); };
+            api.locate = [](void*, QolItemHandle, QolInventoryItemRef*) -> QolResult { return fail(kQolErrUnsupported, "unused"); };
+            api.find_first = [](void*, int32_t, QolInventoryItemRef*) -> QolResult { return fail(kQolErrUnsupported, "unused"); };
+            api.find_empty = [](void*, int32_t, QolInventorySlotRef*) -> QolResult { return fail(kQolErrUnsupported, "unused"); };
+            api.count_item = [](void*, int32_t, int32_t*) -> QolResult { return fail(kQolErrUnsupported, "unused"); };
+            api.move = [](void*, const QolInventorySlotRef*, const QolInventorySlotRef*) -> QolResult { return fail(kQolErrUnsupported, "unused"); };
+            api.take = [](void*, const QolInventorySlotRef*, QolInventoryItem*) -> QolResult { return fail(kQolErrUnsupported, "unused"); };
+            api.place = [](void*, const QolInventorySlotRef*, const QolInventoryItem*) -> QolResult { return fail(kQolErrUnsupported, "unused"); };
+            api.remove_count = [](void*, const QolInventorySlotRef*, int32_t) -> QolResult { return fail(kQolErrUnsupported, "unused"); };
+            api.native_bag_count = &fake_bag_count;
+            api.native_bag_info = &fake_bag_info;
+            api.native_item_at = &fake_item_at;
+            api.native_for_each_space_slot = [](int32_t space, QolInventoryBagSlotFn fn,
+                                                void* ctx) -> QolResult {
+                if (fn == nullptr) return fail(kQolErrInvalidArgument, "callback required");
+                int32_t count = 0;
+                QolResult result = fake_bag_count(space, &count);
+                if (!succeeded(result)) return result;
+                for (int32_t bag = 0; bag < count; ++bag) {
+                    const QolBagRef ref{space, bag};
+                    for (int32_t slot = 0; slot < 16; ++slot) {
+                        QolInventoryItemRef item{};
+                        result = fake_item_at(&ref, slot, &item);
+                        if (result.code == kQolErrNotFound) continue;
+                        if (!succeeded(result)) return result;
+                        if (fn(&item, ctx) == 0) return ok();
+                    }
+                }
+                return ok();
+            };
+            return api;
+        }();
+        *out = &inventory_api;
+        return ok();
+    }
     *out = nullptr;
     return fail(kQolErrNotFound, "capability missing");
 }
@@ -364,9 +405,6 @@ void reset_fixture() {
     g_port.read.category = &fake_category;
     g_port.read.cumulate_count = &fake_cumulate_count;
     g_port.read.effective_cumulate_count = &fake_effective_cumulate_count;
-    g_port.read.bag_count = &fake_bag_count;
-    g_port.read.bag_info = &fake_bag_info;
-    g_port.read.item_at = &fake_item_at;
     g_port.read.serialize_item = &fake_serialize_item;
 
     g_write = {};
@@ -393,6 +431,7 @@ void reset_fixture() {
     g_host_sdk.abi = {sizeof(g_host_sdk), kHostSdkMajor, kHostSdkMinor};
     g_host_sdk.capabilities.require = &fake_capability_require;
     qol::features::core_item::g_sdk = &g_host_sdk;
+    qol::features::core_item::bind_native_inventory_sdk(&g_host_sdk);
 }
 
 const QolItemCreateSpec make_create_spec(int32_t category, int32_t count, uint32_t flags,

@@ -24,7 +24,7 @@
 namespace qol::contracts {
 
 constexpr const char* kInventoryAccessCapabilityId = "inventory.access";
-constexpr QolVersion kInventoryAccessVersion{1, 0};
+constexpr QolVersion kInventoryAccessVersion{1, 1};
 
 struct QolInventorySlotRef {
     int32_t space_id;
@@ -58,16 +58,38 @@ struct QolInventoryAccessApi {
     QolResult (*place)(void* context, const QolInventorySlotRef* ref,
                        const QolInventoryItem* item);
     QolResult (*remove_count)(void* context, const QolInventorySlotRef* ref, int32_t count);
+
+    // 1.1：原生空间只读语义（space 0 原版 / space 1 C18 追加袋）。无 context：
+    // 由 core.inventory 组合模块的低层原语，消费者不再依赖 Item Port 的空间化接口。
+    QolResult (*native_bag_count)(int32_t space_id, int32_t* out_count);
+    QolResult (*native_bag_info)(const QolBagRef* ref, QolBagInfo* out_info);
+    QolResult (*native_item_at)(const QolBagRef* ref, int32_t slot,
+                                QolInventoryItemRef* out);
+    QolResult (*native_for_each_space_slot)(int32_t space_id, QolInventoryBagSlotFn fn,
+                                            void* ctx);
 };
 
 inline bool qol_inventory_access_api_valid(const QolInventoryAccessApi* api) {
     constexpr uint32_t kRequiredSize =
-        static_cast<uint32_t>(offsetof(QolInventoryAccessApi, remove_count) +
-                              sizeof(decltype(QolInventoryAccessApi::remove_count)));
+        static_cast<uint32_t>(offsetof(QolInventoryAccessApi, native_for_each_space_slot) +
+                              sizeof(decltype(QolInventoryAccessApi::native_for_each_space_slot)));
     return api != nullptr && api->struct_size >= kRequiredSize &&
            api->item_at != nullptr && api->locate != nullptr && api->find_first != nullptr &&
            api->find_empty != nullptr && api->count_item != nullptr && api->move != nullptr &&
-           api->take != nullptr && api->place != nullptr && api->remove_count != nullptr;
+           api->take != nullptr && api->place != nullptr && api->remove_count != nullptr &&
+           api->native_bag_count != nullptr && api->native_bag_info != nullptr &&
+           api->native_item_at != nullptr && api->native_for_each_space_slot != nullptr;
+}
+
+// 只消费 1.1 原生空间方法的能力使用者（core.item/autosell）用此窄校验：
+// 不要求 store 面成员非空，避免为了读原生空间而实现整套存写接口。
+inline bool qol_inventory_native_access_api_valid(const QolInventoryAccessApi* api) {
+    constexpr uint32_t kRequiredSize =
+        static_cast<uint32_t>(offsetof(QolInventoryAccessApi, native_for_each_space_slot) +
+                              sizeof(decltype(QolInventoryAccessApi::native_for_each_space_slot)));
+    return api != nullptr && api->struct_size >= kRequiredSize &&
+           api->native_bag_count != nullptr && api->native_bag_info != nullptr &&
+           api->native_item_at != nullptr && api->native_for_each_space_slot != nullptr;
 }
 
 static_assert(std::is_standard_layout<QolInventorySlotRef>::value,

@@ -1,11 +1,13 @@
 #include "contracts/game_ports/item_inventory_state_write_port.h"
 #include "contracts/bag.h"
 #include "contracts/inventory_action.h"
+#include "contracts/inventory_access.h"
 #include "contracts/item_facts.h"
 #include "contracts/world_facts.h"
 #include "plugins/core.item/runtime/context.h"
 #include "plugins/core.item/usecases/item_action.h"
 #include "plugins/core.item/usecases/sell_item.h"
+#include "plugins/core.item/api/native_inventory.h"
 #include "infra/log/qol_log.h"
 
 #include <cstdint>
@@ -227,6 +229,35 @@ QolResult fake_capability_require(const char* id, QolVersionRange, const void** 
         *out = &g_world;
         return ok();
     }
+    if (std::strcmp(id, kInventoryAccessCapabilityId) == 0) {
+        static const QolInventoryAccessApi inventory_api = [] {
+            QolInventoryAccessApi api{};
+            api.struct_size = sizeof(api);
+            api.item_at = [](void*, const QolInventorySlotRef*, QolInventoryItemRef*) -> QolResult { return fail(kQolErrUnsupported, "unused"); };
+            api.locate = [](void*, QolItemHandle, QolInventoryItemRef*) -> QolResult { return fail(kQolErrUnsupported, "unused"); };
+            api.find_first = [](void*, int32_t, QolInventoryItemRef*) -> QolResult { return fail(kQolErrUnsupported, "unused"); };
+            api.find_empty = [](void*, int32_t, QolInventorySlotRef*) -> QolResult { return fail(kQolErrUnsupported, "unused"); };
+            api.count_item = [](void*, int32_t, int32_t*) -> QolResult { return fail(kQolErrUnsupported, "unused"); };
+            api.move = [](void*, const QolInventorySlotRef*, const QolInventorySlotRef*) -> QolResult { return fail(kQolErrUnsupported, "unused"); };
+            api.take = [](void*, const QolInventorySlotRef*, QolInventoryItem*) -> QolResult { return fail(kQolErrUnsupported, "unused"); };
+            api.place = [](void*, const QolInventorySlotRef*, const QolInventoryItem*) -> QolResult { return fail(kQolErrUnsupported, "unused"); };
+            api.remove_count = [](void*, const QolInventorySlotRef*, int32_t) -> QolResult { return fail(kQolErrUnsupported, "unused"); };
+            api.native_bag_count = [](int32_t space, int32_t* out) -> QolResult {
+                if (!out) return fail(kQolErrInvalidArgument, "out required");
+                *out = space == kQolBagSpaceOriginal ? 6 : 0;
+                return ok();
+            };
+            api.native_bag_info = [](const QolBagRef* ref, QolBagInfo* out) -> QolResult {
+                if (!ref || !out) return fail(kQolErrInvalidArgument, "bad bag");
+                *out = {16, 1}; return ok();
+            };
+            api.native_item_at = &fake_item_at;
+            api.native_for_each_space_slot = [](int32_t, QolInventoryBagSlotFn, void*) -> QolResult { return ok(); };
+            return api;
+        }();
+        *out = &inventory_api;
+        return ok();
+    }
     *out = nullptr;
     return fail(kQolErrNotFound, "capability missing");
 }
@@ -266,7 +297,6 @@ void reset_fixture() {
     g_port.abi_version = {kQolPortItemVersion.major, kQolPortItemVersion.minor};
     g_port.struct_size = sizeof(g_port);
     g_port.read.in_world = &fake_in_world;
-    g_port.read.item_at = &fake_item_at;
     g_write.use_item = &fake_native_use;
     g_write.move_item = &fake_native_move;
     g_write.equip_item = &fake_native_equip;
@@ -291,6 +321,7 @@ void reset_fixture() {
 
     qol::features::core_item::g_port = &g_port;
     qol::features::core_item::g_item_state_write = &g_write;
+    qol::features::core_item::bind_native_inventory_sdk(&g_sdk);
     CHECK(qol::features::inventory_hooks::attach(&g_sdk, &g_game, &g_facts, &g_port));
 }
 

@@ -7,6 +7,7 @@
 #include "contracts/http.h"
 #include "contracts/item_facts.h"
 #include "contracts/item_state.h"
+#include "plugins/core.item/api/native_inventory.h"
 #include "contracts/plugin.h"
 #include "contracts/game_ports/item_write_port.h"
 #include "plugins/core.item/usecases/sell_item.h"

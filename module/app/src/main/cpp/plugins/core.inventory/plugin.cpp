@@ -65,25 +65,15 @@ void unregister_write_result_handler() {
     g_write_result_registered = false;
 }
 
-// 物理扫描上界 = 原版袋数 + C18 探测到的追加袋数，最终夹到 item port 布局容量。
+// 物理扫描上界 = 模块布局事实（原版 6 袋 + C18 探测到的追加袋数）。
 void apply_native_bag_limit() {
-    if (g_port == nullptr || g_port->read.bag_count == nullptr ||
-        !contracts::qol_item_port_bag_space_size_valid(g_port)) {
+    if (g_port == nullptr || !contracts::qol_item_port_native_bag_size_valid(g_port)) {
         return;
     }
-    int32_t limit = contracts::kQolOriginalBagCount;
-    int32_t original = 0;
-    if (contracts::succeeded(
-            g_port->read.bag_count(contracts::kQolBagSpaceOriginal, &original)) &&
-        original > 0) {
-        limit = original;
+    contracts::QolNativeBagLayout layout{};
+    if (contracts::succeeded(g_port->read.native_bag_layout(&layout)) && layout.bag_limit > 0) {
+        bags::set_native_bag_limit(layout.bag_limit);
     }
-    int32_t c18 = 0;
-    if (contracts::succeeded(g_port->read.bag_count(contracts::kQolBagSpaceVariant, &c18)) &&
-        c18 > 0) {
-        limit += c18;
-    }
-    bags::set_native_bag_limit(limit);
 }
 
 void log_line(int32_t level, const char* format, ...) {
@@ -128,7 +118,7 @@ int plugin_install(contracts::PluginContext& context) {
     const auto* port = static_cast<const contracts::QolItemPort*>(context.ports[0]);
     if (!contracts::satisfies(port->abi_version, {contracts::kQolPortItemVersion.major,
                                                   contracts::kQolPortItemVersion.minor}) ||
-        !contracts::qol_item_port_bag_space_size_valid(port)) {
+        !contracts::qol_item_port_native_bag_size_valid(port)) {
         return 1;
     }
     const auto* item_money_write =

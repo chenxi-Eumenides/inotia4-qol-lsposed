@@ -1,7 +1,7 @@
 #pragma once
 
 #include "contracts/inventory_access.h"
-#include "store/inventory_store.h"
+#include "plugins/core.inventory/store/inventory_store.h"
 
 namespace qol::features::core_inventory {
 

@@ -1,4 +1,5 @@
 #include "placement.h"
+#include "plugins/core.inventory/api/access.h"
 
 #include <cstdint>
 
@@ -20,9 +21,7 @@ using qol::contracts::QolInventoryItemRef;
 constexpr uint32_t kPrecheckStackLimit = 999;
 
 bool native_read_ready() {
-    return g_port != nullptr && qol::contracts::qol_item_port_bag_space_size_valid(g_port) &&
-           g_port->read.bag_count != nullptr && g_port->read.bag_info != nullptr &&
-           g_port->read.item_at != nullptr;
+    return qol::contracts::qol_inventory_access_api_valid(&inventory_access_api());
 }
 
 bool serialize_ready() {
@@ -63,7 +62,7 @@ bool scan_native_merge(int32_t space_id, const contracts::QolBagTransfer& transf
                        int32_t scope_bag, PlacementTarget* out) {
     if (!native_read_ready() || !serialize_ready()) return false;
     int32_t bag_count = 0;
-    if (!qol::contracts::succeeded(g_port->read.bag_count(space_id, &bag_count)) ||
+    if (!qol::contracts::succeeded(inventory_access_api().native_bag_count(space_id, &bag_count)) ||
         bag_count < 0) {
         return false;
     }
@@ -75,13 +74,13 @@ bool scan_native_merge(int32_t space_id, const contracts::QolBagTransfer& transf
         if (!scope_bag_selected(bag, scope_bag)) continue;
         const QolBagRef ref{space_id, bag};
         QolBagInfo info{};
-        if (!qol::contracts::succeeded(g_port->read.bag_info(&ref, &info)) ||
+        if (!qol::contracts::succeeded(inventory_access_api().native_bag_info(&ref, &info)) ||
             info.capacity < 0) {
             continue;
         }
         for (int32_t slot = 0; slot < info.capacity; ++slot) {
             QolInventoryItemRef existing{};
-            const QolResult probe = g_port->read.item_at(&ref, slot, &existing);
+            const QolResult probe = inventory_access_api().native_item_at(&ref, slot, &existing);
             if (probe.code == kQolErrNotFound) continue;
             if (!qol::contracts::succeeded(probe)) continue;
             // category 预过滤先行，避免对每个候选做完整序列化。
@@ -107,7 +106,7 @@ bool scan_native_merge(int32_t space_id, const contracts::QolBagTransfer& transf
 bool scan_native_empty(int32_t space_id, int32_t scope_bag, PlacementTarget* out) {
     if (!native_read_ready()) return false;
     int32_t bag_count = 0;
-    if (!qol::contracts::succeeded(g_port->read.bag_count(space_id, &bag_count)) ||
+    if (!qol::contracts::succeeded(inventory_access_api().native_bag_count(space_id, &bag_count)) ||
         bag_count < 0) {
         return false;
     }
@@ -119,13 +118,13 @@ bool scan_native_empty(int32_t space_id, int32_t scope_bag, PlacementTarget* out
         if (!scope_bag_selected(bag, scope_bag)) continue;
         const QolBagRef ref{space_id, bag};
         QolBagInfo info{};
-        if (!qol::contracts::succeeded(g_port->read.bag_info(&ref, &info)) ||
+        if (!qol::contracts::succeeded(inventory_access_api().native_bag_info(&ref, &info)) ||
             info.capacity < 0) {
             continue;
         }
         for (int32_t slot = 0; slot < info.capacity; ++slot) {
             QolInventoryItemRef existing{};
-            const QolResult probe = g_port->read.item_at(&ref, slot, &existing);
+            const QolResult probe = inventory_access_api().native_item_at(&ref, slot, &existing);
             if (probe.code == kQolErrNotFound) {
                 *out = PlacementTarget{space_id, bag, slot, false};
                 return true;

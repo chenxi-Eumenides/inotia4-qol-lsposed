@@ -1,4 +1,5 @@
 #include "item_action.h"
+#include "plugins/core.item/api/native_inventory.h"
 
 #include "sell_item.h"
 
@@ -101,14 +102,14 @@ QolResult read_item(const QolActionRef& ref, QolInventoryItemRef* out) {
                                 static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
     if (native_space(ref.space_id)) {
-        if (g_port == nullptr || !contracts::qol_item_port_bag_space_size_valid(g_port) ||
-            g_port->read.item_at == nullptr) {
+        if (g_port == nullptr || !contracts::qol_item_port_native_bag_size_valid(g_port) ||
+            inventory_native_api() == nullptr) {
             constexpr char kMessage[] = "inventory action read unavailable";
             return contracts::error(kQolErrNotReady, kMessage,
                                     static_cast<uint32_t>(sizeof(kMessage) - 1));
         }
         const contracts::QolBagRef bag{ref.space_id, ref.bag};
-        return g_port->read.item_at(&bag, ref.slot, out);
+        return inventory_native_api()->native_item_at(&bag, ref.slot, out);
     }
     const contracts::QolBagSource* source = find_bag_source(ref.space_id);
     if (source == nullptr || source->item_at == nullptr) {
@@ -194,11 +195,11 @@ InventoryActionStatus locate_mutation_target(const contracts::QolBagRef& bag,
     QolResult result{};
     if (native_space(bag.space_id)) {
         port = g_port;
-        if (port == nullptr || !contracts::qol_item_port_bag_space_size_valid(port) ||
-            port->read.bag_info == nullptr || port->read.item_at == nullptr) {
+        if (port == nullptr || !contracts::qol_item_port_native_bag_size_valid(port) ||
+            inventory_native_api() == nullptr) {
             return InventoryActionStatus::kInternal;
         }
-        result = port->read.bag_info(&bag, &info);
+        result = inventory_native_api()->native_bag_info(&bag, &info);
     } else {
         source = find_bag_source(bag.space_id);
         if (source == nullptr || source->info == nullptr || source->item_at == nullptr) {
@@ -238,7 +239,7 @@ InventoryActionStatus locate_mutation_target(const contracts::QolBagRef& bag,
 
     for (int32_t slot = 0; slot < info.capacity; ++slot) {
         QolInventoryItemRef item{};
-        result = native_space(bag.space_id) ? port->read.item_at(&bag, slot, &item)
+        result = native_space(bag.space_id) ? inventory_native_api()->native_item_at(&bag, slot, &item)
                                             : source->item_at(bag.bag, slot, &item);
         if (result.code == kQolErrNotFound) continue;
         if (!contracts::succeeded(result)) return InventoryActionStatus::kInternal;

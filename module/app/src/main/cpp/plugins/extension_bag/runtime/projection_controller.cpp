@@ -71,7 +71,7 @@ int native_bag_count_locked() {
         return original_count;
     }
     // 商店/合成页的袋列每帧都会查询本函数；逐帧扫描全部候选袋会触发
-    // native_bag_size_locked → inventory_bag_info → game_memory_accessible，
+    // native_bag_size_locked → 袋容量/槽占用原语 → game_memory_accessible，
     // 单次可达数十万次地图查询。按 EB 持久化 revision 缓存，仅在袋状态变化时重扫。
     static thread_local uint64_t cached_revision = ~uint64_t{0};
     static thread_local int cached_count = original_count;

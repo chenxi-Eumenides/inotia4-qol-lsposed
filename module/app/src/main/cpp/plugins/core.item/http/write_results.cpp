@@ -1,4 +1,5 @@
 #include "plugins/core.item/runtime/core_item_internal.h"
+#include "plugins/core.item/api/native_inventory.h"
 
 #include <algorithm>
 #include <climits>
@@ -48,12 +49,12 @@ bool result_space_count(int32_t space_id, int32_t* out_count) {
         *out_count = count;
         return true;
     }
-    if (out_count == nullptr || g_port == nullptr || g_port->read.bag_count == nullptr ||
-        !contracts::qol_item_port_bag_space_size_valid(g_port)) {
+    if (out_count == nullptr || g_port == nullptr || inventory_native_api() == nullptr ||
+        !contracts::qol_item_port_native_bag_size_valid(g_port)) {
         return false;
     }
     int32_t count = 0;
-    const QolResult result = g_port->read.bag_count(space_id, &count);
+    const QolResult result = inventory_native_api()->native_bag_count(space_id, &count);
     if (!contracts::succeeded(result)) {
         if (space_id != contracts::kQolBagSpaceOriginal &&
             (result.code == kQolErrUnsupported || result.code == kQolErrNotReady)) {
@@ -75,7 +76,9 @@ QolResult result_bag_info(const contracts::QolBagRef& ref, contracts::QolBagInfo
         }
         return source->info(ref.bag, out);
     }
-    return g_port->read.bag_info(&ref, out);
+    const auto* api = inventory_native_api();
+    return api == nullptr ? contracts::error(kQolErrNotReady, "inventory access unavailable", 28)
+                          : api->native_bag_info(&ref, out);
 }
 
 QolResult result_item_at(const contracts::QolBagRef& ref, int32_t slot,
@@ -87,7 +90,9 @@ QolResult result_item_at(const contracts::QolBagRef& ref, int32_t slot,
         }
         return source->item_at(ref.bag, slot, out);
     }
-    return g_port->read.item_at(&ref, slot, out);
+    const auto* api = inventory_native_api();
+    return api == nullptr ? contracts::error(kQolErrNotReady, "inventory access unavailable", 28)
+                          : api->native_item_at(&ref, slot, out);
 }
 
 int32_t write_port_bag(const WriteRef& ref) {
@@ -157,9 +162,9 @@ bool write_slot_key(int32_t host_bag, int32_t slot, SlotKey* out) {
 }
 
 bool find_item_slot(int32_t category, int32_t* bag_out, int32_t* slot_out) {
-    if (g_port == nullptr || g_port->read.bag_info == nullptr ||
-        g_port->read.item_at == nullptr || bag_out == nullptr || slot_out == nullptr ||
-        !contracts::qol_item_port_bag_space_size_valid(g_port)) {
+    if (g_port == nullptr || inventory_native_api() == nullptr ||
+        bag_out == nullptr || slot_out == nullptr ||
+        !contracts::qol_item_port_native_bag_size_valid(g_port)) {
         return false;
     }
     const uint32_t space_count = 2 + registered_bag_source_count();
@@ -221,7 +226,7 @@ const contracts::CharacterStateApi* character_state_capability() {
 }
 
 bool read_enriched_item(const contracts::QolBagRef& bag, int32_t slot, std::string* out) {
-    if (out == nullptr || g_port == nullptr || g_port->read.item_at == nullptr ||
+    if (out == nullptr || g_port == nullptr || inventory_native_api() == nullptr ||
         g_port->read.inventory_item_view == nullptr) {
         return false;
     }
@@ -265,8 +270,8 @@ bool read_enriched_item(const contracts::QolBagRef& bag, int32_t slot, std::stri
 }
 
 bool capture_inventory_result(InventoryResultSnapshot* out) {
-    if (out == nullptr || g_port == nullptr || g_port->read.bag_info == nullptr ||
-        !contracts::qol_item_port_bag_space_size_valid(g_port)) {
+    if (out == nullptr || g_port == nullptr || inventory_native_api() == nullptr ||
+        !contracts::qol_item_port_native_bag_size_valid(g_port)) {
         return false;
     }
     InventoryResultSnapshot snapshot;

@@ -9,6 +9,7 @@ add_library(qol_plugin_core.item STATIC
     shop/query.cpp
     shop/buy.cpp
     api/bag_source.cpp
+    api/native_inventory.cpp
     api/projection.cpp
     api/facts.cpp
     api/state.cpp
@@ -26,6 +27,7 @@ add_library(qol_plugin_core.item STATIC
     usecases/item_action.cpp
 )
 target_compile_definitions(qol_plugin_core.item PRIVATE QOL_CORE_ITEM_BAG_SOURCE_SEPARATE=1)
+target_compile_definitions(qol_plugin_core.item PRIVATE QOL_CORE_ITEM_NATIVE_INVENTORY_SEPARATE=1)
 target_compile_definitions(qol_plugin_core.item PRIVATE QOL_CORE_ITEM_PROJECTION_SEPARATE=1)
 target_compile_definitions(qol_plugin_core.item PRIVATE QOL_CORE_ITEM_TYPED_READ_SOURCES_SEPARATELY=1)
 target_compile_definitions(qol_plugin_core.item PRIVATE QOL_CORE_ITEM_SHOP_SEPARATE=1)

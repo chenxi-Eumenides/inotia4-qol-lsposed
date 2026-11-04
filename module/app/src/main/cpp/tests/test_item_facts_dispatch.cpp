@@ -6,6 +6,7 @@
 // 游戏侧只以 fake QolItemPort 注入，避免依赖真机内存。
 
 #include "contracts/game_ports/ports.h"
+#include "contracts/inventory_access.h"
 #include "contracts/game_ports/item_port.h"
 #include "contracts/game_ports/item_dice_write_port.h"
 #include "contracts/game_ports/item_money_write_port.h"
@@ -58,6 +59,8 @@ static int g_fail = 0;
     if (cond) ++g_pass; \
     else { ++g_fail; std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
 } while (0)
+
+const qol::contracts::QolInventoryAccessApi& fake_inventory_access();
 
 namespace {
 
@@ -595,14 +598,64 @@ QolResult fake_item_count_limit(qol::contracts::QolItemHandle, uint32_t* out_lim
     return qol::contracts::ok();
 }
 
+QolResult fake_native_bag_layout(qol::contracts::QolNativeBagLayout* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    out->bag_limit = qol::contracts::kQolOriginalBagCount + g_c18_bag_count;
+    out->c18_layout = g_c18_bag_count > 0 ? 1 : 0;
+    return qol::contracts::ok();
+}
+
+QolResult fake_bag_capacity(const qol::contracts::QolBagRef* ref, int32_t* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    qol::contracts::QolBagInfo info{};
+    const QolResult result = fake_bag_info(ref, &info);
+    if (!qol::contracts::succeeded(result)) return result;
+    *out = info.capacity;
+    return qol::contracts::ok();
+}
+
+QolResult fake_slot_occupied(const qol::contracts::QolBagRef* ref, int32_t slot, int32_t* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    qol::contracts::QolInventoryItemRef item{};
+    const QolResult result = fake_item_at(ref, slot, &item);
+    if (result.code == kQolErrNotFound) {
+        *out = 0;
+        return qol::contracts::ok();
+    }
+    if (!qol::contracts::succeeded(result)) return result;
+    *out = 1;
+    return qol::contracts::ok();
+}
+
+QolResult fake_for_each_space_slot(int32_t space_id, qol::contracts::QolInventoryBagSlotFn fn,
+                                   void* ctx) {
+    if (fn == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad item callback", 18);
+    }
+    int32_t count = 0;
+    QolResult result = fake_bag_count(space_id, &count);
+    if (!qol::contracts::succeeded(result)) return result;
+    for (int32_t bag = 0; bag < count; ++bag) {
+        for (int32_t slot = 0; slot < 16; ++slot) {
+            const qol::contracts::QolBagRef ref{space_id, bag};
+            qol::contracts::QolInventoryItemRef item{};
+            result = fake_item_at(&ref, slot, &item);
+            if (result.code == kQolErrNotFound) continue;
+            if (!qol::contracts::succeeded(result)) return result;
+            if (fn(&item, ctx) != 0) return qol::contracts::ok();
+        }
+    }
+    return qol::contracts::ok();
+}
+
 const QolItemPortReadApi kFakeRead{
     &stub_category,   &stub_item_type,     &stub_no_sell,    &stub_sell_price,
     &stub_cumulate,   &stub_item_ref,      &stub_physical,
     &stub_detail_item_context, &fake_inventory, &fake_money,
     &fake_shop, &fake_in_world, &fake_static_text, &fake_static_ready,
     &fake_inventory_item_view, &stub_effective_cumulate, nullptr,
-    &fake_item_count_limit, &fake_count_encoding, nullptr, &fake_bag_count, &fake_bag_info, &fake_item_at,
-    nullptr, nullptr,
+    &fake_item_count_limit, &fake_count_encoding, nullptr, nullptr, nullptr,
+    &fake_native_bag_layout, &fake_bag_capacity, &fake_slot_occupied,
 };
 
 const QolItemPort kFakePort{qol::contracts::kQolPortItemVersion, sizeof(QolItemPort), kFakeRead};
@@ -1273,6 +1326,14 @@ QolResult fake_capability_require(const char* id, QolVersionRange required,
             return qol::contracts::error(kQolErrNotFound, "missing", 7);
         }
         *out_iface = &kFakeCharacterStateApi;
+        return qol::contracts::ok();
+    }
+    if (std::strcmp(id, qol::contracts::kInventoryAccessCapabilityId) == 0) {
+        if (required.major != qol::contracts::kInventoryAccessVersion.major ||
+            required.min_minor > qol::contracts::kInventoryAccessVersion.minor) {
+            return qol::contracts::error(kQolErrNotFound, "missing", 7);
+        }
+        *out_iface = &fake_inventory_access();
         return qol::contracts::ok();
     }
     return qol::contracts::error(kQolErrNotFound, "missing", 7);
@@ -2964,6 +3025,59 @@ QolResult golden_for_each_space_slot(int32_t space_id,
     return qol::contracts::ok();
 }
 
+QolResult golden_native_bag_layout(qol::contracts::QolNativeBagLayout* out) {
+    if (out == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    }
+    int32_t variant = 0;
+    const QolResult result =
+        golden_bag_count(qol::contracts::kQolBagSpaceVariant, &variant);
+    if (!qol::contracts::succeeded(result)) return result;
+    out->bag_limit = qol::contracts::kQolOriginalBagCount + variant;
+    out->c18_layout = variant > 0 ? 1 : 0;
+    return qol::contracts::ok();
+}
+
+QolResult golden_bag_capacity(const qol::contracts::QolBagRef* ref, int32_t* out) {
+    if (out == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    }
+    qol::contracts::QolBagInfo info{};
+    const QolResult result = golden_bag_info(ref, &info);
+    if (!qol::contracts::succeeded(result)) return result;
+    *out = info.capacity;
+    return qol::contracts::ok();
+}
+
+QolResult golden_slot_occupied(const qol::contracts::QolBagRef* ref, int32_t slot, int32_t* out) {
+    if (out == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    }
+    qol::contracts::QolInventoryItemRef item{};
+    const QolResult result = golden_item_at(ref, slot, &item);
+    if (result.code == kQolErrNotFound) {
+        *out = 0;
+        return qol::contracts::ok();
+    }
+    if (!qol::contracts::succeeded(result)) return result;
+    *out = 1;
+    return qol::contracts::ok();
+}
+
+const qol::contracts::QolInventoryAccessApi kFakeInventoryAccess = [] {
+    qol::contracts::QolInventoryAccessApi api{};
+    api.struct_size = sizeof(api);
+    api.native_bag_count = &fake_bag_count;
+    api.native_bag_info = &fake_bag_info;
+    api.native_item_at = &fake_item_at;
+    api.native_for_each_space_slot = &fake_for_each_space_slot;
+    return api;
+}();
+
+const qol::contracts::QolInventoryAccessApi& fake_inventory_access() {
+    return kFakeInventoryAccess;
+}
+
 const qol::contracts::QolItemPortReadApi kGoldenRead{
     &golden_category,          &golden_unsupported_type,  &golden_unsupported1,
     &golden_unsupported_price, &golden_cumulate_count,
@@ -2972,7 +3086,7 @@ const qol::contracts::QolItemPortReadApi kGoldenRead{
     &golden_shop, &golden_in_world, &golden_static_text,
     &golden_static_ready, &golden_view, &stub_effective_cumulate,
      nullptr, &fake_item_count_limit, &fake_count_encoding, nullptr,
-    &golden_bag_count, &golden_bag_info, &golden_item_at, &golden_for_each_space_slot, nullptr,
+    nullptr, nullptr, &golden_native_bag_layout, &golden_bag_capacity, &golden_slot_occupied,
 };
 const qol::contracts::QolItemPort kGoldenPort{qol::contracts::kQolPortItemVersion,
                                                sizeof(qol::contracts::QolItemPort), kGoldenRead};

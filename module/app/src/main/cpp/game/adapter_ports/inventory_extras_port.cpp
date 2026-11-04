@@ -30,21 +30,23 @@ QolResult read_bag_size_ref(const contracts::QolBagRef* ref, int32_t* out_size) 
     if (ref == nullptr || out_size == nullptr) {
         return error_result(kQolErrInvalidArgument, "invalid argument");
     }
-    contracts::QolBagInfo info{};
-    const QolResult result = inventory_bag_info(ref, &info);
-    if (!contracts::succeeded(result)) return result;
-    *out_size = info.capacity;
-    return contracts::ok();
+    return native_bag_capacity_ref(ref, out_size);
 }
 
 QolResult read_is_empty_bag_ref(const contracts::QolBagRef* ref, int32_t* out_empty) {
     if (ref == nullptr || out_empty == nullptr) {
         return error_result(kQolErrInvalidArgument, "invalid argument");
     }
-    contracts::QolBagInfo info{};
-    const QolResult result = inventory_bag_info(ref, &info);
-    if (!contracts::succeeded(result)) return result;
-    *out_empty = info.occupied_slots == 0 ? 1 : 0;
+    *out_empty = 1;
+    for (int32_t slot = 0; slot < 16; ++slot) {
+        int32_t occupied = 0;
+        const QolResult result = native_slot_occupied(ref, slot, &occupied);
+        if (!contracts::succeeded(result)) return result;
+        if (occupied != 0) {
+            *out_empty = 0;
+            break;
+        }
+    }
     return contracts::ok();
 }
 

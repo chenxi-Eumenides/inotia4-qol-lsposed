@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "contracts/inventory_access.h"
-#include "store/slot_table.h"
+#include "plugins/core.inventory/store/slot_table.h"
 
 namespace qol::features::core_inventory::store {
 

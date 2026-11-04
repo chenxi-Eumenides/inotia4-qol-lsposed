@@ -6,6 +6,7 @@
 #include "../../contracts/attribute_quality.h"
 #include "../../contracts/bag.h"
 #include "../../contracts/inventory_action.h"
+#include "../../contracts/inventory_access.h"
 #include "../../contracts/panels.h"
 #include "../../contracts/world_facts.h"
 #include "../../contracts/item_facts.h"
@@ -52,7 +53,7 @@ const contracts::CapabilityRequirement kRequires[] = {
      {contracts::kUiStateVersionMajor, contracts::kUiStateVersionMinor}},
 };
 
-// optional=3: http.registry + ui_panels + inventory.bag_source
+// optional=4: http.registry + ui_panels + inventory.bag_source + inventory.access
 const contracts::CapabilityRequirement kOptionalRequires[] = {
     {contracts::kHttpRegistryCapabilityId,
      {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor}},
@@ -60,6 +61,8 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
      {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor}},
     {contracts::kBagSourceCapabilityId,
      {contracts::kBagSourceVersion.major, contracts::kBagSourceVersion.minor}},
+    {contracts::kInventoryAccessCapabilityId,
+     {contracts::kInventoryAccessVersion.major, contracts::kInventoryAccessVersion.minor}},
 };
 
 #define QOL_HTTP_ROUTE(method, path, owner, op_gated, lease_required) \
@@ -81,6 +84,7 @@ const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
 const contracts::WorldFactsApi* g_world_facts = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
+const contracts::QolInventoryAccessApi* g_inventory_access = nullptr;
 const contracts::UiStateApi* g_ui_state = nullptr;
 
 void register_ui_state() {
@@ -151,6 +155,7 @@ void clear_runtime_capabilities() {
     g_slot_data_api = nullptr;
     g_world_facts = nullptr;
     g_item_facts = nullptr;
+    g_inventory_access = nullptr;
     g_ui_state = nullptr;
 }
 
@@ -197,10 +202,22 @@ bool acquire_runtime_capabilities(contracts::PluginContext& ctx) {
     const auto* ui_state = static_cast<const contracts::UiStateApi*>(iface);
     if (ui_state->read_layers == nullptr) return false;
 
+    iface = nullptr;
+    const contracts::QolInventoryAccessApi* inventory_access = nullptr;
+    if (contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kInventoryAccessCapabilityId,
+            {contracts::kInventoryAccessVersion.major, contracts::kInventoryAccessVersion.minor},
+            &iface)) &&
+        iface != nullptr) {
+        const auto* candidate = static_cast<const contracts::QolInventoryAccessApi*>(iface);
+        if (contracts::qol_inventory_native_access_api_valid(candidate)) inventory_access = candidate;
+    }
+
     g_world_facts = world_facts;
     g_item_facts = item_facts;
     g_slot_data_api = slot_data_api;
     g_ui_state = ui_state;
+    g_inventory_access = inventory_access;
     if (!autosell_store_register(ctx.owner_token, slot_data_api)) {
         clear_runtime_capabilities();
         return false;
@@ -364,6 +381,10 @@ const contracts::QolInventoryExtrasPort* inventory_extras() {
 
 const contracts::QolItemPort* item_port() {
     return g_item_port;
+}
+
+const contracts::QolInventoryAccessApi* inventory_access_api() {
+    return g_inventory_access;
 }
 
 }  // namespace qol::features::autosell

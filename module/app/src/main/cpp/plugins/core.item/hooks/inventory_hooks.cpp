@@ -1,4 +1,5 @@
 #include "inventory_hooks.h"
+#include "plugins/core.item/api/native_inventory.h"
 #include "../api/projection.h"
 #include "../usecases/consume_item.h"
 #include "../bags/native_bag_limit.h"
@@ -421,7 +422,7 @@ bool build_transfer_for_hook_item(void* item, qol::contracts::QolBagTransfer* ou
                                   int32_t* out_category, uint32_t* out_payload_size) {
     if (item == nullptr || out_transfer == nullptr) return false;
     const auto* port = qol::features::core_item::g_port;
-    if (port == nullptr || !qol::contracts::qol_item_port_bag_space_size_valid(port) ||
+    if (port == nullptr || !qol::contracts::qol_item_port_native_bag_size_valid(port) ||
         port->read.serialize_item == nullptr || port->read.category == nullptr) {
         return false;
     }
@@ -1311,29 +1312,28 @@ struct ShortcutTraceScope {
 int native_category_count(int32_t category) {
     const auto* port = qol::features::core_item::g_port;
     if (category <= 0 || port == nullptr ||
-        !qol::contracts::qol_item_port_bag_space_size_valid(port) ||
-        port->read.bag_count == nullptr || port->read.bag_info == nullptr ||
-        port->read.item_at == nullptr) {
+        !qol::contracts::qol_item_port_native_bag_size_valid(port) ||
+        qol::features::core_item::inventory_native_api() == nullptr) {
         return 0;
     }
     int64_t total = 0;
     for (int32_t space = qol::contracts::kQolBagSpaceOriginal;
          space <= qol::contracts::kQolBagSpaceVariant; ++space) {
         int32_t bag_count = 0;
-        if (!qol::contracts::succeeded(port->read.bag_count(space, &bag_count)) ||
+        if (!qol::contracts::succeeded(qol::features::core_item::inventory_native_api()->native_bag_count(space, &bag_count)) ||
             bag_count < 0) {
             continue;
         }
         for (int32_t bag = 0; bag < bag_count; ++bag) {
             const qol::contracts::QolBagRef ref{space, bag};
             qol::contracts::QolBagInfo info{};
-            if (!qol::contracts::succeeded(port->read.bag_info(&ref, &info)) ||
+            if (!qol::contracts::succeeded(qol::features::core_item::inventory_native_api()->native_bag_info(&ref, &info)) ||
                 info.capacity < 0) {
                 continue;
             }
             for (int32_t slot = 0; slot < info.capacity; ++slot) {
                 qol::contracts::QolInventoryItemRef item{};
-                const QolResult result = port->read.item_at(&ref, slot, &item);
+                const QolResult result = qol::features::core_item::inventory_native_api()->native_item_at(&ref, slot, &item);
                 if (result.code == kQolErrNotFound) continue;
                 if (!qol::contracts::succeeded(result) || item.category != category) continue;
                 total += item.count;
