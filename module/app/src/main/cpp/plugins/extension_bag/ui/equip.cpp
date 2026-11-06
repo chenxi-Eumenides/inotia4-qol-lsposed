@@ -355,6 +355,8 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
             qol::extension_bag::ui_state().ui.extension_desc_item = item;
             qol::extension_bag::ui_state().ui.extension_desc_item_bag = item_bag;
             qol::extension_bag::ui_state().ui.extension_desc_item_slot = item_slot;
+            // 物品详情不是袋卸下详情，清掉上一袋残留的卸下目标。
+            qol::extension_bag::ui_state().ui.extension_desc_unequip_bag = -1;
             install_extension_desc_item_hooks_locked(item);
             QOL_LOG_INFO(QolDomain::kExtensionBag,
                          "extension desc item captured bag=%d slot=%d item=%p",
@@ -378,6 +380,8 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
                 qol::extension_bag::ui_state().ui.extension_desc_item = nullptr;
                 qol::extension_bag::ui_state().ui.extension_desc_item_bag = -1;
                 qol::extension_bag::ui_state().ui.extension_desc_item_slot = -1;
+                // 原版装备/袋物品详情不是扩展袋卸下详情，清掉残留卸下目标。
+                qol::extension_bag::ui_state().ui.extension_desc_unequip_bag = -1;
             }
         }
     }

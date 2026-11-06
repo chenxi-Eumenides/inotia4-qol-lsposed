@@ -293,6 +293,9 @@ bool extension_handle_original_bag_unequip() {
     ::qol::extension_bag::ReentryLock lock;
     if (::qol::extension_bag::access::bag().mode != virtual_bag::Mode::kModule) return false;
     const int ext_bag = qol::extension_bag::ui_state().ui.extension_desc_unequip_bag;
+    // 只有扩展袋卸下详情会记录 ext_bag；装备详情打开时清成 -1。
+    // 没有 ext_bag 时必须回原版 backup 处理装备卸下，不能吞按钮。
+    if (ext_bag < 0) return false;
     const bool owns_desc = virtual_bag::valid_index(ext_bag) &&
                            ::qol::extension_bag::access::bag().selected == ext_bag &&
                            ::qol::extension_bag::access::bag().info_bag == ext_bag;
