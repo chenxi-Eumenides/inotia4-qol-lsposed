@@ -146,13 +146,10 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(::qol::extension_bag::Ree
     // 原版袋接收入库按物理袋 0..4 的顺序取第一个可保存袋。不能使用
     // original_bag_locked()：EB 视图为了投影会把当前 UI 窗口临时指向宿主袋
     // （常见是 1），否则袋 0 有空位时仍会落到袋 1。
-    // 排除 internal_bag 自身：正在解除的袋不得作为接收方——袋对象若放回
-    // 自己的行/槽，随后 unequip_bag 清袋会把刚放回的物品一起清掉
-    // （真机实证：extension unequip adopt bag=N dst=N/0 后物品丢失/解除失败）。
+    // internal_bag 是扩展袋索引，与物理袋号无关，不能用来跳过物理袋。
     int order[5];
     int order_count = 0;
     for (int bag = 0; bag < 5; ++bag) {
-        if (bag == internal_bag) continue;
         order[order_count++] = bag;
     }
     int receiving_bag = -1;
@@ -169,7 +166,9 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(::qol::extension_bag::Ree
         int adopt_bag = -1;
         int adopt_slot = -1;
         for (int bag = 0; bag < virtual_bag::active_extension_bags() && adopt_bag < 0; ++bag) {
-            if (bag == internal_bag) continue;  // 排除正在解除的袋（见上）
+            // 排除正在解除的袋：袋对象若放回自己的行/槽，随后 unequip_bag
+            // 清袋会把刚放回的物品一起清掉。
+            if (bag == internal_bag) continue;
             if (::qol::extension_bag::access::bag().types[bag] == 0) continue;
             const int capacity = ::qol::extension_bag::access::bag().capacities[bag];
             for (int slot = 0; slot < capacity; ++slot) {
