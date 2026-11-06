@@ -166,6 +166,14 @@ uint64_t equip_control_event_proc_wrapper(void* control, uint64_t event, void* x
                       "hook=%s backup missing", "hook:UIEquip_EquipControlEventProc");
         return 0;
     }
+    // UIEquip_EquipControlEventProc 的 0x01/0x80 会打开装备详情；当前详情不再是
+    // 扩展袋卸下详情，清掉残留目标，避免卸下按钮被误分流。
+    if (event == 0x01 || event == 0x80) {
+        ::qol::extension_bag::ReentryLock lock;
+        if (lock.owns_lock()) {
+            ui_state().ui.extension_desc_unequip_bag = -1;
+        }
+    }
     uint64_t result = 0;
     const VirtualBagEquipControlEventResult outcome = virtual_bag_handle_equip_control_event(
         control, event, x2, param, backup, &result);
