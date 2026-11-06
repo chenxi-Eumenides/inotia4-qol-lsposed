@@ -1041,11 +1041,24 @@ QolResult equip_handle(int32_t role, contracts::QolItemHandle handle, int32_t eq
         return item_error(out, kQolErrNotReady, "equip slot unavailable");
     }
     if (*equipped_slot != nullptr) return item_error(out, kQolErrConflict, "equip slot occupied");
-    if (!fn_can_equip(character, item) || fn_find_equip_slot(character, item) != equip_slot) {
+    if (!fn_can_equip(character, item)) {
+        return item_error(out, kQolErrBlocked, "cannot equip");
+    }
+    const int base_slot = fn_find_equip_slot(character, item);
+    const bool second_ring_slot = base_slot == 8 && equip_slot == 9;
+    if (equip_slot != base_slot && !second_ring_slot) {
         return item_error(out, kQolErrBlocked, "cannot equip");
     }
 
-    const int equipped = fn_equip_item(character, item);
+    int equipped = 1;
+    if (second_ring_slot) {
+        // CHAR_EquipItem 只用 CHAR_FindEquipSlot 的单一结果，戒指第一槽被占用时返回 0。
+        // 原版 CHAR_EquipItemFromInvenToSlot 在 target=9 且 9 为空时直接 CHAR_SetEquipItem
+        // （0xe555c），这里沿用同一原语以支持第二戒指槽。
+        fn_set_equip_item(character, equip_slot, item);
+    } else {
+        equipped = fn_equip_item(character, item);
+    }
     if (equipped == 0) {
         if (*equipped_slot == item) fn_set_equip_item(character, equip_slot, nullptr);
         return item_error(out, kQolErrInternal, "equip failed");
@@ -1230,9 +1243,16 @@ QolResult equip_item(int32_t role, int32_t bag, int32_t slot,
     if (fn_find_equip_slot == nullptr || fn_equip_item_from_inven_to_slot == nullptr) {
         return item_error(out, kQolErrUnsupported, "symbol not resolved");
     }
-    const int target = fn_find_equip_slot(character, item);
+    int target = fn_find_equip_slot(character, item);
     if (target < 0 || target >= C_EQUIP_SLOTS) {
         return item_error(out, kQolErrBlocked, "cannot equip");
+    }
+    // CHAR_EquipItemFromInven @0xe577c 对戒指有 8→9 特例：第一槽已占用且第二槽为空时，
+    // 原版会装备到 9。CHAR_FindEquipSlot 只返回 8，这里补回该选择。
+    if (target == 8 && fn_get_equip_item != nullptr &&
+        fn_get_equip_item(character, 8) != nullptr &&
+        fn_get_equip_item(character, 9) == nullptr) {
+        target = 9;
     }
     // This entry remains hooked by Stage4; it owns the original exchange and special_equip chain.
     const int result = fn_equip_item_from_inven_to_slot(character, bag, slot, target);

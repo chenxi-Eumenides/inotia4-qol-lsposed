@@ -713,6 +713,19 @@ int provider_equip_item(void* character, int32_t flat_bag, int32_t slot) {
         free_native(new_item);
         return 0;
     }
+    // CHAR_EquipItemFromInven @0xe577c 对戒指有 8→9 特例：第一槽已占用且第二槽为空时，
+    // 原版会装备到 9。CHAR_FindEquipSlot 只返回 8，这里补回该选择。
+    if (target == 8) {
+        void* first_ring = nullptr;
+        void* second_ring = nullptr;
+        if (qol::contracts::succeeded(
+                extras->read.equipped_item(character, 8, &first_ring)) &&
+            qol::contracts::succeeded(
+                extras->read.equipped_item(character, 9, &second_ring)) &&
+            first_ring != nullptr && second_ring == nullptr) {
+            target = 9;
+        }
+    }
     int32_t two_handed = 0;
     if (g_game->abi.minor >= qol::contracts::kGameHostTwoHandedMinor &&
         g_game->read_only.item.is_two_handed != nullptr) {
