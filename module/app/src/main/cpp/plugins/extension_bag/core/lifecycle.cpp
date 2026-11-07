@@ -646,7 +646,9 @@ bool prepare_main_menu_locked() {
     // drop the rest so queued addresses cannot outlive the menu transition.
     drain_deferred_frees_locked();
     clear_deferred_free_queue_locked();
-    runtime_state().objects.bag = {};
+    // sidecar 不持有 ItemPool 指针，clear_module_cache_locked 已清掉原生对象和页签引用。
+    // 返回主菜单后重新进入同一存档不会再次触发 session-bound load；清空 bag 会让
+    // 扩展袋变空，并在下一次保存时把空状态写回。换存档由 slot data load 覆盖 sidecar。
     runtime_state().persistence.loaded_slot = -2;
     runtime_state().persistence.dirty = false;
     qol::extension_bag::ui_state().ui.inventory_frame_active = false;
