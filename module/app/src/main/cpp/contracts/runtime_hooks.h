@@ -14,7 +14,7 @@
 namespace qol::contracts {
 
 // minor=1：帧任务字段由 legacy frame_task 直通改为 infra::scheduler 直通（同位同签名）。
-constexpr QolVersion kQolRuntimeHooksVersion{1, 1};
+constexpr QolVersion kQolRuntimeHooksVersion{1, 2};
 
 // 帧点位（与 infra scheduler 帧点位同值；W31 核验）：0=渲染前、1=逻辑前。
 constexpr int32_t kQolRuntimeFramePointRenderPre = 0;

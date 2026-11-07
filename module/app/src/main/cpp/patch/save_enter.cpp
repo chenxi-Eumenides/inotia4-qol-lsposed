@@ -59,18 +59,19 @@ void save_load_wrapper(int32_t slot) {
                      "save enter blocked because loading bypass scope is occupied slot=%d", slot);
         return;
     }
-    save_enter_mark_pending();
-    if (fn_game_start_resume_game != nullptr) {
-        fn_game_start_resume_game(slot);
-    } else {
-        // 原版未启动：显式取消未决转换（释放 token/lease），并结束 bypass 作用域。
+    const int result = fn_game_start_resume_game != nullptr
+                           ? fn_game_start_resume_game(slot)
+                           : 0;
+    qol::game::save_load_bypass_end(bypass);
+    if (result == 0) {
+        // 原版未启动/明确失败：释放 token/lease，且不留下 save_enter pending。
         const auto& hooks_cancel = qol::contracts::qol_runtime_hooks();
         if (hooks_cancel.save_transition_cancel_thunk != nullptr)
             hooks_cancel.save_transition_cancel_thunk(transition);
-        qol::game::save_load_bypass_end(bypass);
+        QOL_LOG_WARN(QolDomain::kSave, "save enter original failed slot=%d", slot);
         return;
     }
-    qol::game::save_load_bypass_end(bypass);
+    save_enter_mark_pending();
 }
 
 // 该 patch 精确替换 SelectCharacter_ButtonStartExe+0x10 的原版 BL

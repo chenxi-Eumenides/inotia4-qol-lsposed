@@ -549,6 +549,19 @@ int save_resume_entry_wrapper(int32_t slot) {
     int32_t pending_target = -1;
     if (hooks.save_has_unready_load_transition != nullptr &&
         hooks.save_has_unready_load_transition(&pending_target)) {
+        // 同槽透传；异槽仍在转换中时拒绝，避免把 B 槽读档套进 A 槽的转换上下文。
+        if (pending_target != slot) {
+            CS_LOG_WARN(kCoreSaveLogDomain,
+                        "resume entry pending slot mismatch slot=%d pending=%d", slot,
+                        pending_target);
+            return 0;
+        }
+        // 按钮 call-patch 路径不会武装计时器；这里对已有转换做同 token 幂等补武装。
+        uint64_t pending_token = 0;
+        if (save_transition_pending_observation(&pending_token, nullptr) &&
+            pending_token != 0) {
+            resume_timer_arm(pending_token);
+        }
         return g_backup_game_start_resume_game(slot);
     }
     uint64_t token = 0;
@@ -569,9 +582,17 @@ int save_resume_entry_wrapper(int32_t slot) {
         CS_LOG_WARN(kCoreSaveLogDomain, "resume entry bypass unavailable slot=%d", slot);
         return 0;
     }
-    if (hooks.save_enter_mark_pending != nullptr) hooks.save_enter_mark_pending();
+    resume_timer_arm(token);
     const int result = g_backup_game_start_resume_game(slot);
     if (hooks.save_load_bypass_end != nullptr) hooks.save_load_bypass_end(bypass);
+    if (result == 0) {
+        // 原版未启动/明确失败：释放 token/lease 与确认计时器，且不留下 save_enter pending。
+        (void)save_transition_cancel(token);
+        resume_timer_disarm();
+        CS_LOG_WARN(kCoreSaveLogDomain, "resume entry original failed slot=%d", slot);
+        return 0;
+    }
+    if (hooks.save_enter_mark_pending != nullptr) hooks.save_enter_mark_pending();
     return result;
 }
 

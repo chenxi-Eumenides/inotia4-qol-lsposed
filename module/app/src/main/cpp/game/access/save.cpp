@@ -283,7 +283,6 @@ std::string enter_slot_locked(int32_t slot) {
     fn_ui_set_popup_process_info(4, 0);
     uint8_t** flag_ptr = reinterpret_cast<uint8_t**>(g_base + G_GAME_RESUME_FLAG_GOT_VMA);
     if (*flag_ptr != nullptr) **flag_ptr = 0;
-    contracts::qol_runtime_hooks().save_enter_mark_pending();  // 进入存档回调：标记读档发起
     const bool handle_transition = begin_item_handle_lifecycle_transition();
     // 与按钮读档共用受控转换上下文：统一设置未就绪 transition + invocation，作用域释放。
     const uint64_t bypass = save_load_bypass_begin(
@@ -297,6 +296,7 @@ std::string enter_slot_locked(int32_t slot) {
     if (handle_transition) finish_item_handle_lifecycle_transition(r != 0);
     else if (r != 0) invalidate_all_item_handles();
     if (!r) return op_err("enter slot failed");
+    contracts::qol_runtime_hooks().save_enter_mark_pending();  // 原版已启动：标记读档发起
     transition_guard.disarmed = true;  // 原版已启动：确认序接管 token。
 
     // v0.4.49：进档后清理残留教学暂停——obj170=6（药水教学）是持久状态，
