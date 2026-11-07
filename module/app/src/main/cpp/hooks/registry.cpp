@@ -10,7 +10,7 @@
 namespace qol::hooks {
 namespace {
 
-constexpr uint32_t kMaxClaims = 128;
+constexpr uint32_t kMaxClaims = 160;
 
 struct Entry {
     contracts::ResourceClaim claim;

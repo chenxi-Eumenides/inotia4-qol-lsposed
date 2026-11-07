@@ -12,7 +12,7 @@ namespace qol::hooks {
 namespace {
 
 // 登记表容量（hooks/registry.cpp 同值）；事务资源列表按此设置上限。
-constexpr uint32_t kMaxResources = 128;
+constexpr uint32_t kMaxResources = 160;
 // 终态事务保留条数：环形覆盖最旧，淘汰后查询返回 false。
 constexpr uint32_t kMaxTerminal = 16;
 // 并发未终态事务槽位数（每插件至多一个）。
