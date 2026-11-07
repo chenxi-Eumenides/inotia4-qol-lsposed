@@ -62,6 +62,7 @@ struct QuestSnapshot {
 };
 
 const contracts::QolHostSdk* g_sdk = nullptr;
+const contracts::QolEventStateApi* g_event_state = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
 const contracts::WorldFactsApi* g_world_facts = nullptr;
 const contracts::QolQuestPort* g_quest_port = nullptr;
@@ -501,29 +502,27 @@ void start_snapshot_task() {
     }
 }
 
-// QolEventHandler 签名适配：转调 on_save_enter（复位 world 边沿 + 启动 resync tick），
-// 复用其内部逻辑，不复制状态机。
-void on_save_enter_event(void* /*ctx*/, const void* /*payload*/) {
+void on_save_ready_state(void*, const contracts::EventStateChange* change) {
+    if (change == nullptr ||
+        change->availability != static_cast<uint8_t>(contracts::EventStateAvailability::kAvailable) ||
+        change->value != 1) return;
     on_save_enter(nullptr);
 }
 
-// 订阅 kEventSaveEnter（core.save 确认后 publish，patch/save_enter）。同一 fn+ctx
-// 幂等：已订阅（id 非 0）时直接返回，避免 install 重入产生重复 resync。
 void register_save_enter_subscription() {
-    if (g_save_enter_subscription != 0 || g_sdk == nullptr ||
-        g_sdk->events.subscribe == nullptr) {
-        return;
-    }
-    (void)g_sdk->events.subscribe(contracts::kEventSaveEnter, &on_save_enter_event, nullptr,
-                                  &g_save_enter_subscription);
+    if (g_save_enter_subscription != 0 || g_sdk == nullptr) return;
+    g_event_state = contracts::event_state_if_available(g_sdk);
+    if (g_event_state == nullptr) return;
+    (void)g_event_state->subscribe(contracts::kEventStateSaveReady, &on_save_ready_state, nullptr,
+                                   &g_save_enter_subscription);
 }
 
 void unregister_save_enter_subscription() {
-    if (g_save_enter_subscription != 0 && g_sdk != nullptr &&
-        g_sdk->events.unsubscribe != nullptr) {
-        (void)g_sdk->events.unsubscribe(g_save_enter_subscription);
+    if (g_save_enter_subscription != 0 && g_event_state != nullptr) {
+        (void)g_event_state->unsubscribe(g_save_enter_subscription);
     }
     g_save_enter_subscription = 0;
+    g_event_state = nullptr;
 }
 
 int plugin_install(contracts::PluginContext& ctx) {

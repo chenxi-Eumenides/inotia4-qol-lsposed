@@ -15,7 +15,7 @@
 // (qid, 2) 补齐状态。只做 1→2 补升，不做降级。
 //
 // 帧节拍经 Host SDK scheduler 逻辑帧点（帧源 wrapper 派发）。进档重算有两个同步点：
-// Game Host world 状态边沿（LogicPre 常驻检测）与 kEventSaveEnter 事件（core.save
+// Game Host world 状态边沿（LogicPre 常驻检测）与存档 ready 事件状态（core.save
 // 确认后 publish，插件 install 订阅）；两者均复用同一条 resync 路径，不依赖宿主私有
 // save_enter 设施。
 
@@ -36,7 +36,7 @@ void cancel_resync_task();
 
 void start_resync_task();
 
-// kEventSaveEnter 事件订阅适配（游戏主线程、world 就绪后触发）：注册一次性逻辑帧任务。
+// 存档 ready 事件状态订阅适配（游戏主线程、world 就绪后触发）：注册一次性逻辑帧任务。
 void on_save_enter(void* ctx);
 
 // 一次性逻辑帧任务：补齐 state=1 且已达成者；返回 false 自动注销。

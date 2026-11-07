@@ -67,6 +67,8 @@ int fixture_typed_registrations();
 int fixture_typed_unregistrations();
 int fixture_event_registrations();
 int fixture_event_unregistrations();
+int fixture_event_state_registrations();
+int fixture_event_state_unregistrations();
 }  // namespace qol::host
 
 namespace qol::gametest {
@@ -750,6 +752,8 @@ void assert_no_public_craft_result_capability() {
 void assert_registrations_net_zero() {
     assert(qol::host::fixture_typed_registrations() == qol::host::fixture_typed_unregistrations());
     assert(qol::host::fixture_event_registrations() == qol::host::fixture_event_unregistrations());
+    assert(qol::host::fixture_event_state_registrations() ==
+           qol::host::fixture_event_state_unregistrations());
     assert(g_text_subscribe_calls == g_text_unsubscribe_calls);
 }
 
@@ -1348,6 +1352,9 @@ int main(int argc, char** argv) {
         const int typed_unreg_before = qol::host::fixture_typed_unregistrations();
         const int event_before = qol::host::fixture_event_registrations();
         const int event_unreg_before = qol::host::fixture_event_unregistrations();
+        const int event_state_before = qol::host::fixture_event_state_registrations();
+        const int event_state_unreg_before =
+            qol::host::fixture_event_state_unregistrations();
         const int text_sub_before = g_text_subscribe_calls;
         const int text_unsub_before = g_text_unsubscribe_calls;
 
@@ -1365,8 +1372,10 @@ int main(int argc, char** argv) {
         // 本次 install 的注册必须净额归零。
         assert(qol::host::fixture_typed_registrations() == typed_before + 2);
         assert(qol::host::fixture_typed_unregistrations() == typed_unreg_before + 2);
-        assert(qol::host::fixture_event_registrations() == event_before + 1);
-        assert(qol::host::fixture_event_unregistrations() == event_unreg_before + 1);
+        assert(qol::host::fixture_event_registrations() == event_before);
+        assert(qol::host::fixture_event_unregistrations() == event_unreg_before);
+        assert(qol::host::fixture_event_state_registrations() == event_state_before + 1);
+        assert(qol::host::fixture_event_state_unregistrations() == event_state_unreg_before + 1);
         assert(g_text_subscribe_calls == text_sub_before + 1);
         assert(g_text_unsubscribe_calls == text_unsub_before + 1);
         assert(!qol::features::custom_recipe::ui::core_backups_ready());

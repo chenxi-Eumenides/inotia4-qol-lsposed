@@ -54,6 +54,7 @@
 - `plugin-audit-playbook.md`：审计、修复、测试闭环流程。
 - `hook-engine-decision.md`：入口 hook 原语现状、4 字节短补丁边界、第三方 hook 库对比与选型结论。
 - `config-enable-lifecycle-proposal.md`：已被实现模型取代（superseded）；现行契约见 ARCHITECTURE §8.2 与 API 参考 §7.6。
+- `event-state-mechanism-proposal.md`：事件状态（event state）机制提案：存档就绪等高频事实由所有者声明状态、宿主统一派发；含契约、生命周期、迁移路径与使用者清单（未实现）。
 - `baseline.md`：脚本生成的结构基线。
 - `map.md`：脚本生成的当前源码结构统计；不定义目标架构。
 - `api-route-map.md`：API 路由核对材料。

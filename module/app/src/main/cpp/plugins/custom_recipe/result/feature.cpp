@@ -33,6 +33,7 @@ constexpr uint32_t kJewelTypeShift = 18;
 constexpr uint32_t kJewelTypeMask = 63;
 
 const contracts::QolHostSdk* g_sdk = nullptr;
+const contracts::QolEventStateApi* g_event_state = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
 const contracts::CraftFactsApi* g_craft_facts = nullptr;
@@ -41,7 +42,7 @@ const contracts::QolCustomRecipeWritePort* g_write_port = nullptr;
 const contracts::InventoryActionApi* g_inventory_action = nullptr;
 const contracts::QolInventorySlotApi* g_inventory_slot = nullptr;
 const contracts::QolBagSourceRegistryApi* g_bag_source_registry = nullptr;
-uint64_t g_save_enter_subscription = 0;
+uint64_t g_save_ready_subscription = 0;
 bool valid_craft_item(qol::contracts::QolItemHandle item) {
     return item.slot != 0 && item.generation != 0;
 }
@@ -637,7 +638,10 @@ void refresh_dynamic_recipes(void* /*ctx*/) {
                 n, slot, cache_hit ? "hit" : "miss", rerolls);
 }
 
-void refresh_dynamic_recipes_event(void* /*ctx*/, const void* /*payload*/) {
+void refresh_dynamic_recipes_event(void* /*ctx*/, const contracts::EventStateChange* change) {
+    if (change == nullptr ||
+        change->availability != static_cast<uint8_t>(contracts::EventStateAvailability::kAvailable) ||
+        change->value != 1) return;
     refresh_dynamic_recipes(nullptr);
 }
 
@@ -1827,21 +1831,20 @@ bool set_enabled(bool enabled_value) {
 }
 
 void register_dynamic_recipes() {
-    if (g_save_enter_subscription != 0 || g_sdk == nullptr ||
-        g_sdk->events.subscribe == nullptr) {
-        return;
-    }
-    (void)g_sdk->events.subscribe(contracts::kEventSaveEnter,
+    if (g_save_ready_subscription != 0 || g_sdk == nullptr) return;
+    g_event_state = contracts::event_state_if_available(g_sdk);
+    if (g_event_state == nullptr) return;
+    (void)g_event_state->subscribe(contracts::kEventStateSaveReady,
                                    &refresh_dynamic_recipes_event, nullptr,
-                                   &g_save_enter_subscription);
+                                   &g_save_ready_subscription);
 }
 
 void unregister_dynamic_recipes() {
-    if (g_save_enter_subscription != 0 && g_sdk != nullptr &&
-        g_sdk->events.unsubscribe != nullptr) {
-        (void)g_sdk->events.unsubscribe(g_save_enter_subscription);
+    if (g_save_ready_subscription != 0 && g_event_state != nullptr) {
+        (void)g_event_state->unsubscribe(g_save_ready_subscription);
     }
-    g_save_enter_subscription = 0;
+    g_save_ready_subscription = 0;
+    g_event_state = nullptr;
 }
 
 const result::CraftResultApi& craft_result_api() { return kCraftResultApi; }

@@ -7,7 +7,7 @@
 #include <type_traits>
 
 using namespace qol::contracts;
-static_assert(kHostSdkMajor == 1 && kHostSdkMinor == 31);
+static_assert(kHostSdkMajor == 1 && kHostSdkMinor == 32);
 static_assert(kHttpRegistryVersion.major == 1 && kHttpRegistryVersion.minor == 1);
 static_assert(kHttpDispatchVersion.major == 1 && kHttpDispatchVersion.minor == 1);
 
@@ -72,7 +72,8 @@ static_assert(offsetof(QolHostSdk, module_health) == 824);
 static_assert(offsetof(QolHostSdk, desc_hook_v2) == 832);
 static_assert(offsetof(QolHostSdk, panel_enumeration) == 840);
 static_assert(offsetof(QolHostSdk, public_export) == 848);
-static_assert(sizeof(QolHostSdk) == 856);
+static_assert(offsetof(QolHostSdk, event_state) == 856);
+static_assert(sizeof(QolHostSdk) == 864);
 static_assert(std::is_standard_layout_v<FeatureDefinition> &&
               std::is_trivially_copyable_v<FeatureDefinition>);
 constexpr FeatureDefinition kDefaultPriorityFeature{};

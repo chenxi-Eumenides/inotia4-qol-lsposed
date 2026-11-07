@@ -623,6 +623,7 @@ set(INFRA_TEST_SOURCES
     ${CPP_DIR}/infra/command_queue.cpp
     ${CPP_DIR}/infra/runtime.cpp
     ${CPP_DIR}/infra/events.cpp
+    ${CPP_DIR}/infra/event_state.cpp
     ${CPP_DIR}/infra/capabilities.cpp
     ${CPP_DIR}/infra/status.cpp
     ${CPP_DIR}/infra/test_reset.cpp
@@ -693,6 +694,15 @@ foreach(infra_case snapshot command_queue events capabilities_status)
     target_link_libraries(infra_${infra_case}_tests PRIVATE Threads::Threads)
     add_test(NAME infra_${infra_case}_tests COMMAND infra_${infra_case}_tests)
 endforeach()
+
+add_executable(infra_event_state_tests
+    test_infra_event_state.cpp
+    ${CPP_DIR}/infra/event_state.cpp
+    ${CPP_DIR}/infra/runtime.cpp)
+target_include_directories(infra_event_state_tests PRIVATE ${CPP_DIR})
+target_compile_features(infra_event_state_tests PRIVATE cxx_std_17)
+target_link_libraries(infra_event_state_tests PRIVATE Threads::Threads)
+add_test(NAME infra_event_state_tests COMMAND infra_event_state_tests)
 
 add_executable(settings_catalog_abi_tests test_settings_catalog_abi.cpp)
 target_include_directories(settings_catalog_abi_tests PRIVATE ${CPP_DIR})
@@ -1391,6 +1401,7 @@ add_executable(host_adapter_tests
     test_public_export_bridge_stubs.cpp
     ${CPP_DIR}/host/public_export.cpp
     ${CPP_DIR}/host/host_sdk.cpp
+    ${CPP_DIR}/infra/event_state.cpp
     ${CPP_DIR}/host/module_health.cpp
     ${CPP_DIR}/host/features/production.cpp
     ${CPP_DIR}/host/features/platform.cpp

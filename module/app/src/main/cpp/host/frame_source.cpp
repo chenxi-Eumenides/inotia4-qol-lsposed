@@ -327,27 +327,6 @@ bool host_save_transition_begin_thunk(int32_t kind, int32_t target_slot,
     return contracts::succeeded(result);
 }
 
-// P3c：core.save 确认序未完成（未 ready）时 kEventSaveEnter 事件不得派发。
-// 缺省（core.save 未装/未 bind）放行，保持无模块参与时的既有 save_enter 行为。
-bool host_save_enter_ready() {
-    const contracts::QolOwnerToken token = qol::host::owner_token_of("core.save");
-    if (token == 0) return true;
-    // binding 是否存在由派发返回的 NotFound 区分：NotFound = 无 binding（未装/停用），
-    // 与确认序未完成（kMaintenance 探针返回 Blocked）语义分离。
-    contracts::QolSaveNativeCall call{};
-    call.size = sizeof(call);
-    call.kind = static_cast<uint32_t>(contracts::QolSaveCallKind::kMaintenance);
-    call.target_slot = -1;
-    call.class_index = -1;
-    call.origin = static_cast<uint32_t>(contracts::QolSaveOrigin::kOrdinary);
-    contracts::QolSaveDomainStatus status{};
-    status.size = sizeof(status);
-    const QolResult result =
-        qol::host::save_route::dispatch_native_call_for_plugin("core.save", &call, &status);
-    if (result.code == kQolErrNotFound) return true;  // 无 binding：模块面未参与。
-    return contracts::succeeded(result);
-}
-
 // P3c：取消未决转换。经 save_route 转接 core.save 的 kCancelTransition；无 binding 时静默
 // 返回（模块未参与，无可取消 token）。仅供 Game 层的「原版未启动/明确失败」出口调用。
 void host_save_transition_cancel_thunk(uint64_t transition) {
@@ -377,10 +356,8 @@ const QolRuntimeHooksApi kQolRuntimeHooksApi{
     &host_transition_run_inline,
     &host_scheduler_add,
     &host_scheduler_remove,
-    &save_enter_mark_pending,
     &host_capability_require,
     &host_save_transition_begin_thunk,
-    &host_save_enter_ready,
     &host_save_transition_cancel_thunk,
     &qol::game::save_load_bypass_begin,
     &qol::game::save_load_bypass_end,

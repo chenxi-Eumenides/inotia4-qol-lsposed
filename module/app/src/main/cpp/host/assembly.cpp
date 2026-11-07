@@ -85,13 +85,14 @@
 #include "host/plugin_registry.h"
 #include "host/ui_adapter.h"
 #include "infra/commands.h"
-#include "infra/events.h"
+#include "infra/event_state.h"
 #include "infra/frame/transition_dispatch.h"
 #include "infra/request_policy.h"
 #include "infra/config.h"
 #include "infra/runtime.h"
 #include "infra/scheduler.h"
 #include "contracts/events.h"
+#include "game/state/game_state.h"
 #include "hooks/registry.h"
 #include "patch/instr_patch.h"
 #include "patch/ptr_slot.h"
@@ -457,11 +458,6 @@ void retry_save_patch_claims() {
     bool installed = false;
     if (save_sites_ready()) {
         installed = install_save_patch_claims(&failure);
-        if (installed && !save_enter_init()) {
-            installed = false;
-            failure.stage = "save_enter_init";
-            failure.error = "frame task registration rejected";
-        }
     } else {
         failure.stage = "site_not_ready";
         failure.error = "bridge or game function entry unavailable";
@@ -535,10 +531,39 @@ bool drain_commands_task(int64_t frame, void* ctx) {
     return true;
 }
 
-// SaveEnter 锁存订阅回调（infra 事件签名）：只记录当前有效 activation token，
-// 不做资源安装/插件调用/游戏访问。
-void on_save_enter_ready(void* /*ctx*/, const void* /*payload*/) {
+// 存档就绪状态订阅：snapshot 与变为就绪均可触发 owner 恢复。
+void on_save_ready_state(void*, const contracts::EventStateChange* change) {
+    if (change == nullptr) return;
+    if (change->availability !=
+        static_cast<uint8_t>(contracts::EventStateAvailability::kAvailable)) return;
+    if (change->value == 0) return;
     feature_registry_notify_save_ready();
+}
+
+uint64_t g_save_ready_subscription = 0;
+
+bool event_state_fallback_tick(int64_t, void*) {
+    static bool initialized = false;
+    static bool was_ready = false;
+    const bool in_world = game_in_world();
+    if (qol::infra::event_state_has_active_declaration(contracts::kEventStateSaveReady)) {
+        initialized = false;
+        return true;
+    }
+    if (!initialized || in_world != was_ready) {
+        initialized = true;
+        was_ready = in_world;
+        qol::infra::event_state_host_publish(
+            contracts::kEventStateSaveReady,
+            static_cast<uint8_t>(contracts::EventStateAvailability::kAvailable),
+            in_world ? 1 : 0, in_world ? current_save_slot() : -1);
+    }
+    return true;
+}
+
+bool event_state_dispatch_tick(int64_t, void*) {
+    qol::infra::event_state_dispatch_pending();
+    return true;
 }
 
 // save_transaction 的 gate 准入缝：gate 与 store 共用一把锁，取锁后按凭据校验，
@@ -570,13 +595,15 @@ bool assembly_init() {
     // extending the Game Host ABI or making the plugin depend on Game Adapter internals.
     extension_bag_bind_player_update_shortcut(fn_player_update_shortcut);
 #endif
-    // 启动期 ownership 恢复信号源：装配期经 infra 事件订阅一次（幂等：以已存订阅 id
-    // 判定，assembly_init 重入不产生重复订阅；订阅不随插件启停变化），回调只锁存 owner
-    // token。装配期/主线程串行执行，无需额外同步。
-    static uint64_t g_save_enter_subscription = 0;
-    if (g_save_enter_subscription == 0) {
-        g_save_enter_subscription = qol::infra::subscribe(qol::contracts::kEventSaveEnter,
-                                                          &on_save_enter_ready, nullptr);
+    if (g_save_ready_subscription == 0) {
+        const contracts::QolResult subscribed = qol::infra::event_state_subscribe(
+            contracts::kEventStateSaveReady, &on_save_ready_state, nullptr,
+            &g_save_ready_subscription);
+        if (!contracts::succeeded(subscribed)) {
+            QOL_LOG_WARN(QolDomain::kCore,
+                         "assembly: save-ready state subscription failed error=%s",
+                         subscribed.message != nullptr ? subscribed.message : "unknown");
+        }
     }
     // item_count facade 是宿主装配的常驻实现，始终可查；扩展模式由生命周期策略驱动。
     const_cast<contracts::QolGameHost&>(g_game_host).item_count = host_item_count_api();
@@ -755,13 +782,28 @@ bool assembly_init() {
     // bridge_init attaches the ELF resolver before nativeInit enters assembly_init.
     probe_entry_export_resolution();
 #endif
-    // Save enter 迁移装配（装配末段，顺序关键）：core.save 插件的 RenderPre 确认任务在
-    // 插件装配期注册，scheduler 注册序即派发序；save_enter_tick 置于其后保证每帧
-    // 「先 core.save 确认、后 save_enter 消费」。发起点站点解析依赖 bridge/fn_resolve，
-    // boot 期安装曾因 bridge_ready() 恒 false 失败，故置本段。
-    if (!save_enter_init()) {
-        QOL_LOG_WARN(QolDomain::kCore, "assembly: save enter tick registration failed");
-        module_engine_failure = true;
+    // fallback 状态发布先于状态变更派发注册，确保同一逻辑帧的订阅者读取到新状态。
+    // 注册失败必须显式上报：缺任一任务都会让状态既不更新也不通知。
+    static bool g_event_state_tasks_registered = false;
+    if (!g_event_state_tasks_registered) {
+        const infra::FrameTaskId fallback_task = infra::scheduler_add(
+            infra::FramePoint::kLogicPre, &event_state_fallback_tick, nullptr, 1, 0);
+        const infra::FrameTaskId dispatch_task =
+            fallback_task == 0
+                ? 0
+                : infra::scheduler_add(infra::FramePoint::kLogicPre, &event_state_dispatch_tick,
+                                       nullptr, 1, 0);
+        if (fallback_task == 0 || dispatch_task == 0) {
+            if (fallback_task != 0) (void)infra::scheduler_remove(fallback_task);
+            if (dispatch_task != 0) (void)infra::scheduler_remove(dispatch_task);
+            module_engine_failure = true;
+            QOL_LOG_ERROR(QolDomain::kCore,
+                          "assembly: event state frame tasks unavailable (fallback=%llu dispatch=%llu)",
+                          static_cast<unsigned long long>(fallback_task),
+                          static_cast<unsigned long long>(dispatch_task));
+        } else {
+            g_event_state_tasks_registered = true;
+        }
     }
     // 发起点首装：装配期失败只标记待补装（健康位先置 unknown），不折算成模块初始化失败。
     // 补装成功会清除该位；补装窗口耗尽才上报 kSaveEntryPatches 失败。

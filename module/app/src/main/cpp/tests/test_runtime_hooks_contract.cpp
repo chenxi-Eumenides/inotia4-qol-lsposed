@@ -35,7 +35,7 @@ int main() {
 
     // 版本与帧点位常量（W31：与 infra 同值；infra 侧 static_assert 复核）。
     CHECK(qol::contracts::kQolRuntimeHooksVersion.major == 1);
-    CHECK(qol::contracts::kQolRuntimeHooksVersion.minor == 2);
+    CHECK(qol::contracts::kQolRuntimeHooksVersion.minor == 3);
     CHECK(qol::contracts::kQolRuntimeFramePointRenderPre == 0);
     CHECK(qol::contracts::kQolRuntimeFramePointLogicPre == 1);
 
@@ -55,9 +55,7 @@ int main() {
     static_assert(std::is_same<decltype(QolRuntimeHooksApi::scheduler_remove),
                                bool (*)(uint64_t)>::value,
                   "scheduler_remove signature drift");
-    static_assert(std::is_same<decltype(QolRuntimeHooksApi::save_enter_mark_pending),
-                               void (*)()>::value,
-                  "save_enter_mark_pending signature drift");
+
     static_assert(std::is_same<decltype(QolRuntimeHooksApi::capability_require),
                                const void* (*)(const char*, uint16_t, uint16_t)>::value,
                   "capability_require signature drift");

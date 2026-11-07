@@ -27,6 +27,7 @@ std::mutex g_task_mtx;
 uint64_t g_task = 0;
 uint64_t g_save_enter_subscription = 0;
 uint64_t g_save_exit_subscription = 0;
+const qol::contracts::QolEventStateApi* g_event_state = nullptr;
 std::atomic<bool> g_global_enabled{false};
 std::atomic<bool> g_config_enabled{false};
 std::atomic<uint64_t> g_scan_cancel_epoch{0};
@@ -510,9 +511,11 @@ void sync_task() {
     AUTOSELL_LOG_INFO("task registered id=%llu", static_cast<unsigned long long>(g_task));
 }
 
-void autosell_on_save_enter(void*, const void* payload) {
-    const auto* event = static_cast<const qol::contracts::SaveEnterEvent*>(payload);
-    const int slot = event == nullptr ? -1 : event->slot;
+void autosell_on_save_enter(void*, const qol::contracts::EventStateChange* change) {
+    if (change == nullptr ||
+        change->availability != static_cast<uint8_t>(qol::contracts::EventStateAvailability::kAvailable) ||
+        change->value != 1) return;
+    const int slot = change->slot;
     if (!autosell_scan_save_enter(slot)) {
         AUTOSELL_LOG_WARN("save enter rejected slot mismatch slot=%d", slot);
         remove_task_if_any();
@@ -566,9 +569,11 @@ void autosell_set_global_enabled(bool enabled) {
 void autosell_register_save_enter() {
     if (g_save_enter_subscription != 0) return;
     const auto* sdk = qol::features::autosell::host_sdk();
-    if (sdk == nullptr || sdk->events.subscribe == nullptr) return;
-    (void)sdk->events.subscribe(qol::contracts::kEventSaveEnter, &autosell_on_save_enter, nullptr,
-                                &g_save_enter_subscription);
+    if (sdk == nullptr) return;
+    g_event_state = qol::contracts::event_state_if_available(sdk);
+    if (g_event_state == nullptr) return;
+    (void)g_event_state->subscribe(qol::contracts::kEventStateSaveReady, &autosell_on_save_enter,
+                                   nullptr, &g_save_enter_subscription);
 }
 
 void autosell_register_save_exit() {
@@ -582,9 +587,11 @@ void autosell_register_save_exit() {
 void autosell_unregister_save_callbacks() {
     const auto* sdk = qol::features::autosell::host_sdk();
     if (sdk != nullptr && sdk->events.unsubscribe != nullptr) {
-        if (g_save_enter_subscription != 0) (void)sdk->events.unsubscribe(g_save_enter_subscription);
         if (g_save_exit_subscription != 0) (void)sdk->events.unsubscribe(g_save_exit_subscription);
     }
+    if (g_event_state != nullptr && g_save_enter_subscription != 0)
+        (void)g_event_state->unsubscribe(g_save_enter_subscription);
+    g_event_state = nullptr;
     g_save_enter_subscription = 0;
     g_save_exit_subscription = 0;
 }

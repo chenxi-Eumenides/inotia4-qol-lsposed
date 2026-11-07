@@ -122,7 +122,7 @@ UIMix 控件。
 
 - 26 个特殊装备类别（`model/catalog.h:165-168`）各生成一条三格有序配方；材料从 14 条材料池
   （`catalog.h:157-160`，含一个空槽候选）抽取且三者互不相同。
-- 每次 `kEventSaveEnter`：经 `save.facts` v1.1 读取当前槽 `slot_times` 的**角色创建时间**作
+- 每次存档就绪（事件状态 `kEventStateSaveReady` 的 ready 发布/快照）：经 `save.facts` v1.1 读取当前槽 `slot_times` 的**角色创建时间**作
   seed（`result/feature.cpp:455-502`）；自包含 SplitMix64 PRNG 按类别派生独立流，不使用共享
   游戏 RNG。同 seed + 同类别 + 同代码版本生成完全相同目录。
 - 候选若命中静态配方或已接受的动态配方，只重抽当前类别，不改变其它类别结果。

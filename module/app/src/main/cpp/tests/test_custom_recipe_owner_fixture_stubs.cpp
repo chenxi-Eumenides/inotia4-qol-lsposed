@@ -82,6 +82,33 @@ QolResult sdk_post_typed(uint32_t, const void*, uint32_t,
 
 int g_event_registrations = 0;
 int g_event_unregistrations = 0;
+
+int g_event_state_registrations = 0;
+int g_event_state_unregistrations = 0;
+QolResult sdk_event_state_declare(contracts::QolOwnerToken, const contracts::EventStateDescriptor* descriptor) {
+    if (descriptor == nullptr || descriptor->event_id != contracts::kEventStateSaveReady)
+        return contracts::error(kQolErrNotFound, nullptr, 0);
+    return contracts::ok();
+}
+QolResult sdk_event_state_set(contracts::QolOwnerToken, const contracts::EventStateValue*) {
+    return contracts::ok();
+}
+QolResult sdk_event_state_read(uint32_t, contracts::EventStateValue*) {
+    return contracts::error(kQolErrNotReady, nullptr, 0);
+}
+QolResult sdk_event_state_subscribe(uint32_t, contracts::QolEventStateHandler, void*,
+                                    uint64_t* out_id) {
+    ++g_event_state_registrations;
+    if (out_id != nullptr) *out_id = 500u + static_cast<uint64_t>(g_event_state_registrations);
+    return contracts::ok();
+}
+QolResult sdk_event_state_unsubscribe(uint64_t) {
+    ++g_event_state_unregistrations;
+    return contracts::ok();
+}
+const contracts::QolEventStateApi kEventStateStub{
+    sizeof(contracts::QolEventStateApi), &sdk_event_state_declare, &sdk_event_state_set,
+    &sdk_event_state_read, &sdk_event_state_subscribe, &sdk_event_state_unsubscribe};
 QolResult sdk_event_subscribe(uint32_t, qol::contracts::QolEventHandler, void*, uint64_t* out_id) {
     ++g_event_registrations;
     if (out_id != nullptr) *out_id = 100u + static_cast<uint64_t>(g_event_registrations);
@@ -122,6 +149,7 @@ contracts::QolHostSdk make_host_sdk() {
     sdk.commands.post_typed = &sdk_post_typed;
     sdk.events.subscribe = &sdk_event_subscribe;
     sdk.events.unsubscribe = &sdk_event_unsubscribe;
+    sdk.event_state = &kEventStateStub;
     sdk.capabilities.require = &sdk_capability_require;
     sdk.text_scope.push = &sdk_text_scope_push;
     sdk.text_scope.pop = &sdk_text_scope_pop;
@@ -142,5 +170,7 @@ int fixture_typed_registrations() { return g_typed_registrations; }
 int fixture_typed_unregistrations() { return g_typed_unregistrations; }
 int fixture_event_registrations() { return g_event_registrations; }
 int fixture_event_unregistrations() { return g_event_unregistrations; }
+int fixture_event_state_registrations() { return g_event_state_registrations; }
+int fixture_event_state_unregistrations() { return g_event_state_unregistrations; }
 
 }  // namespace qol::host

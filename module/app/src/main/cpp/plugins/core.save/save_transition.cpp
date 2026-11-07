@@ -12,6 +12,18 @@
 #include "slot_data_provider.h"
 
 namespace qol::features::core_save {
+
+namespace {
+void (*g_state_publisher)(bool ready, int32_t slot) = nullptr;
+}  // namespace
+
+void save_transition_set_state_publisher(void (*publisher)(bool ready, int32_t slot)) {
+    g_state_publisher = publisher;
+}
+
+void publish_save_ready(bool ready, int32_t slot) {
+    if (g_state_publisher != nullptr) g_state_publisher(ready, slot);
+}
 namespace {
 using namespace qol::contracts;
 constexpr auto value = [](auto v) { return static_cast<uint32_t>(v); };
@@ -286,9 +298,10 @@ QolResult save_transition_begin(uint32_t kind, int32_t requested_slot, uint64_t*
         std::lock_guard<std::mutex> lock(g.mutex);
         g.pending = pending;
         g.has_pending = true;
-        g.ready_published = false;  // 新转换期间不允许 kEventSaveEnter 事件派发。
+        g.ready_published = false;  // 新转换期间事件状态不再 ready。
         *out_token = pending.id;
     }
+    publish_save_ready(false, -1);
     CS_LOG_INFO(kCoreSaveLogDomain, "transition begun kind=%u slot=%d token=%llu old_epoch=%llu",
                  kind, requested_slot, pending.id, pending.old_epoch);
     return ok();
@@ -415,9 +428,10 @@ QolResult save_transition_confirm(uint64_t token_id, int32_t observed_slot) {
         g.pending.phase = TransitionPhase::kTerminal;
         g.pending = PendingTransition{};
         g.has_pending = false;
-        // 此后才允许 kEventSaveEnter 事件派发。
+        // 此后事件状态才可发布 ready。
         g.ready_published = true;
     }
+    publish_save_ready(true, pending.target_slot);
     CS_LOG_INFO(kCoreSaveLogDomain,
                  "transition ready token=%llu slot=%d old_epoch=%llu epoch=%llu", token_id,
                  pending.target_slot, pending.old_epoch, ready_session.epoch);
@@ -448,6 +462,7 @@ QolResult save_transition_cancel(uint64_t token_id) {
             (void)qol::features::core_save::slot_data_abandon_transition();
         }
     }
+    publish_save_ready(false, -1);
     if (unknown) {
         CS_LOG_WARN(kCoreSaveLogDomain, "transition cancel failed token=%llu step=lookup", token_id);
         return fail(kQolErrNotFound, "transition token unknown");

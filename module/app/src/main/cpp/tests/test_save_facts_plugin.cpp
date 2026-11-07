@@ -60,22 +60,18 @@ bool fake_begin_thunk(int32_t kind, int32_t target_slot, uint64_t* out_transitio
     if (out_transition != nullptr) *out_transition = status.transition;
     return succeeded(result);
 }
-bool fake_enter_ready() {
-    QolSaveNativeCall call{};
-    call.size = sizeof(call);
-    call.kind = static_cast<uint32_t>(QolSaveCallKind::kMaintenance);
-    call.target_slot = -1;
-    call.origin = static_cast<uint32_t>(QolSaveOrigin::kOrdinary);
-    QolSaveDomainStatus status{};
-    status.size = sizeof(status);
-    const QolResult result = qol::host::save_route::dispatch_native_call(
-        qol::features::core_save_test_owner_token(), &call, &status);
-    if (result.code == kQolErrNotFound) return true;
-    return succeeded(result);
-}
 const QolRuntimeHooksApi kTestHooks{
-    {1, 0}, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-    &fake_begin_thunk, &fake_enter_ready,
+    {1, 0},
+    nullptr,  // transition_run
+    nullptr,  // transition_run_inline
+    nullptr,  // scheduler_add
+    nullptr,  // scheduler_remove
+    nullptr,  // capability_require
+    &fake_begin_thunk,
+    nullptr,  // save_transition_cancel_thunk
+    nullptr,  // save_load_bypass_begin
+    nullptr,  // save_load_bypass_end
+    nullptr,  // save_has_unready_load_transition
 };
 }  // namespace
 const QolRuntimeHooksApi& qol_runtime_hooks() { return kTestHooks; }
@@ -305,6 +301,53 @@ QolResult verify_owner(QolOwnerToken token) {
                : error(kQolErrBlocked, "invalid token", 13);
 }
 
+// 事件状态 stub：core.save 现在以 event state 发布存档就绪；本测试只关心 ready/slot。
+bool g_event_declared = false;
+bool g_event_ready = false;
+int32_t g_event_slot = -1;
+
+QolResult es_declare(QolOwnerToken owner, const EventStateDescriptor* descriptor) {
+    if (descriptor == nullptr) return error(kQolErrInvalidArgument, "bad descriptor", 14);
+    if (g_owner_token == 0 || owner != g_owner_token)
+        return error(kQolErrBlocked, "invalid token", 13);
+    if (descriptor->event_id != kEventStateSaveReady)
+        return error(kQolErrNotFound, "unknown event", 13);
+    g_event_declared = true;
+    return ok();
+}
+QolResult es_set(QolOwnerToken owner, const EventStateValue* value) {
+    if (value == nullptr) return error(kQolErrInvalidArgument, "bad value", 9);
+    if (g_owner_token == 0 || owner != g_owner_token || !g_event_declared)
+        return error(kQolErrBlocked, "invalid owner", 13);
+    if (value->availability == static_cast<uint8_t>(EventStateAvailability::kUnavailable)) {
+        g_event_ready = false;
+        g_event_slot = -1;
+        return ok();
+    }
+    g_event_ready = value->value != 0;
+    g_event_slot = value->slot;
+    return ok();
+}
+QolResult es_read(uint32_t event_id, EventStateValue* out) {
+    if (out == nullptr) return error(kQolErrInvalidArgument, "bad output", 10);
+    if (event_id != kEventStateSaveReady || !g_event_declared)
+        return error(kQolErrNotReady, "not published", 13);
+    out->size = sizeof(*out);
+    out->event_id = event_id;
+    out->schema_version = kEventStateSaveReadySchema;
+    out->availability = static_cast<uint8_t>(EventStateAvailability::kAvailable);
+    out->value = g_event_ready ? 1 : 0;
+    out->slot = g_event_slot;
+    out->revision = 1;
+    return ok();
+}
+QolResult es_subscribe(uint32_t, QolEventStateHandler, void*, uint64_t*) {
+    return error(kQolErrUnsupported, "unused", 6);
+}
+QolResult es_unsubscribe(uint64_t) { return ok(); }
+const QolEventStateApi kEventStateStub{
+    sizeof(QolEventStateApi), &es_declare, &es_set, &es_read, &es_subscribe, &es_unsubscribe};
+
 QolResult dispatch(uint32_t route, const char* path, const char* body, char* output,
                    uint32_t capacity, uint32_t* output_size) {
     HttpReq request{HttpMethod::kPost, path, static_cast<uint32_t>(std::strlen(path)),
@@ -436,6 +479,7 @@ int main() {
     sdk.owner_store = &owner_store;
     sdk.slot_operation = &kOperation;
     sdk.save_route = &qol::host::save_route::save_route_api();
+    sdk.event_state = &kEventStateStub;
     QolGameHost game{};
     game.thread.is_main_thread = &is_main_thread;
     PluginContext context{};
@@ -474,12 +518,12 @@ int main() {
     uint64_t frame_transition = 0;
     CHECK(transition_hooks.save_transition_begin_thunk != nullptr &&
           transition_hooks.save_transition_begin_thunk(0, 1, &frame_transition));
-    CHECK(!transition_hooks.save_enter_ready());
+    CHECK(!g_event_ready);
     CHECK(logic_task->handler(1, logic_task->ctx) != 0);
-    CHECK(!transition_hooks.save_enter_ready()); // LogicPre cannot publish ready.
+    CHECK(!g_event_ready); // LogicPre cannot publish ready.
     g_adapter_world_ready = 1;
     CHECK(render_task->handler(2, render_task->ctx) != 0);
-    CHECK(transition_hooks.save_enter_ready()); // RenderPre performs token confirmation.
+    CHECK(g_event_ready); // RenderPre performs token confirmation.
     g_adapter_world_ready = 0;
 
     char output[4096]{};
@@ -596,12 +640,11 @@ int main() {
         // begin thunk（host 缝的真实现经 save_route 派发）：成功取得 lease 后取消，
         // 确认序前 maintenance 探针保持 Blocked。
         const auto& hooks = qol_runtime_hooks();
-        if (hooks.save_transition_begin_thunk != nullptr &&
-            hooks.save_enter_ready != nullptr) {
+        if (hooks.save_transition_begin_thunk != nullptr && sdk.event_state != nullptr) {
             uint64_t transition = 0;
             CHECK(hooks.save_transition_begin_thunk(0, 1, &transition) && transition != 0);
             CHECK(qol::features::core_save::save_transition_cancel(transition).ok == kQolOk);
-            CHECK(!hooks.save_enter_ready());  // 确认序未完成：不派发旧回调/事件。
+            CHECK(!g_event_ready);  // 确认序未完成：事件状态保持未就绪。
         }
         // native_call（kSave）：经真 save_route 派发回 core.save，session 未 ready 时
         // 事务失败（kFailed，不调用原版）。
@@ -642,7 +685,7 @@ int main() {
         qol::features::core_save::TransitionResult settled{};
         CHECK(qol::features::core_save::save_transition_query(hang_token, &settled).ok == kQolOk);
         CHECK(settled.state == qol::features::core_save::TransitionResultState::kCancelled);
-        CHECK(!hooks.save_enter_ready());
+        CHECK(!g_event_ready);
         // 超时收敛后同槽 catch-up 不再自动 begin（封锁生效，无新 pending 抖动）。
         CHECK(render_task->handler(701, render_task->ctx) != 0);
         uint64_t orphan_token = 0;

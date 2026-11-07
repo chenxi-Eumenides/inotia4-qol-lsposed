@@ -106,20 +106,20 @@ void test_save_event_payload_contract() {
     qol::infra::reset_for_test();
     reset_log();
 
-    HandlerCtx enter{1};
     HandlerCtx exit{2};
-    subscribe(qol::contracts::kEventSaveEnter, record, &enter);
+    HandlerCtx config{3};
     subscribe(qol::contracts::kEventSaveExit, record, &exit);
-    const qol::contracts::SaveEnterEvent enter_event{2};
+    subscribe(qol::contracts::kEventConfigChanged, record, &config);
     const qol::contracts::SaveExitEvent exit_event{2};
+    const qol::contracts::ConfigChangedEvent config_event{"key", 7};
 
-    CHECK(publish(qol::contracts::kEventSaveEnter, &enter_event) == 1);
-    CHECK(g_payloads.size() == 1 && g_payloads[0] == &enter_event);
-    CHECK(static_cast<const qol::contracts::SaveEnterEvent*>(g_payloads[0])->slot == 2);
-    reset_log();
     CHECK(publish(qol::contracts::kEventSaveExit, &exit_event) == 1);
     CHECK(g_payloads.size() == 1 && g_payloads[0] == &exit_event);
     CHECK(static_cast<const qol::contracts::SaveExitEvent*>(g_payloads[0])->slot == 2);
+    reset_log();
+    CHECK(publish(qol::contracts::kEventConfigChanged, &config_event) == 1);
+    CHECK(g_payloads.size() == 1 && g_payloads[0] == &config_event);
+    CHECK(static_cast<const qol::contracts::ConfigChangedEvent*>(g_payloads[0])->int_value == 7);
 }
 
 void test_unsubscribe() {

@@ -13,6 +13,7 @@
 #include <string>
 
 #include "contracts/commands.h"
+#include "contracts/events.h"
 #include "contracts/game_ports/save_port.h"
 #include "contracts/game_ports/save_transaction_port.h"
 #include "contracts/game_ports/save_write_port.h"
@@ -39,6 +40,35 @@ constexpr contracts::CapabilityRequirement kOptionalHttpRequires[] = {
 
 const contracts::QolSavePort* g_port = nullptr;
 const contracts::QolHostSdk* g_sdk = nullptr;
+const contracts::QolEventStateApi* g_event_state = nullptr;
+contracts::QolOwnerToken g_event_owner = 0;
+int32_t g_event_slot = -1;
+
+void publish_save_ready_impl(bool ready, int32_t slot) {
+    if (g_event_state == nullptr || g_event_owner == 0) return;
+    contracts::EventStateValue value{};
+    value.size = sizeof(value);
+    value.event_id = contracts::kEventStateSaveReady;
+    value.schema_version = contracts::kEventStateSaveReadySchema;
+    value.availability = static_cast<uint8_t>(contracts::EventStateAvailability::kAvailable);
+    value.value = ready ? 1 : 0;
+    value.slot = ready ? slot : -1;
+    g_event_slot = value.slot;
+    (void)g_event_state->set_state(g_event_owner, &value);
+}
+
+void publish_save_unavailable_impl() {
+    if (g_event_state == nullptr || g_event_owner == 0) return;
+    contracts::EventStateValue value{};
+    value.size = sizeof(value);
+    value.event_id = contracts::kEventStateSaveReady;
+    value.schema_version = contracts::kEventStateSaveReadySchema;
+    value.availability = static_cast<uint8_t>(contracts::EventStateAvailability::kUnavailable);
+    value.value = 0;
+    value.slot = -1;
+    g_event_slot = -1;
+    (void)g_event_state->set_state(g_event_owner, &value);
+}
 
 QolResult not_ready() {
     return contracts::error(kQolErrNotReady, "save facts not ready", 20);
@@ -592,7 +622,6 @@ int save_resume_entry_wrapper(int32_t slot) {
         CS_LOG_WARN(kCoreSaveLogDomain, "resume entry original failed slot=%d", slot);
         return 0;
     }
-    if (hooks.save_enter_mark_pending != nullptr) hooks.save_enter_mark_pending();
     return result;
 }
 
@@ -1181,10 +1210,28 @@ int plugin_install(contracts::PluginContext& ctx) {
         plugin_deactivate(ctx);
         return 1;
     }
+    // 事件声明放在全部可失败步骤之后：失败的 install 不得占有事件，否则 owner 仍有效时
+    // 宿主 fallback 会视其为活跃声明并停止发布，存档就绪将没有生产者。
+    g_event_state = contracts::event_state_if_available(ctx.sdk);
+    if (g_event_state == nullptr) {
+        plugin_deactivate(ctx);
+        return 1;
+    }
+    g_event_owner = ctx.owner_token;
+    contracts::EventStateDescriptor descriptor{sizeof(descriptor),
+                                               contracts::kEventStateSaveReady,
+                                               contracts::kEventStateSaveReadySchema, 0};
+    if (!contracts::succeeded(g_event_state->declare(g_event_owner, &descriptor))) {
+        plugin_deactivate(ctx);
+        return 1;
+    }
+    save_transition_set_state_publisher(&publish_save_ready_impl);
     log_message(ctx.sdk, "[core.save] provider install: facts + save writes + save route + hooks");
     return 0;
 }
 void plugin_deactivate(contracts::PluginContext& ctx) {
+    publish_save_unavailable_impl();
+    save_transition_set_state_publisher(nullptr);
     // §9 停用顺序：先关准入（拒绝新请求与新转换）→ 摘 save_route 派发 → 收敛未决事务
     //（degraded + 释放凭据）→ 关转换状态机 → 摘帧任务/票据处理器。
     slot_data_set_available(false);
@@ -1215,15 +1262,27 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     g_sdk = nullptr;
     g_game = nullptr;
     g_port = nullptr;
+    g_event_state = nullptr;
+    g_event_owner = 0;
     core_save_log_install(nullptr);
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
+    // 停用后重新启用会分配新的 owner token；旧声明已按失效清理，这里用当前 token 重新声明。
+    g_event_owner = ctx.owner_token;
+    if (g_event_state != nullptr) {
+        contracts::EventStateDescriptor descriptor{sizeof(descriptor),
+                                                   contracts::kEventStateSaveReady,
+                                                   contracts::kEventStateSaveReadySchema, 0};
+        (void)g_event_state->declare(g_event_owner, &descriptor);
+    }
+    publish_save_ready_impl(false, -1);
     slot_data_set_available(contracts::succeeded(initialize_slot_data(ctx)));
     log_message(ctx.sdk, "[core.save] provider enabled: capability published");
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
+    publish_save_unavailable_impl();
     slot_data_set_available(false);
     log_message(ctx.sdk, "[core.save] provider disabled: capability withdrawn");
 }

@@ -1,21 +1,12 @@
-// save_enter.cpp —— 进入存档（读档/新档）加载完成事件发源地。
+// save_enter.cpp —— 读档/新档发起点 wrapper 与声明式 patch 资源。
 //
 // 发起点：SaveSlot_SlotButtonExe+0x88（读档）与 SelectCharacter_ButtonStartExe+0x10（新档）
 // 的 BL，作为两条声明式 kCallPatch 资源（owner="core"）由宿主装配末段安装改指 wrapper；
-// wrapper 先经 core.save 转换门禁并标记 pending，再复刻原调用。检测任务 save_enter_tick
-// 由 infra::scheduler 注册在 kRenderPre 点位（仅 world 态 DrawPlay 执行），
-// world 就绪后消费一次、publish kEventSaveEnter（旧回调设施已退役，消费者改为事件订阅）。
-//
-// P3c 重接：读档发起先经 core.save 的转换状态机 begin（prepare_detach 拒绝时阻断原版
-// 转换），确认序（reset/ensure+journal 严格检查+新 epoch+session_ready+加载排空）由
-// core.save 在 RenderPre 完成；save_enter_tick 只在确认序发布 ready 后才消费 pending、
-// 发布 kEventSaveEnter。确认失败不消费、不派发、保持阻断。
+// wrapper 经 core.save 转换门禁后复刻原调用。存档就绪由 core.save 的事件状态发布。
 
 #include "patch/save_enter.h"
 
-#include "infra/scheduler.h"
 #include "infra/log/qol_log.h"
-#include "contracts/events.h"
 #include "contracts/runtime_hooks.h"
 #include "contracts/save_route.h"
 #include "contracts/game_ports/save_transaction_port.h"
@@ -23,21 +14,13 @@
 #include "game/access/save.h"
 #include "game/access/save_transaction.h"
 #include "game/state/game_state.h"
-#include "infra/events.h"
-
-#include <atomic>
 
 namespace {
 
-std::atomic<bool> g_pending{false};
-
-std::atomic<bool> g_tick_registered{false};
-
 // 读档 wrapper：先经 core.save begin 转换（kResume；准入关闭时阻断原版转换），成功后
-// 登记 loading 旁路 invocation 与未就绪转换（SAVE_Save 的读档期旁路矩阵输入），再标记
-// pending 并复刻原调用。原版转换返回后旁路窗口关闭：SAVE_LoadCharacterAll 内部的
-// SAVE_Save 只可能发生在该窗口内，其后的 SAVE_Save 无 loading 语义（session 未 ready
-// 时将被矩阵拒绝，fail-closed）。
+// 登记 loading 旁路 invocation 与未就绪转换（SAVE_Save 的读档期旁路矩阵输入）。
+// 原版转换返回后旁路窗口关闭：SAVE_LoadCharacterAll 内部的 SAVE_Save 只可能发生在该
+// 窗口内，其后的 SAVE_Save 无 loading 语义（session 未 ready 时将被矩阵拒绝，fail-closed）。
 void save_load_wrapper(int32_t slot) {
     uint64_t transition = 0;
     const auto& hooks = qol::contracts::qol_runtime_hooks();
@@ -64,14 +47,13 @@ void save_load_wrapper(int32_t slot) {
                            : 0;
     qol::game::save_load_bypass_end(bypass);
     if (result == 0) {
-        // 原版未启动/明确失败：释放 token/lease，且不留下 save_enter pending。
+        // 原版未启动/明确失败：释放 token/lease，不留下未决转换。
         const auto& hooks_cancel = qol::contracts::qol_runtime_hooks();
         if (hooks_cancel.save_transition_cancel_thunk != nullptr)
             hooks_cancel.save_transition_cancel_thunk(transition);
         QOL_LOG_WARN(QolDomain::kSave, "save enter original failed slot=%d", slot);
         return;
     }
-    save_enter_mark_pending();
 }
 
 // 该 patch 精确替换 SelectCharacter_ButtonStartExe+0x10 的原版 BL
@@ -83,7 +65,6 @@ void save_new_wrapper() {
         QOL_LOG_WARN(QolDomain::kSave, "new game confirmation unavailable; original not invoked");
         return;
     }
-    save_enter_mark_pending();
     fn_select_character_start_game();
 }
 
@@ -122,41 +103,7 @@ const qol::contracts::ResourceClaim kEnterClaims[] = {
     },
 };
 
-// 帧检测任务：core.save 确认序发布 ready 后消费 pending 并 publish kEventSaveEnter。
-// should_fire 探针门禁是「core.save 确认未完成就不消费不派发」的顺序无关保证，必须保留。
-// 确认未完成/失败：不消费 pending、不派发、保持阻断。
-bool save_enter_tick(int64_t /*frame*/, void* /*ctx*/) {
-    if (!save_enter_detail::should_fire(g_pending.load(std::memory_order_acquire),
-                                        game_in_world())) {
-        return true;
-    }
-    const auto& hooks = qol::contracts::qol_runtime_hooks();
-    if (hooks.save_enter_ready != nullptr && !hooks.save_enter_ready()) return true;
-    if (!g_pending.exchange(false, std::memory_order_acq_rel)) return true;  // 已被并发消费
-
-    const qol::contracts::SaveEnterEvent event{current_save_slot()};
-    (void)qol::infra::publish(qol::contracts::kEventSaveEnter, &event);
-    // 由 g_pending.exchange 保证每次 pending 只触发一次（非逐帧），保持 INFO。
-    QOL_LOG_INFO(QolDomain::kSave, "save enter fired");
-    return true;
-}
-
 }  // namespace
-
-void save_enter_mark_pending() {
-    g_pending.store(true, std::memory_order_release);
-}
-
-bool save_enter_init() {
-    if (g_tick_registered.exchange(true, std::memory_order_acq_rel)) return true;
-    const qol::infra::FrameTaskId id = qol::infra::scheduler_add(
-        qol::infra::FramePoint::kRenderPre, &save_enter_tick, nullptr, 1, 0);
-    if (id == 0) {
-        g_tick_registered.store(false, std::memory_order_release);  // 允许重试
-        return false;
-    }
-    return true;
-}
 
 uint32_t save_enter_claim_count() {
     return sizeof(kEnterClaims) / sizeof(kEnterClaims[0]);

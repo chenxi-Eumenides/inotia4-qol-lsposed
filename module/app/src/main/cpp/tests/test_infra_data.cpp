@@ -1,5 +1,5 @@
 // host 单测（自动出售阶段 A / 帧任务纯逻辑）：
-//   1) save_enter 触发判定 save_enter_detail::should_fire
+//   1) save_enter 声明式资源入口存在性（触发判定已迁移到事件状态）
 //   2) 数据层 item_is_equip 的编码分支 item_count_encoding_from_flags（注入假类别表）
 // 纯头文件逻辑，不依赖 Android/游戏内存。
 // 帧调度的去重/interval/count 语义由 test_infra_scheduler.cpp 覆盖。
@@ -32,14 +32,6 @@ uint16_t type_flags_for(int category) {
 }
 
 }  // namespace
-
-static void test_save_enter_should_fire() {
-    // 仅「已发起 且 已进入 world」为真；其余三组合为假。
-    CHECK(!save_enter_detail::should_fire(false, false));
-    CHECK(!save_enter_detail::should_fire(false, true));
-    CHECK(!save_enter_detail::should_fire(true, false));
-    CHECK(save_enter_detail::should_fire(true, true));
-}
 
 static void test_item_is_equip_encoding() {
     // 假类别表：步长 8，覆盖 category 0..3；记录 +6 bit0 = 可堆叠标记。
@@ -117,7 +109,6 @@ static void test_item_is_backpack_encoding() {
 }
 
 int main() {
-    test_save_enter_should_fire();
     test_item_is_equip_encoding();
     test_item_is_backpack_encoding();
     std::printf("infra_data_tests: %d passed, %d failed\n", g_pass, g_fail);

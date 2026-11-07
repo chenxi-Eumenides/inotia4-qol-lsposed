@@ -26,6 +26,7 @@
 
 #include "commands.h"
 #include "config_namespace.h"
+#include "events.h"
 #include "feature.h"
 #include "http.h"
 #include "in_flight.h"
@@ -91,6 +92,16 @@ using QolEventsUnsubscribeFn = QolResult (*)(uint64_t id);
 struct QolEventsApi {
     QolEventsSubscribeFn subscribe;
     QolEventsUnsubscribeFn unsubscribe;
+};
+
+struct QolEventStateApi {
+    uint32_t struct_size;
+    QolResult (*declare)(QolOwnerToken owner, const EventStateDescriptor* descriptor);
+    QolResult (*set_state)(QolOwnerToken owner, const EventStateValue* value);
+    QolResult (*read)(uint32_t event_id, EventStateValue* out_value);
+    QolResult (*subscribe)(uint32_t event_id, QolEventStateHandler handler, void* ctx,
+                           uint64_t* out_id);
+    QolResult (*unsubscribe)(uint64_t id);
 };
 
 using QolCapabilityRequireFn = QolResult (*)(const char* id, QolVersionRange range,
@@ -507,6 +518,8 @@ struct QolHostSdk {
     const QolPanelEnumerationApi* panel_enumeration;
     // v1.31 tail: 模块目录→公共 Download 的异步导出入口；null 表示不可用。
     const QolPublicExportApi* public_export;
+    // v1.32 tail: 事件状态声明/更新/查询/订阅；null 表示宿主不支持。
+    const QolEventStateApi* event_state;
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
@@ -516,8 +529,20 @@ constexpr uint16_t kHostSdkMajor = 1;
 // minor 27 appends desc hook V2; minor 28 appends owner availability to feature control;
 // minor 29 appends registered panel provider enumeration; minor 30 adds feature choice metadata
 // and read/write management functions at the tails of their existing tables; minor 31 appends
-// the asynchronous public-Download export entry point.
-constexpr uint16_t kHostSdkMinor = 31;
+// the asynchronous public-Download export entry point; minor 32 adds event-state APIs.
+constexpr uint16_t kHostSdkMinor = 32;
+
+inline const QolEventStateApi* event_state_if_available(const QolHostSdk* sdk) {
+    constexpr std::size_t end = offsetof(QolHostSdk, event_state) +
+                                sizeof(const QolEventStateApi*);
+    if (sdk == nullptr || sdk->abi.major != kHostSdkMajor || sdk->abi.minor < 32 ||
+        sdk->abi.size < end) return nullptr;
+    const auto* api = sdk->event_state;
+    if (api == nullptr || api->struct_size < sizeof(QolEventStateApi) ||
+        api->declare == nullptr || api->set_state == nullptr || api->read == nullptr ||
+        api->subscribe == nullptr || api->unsubscribe == nullptr) return nullptr;
+    return api;
+}
 
 inline const QolPublicExportApi* public_export_if_available(const QolHostSdk* sdk) {
     constexpr std::size_t end = offsetof(QolHostSdk, public_export) +

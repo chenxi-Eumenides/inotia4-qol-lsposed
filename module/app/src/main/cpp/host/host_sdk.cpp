@@ -28,12 +28,14 @@
 #include "infra/request_policy.h"
 #include "infra/config.h"
 #include "infra/events.h"
+#include "infra/event_state.h"
 #include "infra/panels.h"
 #include "infra/scheduler.h"
 #include "infra/snapshot_handle.h"
 #include "infra/store.h"
 #include "infra/slot_operation_gate.h"
 #include "infra/text_scope.h"
+#include "game/adapter_ports/game_host_port.h"
 #include "game/adapter_ports/system_port.h"
 #include "game/access/ptr_slots.h"
 #include "game/access/game_access.h"
@@ -307,6 +309,23 @@ QolResult sdk_events_unsubscribe(uint64_t id) {
     if (id == 0) return result_error(kQolErrInvalidArgument, kInvalidArgument);
     return result_from_bool(infra::unsubscribe(id), kQolErrNotFound, kNotFound);
 }
+
+QolResult sdk_event_state_declare(contracts::QolOwnerToken owner, const contracts::EventStateDescriptor* descriptor) {
+    return descriptor ? infra::event_state_declare(owner, *descriptor) : result_error(kQolErrInvalidArgument, kInvalidArgument);
+}
+QolResult sdk_event_state_set(contracts::QolOwnerToken owner, const contracts::EventStateValue* value) {
+    return value ? infra::event_state_set(owner, *value) : result_error(kQolErrInvalidArgument, kInvalidArgument);
+}
+QolResult sdk_event_state_read(uint32_t event_id, contracts::EventStateValue* out) { return infra::event_state_read(event_id, out); }
+QolResult sdk_event_state_subscribe(uint32_t event_id, contracts::QolEventStateHandler handler, void* ctx, uint64_t* out) {
+    return infra::event_state_subscribe(event_id, handler, ctx, out);
+}
+QolResult sdk_event_state_unsubscribe(uint64_t id) {
+    return result_from_bool(infra::event_state_unsubscribe(id), kQolErrNotFound, kNotFound);
+}
+const contracts::QolEventStateApi kEventStateApi{
+    sizeof(contracts::QolEventStateApi), &sdk_event_state_declare, &sdk_event_state_set,
+    &sdk_event_state_read, &sdk_event_state_subscribe, &sdk_event_state_unsubscribe};
 
 struct CapabilityLease {
     bool used = false;
@@ -1347,6 +1366,8 @@ QolResult store_result(infra::store::Status status) {
 const char* sdk_module_version() { return qol::game::system_port_version(); }
 
 contracts::QolHostSdk make_host_sdk() {
+    infra::event_state_set_owner_gate(&owner_verify_token);
+    infra::event_state_set_main_thread_gate(&qol::game::game_host_is_main_thread);
     contracts::QolHostSdk sdk{};
     sdk.abi = {sizeof(contracts::QolHostSdk), contracts::kHostSdkMajor, contracts::kHostSdkMinor};
     sdk.log = {&sdk_log_write, &sdk_log_debug_enabled};
@@ -1355,6 +1376,7 @@ contracts::QolHostSdk make_host_sdk() {
     sdk.scheduler = {&sdk_scheduler_add, &sdk_scheduler_remove};
     sdk.commands = sdk_commands_api();
     sdk.events = {&sdk_events_subscribe, &sdk_events_unsubscribe};
+    sdk.event_state = &kEventStateApi;
     sdk.capabilities = {&sdk_capability_require, &sdk_capability_lease_enter,
                         &sdk_capability_lease_leave, &sdk_capability_set_available};
     sdk.store = {&sdk_store_read, &sdk_store_write, &sdk_store_remove, &sdk_store_replace,

@@ -296,7 +296,6 @@ std::string enter_slot_locked(int32_t slot) {
     if (handle_transition) finish_item_handle_lifecycle_transition(r != 0);
     else if (r != 0) invalidate_all_item_handles();
     if (!r) return op_err("enter slot failed");
-    contracts::qol_runtime_hooks().save_enter_mark_pending();  // 原版已启动：标记读档发起
     transition_guard.disarmed = true;  // 原版已启动：确认序接管 token。
 
     // v0.4.49：进档后清理残留教学暂停——obj170=6（药水教学）是持久状态，
@@ -363,7 +362,6 @@ std::string create_slot_locked(int32_t slot, int32_t class_idx) {
     // 进入选角环境（GAME_Initialize + MAP_Load(6) + MAINMENU_CreateSelectCharList）
     fn_game_exit_save_slot_select_char();
     // 选角确认开始（*[0x2f5000+0xa00] = class_idx + STATE_Set(5) + UI_SetPopupProcessInfo(4,0)）
-    contracts::qol_runtime_hooks().save_enter_mark_pending();  // 进入存档回调：标记新档发起
     fn_select_character_start_game();
     // 新档教学初始化（SelectCharacter_ButtonStartExe：StartGame 后 TutorialStart）
     fn_tutorial_start();

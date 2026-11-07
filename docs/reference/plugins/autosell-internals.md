@@ -79,7 +79,7 @@ required capabilities 在 `plugin.cpp` 声明；`inventory.bag_source` 1.2 是�
 - `ui_busy()` 只把 `kPanel`/`kDialog` 且 id 为 `inventory` 的层视为占用；其他 UI 不阻塞扫描（`scan.cpp`）。
 - `remove_task_if_any()` 先递增取消纪元，再在 `g_task_mtx` 内移除任务；扫描在每个槽和每次出售前检查纪元，已进入 `inventory.action.sell` 的单笔事务允许完成（`scan.cpp`）。
 - `sync_task()` 在 `g_task_mtx` 内二次复核 global/session/config，避免检查与注册之间的迟到窗口；重复调用不会重复注册（`scan.cpp`）。
-- `save_enter` 校验 slot 后同步任务；`save_exit` 调 `autosell_store_reject_session()` 并移除任务（`scan.cpp`）。
+- 存档就绪（事件状态 `kEventStateSaveReady`，ready=1）校验 slot 后同步任务；`kEventSaveExit` 调 `autosell_store_reject_session()` 并移除任务（`scan.cpp`）。
 - 原版物理袋：`scan_physical_bags` 通过 `inventory.access` 1.1 的 `native_for_each_space_slot(space=0)` 枚举 `bag 0..4`；不再使用 legacy `for_each_bag_slot`，避免关闭背包面板后枚举为空。
 - 枚举性能：`native_for_each_space_slot` 由 core.inventory 组合 `item_ref_at` 逐槽读取；autosell 的扫描语义、取消纪元和失败门禁不变。
 - 注册源扫描：`scan_body` 在物理袋后先调用 `scan_variant_bags`（`space=1` C18 原生追加袋，经 `inventory.access` 1.1 的 `native_for_each_space_slot`），再调用 `scan_registered_sources`（`inventory.bag_source` 1.2 的 `source_count/source_at`，`space>=2`）。每个引用校验句柄/category、`refresh_item_count` 后进入 `process_ref`；每类遍历错误按 code 变化限速 WARN，`kQolErrNotReady` 静默。取消纪元同样在回调内检查。
@@ -167,7 +167,7 @@ scheduler (每 20 帧)
 ### 存档
 
 ```text
-save_enter → scan_session 标记 session → sync_task
+存档就绪状态 → scan_session 标记 session → sync_task
 sd_load → 校验 sidecar → 应用配置 → 标记 load_ready
 sd_capture → 复制当前槽配置
 sd_complete → 按 revision 清 dirty / 保留重试

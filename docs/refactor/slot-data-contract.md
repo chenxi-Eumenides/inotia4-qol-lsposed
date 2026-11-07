@@ -91,7 +91,7 @@ inspect 区分 `Absent / PrimaryValid / FallbackUsed / Corrupt / IoFailed`。共
 
 `prepare_detach` 幂等且可拒绝，拒绝时阻止原版转换。消费者的 `session_ready` 通知先于同轮 SessionBound load；Immediate 消费者在通知中自行 request_load。消费者通知不是全局 session.ready 的提前发布，未加载不得扫描/操作。
 
-core.save 的确认阶段必须位于 `kEventSaveEnter` 派发之前，不能仅作为事件订阅者依赖订阅顺序。当前机制：core.save 的 RenderPre 确认任务在插件装配期注册，先于 `patch/save_enter.cpp` 的 `save_enter_tick` 派发（同一帧点内注册序即派发序）；`save_enter_tick` 内另有 `save_enter_ready` 探针作为顺序无关的第二重保证——确认未完成或失败时不消费 pending、不派发事件。
+core.save 的确认阶段必须先于存档就绪通知。当前机制：core.save 在 `save_transition_confirm` 的成功终态通过 Host SDK 写入事件状态 `kEventStateSaveReady` 的 ready 值（`availability=available, value=1, slot=目标槽`）；宿主在 LogicPre 的 `event_state_dispatch_tick` 比较前后值并在帧点派发订阅者（`set_state` 只入队，不内联回调）。确认未完成、失败或取消时状态保持 `value=0`，不产生 ready 通知；core.save 停用/卸载时状态转为 `unavailable` 并派发一次。事件状态取代了旧的 `save_enter_tick` + `save_enter_ready` 探针链路。
 
 ## 5. 保存事务顺序
 

@@ -14,7 +14,8 @@
 namespace qol::contracts {
 
 // minor=1：帧任务字段由 legacy frame_task 直通改为 infra::scheduler 直通（同位同签名）。
-constexpr QolVersion kQolRuntimeHooksVersion{1, 2};
+// minor=3：移除 save-enter pending/ready 两个过渡字段（由事件状态取代）。
+constexpr QolVersion kQolRuntimeHooksVersion{1, 3};
 
 // 帧点位（与 infra scheduler 帧点位同值；W31 核验）：0=渲染前、1=逻辑前。
 constexpr int32_t kQolRuntimeFramePointRenderPre = 0;
@@ -45,9 +46,6 @@ typedef struct QolRuntimeHooksApi {
                               int32_t count);
     bool (*scheduler_remove)(uint64_t id);
 
-    // 标记「进入存档流程已发起」（直通 infra/save/save_enter）。
-    void (*save_enter_mark_pending)();
-
     // capability 现取（过渡：game 层无法直接调 infra::require_capability）。
     // 返回 nullptr = 未注册/版本不符；调用方按既有降级语义处理。
     const void* (*capability_require)(const char* id, uint16_t major, uint16_t min_minor);
@@ -60,10 +58,6 @@ typedef struct QolRuntimeHooksApi {
     // 调用方不得继续执行原版转换。out_transition 携带确认序必须复用的 token id。
     bool (*save_transition_begin_thunk)(int32_t kind, int32_t target_slot,
                                         uint64_t* out_transition);
-
-    // 进入存档确认序是否已发布 ready（core.save 确认完成后才允许 kEventSaveEnter
-    // 事件派发）。false = 确认未完成或失败：调用方不消费 pending、不派发。
-    bool (*save_enter_ready)();
 
     // 取消未决转换：begin 成功后、原版未启动或明确失败的出口显式释放 token/lease
     // （已删 dat 不伪装恢复；provider 撤销 transitioning，session 回 Unavailable）。

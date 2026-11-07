@@ -51,8 +51,12 @@ QolResult save_transition_confirm(uint64_t token_id, int32_t observed_slot);
 QolResult save_transition_cancel(uint64_t token_id);
 // 私有结果查询：只按 token 身份查询，不依赖全局 ready 或当前槽。
 QolResult save_transition_query(uint64_t token_id, TransitionResult* out);
-// 确认序成功发布 ready 之后才允许 kEventSaveEnter 事件派发；新转换开始即撤销。
+// 确认序成功发布 ready 之后才发布事件状态 ready；新转换开始即撤销。
 bool save_transition_ready_for_save_enter();
+// 事件状态发布缝：插件 install 注入（owner/sdk 就绪后），deactivate 置空。
+// save_transition 自身不持有 Host SDK，测试目标无需链接插件实现。
+void save_transition_set_state_publisher(void (*publisher)(bool ready, int32_t slot));
+void publish_save_ready(bool ready, int32_t slot);
 // 确认序观测面（RenderPre 帧驱动）：存在等待确认的转换时返回其 token 与 target 槽。
 // phase 已进入确认中/终态时返回 false（不重复确认）。
 bool save_transition_pending_observation(uint64_t* out_token, int32_t* out_target);

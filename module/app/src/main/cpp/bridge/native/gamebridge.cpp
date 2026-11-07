@@ -269,7 +269,7 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         // 自动出售已迁移为 autosell 插件（assembly 注册）：save_enter/save_exit 回调与
         // 扫描任务生命周期由插件 install/on_enabled 管理。
         // 任务完成度进档重算已迁移为 quest 插件（assembly_init 统一装配）：插件 install
-        // 订阅 kEventSaveEnter（core.save 确认后 publish），不复用旧 save_enter 回调设施。
+        // 订阅事件状态 kEventStateSaveReady（core.save 确认后发布），不复用旧 save_enter 回调设施。
         // 帧缓存预取按 Store 的 apiEnabled 在 assembly/install 完成后启停，避免早于 builder 与 frame source。
         // 设置页/备份面板/自动出售面板由插件提供 panel provider（含回调）；PopupState 由
         // core.custom_ui 的 PopupHost 在面板打开期间统一托管、空闲还原。autosell 另声明

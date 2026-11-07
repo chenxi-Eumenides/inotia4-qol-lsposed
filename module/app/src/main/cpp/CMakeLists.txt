@@ -238,6 +238,7 @@ target_sources(gamebridge PRIVATE
     infra/command_queue.cpp
     infra/runtime.cpp
     infra/events.cpp
+    infra/event_state.cpp
     infra/capabilities.cpp
     infra/status.cpp
     game/clock.cpp
