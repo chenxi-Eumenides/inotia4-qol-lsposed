@@ -62,6 +62,11 @@ struct QolAttrRangeC18Api {
 struct QolItemCategoryApi {
     QolResult (*category)(const void* item, int32_t* out_category);
 };
+// 角色属性只读面（v2.11 尾追加，damage_widen 用）：直调 CHAR_GetAttr，含 buff/装备修正。
+// 只读；线程语义：仅游戏逻辑线程调用（与原函数相同线程域）。
+struct QolCharacterReadApi {
+    QolResult (*attr)(void* character, int32_t attr_id, int32_t* out_value);
+};
 struct QolReadApi {
     QolAttrRangeReadApi attr_range;
 };
@@ -253,6 +258,7 @@ struct QolGameHost {
     QolGameIdentityApi game_identity;
     QolAttrRangeC18Api attr_range_c18;
     QolItemCategoryApi item_category;
+    QolCharacterReadApi character_read;
 };
 
 static_assert(std::is_standard_layout<QolGameHost>::value,
@@ -272,8 +278,11 @@ static_assert(offsetof(QolGameHost, item_category) ==
                   offsetof(QolGameHost, attr_range_c18) + sizeof(QolAttrRangeC18Api),
               "QolGameHost item_category ABI offset changed");
 static_assert(sizeof(QolGameHost) ==
-                  offsetof(QolGameHost, item_category) + sizeof(QolItemCategoryApi),
+                  offsetof(QolGameHost, character_read) + sizeof(QolCharacterReadApi),
               "QolGameHost ABI size changed");
+static_assert(offsetof(QolGameHost, character_read) ==
+                  offsetof(QolGameHost, item_category) + sizeof(QolItemCategoryApi),
+              "QolGameHost character_read ABI offset changed");
 
 constexpr uint16_t kGameHostMajor = 2;
 // 2.4 appended the read-only game identity tail used by the settings page.
@@ -286,6 +295,7 @@ constexpr uint16_t kGameHostTwoHandedMinor = 8;
 constexpr uint16_t kGameHostC18JewelRangeMinor = 9;
 // 2.10 appended the raw-item category tail used by world_tuning drop quality reroll.
 constexpr uint16_t kGameHostItemCategoryMinor = 10;
-constexpr uint16_t kGameHostMinor = kGameHostItemCategoryMinor;
+constexpr uint16_t kGameHostCharacterReadMinor = 11;
+constexpr uint16_t kGameHostMinor = kGameHostCharacterReadMinor;
 
 }  // namespace qol::contracts

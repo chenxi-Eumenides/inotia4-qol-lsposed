@@ -484,6 +484,11 @@ constexpr uintptr_t F_GET_MEMBER_VMA = 0x11f384;     // void* (int)
 constexpr uintptr_t F_GET_MENU_CHARACTER_VMA = 0x120338; // void* () PARTY_GetMenuCharacter：当前装备/物品菜单选中角色
 constexpr uintptr_t F_GET_PARTY_SIZE_VMA = 0x11f3a4; // int ()
 constexpr uintptr_t F_GET_ATTR_VMA = 0xdfd18;        // int32 (void*, int)
+// libgame.so dynsym 在 c18/c18-v514/c18-v520/monster/overhaul 中同名同 VMA；入口 ABI 均核对一致。
+constexpr uintptr_t F_CHAR_GET_NORMAL_DAMAGE_VMA = 0xe0bd0; // int (void* ch)，attr5(+attr109 if attr106>0)+1000 × attr4 / 1000；8位乘回绕点，damage_widen 一期替换
+constexpr uintptr_t F_CHAR_GET_NORMAL_MAGIC_DAMAGE_VMA = 0xe0c54; // int (void* ch)，(attr9+1000) × attr8 / 1000
+constexpr uintptr_t F_CHAR_GET_CRITICAL_DAMAGE_VMA = 0xe0768; // int (void* unused, void* ch, int32 damage)，首参保存后未使用；damage+damage×(attr3+max(1000-attr2,0))/1000
+constexpr uintptr_t F_CHAR_CALC_MAGICAL_DEFENSE_VMA = 0xe0910; // int (void* unused, void* defender, int32 damage)，首参未使用；damage×(1000-attr11)/1000
 constexpr uintptr_t F_GET_EQUIP_VMA = 0xda20c;       // void* (void*, int)
 constexpr uintptr_t F_GET_EXP_VMA = 0xd9b54;         // int64 (void*)
 constexpr uintptr_t F_GET_NEXT_EXP_VMA = 0xd9b68;    // int64 (void*)

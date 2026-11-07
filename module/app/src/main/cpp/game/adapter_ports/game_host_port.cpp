@@ -28,6 +28,7 @@
 #include "game/state/ui_http.h"
 #include "game/feature/game_feature.h"
 #include "game/variants/game_variant.h"
+#include "game/symbols/game_symbols.h"
 
 namespace qol::game {
 namespace {
@@ -940,6 +941,23 @@ QolResult game_shortcut_item_category(int32_t shortcut, int32_t* out_category) {
     return contracts::ok();
 }
 
+QolResult read_character_attr(void* character, int32_t attr_id, int32_t* out_value) {
+    if (character == nullptr || out_value == nullptr || attr_id < 0) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    // 只读直调与原函数在被调线程上的自调用等价，不设主线程门禁（线程域由调用方决定，
+    // 与 item 只读面同一纪律）。复用既有 F_GET_ATTR_VMA 登记，不另造同址符号。
+    using GetAttrFn = int32_t (*)(void*, int32_t);
+    static GetAttrFn get_attr = nullptr;
+    if (get_attr == nullptr && g_base != 0) {
+        get_attr = reinterpret_cast<GetAttrFn>(
+            g_base + fn_resolve("F_GET_ATTR_VMA", F_GET_ATTR_VMA));
+    }
+    if (get_attr == nullptr) return not_ready();
+    *out_value = get_attr(character, attr_id);
+    return contracts::ok();
+}
+
 contracts::QolGameHost make_game_host() {
     contracts::QolGameHost host{};
     host.abi = {sizeof(contracts::QolGameHost), contracts::kGameHostMajor,
@@ -983,6 +1001,7 @@ contracts::QolGameHost make_game_host() {
     host.game_identity = {&game_query_identity};
     host.attr_range_c18 = {&read_attr_jewel_generation_range};
     host.item_category = {&read_item_category};
+    host.character_read = {&read_character_attr};
     return host;
 }
 

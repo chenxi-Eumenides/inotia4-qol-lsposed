@@ -56,6 +56,7 @@
 #include "plugins/better_move/plugin.h"
 #include "plugins/push_all/plugin.h"
 #include "plugins/popup_blocker/plugin.h"
+#include "plugins/damage_widen/plugin.h"
 #include "plugins/core.quest/plugin.h"
 #include "plugins/save_backup/plugin.h"
 #include "plugins/world_tuning/plugin.h"
@@ -245,6 +246,7 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
     {&features::push_all::plugin_descriptor},
     {&features::better_move::plugin_descriptor},
     {&features::popup_blocker::plugin_descriptor},
+    {&features::damage_widen::plugin_descriptor},
     {&features::core_quest::plugin_descriptor},
     {&features::save_backup::plugin_descriptor, nullptr, true},
     {&features::world_tuning::plugin_descriptor},
