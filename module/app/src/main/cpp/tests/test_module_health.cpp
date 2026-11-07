@@ -174,6 +174,36 @@ void test_known_failed_recovery_and_sticky_menu() {
     assert((snapshot.failed_mask & ~kQolModuleHealthAllMask) == 0);
 }
 
+void test_save_entry_patch_fact_separate_from_initialization() {
+    using namespace qol::contracts;
+    qol::host::module_health_reset_for_test();
+    const uint32_t save_bit = static_cast<uint32_t>(QolModuleHealthBit::kSaveEntryPatches);
+    assert((kQolModuleHealthAllMask & save_bit) != 0);
+
+    // 装配期首装失败：只置 unknown，不进入 failed。
+    qol::host::module_health_set_fact(QolModuleHealthBit::kSaveEntryPatches, false, false);
+    QolModuleHealthSnapshot snapshot = read_snapshot();
+    assert((snapshot.known_mask & save_bit) == 0);
+    assert((snapshot.failed_mask & save_bit) == 0);
+
+    // 模块初始化成功与存档入口失败互相独立。
+    qol::host::module_health_set_fact(QolModuleHealthBit::kModuleInitialization, true, false);
+    qol::host::module_health_set_fact(QolModuleHealthBit::kSaveEntryPatches, true, true);
+    snapshot = read_snapshot();
+    const uint32_t assembly_bit = static_cast<uint32_t>(QolModuleHealthBit::kModuleInitialization);
+    assert((snapshot.failed_mask & assembly_bit) == 0);
+    assert((snapshot.failed_mask & save_bit) != 0);
+
+    // 补装成功后清除失败位，且不影响模块初始化位。
+    const uint64_t failed_revision = snapshot.revision;
+    qol::host::module_health_set_fact(QolModuleHealthBit::kSaveEntryPatches, true, false);
+    snapshot = read_snapshot();
+    assert(snapshot.revision > failed_revision);
+    assert((snapshot.known_mask & save_bit) != 0);
+    assert((snapshot.failed_mask & save_bit) == 0);
+    assert((snapshot.failed_mask & assembly_bit) == 0);
+}
+
 void test_config_bootstrap_completion_is_atomic() {
     using namespace qol::contracts;
     qol::host::module_health_reset_for_test();
@@ -435,6 +465,7 @@ void test_plugin_is_host_only_and_optional() {
 
 int main() {
     test_known_failed_recovery_and_sticky_menu();
+    test_save_entry_patch_fact_separate_from_initialization();
     test_config_bootstrap_completion_is_atomic();
     test_host_fact_observers_replay_changes_and_recovery();
     test_unsubscribe_drains_in_flight_callback();

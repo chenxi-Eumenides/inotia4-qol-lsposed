@@ -63,6 +63,8 @@ internal object ModuleHealthDecision {
     const val FRAME_SOURCE_BIT = 1L shl 1
     const val ASSEMBLY_BIT = 1L shl 2
     const val CONFIG_STORE_BIT = 1L shl 3
+    /** 存档 enter/exit 发起点 call patch：补装窗口耗尽仍失败时才上报。 */
+    const val SAVE_ENTRY_BIT = 1L shl 4
 
     fun decide(
         snapshot: ModuleHealthSnapshot?,
@@ -83,6 +85,7 @@ internal object ModuleHealthDecision {
         if (frameFailed) unavailable += "帧钩子"
         if (mainMenuSeen && failed(ASSEMBLY_BIT)) unavailable += "模块初始化"
         if (mainMenuSeen && failed(CONFIG_STORE_BIT)) unavailable += "配置存储"
+        if (mainMenuSeen && failed(SAVE_ENTRY_BIT)) unavailable += "存档入口"
 
         return ModuleHealthPresentation(
             unavailableNames = unavailable.toList(),

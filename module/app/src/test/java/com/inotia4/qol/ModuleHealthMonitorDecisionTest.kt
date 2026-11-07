@@ -130,6 +130,36 @@ object ModuleHealthMonitorDecisionTest {
         check(stickyHostFailures.unavailableNames == listOf("模块初始化", "配置存储"))
         check(stickyHostFailures.visible)
 
+        val saveEntryFailure = ModuleHealthDecision.decide(
+            snapshot = ModuleHealthSnapshot(
+                revision = 5L,
+                knownMask = ModuleHealthDecision.SAVE_ENTRY_BIT,
+                failedMask = ModuleHealthDecision.SAVE_ENTRY_BIT,
+                mainMenuSeen = false,
+            ),
+            nativeLibraryStateKnown = true,
+            nativeLibraryLoaded = true,
+            mainMenuSeenSticky = true,
+            activityVisible = true,
+        )
+        check(saveEntryFailure.unavailableNames == listOf("存档入口"))
+        check(saveEntryFailure.visible)
+
+        val saveEntryPendingBeforeMenu = ModuleHealthDecision.decide(
+            snapshot = ModuleHealthSnapshot(
+                revision = 6L,
+                knownMask = ModuleHealthDecision.SAVE_ENTRY_BIT,
+                failedMask = ModuleHealthDecision.SAVE_ENTRY_BIT,
+                mainMenuSeen = false,
+            ),
+            nativeLibraryStateKnown = true,
+            nativeLibraryLoaded = true,
+            mainMenuSeenSticky = false,
+            activityVisible = true,
+        )
+        check(saveEntryPendingBeforeMenu.unavailableNames.isEmpty())
+        check(!saveEntryPendingBeforeMenu.visible)
+
         val hiddenActivity = ModuleHealthDecision.decide(
             snapshot = ModuleHealthSnapshot(
                 revision = 4L,

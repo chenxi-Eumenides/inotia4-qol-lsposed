@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -96,6 +97,7 @@
 #include "patch/ptr_slot.h"
 #include "host/adapters.h"
 #include "hooks/install.h"
+#include "patch/claims.h"
 
 namespace qol::host {
 
@@ -338,7 +340,18 @@ bool save_sites_ready() {
 // 声明式安装：登记 → dispatch_install（kCallPatch：patch_site 站点解析 + patch 原语）→
 // live + 运行期地址登记。任一条失败逆序回滚已装条目（fail-closed，禁止半装），返回
 // false（整组可重试）。
-bool install_save_patch_claims() {
+//
+// 失败现场经 [SavePatchInstallFailure] 回带：dispatch_install / resolve_site 的错误文本
+// 本身不打日志，只回带；不记录就会退化成一条无上下文的 WARN。
+struct SavePatchInstallFailure {
+    const char* stage = nullptr;
+    const char* claim_id = nullptr;
+    const char* symbol = nullptr;
+    uintptr_t addr = 0;
+    const char* error = nullptr;
+};
+
+bool install_save_patch_claims(SavePatchInstallFailure* out_failure) {
     const contracts::ResourceClaim* const groups[] = {save_enter_claims(), save_exit_claims()};
     const uint32_t counts[] = {save_enter_claim_count(), save_exit_claim_count()};
     constexpr uint32_t kMaxInstalled = 4;  // 现有声明共 3 条
@@ -360,16 +373,30 @@ bool install_save_patch_claims() {
         for (uint32_t i = 0; i < counts[g]; ++i) {
             const contracts::ResourceClaim& claim = groups[g][i];
             if (!hooks::register_claim(claim)) {
+                if (out_failure != nullptr) {
+                    *out_failure = SavePatchInstallFailure{
+                        "register_claim", claim.id, claim.symbol, 0,
+                        "claim registration rejected (duplicate id with another owner or table full)"};
+                }
                 rollback();
                 return false;
             }
             qol::game::PatchSite site{};
             if (!qol::game::patch_site(claim.symbol, &site)) {
+                if (out_failure != nullptr) {
+                    *out_failure = SavePatchInstallFailure{
+                        "patch_site", claim.id, claim.symbol, 0, "site not found"};
+                }
                 rollback();
                 return false;
             }
             const MechanismOutcome outcome = dispatch_install(claim, 0);
             if (outcome.ok != 0) {
+                if (out_failure != nullptr) {
+                    *out_failure = SavePatchInstallFailure{
+                        "dispatch_install", claim.id, claim.symbol, site.addr,
+                        outcome.error != nullptr ? outcome.error : "dispatch rejected"};
+                }
                 rollback();
                 return false;
             }
@@ -381,12 +408,82 @@ bool install_save_patch_claims() {
     return true;
 }
 
+// 同一失败签名（阶段 / claim / 错误文本）只在首次出现时记录：补装每逻辑帧重试，
+// 逐帧重复会刷屏；签名变化说明失败点已改变，需要重新记录。补装窗口耗尽另有一条 WARN。
+// 失败现场只持有静态字符串（本文件的字面量或 resolve_site 的静态错误串），可安全比较指针。
+void log_save_patch_install_failure(const SavePatchInstallFailure& failure, uint32_t attempt) {
+    static const char* last_stage = nullptr;
+    static const char* last_claim = nullptr;
+    static const char* last_error = nullptr;
+    const auto same = [](const char* left, const char* right) {
+        if (left == right) return true;
+        if (left == nullptr || right == nullptr) return false;
+        return std::strcmp(left, right) == 0;
+    };
+    if (same(last_stage, failure.stage) && same(last_claim, failure.claim_id) &&
+        same(last_error, failure.error)) {
+        return;
+    }
+    last_stage = failure.stage;
+    last_claim = failure.claim_id;
+    last_error = failure.error;
+    QOL_LOG_WARN(QolDomain::kCore,
+                 "save patch install failed attempt=%u stage=%s claim=%s symbol=%s addr=%p "
+                 "error=%s hooks_claims=%u patch_points=%u",
+                 attempt,
+                 failure.stage != nullptr ? failure.stage : "-",
+                 failure.claim_id != nullptr ? failure.claim_id : "-",
+                 failure.symbol != nullptr ? failure.symbol : "-",
+                 reinterpret_cast<void*>(failure.addr),
+                 failure.error != nullptr ? failure.error : "-",
+                 hooks::claim_count(), qol::patch::claimed_count());
+}
+
 // save 迁移装配（tick 注册 + 发起点安装）完成标记：装配末段首装或逻辑帧补装成功即置位。
 std::atomic<bool> g_save_patches_ready{false};
-// 补装尝试上限：覆盖装配期短暂未就绪；持续失败（如版本漂移导致原字不匹配）到限即停，
-// 避免 call_patch 逐帧 ERROR 刷屏。装配期已 WARN 一次，到限不再补记。
+// 补装尝试上限：覆盖装配期短暂未就绪。持续失败（如版本漂移导致原字不匹配）到限即停，
+// 避免 call_patch 逐帧刷屏；到限时上报 kSaveEntryPatches 失败并由水印显示「存档入口」。
 constexpr uint32_t kSavePatchRetryLimit = 300;
 uint32_t g_save_patch_retry_count = 0;
+
+// 补装一次。成功：置 ready 并把健康位恢复为 known/ok（装配期瞬时失败不留失败位）；
+// 失败：按签名记录一次现场；到限时上报失败健康位并停止重试。
+void retry_save_patch_claims() {
+    if (g_save_patches_ready.load(std::memory_order_acquire)) return;
+    if (g_save_patch_retry_count >= kSavePatchRetryLimit) return;
+    ++g_save_patch_retry_count;
+
+    SavePatchInstallFailure failure{};
+    bool installed = false;
+    if (save_sites_ready()) {
+        installed = install_save_patch_claims(&failure);
+        if (installed && !save_enter_init()) {
+            installed = false;
+            failure.stage = "save_enter_init";
+            failure.error = "frame task registration rejected";
+        }
+    } else {
+        failure.stage = "site_not_ready";
+        failure.error = "bridge or game function entry unavailable";
+    }
+    if (installed) {
+        g_save_patches_ready.store(true, std::memory_order_release);
+        module_health_set_fact(contracts::QolModuleHealthBit::kSaveEntryPatches, true, false);
+        QOL_LOG_INFO(QolDomain::kCore,
+                     "assembly: save patches installed on frame retry attempts=%u",
+                     g_save_patch_retry_count);
+        return;
+    }
+    log_save_patch_install_failure(failure, g_save_patch_retry_count);
+    if (g_save_patch_retry_count >= kSavePatchRetryLimit) {
+        QOL_LOG_WARN(QolDomain::kCore,
+                     "save patch install retries exhausted attempts=%u last_stage=%s last_error=%s",
+                     g_save_patch_retry_count,
+                     failure.stage != nullptr ? failure.stage : "-",
+                     failure.error != nullptr ? failure.error : "-");
+        module_health_set_fact(contracts::QolModuleHealthBit::kSaveEntryPatches, true, true);
+    }
+}
 
 #if QOL_ENABLE_DEVICE_PROBE
 void probe_entry_export_resolution() {
@@ -429,16 +526,10 @@ bool drain_commands_task(int64_t frame, void* ctx) {
     // 位置固定在 reconciler 之后：desired 关闭、依赖撤销与 stop 已先经 reconciler 处理。
     feature_registry_retry_pending_ownership();
     // save enter/exit 迁移装配补装（resumable 语义，替代旧「启动失败即永不重试」）：
-    // 装配末段首装失败时逐帧重试至成功（幂等，成功后为原子快路径并停止）；到限即停，
-    // 避免版本漂移等永久失败场景下 call_patch 逐帧 ERROR 刷屏。
-    if (!g_save_patches_ready.load(std::memory_order_acquire) &&
-        g_save_patch_retry_count < kSavePatchRetryLimit) {
-        ++g_save_patch_retry_count;
-        if (save_sites_ready() && install_save_patch_claims() && save_enter_init()) {
-            g_save_patches_ready.store(true, std::memory_order_release);
-            QOL_LOG_INFO(QolDomain::kCore, "assembly: save patches installed on frame retry");
-        }
-    }
+    // 装配末段首装失败时逐帧重试至成功（幂等，成功后为原子快路径并停止）。
+    // 首次失败只降级为待补装，不改写 kModuleInitialization；补装成功清除健康位，
+    // 补装窗口耗尽才由 retry_save_patch_claims 上报 kSaveEntryPatches 失败。
+    retry_save_patch_claims();
     // save_route unbind 的 drain 在帧点完成，不自旋。
     save_route::step();
     return true;
@@ -667,19 +758,26 @@ bool assembly_init() {
     // Save enter 迁移装配（装配末段，顺序关键）：core.save 插件的 RenderPre 确认任务在
     // 插件装配期注册，scheduler 注册序即派发序；save_enter_tick 置于其后保证每帧
     // 「先 core.save 确认、后 save_enter 消费」。发起点站点解析依赖 bridge/fn_resolve，
-    // boot 期安装曾因 bridge_ready() 恒 false 失败，故置本段。失败只降级不 fail 装配
-    // （迁移前 bridge 调用点亦不检查返回值）；未装成功由逻辑帧补装任务按 resumable
-    // 语义逐帧重试。
+    // boot 期安装曾因 bridge_ready() 恒 false 失败，故置本段。
     if (!save_enter_init()) {
         QOL_LOG_WARN(QolDomain::kCore, "assembly: save enter tick registration failed");
         module_engine_failure = true;
     }
-    if (save_sites_ready() && install_save_patch_claims()) {
-        g_save_patches_ready.store(true, std::memory_order_release);
-    } else {
-        QOL_LOG_WARN(QolDomain::kCore,
-                     "assembly: save patch claims install failed or site not ready");
-        module_engine_failure = true;
+    // 发起点首装：装配期失败只标记待补装（健康位先置 unknown），不折算成模块初始化失败。
+    // 补装成功会清除该位；补装窗口耗尽才上报 kSaveEntryPatches 失败。
+    {
+        SavePatchInstallFailure failure{};
+        if (save_sites_ready() && install_save_patch_claims(&failure)) {
+            g_save_patches_ready.store(true, std::memory_order_release);
+            module_health_set_fact(contracts::QolModuleHealthBit::kSaveEntryPatches, true, false);
+        } else {
+            if (failure.stage == nullptr) {
+                failure.stage = "site_not_ready";
+                failure.error = "bridge or game function entry unavailable";
+            }
+            log_save_patch_install_failure(failure, 0);
+            module_health_set_fact(contracts::QolModuleHealthBit::kSaveEntryPatches, false, false);
+        }
     }
     // 迁移消费者帧任务注册（char_next_exp 缓存 / transition 逻辑相位消费者）。
     // 注册点必须在装配末段：注册顺序即派发顺序，置于 drain 与插件装配之后

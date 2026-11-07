@@ -185,7 +185,8 @@ static_assert(static_cast<uint32_t>(QolModuleHealthBit::kNative) == (1U << 0));
 static_assert(static_cast<uint32_t>(QolModuleHealthBit::kFrameHooks) == (1U << 1));
 static_assert(static_cast<uint32_t>(QolModuleHealthBit::kModuleInitialization) == (1U << 2));
 static_assert(static_cast<uint32_t>(QolModuleHealthBit::kConfigStorage) == (1U << 3));
-static_assert(kQolModuleHealthAllMask == 0x0FU);
+static_assert(static_cast<uint32_t>(QolModuleHealthBit::kSaveEntryPatches) == (1U << 4));
+static_assert(kQolModuleHealthAllMask == 0x1FU);
 static_assert(std::is_standard_layout_v<HttpEndpointDescriptor>);
 static_assert(std::is_trivial_v<HttpEndpointDescriptor>);
 static_assert(std::is_same_v<decltype(HttpEndpointDescriptor::query_handler),
