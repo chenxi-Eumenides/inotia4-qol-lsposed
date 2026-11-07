@@ -59,9 +59,6 @@ internal class ActivityStartupProgress {
 
 /** Starts native/runtime work from real MainActivity lifecycle events after libgame is loaded. */
 internal object MainActivityStartupHook {
-    private const val TARGET_ACTIVITY =
-        "com.com2us.inotia4.normal.freefull.google.global.android.common.MainActivity"
-
     private val lock = Any()
     private val executor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "bridge-init").apply { isDaemon = true }
@@ -73,7 +70,10 @@ internal object MainActivityStartupHook {
 
     fun install(param: XposedModuleInterface.PackageLoadedParam, hooker: (Method) -> Unit) {
         try {
-            val activityClass = param.getDefaultClassLoader().loadClass(TARGET_ACTIVITY)
+            val activityClass = HostIdentity.resolveMainActivity(
+                param.getDefaultClassLoader(),
+                param.packageName,
+            ) ?: error("MainActivity class not found for ${param.packageName}")
             val onCreate = activityClass.getDeclaredMethod("onCreate", Bundle::class.java)
             hooker(onCreate)
             LogFile.info(LogDomain.PLATFORM, "MainActivity startup hook installed on onCreate")
@@ -96,11 +96,14 @@ internal object MainActivityStartupHook {
 
     /**
      * 安装宿主 MainActivity.onActivityResult hook：SAF 文件选择器的结果回调入口。
-     * 与 [install] 用同一个 [TARGET_ACTIVITY] 解析，失败按相同风格落日志不影响其他 hook。
+     * 与 [install] 用 [HostIdentity.resolveMainActivity] 解析同一个类，失败按相同风格落日志不影响其他 hook。
      */
     fun installActivityResult(param: XposedModuleInterface.PackageLoadedParam, hooker: (Method) -> Unit) {
         try {
-            val activityClass = param.getDefaultClassLoader().loadClass(TARGET_ACTIVITY)
+            val activityClass = HostIdentity.resolveMainActivity(
+                param.getDefaultClassLoader(),
+                param.packageName,
+            ) ?: error("MainActivity class not found for ${param.packageName}")
             val onActivityResult = activityClass.getDeclaredMethod(
                 "onActivityResult",
                 Int::class.javaPrimitiveType,

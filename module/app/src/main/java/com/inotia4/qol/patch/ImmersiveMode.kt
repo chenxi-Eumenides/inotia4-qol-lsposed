@@ -5,6 +5,7 @@ import android.os.Build
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
+import com.inotia4.qol.HostIdentity
 import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
 import io.github.libxposed.api.XposedModuleInterface
@@ -17,13 +18,12 @@ import java.lang.reflect.Method
  */
 object ImmersiveMode {
 
-    private const val TARGET_ACTIVITY =
-        "com.com2us.inotia4.normal.freefull.google.global.android.common.MainActivity"
-
     fun install(param: XposedModuleInterface.PackageLoadedParam, hooker: (Method) -> Unit) {
         try {
-            val cl = param.getDefaultClassLoader()
-            val activityCls = cl.loadClass(TARGET_ACTIVITY)
+            val activityCls = HostIdentity.resolveMainActivity(
+                param.getDefaultClassLoader(),
+                param.packageName,
+            ) ?: error("MainActivity class not found for ${param.packageName}")
             val method = activityCls.getDeclaredMethod("onWindowFocusChanged", Boolean::class.javaPrimitiveType)
             hooker(method)
             LogFile.info(LogDomain.PLATFORM, "ImmersiveMode hook installed on MainActivity.onWindowFocusChanged")

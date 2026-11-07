@@ -89,8 +89,9 @@
 ### 方式一：LSPosed 模块（需 root）
 
 1. 从 [Releases](https://github.com/chenxi-Eumenides/inotia4-qol-lsposed/releases) 下载模块 APK（`inotia4_qol_lsposed_release_vX.Y.Z.apk`）。
-2. 安装后在 LSPosed 中启用模块，作用域勾选游戏包名
-   `com.com2us.inotia4.normal.freefull.google.global.android.common`。
+2. 安装后在 LSPosed 中启用模块，作用域勾选游戏的实际安装包名。默认推荐列表里是原版包名
+   `com.com2us.inotia4.normal.freefull.google.global.android.common`；改过包名的版本直接勾选它自己的
+   包名即可，无需重新构建模块。
 3. 重启游戏。
 
 ### 方式二：免 root 集成包（LSPatch）
@@ -106,7 +107,8 @@
 - 存档管理器
   - 点击选槽，箭头按钮导出/导入选中槽，X按钮删除选中槽/存档
   - 导出文件位于
-  `Android/data/com.com2us.inotia4.normal.freefull.google.global.android.common/files/qol/backups`，用系统原生文件管理器打开该路径
+  `Android/data/<游戏实际包名>/files/qol/backups`（原版包名为
+  `com.com2us.inotia4.normal.freefull.google.global.android.common`），用系统原生文件管理器打开该路径
 - HTTP API
   - 模块启动后在本机 `http://<设备IP>:8088` 提供（局域网内可访问）
   - API 为明文 HTTP，仅建议在可信局域网内使用

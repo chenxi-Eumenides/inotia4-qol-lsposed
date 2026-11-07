@@ -1,2 +1,4 @@
 minApiVersion=101
 targetApiVersion=101
+# 允许用户把模块作用域勾选到 scope.list 之外的改包名游戏；宿主身份由运行时类探测确认。
+staticScope=false

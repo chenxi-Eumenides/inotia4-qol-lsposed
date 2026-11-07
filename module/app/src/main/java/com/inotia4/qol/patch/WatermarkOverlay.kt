@@ -7,6 +7,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.TextView
+import com.inotia4.qol.HostIdentity
 import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
 import io.github.libxposed.api.XposedModuleInterface
@@ -47,9 +48,6 @@ internal fun moduleHealthWatermarkText(visible: Boolean, unavailableNames: List<
  * 配置和模块健康更新均经 refreshColor() 在现有视图上刷新。
  */
 object WatermarkOverlay {
-
-    private const val TARGET_ACTIVITY =
-        "com.com2us.inotia4.normal.freefull.google.global.android.common.MainActivity"
 
     /** 注入视图的 tag，用于幂等判定（重复获焦时不叠加第二个水印）。 */
     private const val WATERMARK_TAG = "inotia4_qol_watermark"
@@ -119,8 +117,10 @@ object WatermarkOverlay {
 
     fun install(param: XposedModuleInterface.PackageLoadedParam, hooker: (Method) -> Unit) {
         try {
-            val cl = param.getDefaultClassLoader()
-            val activityCls = cl.loadClass(TARGET_ACTIVITY)
+            val activityCls = HostIdentity.resolveMainActivity(
+                param.getDefaultClassLoader(),
+                param.packageName,
+            ) ?: error("MainActivity class not found for ${param.packageName}")
             val method = activityCls.getDeclaredMethod("onWindowFocusChanged", Boolean::class.javaPrimitiveType)
             hooker(method)
             LogFile.info(LogDomain.PLATFORM, "WatermarkOverlay hook installed on MainActivity.onWindowFocusChanged")

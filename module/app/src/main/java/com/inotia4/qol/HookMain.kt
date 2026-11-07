@@ -17,7 +17,9 @@ class HookMain : XposedModule() {
         super.onModuleLoaded(param)
         if (param.isSystemServer) return
         val processPackage = param.processName.substringBefore(':')
-        if (!TargetPackages.contains(processPackage)) return
+        if (processPackage.isEmpty()) return
+        // 改包名的变体 applicationId 不再是构建期列表中的值；先采用框架上报的进程包名，
+        // 宿主身份在 onPackageLoaded 用类探测确认。
         TargetPackages.activate(processPackage)
 
         // 无 context 提前初始化日志（进程 uid 与游戏一致，可写游戏私有目录）
@@ -26,13 +28,18 @@ class HookMain : XposedModule() {
 
         // 捕获未处理异常：写独立崩溃取证文件并转发前序 handler（防闪退信息丢失）
         JavaCrashReporter.install()
-
-        ModuleHealthMonitor.start()
     }
 
     override fun onPackageLoaded(param: XposedModuleInterface.PackageLoadedParam) {
-        if (!TargetPackages.contains(param.packageName)) return
+        if (!HostIdentity.isInotia4(param)) {
+            LogFile.warn(
+                LogDomain.PLATFORM,
+                "package ${param.packageName} is not an Inotia4 host; hooks skipped",
+            )
+            return
+        }
         TargetPackages.activate(param.packageName)
+        ModuleHealthMonitor.start()
         val moduleApkPath = getModuleApplicationInfo().sourceDir
         MainActivityStartupHook.install(param) { method ->
             hook(method)

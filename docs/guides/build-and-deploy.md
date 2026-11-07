@@ -83,7 +83,8 @@ scripts/build-release.sh
 # Release 产物 → output/inotia4_qol_lsposed_release_v<version>.apk（与 debug 同证书，可直接覆盖安装）；版本号来自 build.gradle.kts，脚本只保留最新 2 份模块 Release APK（不清理集成包）
 # 如需强制离线，可追加 Gradle 参数：scripts/build-release.sh --offline
 # 命名格式固定：inotia4_qol_lsposed_release_vX.Y.Z.apk（如 v0.7.8）
-# 多目标包名：逗号分隔，同时写入 LSPosed scope.list 和模块运行时过滤。
+# 多目标包名：逗号分隔，写入 LSPosed scope.list（推荐作用域）。运行时不再按该列表过滤，
+# 改包名的变体可在 LSPosed Manager 直接勾选实际包名，无需重新构建模块。
 scripts/build-release.sh -PtargetPackages=com.com2us.inotia4.normal.freefull.google.global.android.common,com.com2us.inotia4.qol.patched
 
 # ⑥ 按需生成集成版（本模块 APK → apk/game-apk/ 下各游戏 APK 的集成包）
@@ -132,11 +133,17 @@ curl -s -X POST http://<设备IP>:8088/api/system/enter_slot -H "Content-Type: a
 curl -s http://<设备IP>:8088/api/ui/state
 ```
 
-> `targetPackages` 默认只有原版游戏包名。需要让同一个 LSPosed 模块覆盖多个包时，使用
-> `-PtargetPackages=pkg.one,pkg.two`；构建会生成多行 `META-INF/xposed/scope.list`，并让运行时只在这些包中初始化。
-> 包名必须是合法 Android applicationId。LSPatch 集成始终保留游戏原包名，`patch-apk.sh` 不支持修改输出 applicationId；需要让模块覆盖多个包时，只能通过 `-PtargetPackages` 加入模块构建并重新构建。该游戏的资源表仍保留原资源 namespace，模块已兼容 `CResource.R()` 和 `Resources.getIdentifier()`。
+> `targetPackages` 默认只有原版游戏包名，仅用于生成 LSPosed 推荐作用域 `META-INF/xposed/scope.list`。
+> 模块运行时不按该列表过滤：`module.prop` 明确 `staticScope=false`，用户可在 LSPosed Manager 勾选任意
+> 改包名后的应用；模块用游戏框架类（`CResource`、`WrapperUserDefined`）和 `MainActivity` 类探测宿主，
+> 通过后以框架上报的实际包名作为存储路径和 PackageManager 查询依据。改包名通常只改 applicationId，
+> Java 类和资源表 namespace 保持原样，因此无需重新构建模块。需要预勾选更多包时仍可用
+> `-PtargetPackages=pkg.one,pkg.two` 覆盖；包名必须是合法 Android applicationId。`patch-apk.sh` 仍不支持修改
+> 输出 applicationId。该游戏的资源表保留原资源 namespace，模块已兼容 `CResource.R()` 和
+> `Resources.getIdentifier()`。
 
-> 当前默认 Release 配置已同时包含原包和 `com.com2us.inotia4.qol.patched`；不传 `-PtargetPackages` 即可生成支持两个包的模块 APK。只有新增其他目标包时才需要通过 Gradle 属性覆盖列表，`patch-apk.sh` 不会自动重建模块。
+> 当前默认 Release 配置已同时包含原包和 `com.com2us.inotia4.qol.patched`；不传 `-PtargetPackages`
+> 也能覆盖这两个包，并可在 Manager 里手动添加其他改包名版本。`patch-apk.sh` 不会自动重建模块。
 
 > **默认签名密钥**：`scripts/patch-apk.sh` 用 `scripts/keys/aosp-testkey.bks`（AOSP 公开 testkey）签名，
 > 证书 SHA-256 为 `a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc`。脚本调用 LSPatch 前
