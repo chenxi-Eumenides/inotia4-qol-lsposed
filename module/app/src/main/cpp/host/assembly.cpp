@@ -251,7 +251,9 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
     {&features::core_system::plugin_descriptor},
     {&features::character_panel_i18n::plugin_descriptor},
     {&features::world_teleport::plugin_descriptor},
-    {&features::custom_map::plugin_descriptor},
+    // custom_map 尚未完成（资源替换与面板未经真机验收），暂不注册：不进入 capability DAG、
+    // 不声明 feature 与资源 claim。代码与 target 保留，完成后恢复这一行即可接线。
+    // {&features::custom_map::plugin_descriptor},
 #endif
     {nullptr},
 };
