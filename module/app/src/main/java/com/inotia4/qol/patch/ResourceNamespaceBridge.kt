@@ -9,8 +9,13 @@ import java.lang.reflect.Field
 import java.lang.reflect.Method
 
 /**
- * NPatch --newpackage changes the manifest package but keeps the original resource-table
- * namespace. The game's CResource.R() queries resources with the manifest package and gets 0.
+ * 改包名工具对资源表的处理分两种：
+ * - NPatch --newpackage 只改 manifest package，资源表 namespace 仍是原版包名；
+ *   游戏用新包名查询资源得到 0，需要桥接回原版 namespace。
+ * - 共存版重打包同时改写了资源表 namespace（资源表包名与 manifest 一致）；
+ *   游戏自己的查询本来可用，不能再改写，否则同样得到 0。
+ *
+ * 因此桥接前先探测目标资源在宿主包名下是否可解析，只有不可解析时才回退原版 namespace。
  */
 object ResourceNamespaceBridge {
 
@@ -18,7 +23,19 @@ object ResourceNamespaceBridge {
         "com.com2us.inotia4.normal.freefull.google.global.android.common"
     private const val RESOURCE_CLASS = "com.com2us.wrapper.function.CResource"
     private var resourceClass: Class<*>? = null
+
+    @Volatile
     private var renamedPackageName: String? = null
+
+    /** 首次探测确认宿主资源表使用 manifest 包名后置位，后续查询不再重复探测。 */
+    @Volatile
+    private var resourcesUseHostPackage: Boolean = false
+
+    /**
+     * getIdentifier 探测会再次进入本 hook；用线程本地标记让探测直接走原方法，
+     * 避免改写逻辑递归调用自身。
+     */
+    private val probing = ThreadLocal<Boolean>()
 
     fun install(param: XposedModuleInterface.PackageLoadedParam, hooker: (Method) -> Unit) {
         if (param.packageName == ORIGINAL_RESOURCE_PACKAGE) return
@@ -43,22 +60,29 @@ object ResourceNamespaceBridge {
     }
 
     /**
-     * Rewrite Resources.getIdentifier args for the renamed-package process.
+     * Rewrite Resources.getIdentifier args for a renamed-package process.
      * Covers two game call shapes:
      * 1. CResource.R(): getIdentifier(name, type, renamedPackage)
      * 2. WrapperUserDefined.GetStringFromXml(Ex): getIdentifier("$renamedPackage:xml/$file", null, null)
      */
     fun rewriteIdentifierArgs(args: MutableList<Any?>) {
+        if (probing.get() == true) return
         val renamed = renamedPackageName ?: return
         if (args.getOrNull(2) == renamed) {
+            if (resourcesUseHostPackage) return
+            val name = args.getOrNull(0) as? String ?: return
+            val type = args.getOrNull(1) as? String
+            // null 表示上下文尚未就绪、无法判断；此时保持原参数，避免把共存版资源误改写。
+            if (hostResourceVisible(name, type) != false) return
             args[2] = ORIGINAL_RESOURCE_PACKAGE
             return
         }
         if (args.getOrNull(1) == null && args.getOrNull(2) == null) {
             val name = args.getOrNull(0) as? String ?: return
-            if (name.startsWith("$renamed:")) {
-                args[0] = ORIGINAL_RESOURCE_PACKAGE + name.substring(renamed.length)
-            }
+            if (!name.startsWith("$renamed:")) return
+            if (resourcesUseHostPackage) return
+            if (hostResourceVisible(name, null) != false) return
+            args[0] = ORIGINAL_RESOURCE_PACKAGE + name.substring(renamed.length)
         }
     }
 
@@ -66,7 +90,32 @@ object ResourceNamespaceBridge {
         val parts = resourceKey.split('.', limit = 3)
         if (parts.size != 3 || parts[0] != "R") return 0
         val context = currentContext() ?: return 0
-        return context.resources.getIdentifier(parts[2], parts[1], ORIGINAL_RESOURCE_PACKAGE)
+        val type = parts[1]
+        val name = parts[2]
+        val renamed = renamedPackageName
+        if (renamed != null && (resourcesUseHostPackage || hostResourceVisible(name, type) == true)) {
+            return identifier(context, name, type, renamed)
+        }
+        return identifier(context, name, type, ORIGINAL_RESOURCE_PACKAGE)
+    }
+
+    /** null 表示上下文尚未就绪，无法判断宿主资源表是否使用 manifest 包名。 */
+    private fun hostResourceVisible(name: String, type: String?): Boolean? {
+        val renamed = renamedPackageName ?: return null
+        val context = currentContext() ?: return null
+        if (identifier(context, name, type, renamed) == 0) return false
+        resourcesUseHostPackage = true
+        return true
+    }
+
+    private fun identifier(context: Context, name: String, type: String?, packageName: String?): Int {
+        val wasProbing = probing.get() == true
+        probing.set(true)
+        return try {
+            context.resources.getIdentifier(name, type, packageName)
+        } finally {
+            probing.set(wasProbing)
+        }
     }
 
     private fun currentContext(): Context? {
