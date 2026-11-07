@@ -349,8 +349,9 @@ int main() {
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_SAVE);
     CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_SAVE_WRITE);
     CHECK(descriptor.ports[2].id == qol::contracts::QolPortId::QOL_PORT_SAVE_TRANSACTION);
-    // P3c 资源声明：SAVE_Save 完整入口 + 新档边界 + 选角取消（Required+FailClosed）。
-    CHECK(descriptor.resources_count == 3 && descriptor.resources != nullptr);
+    // P3c 资源声明：SAVE_Save 完整入口 + 继续存档统一入口 + 新档边界 + 选角取消
+    //（Required+FailClosed）。
+    CHECK(descriptor.resources_count == 4 && descriptor.resources != nullptr);
     for (uint32_t i = 0; i < descriptor.resources_count; ++i) {
         const auto& claim = descriptor.resources[i];
         CHECK(claim.mechanism == qol::contracts::ResourceMechanism::kEntryHook);
@@ -360,8 +361,9 @@ int main() {
     }
     CHECK(std::strcmp(descriptor.resources[0].id, "hook:SAVE_Save") == 0);
     CHECK(std::strcmp(descriptor.resources[0].symbol, "F_SAVE_VMA") == 0);
-    CHECK(std::strcmp(descriptor.resources[1].id, "hook:SaveSlot_GoToNewGame") == 0);
-    CHECK(std::strcmp(descriptor.resources[2].id, "hook:SelectCharacter_ButtonBackExe") == 0);
+    CHECK(std::strcmp(descriptor.resources[1].id, "hook:GAME_StartResumeGame") == 0);
+    CHECK(std::strcmp(descriptor.resources[2].id, "hook:SaveSlot_GoToNewGame") == 0);
+    CHECK(std::strcmp(descriptor.resources[3].id, "hook:SelectCharacter_ButtonBackExe") == 0);
     // 写面（阶段 5 票据契约）由同域 owner 声明式提供 3 条 POST。
     CHECK(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
     CHECK(descriptor.http_endpoint_count == 3 && descriptor.http_endpoints != nullptr);

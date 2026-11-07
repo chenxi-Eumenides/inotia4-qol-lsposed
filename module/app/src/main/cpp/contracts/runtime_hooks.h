@@ -68,6 +68,13 @@ typedef struct QolRuntimeHooksApi {
     // 取消未决转换：begin 成功后、原版未启动或明确失败的出口显式释放 token/lease
     // （已删 dat 不伪装恢复；provider 撤销 transitioning，session 回 Unavailable）。
     void (*save_transition_cancel_thunk)(uint64_t transition);
+
+    // ---- 继续存档入口的统一转换上下文（plugin 侧 GAME_StartResumeGame hook 使用）----
+    // 读档旁路：设置未就绪 transition 并登记仅本次回调有效的 invocation。
+    uint64_t (*save_load_bypass_begin)(uint64_t transition, int32_t target_slot, uint32_t kind);
+    void (*save_load_bypass_end)(uint64_t invocation);
+    // 已存在未就绪读档转换（API/按钮 wrapper 已 begin）时返回 true，入口 hook 直接透传。
+    bool (*save_has_unready_load_transition)(int32_t* out_target);
 } QolRuntimeHooksApi;
 
 static_assert(sizeof(QolVersion) == 4, "QolVersion ABI changed");

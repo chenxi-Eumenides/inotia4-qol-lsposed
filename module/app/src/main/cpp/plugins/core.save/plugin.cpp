@@ -215,9 +215,11 @@ void resume_timer_disarm() {
 using SaveSaveFn = int (*)();
 using GoToNewGameFn = void (*)(int32_t);
 using SelectCharBackFn = void (*)();
+using GameStartResumeGameFn = int (*)(int32_t);
 SaveSaveFn g_backup_save_save = nullptr;
 GoToNewGameFn g_backup_goto_new_game = nullptr;
 SelectCharBackFn g_backup_select_back = nullptr;
+GameStartResumeGameFn g_backup_game_start_resume_game = nullptr;
 
 bool main_thread_now() {
     return g_game != nullptr && g_game->thread.is_main_thread != nullptr &&
@@ -532,6 +534,45 @@ void goto_new_game_wrapper(int32_t slot) {
     }
     g_selection_token.store(token, std::memory_order_release);
     if (g_backup_goto_new_game != nullptr) g_backup_goto_new_game(slot);
+}
+
+// hook:GAME_StartResumeGame handler：所有继续存档入口的统一转换/加载通知。
+// API 与已安装的按钮 wrapper 会先 begin + bypass；此处检测到未就绪转换时直接透传。
+// 未安装按钮 call patch 的游戏 UI 路径没有转换上下文，由本入口补齐 begin + bypass，
+// 让 EB slot data 重新加载，随后原版 GAME_Initialize/SAVE_Load 照常清空并读档。
+int save_resume_entry_wrapper(int32_t slot) {
+    if (!main_thread_now() || slot < 0 || slot > 2 ||
+        g_backup_game_start_resume_game == nullptr) {
+        return 0;
+    }
+    const auto& hooks = qol::contracts::qol_runtime_hooks();
+    int32_t pending_target = -1;
+    if (hooks.save_has_unready_load_transition != nullptr &&
+        hooks.save_has_unready_load_transition(&pending_target)) {
+        return g_backup_game_start_resume_game(slot);
+    }
+    uint64_t token = 0;
+    const QolResult began = save_transition_begin(
+        static_cast<uint32_t>(TransitionKind::kResume), slot, &token);
+    if (!contracts::succeeded(began)) {
+        CS_LOG_WARN(kCoreSaveLogDomain, "resume entry begin rejected slot=%d code=%d", slot,
+                    began.code);
+        return 0;
+    }
+    uint64_t bypass = 0;
+    if (hooks.save_load_bypass_begin != nullptr) {
+        bypass = hooks.save_load_bypass_begin(
+            token, slot, static_cast<uint32_t>(contracts::QolSaveCallKind::kResume));
+    }
+    if (bypass == 0) {
+        (void)save_transition_cancel(token);
+        CS_LOG_WARN(kCoreSaveLogDomain, "resume entry bypass unavailable slot=%d", slot);
+        return 0;
+    }
+    if (hooks.save_enter_mark_pending != nullptr) hooks.save_enter_mark_pending();
+    const int result = g_backup_game_start_resume_game(slot);
+    if (hooks.save_load_bypass_end != nullptr) hooks.save_load_bypass_end(bypass);
+    return result;
 }
 
 // hook:SelectCharacter_ButtonBackExe handler：选角取消只释放 selection token/lease
@@ -913,6 +954,19 @@ const contracts::ResourceClaim kResources[] = {
      nullptr,
      0,
      reinterpret_cast<void*>(&save_save_wrapper)},
+    {"hook:GAME_StartResumeGame",
+     "F_GAME_START_RESUME_GAME_VMA",
+     contracts::ResourceMechanism::kEntryHook,
+     contracts::ResourcePolicy::kPrivate,
+     contracts::ResourceRequirement::kRequired,
+     contracts::ResourceFailure::kFailClosed,
+     true,
+     "core.save",
+     "所有继续存档入口的统一转换/加载通知：已 begin 的路径直接透传，未覆盖的游戏 UI "
+     "路径补齐 transition + loading bypass，保证 EB sidecar 随原版清空后重载",
+     nullptr,
+     0,
+     reinterpret_cast<void*>(&save_resume_entry_wrapper)},
     {"hook:SaveSlot_GoToNewGame",
      "F_SAVESLOT_GO_TO_NEW_GAME_VMA",
      contracts::ResourceMechanism::kEntryHook,
@@ -952,6 +1006,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_backup_save_save = nullptr;
     g_backup_goto_new_game = nullptr;
     g_backup_select_back = nullptr;
+    g_backup_game_start_resume_game = nullptr;
     g_logic_clock_task = 0;
     g_resume_window_token.store(0, std::memory_order_release);
     g_catch_up_blocked_slot.store(-1, std::memory_order_release);
@@ -1172,6 +1227,11 @@ int32_t save_on_resource_ready_impl(const char* resource_id, void* backup) {
     if (std::strcmp(resource_id, "hook:SaveSlot_GoToNewGame") == 0) {
         if (backup == nullptr) return 1;
         g_backup_goto_new_game = reinterpret_cast<GoToNewGameFn>(backup);
+        return 0;
+    }
+    if (std::strcmp(resource_id, "hook:GAME_StartResumeGame") == 0) {
+        if (backup == nullptr) return 1;
+        g_backup_game_start_resume_game = reinterpret_cast<GameStartResumeGameFn>(backup);
         return 0;
     }
     if (std::strcmp(resource_id, "hook:SelectCharacter_ButtonBackExe") == 0) {

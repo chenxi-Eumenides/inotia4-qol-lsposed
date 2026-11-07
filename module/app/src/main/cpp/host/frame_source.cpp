@@ -27,6 +27,7 @@
 #include "infra/log/qol_log.h"
 #include "game/access/patches.h"
 #include "game/access/game_access.h"
+#include "game/access/save_transaction.h"
 #include "game/adapter_ports/game_host_port.h"
 #include "hooks/registry.h"
 #include "infra/runtime.h"
@@ -381,6 +382,9 @@ const QolRuntimeHooksApi kQolRuntimeHooksApi{
     &host_save_transition_begin_thunk,
     &host_save_enter_ready,
     &host_save_transition_cancel_thunk,
+    &qol::game::save_load_bypass_begin,
+    &qol::game::save_load_bypass_end,
+    &qol::game::save_has_unready_load_transition,
 };
 
 }  // namespace
