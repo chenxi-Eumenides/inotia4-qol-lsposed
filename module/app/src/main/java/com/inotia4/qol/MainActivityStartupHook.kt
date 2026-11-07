@@ -244,18 +244,31 @@ internal object MainActivityStartupHook {
     }
 
     private val trueFieldPattern = Regex("\":true")
-    private val falseFieldPattern = Regex("\":false")
+    private val falseFieldNamePattern = Regex("\"([A-Za-z0-9_]+)\":false")
 
     /**
-     * 符号就绪摘要：INFO 只留 `symbols=<ok>/<total>`。
-     * 完整 90 项 VMA 报告单行约 5 KB，超过 logcat 单条上限，且逐项明细只在排查
-     * 符号缺失时有用，因此明细降为 DEBUG，由 debug.logging 开关控制。
+     * 符号就绪摘要：INFO 只留 `symbols=<ok>/<total>`；有缺失时额外输出缺失符号名，
+     * 避免为定位单个符号去开 DEBUG 拉取整个 5 KB 报告。
+     * 完整报告单行约 5 KB，超过 logcat 单条上限，仍只走 DEBUG。
+     *
+     * `kernel_only` 是构建模式标记，不是游戏符号；从统计和缺失告警中剔除，
+     * 避免普通构建固定出现 `321/322` 这种看似缺符号的噪声。
      */
     private fun nativeInitReportSummary(): String {
         val report = nativeInitReport()
-        val ok = trueFieldPattern.findAll(report).count()
-        val missing = falseFieldPattern.findAll(report).count()
-        val total = ok + missing
+        val kernelOnlyTrue = report.contains("\"kernel_only\":true")
+        val ok = trueFieldPattern.findAll(report).count() - if (kernelOnlyTrue) 1 else 0
+        val missingNames = falseFieldNamePattern.findAll(report)
+            .map { it.groupValues[1] }
+            .filter { it != "kernel_only" }
+            .toList()
+        if (missingNames.isNotEmpty()) {
+            LogFile.warn(
+                LogDomain.PLATFORM,
+                "native symbol missing: count=${missingNames.size} names=${missingNames.joinToString(",")}",
+            )
+        }
+        val total = ok + missingNames.size
         return if (total == 0) report else "symbols=$ok/$total"
     }
 
