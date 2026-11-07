@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "patch/call_patch.h"
+#include "patch/insn_patch.h"
 #include "patch/short_hook.h"
 #include "patch/native_hook.h"
 #include "patch/save_enter.h"
@@ -75,6 +76,7 @@
 #include "game/state/game_state.h"
 #include "game/access/ptr_slots.h"
 #include "game/access/symbols.h"
+#include "game/access/insn_sites.h"
 #include "game/clock.h"
 #include "hooks/transaction.h"
 #include "host/adapters.h"
@@ -296,6 +298,17 @@ MechanismOutcome dispatch_install(const contracts::ResourceClaim& claim, uintptr
         return MechanismOutcome{outcome.ok, outcome.error,
                                 outcome.ok == 0 ? site.expected_value : nullptr};
     }
+    if (claim.mechanism == contracts::ResourceMechanism::kInsnPatch) {
+        qol::game::InsnSite site{};
+        if (!qol::game::insn_site_resolve(claim.symbol, &site))
+            return MechanismOutcome{1, "instruction site unavailable for variant"};
+        const InsnPatchSpec spec{site.kind, site.a_reg, site.b_reg, site.d_reg,
+                                 site.divisor, site.ret_addr};
+        void* backup = nullptr;
+        if (!insn_patch_install(site.addr, &spec, &backup))
+            return MechanismOutcome{1, "instruction patch rejected"};
+        return MechanismOutcome{0, nullptr, backup};
+    }
     if (claim.mechanism != contracts::ResourceMechanism::kCallPatch) {
         return MechanismOutcome{1, "mechanism unsupported"};
     }
@@ -320,6 +333,13 @@ MechanismOutcome dispatch_release(const contracts::ResourceClaim& claim, uintptr
         }
         const qol::patch::Outcome outcome = qol::patch::release_claim(claim, site);
         return MechanismOutcome{outcome.ok, outcome.error};
+    }
+    if (claim.mechanism == contracts::ResourceMechanism::kInsnPatch) {
+        qol::game::InsnSite site{};
+        if (!qol::game::insn_site_resolve(claim.symbol, &site))
+            return MechanismOutcome{1, "instruction site unavailable for variant"};
+        return MechanismOutcome{insn_patch_release(site.addr) ? 0 : 1,
+                                "instruction patch release failed"};
     }
     if (claim.mechanism != contracts::ResourceMechanism::kCallPatch) {
         return MechanismOutcome{1, "mechanism unsupported"};

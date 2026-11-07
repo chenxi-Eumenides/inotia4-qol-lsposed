@@ -159,6 +159,7 @@ target_link_libraries(gamebridge PRIVATE ${log-lib} dl)
 # 自动出售阶段 A：core 基础设施 + 数据层下沉（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     patch/call_patch.cpp
+    patch/insn_patch.cpp
     patch/short_hook.cpp
     patch/native_hook.cpp
     patch/save_enter.cpp
@@ -347,6 +348,7 @@ target_sources(gamebridge PRIVATE
 # P4 阶段 A1：patch/ 机制层 + push_all 迁移（指令 patch 占用声明/原字校验/回滚，末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     game/access/patches.cpp
+    game/access/insn_sites.cpp
     patch/claims.cpp
     patch/instr_patch.cpp
 )

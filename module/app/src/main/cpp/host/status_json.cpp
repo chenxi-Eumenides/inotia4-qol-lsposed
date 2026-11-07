@@ -111,6 +111,8 @@ const char* mechanism_name(qol::contracts::ResourceMechanism mechanism) {
             return "ptr" "_slot";
         case qol::contracts::ResourceMechanism::kOwnership:
             return "ownership";
+        case qol::contracts::ResourceMechanism::kInsnPatch:
+            return "insn_patch";
     }
     return "unknown";
 }

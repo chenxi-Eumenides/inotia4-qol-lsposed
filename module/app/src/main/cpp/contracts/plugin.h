@@ -28,6 +28,9 @@ enum class ResourceMechanism : uint8_t {
     kCallPatch = 1,
     kPtrSlot = 2,
     kOwnership = 3,
+    // 函数体内指令级替换（mul→int64 trampoline）；handler 为空，由符号登记表提供机制参数；
+    // backup 语义为原指令字（uintptr_t 值）。
+    kInsnPatch = 4,
 };
 
 // 资源策略（§4.2）：私有 / 共享。

@@ -479,6 +479,12 @@ constexpr size_t CB_ENABLED = 0x69;          // u8 使能标志（ControlButton_
 constexpr size_t CB_SIZE = 0x78;             // 按钮私有数据总大小
 
 // ---- 函数 VMA ----
+constexpr uintptr_t F_CHAR_ACT_M_DD_VMA = 0xede88; // CHAR_Act_M_DD：怪物伤害公式函数入口
+constexpr uintptr_t F_CHAR_ACT_M_DD_WRAP_A_VMA = 0xee06c;
+constexpr uintptr_t F_CHAR_ACT_M_DD_WRAP_A_RET_VMA = 0xee080;
+constexpr uintptr_t F_CHAR_ACT_M_DD_WRAP_B_VMA = 0xee1a8;
+constexpr uintptr_t F_CHAR_ACT_M_DD_WRAP_BC_VMA = 0xee1c4;
+constexpr uintptr_t F_CHAR_ACT_M_DD_WRAP_BC_RET_VMA = 0xee1ec;
 constexpr uintptr_t F_GET_MONEY_VMA = 0x10445c;      // int64 ()
 constexpr uintptr_t F_GET_MEMBER_VMA = 0x11f384;     // void* (int)
 constexpr uintptr_t F_GET_MENU_CHARACTER_VMA = 0x120338; // void* () PARTY_GetMenuCharacter：当前装备/物品菜单选中角色
