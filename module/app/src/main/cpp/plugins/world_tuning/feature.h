@@ -17,9 +17,8 @@
 //   ⑤ 金币增量。
 // 玩家血量倍率尚未接游戏逻辑（面板行可见、箭头禁用）。
 //
-// 机制（沿用 simple_mode 已论证的入口 hook）：
-//   - 伤害：包裹 CHAR_AddDamage 入口。该函数是全部 15 条伤害路径的唯一汇合点，
-//     函数体第 3 条语句即 CHAR_AddLife(受害者, -伤害)，故入口即「生效前最后一刻」。
+// 机制：
+//   - 伤害：包裹 CHAR_AddLife 入口。负 delta 为伤害，正 delta 为治疗；所有伤害最终汇入此处。
 //   - 最大生命：包裹 CHAR_UpdateAttrFromMonster。CHAR_UpdateAttr 对 C_TYPE==1 必然分派至此，
 //     属性脏位是惰性重算 → 生成/升级/装备/buff/难度 任何路径都会经过。
 //
@@ -44,7 +43,7 @@ void bind_runtime(const contracts::QolHostSdk* sdk, const contracts::QolGameHost
 void clear_runtime();
 
 // 资源 id：plugin.cpp 的 ResourceClaim 与本层 on_resource_ready 分派共用同一常量。
-inline constexpr const char* kResourceIdAddDamage = "hook:CHAR_AddDamage";
+inline constexpr const char* kResourceIdAddLife = "hook:CHAR_AddLife";
 inline constexpr const char* kResourceIdUpdateAttrFromMonster = "hook:CHAR_UpdateAttrFromMonster";
 inline constexpr const char* kResourceIdAddExperience = "hook:CHAR_AddExperience";
 inline constexpr const char* kResourceIdAddMoney = "hook:INVEN_AddMoney";
@@ -72,9 +71,8 @@ bool rates_config_available();
 // 受限生命周期回调（§3.3）：只缓存 backup，恒返回 0（本插件无失败路径）。
 int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup);
 
-// 两个入口 wrapper：由 plugin_descriptor 的 ResourceClaim.handler 声明，宿主安装。
-void char_add_damage_wrapper(void* attacker, void* victim, int32_t damage, int32_t damage_flag,
-                             int32_t magic_flag);
+// 入口 wrapper：由 plugin_descriptor 的 ResourceClaim.handler 声明，宿主安装。
+void char_add_life_wrapper(void* ch, int32_t delta);
 void char_update_attr_from_monster_wrapper(void* ch, int32_t attr);
 int32_t char_add_experience_wrapper(void* ch, int32_t amount, uint8_t flag);
 int32_t inven_add_money_wrapper(int64_t amount);

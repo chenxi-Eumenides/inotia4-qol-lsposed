@@ -34,7 +34,7 @@ std::atomic<int32_t> g_rates[kRateCount] = {
     kDropQuantityDefault, kDropRerollDefault};
 
 // wrapper 入口函数指针类型：与游戏函数 ABI 一致。原函数入口由宿主经 on_resource_ready 交还。
-using AddDamageFn = void (*)(void*, void*, int32_t, int32_t, int32_t);
+using AddLifeFn = void (*)(void*, int32_t);
 using UpdateAttrFromMonsterFn = void (*)(void*, int32_t);
 using AddExperienceFn = int32_t (*)(void*, int32_t, uint8_t);
 using AddMoneyFn = int32_t (*)(int64_t);
@@ -42,7 +42,7 @@ using DropItemFn = void (*)(void*);
 using MakeItemFn = void* (*)(int32_t, int32_t, int32_t);
 using MakeEquipDetailFn = void* (*)(int32_t, int32_t, int32_t, int32_t, int32_t);
 
-std::atomic<void*> g_backup_add_damage{nullptr};
+std::atomic<void*> g_backup_add_life{nullptr};
 std::atomic<void*> g_backup_update_attr_from_monster{nullptr};
 std::atomic<void*> g_backup_add_experience{nullptr};
 std::atomic<void*> g_backup_add_money{nullptr};
@@ -192,28 +192,26 @@ int32_t rate_value(RateId id) {
 // Hook wrapper（定义在命名空间作用域：地址要交给宿主安装，需外部链接）
 // ---------------------------------------------------------------------------
 
-void char_add_damage_wrapper(void* attacker, void* victim, int32_t damage, int32_t damage_flag,
-                             int32_t magic_flag) {
+void char_add_life_wrapper(void* ch, int32_t delta) {
     const auto* sdk = g_sdk;
     const contracts::InFlightGuard guard(
-        sdk == nullptr ? nullptr : &sdk->in_flight, {kResourceIdAddDamage});
-    const AddDamageFn backup =
-        reinterpret_cast<AddDamageFn>(g_backup_add_damage.load(std::memory_order_acquire));
+        sdk == nullptr ? nullptr : &sdk->in_flight, {kResourceIdAddLife});
+    const AddLifeFn backup =
+        reinterpret_cast<AddLifeFn>(g_backup_add_life.load(std::memory_order_acquire));
     if (backup == nullptr) return;
 
-    int32_t out_damage = damage;
-    if (g_gate.load(std::memory_order_relaxed) && damage > 0 && g_extras != nullptr &&
+    if (delta < 0 && g_gate.load(std::memory_order_relaxed) && g_extras != nullptr &&
         g_facts != nullptr) {
-        const Side victim_side = classify(victim);
+        const Side side = classify(ch);
         int32_t percent = kRateDefault;
-        if (victim_side == Side::kPlayer) {
+        if (side == Side::kPlayer) {
             percent = rate_value(RateId::kDamageIn);
-        } else if (victim_side == Side::kMonster && classify(attacker) == Side::kPlayer) {
+        } else if (side == Side::kMonster) {
             percent = rate_value(RateId::kDamageOut);
         }
-        if (percent != kRateDefault) out_damage = scale_by_percent(damage, percent);
+        if (percent != kRateDefault) delta = -scale_by_percent(-delta, percent);
     }
-    backup(attacker, victim, out_damage, damage_flag, magic_flag);
+    backup(ch, delta);
 }
 
 void char_update_attr_from_monster_wrapper(void* ch, int32_t attr) {
@@ -608,8 +606,8 @@ bool rates_config_available() {
 int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup) {
     (void)ctx;
     if (resource_id == nullptr) return 0;
-    if (std::strcmp(resource_id, kResourceIdAddDamage) == 0) {
-        g_backup_add_damage.store(backup, std::memory_order_release);
+    if (std::strcmp(resource_id, kResourceIdAddLife) == 0) {
+        g_backup_add_life.store(backup, std::memory_order_release);
         return 0;
     }
     if (std::strcmp(resource_id, kResourceIdUpdateAttrFromMonster) == 0) {

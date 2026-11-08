@@ -67,7 +67,7 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 
 | 资源 id | 符号 | 用途 |
 |---|---|---|
-| `hook:CHAR_AddDamage` | `F_CHAR_ADD_DAMAGE_VMA` | 伤害唯一汇合点，改写 `w2` 入参 |
+| `hook:CHAR_AddLife` | `F_CHAR_ADD_LIFE_VMA` | 伤害/治疗最终结算；怪物受伤按 `damage_out`、玩家受伤按 `damage_in` 缩放，治疗透传 |
 | `hook:CHAR_UpdateAttrFromMonster` | `F_CHAR_UPDATE_ATTR_FROM_MONSTER_VMA` | 怪物最大生命重算层，`attr==0x1e` |
 | `hook:CHAR_AddExperience` | `F_ADD_EXP_VMA` | 加经验统一入口 `int(void* ch, int32 amount, uint8 flag)` |
 | `hook:INVEN_AddMoney` | `F_ADD_MONEY_VMA` | 加金币增量入口 `int(int64 amount)` |
@@ -83,11 +83,13 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 
 伤害：
 
+- monster v29 的 mod 会周期性还原 AddDamage 入口跳板（完整性维持），因此伤害缩放落点在 AddLife（干净序言、无 mod 守卫）。
+
 | 条件 | 倍率 |
 |---|---|
-| 受害者玩家侧 | `damage_in` |
-| 攻击者玩家侧且受害者怪物 | `damage_out` |
-| 其余 | 100 |
+| AddLife 的角色为玩家侧且 delta 为负（受伤） | `damage_in` |
+| AddLife 的角色为怪物且 delta 为负（受伤） | `damage_out` |
+| 其余（中性/未知角色、治疗） | 100 / 透传 |
 
 `scale_by_percent`：`value<=0` 或 100 原样返回；int64 计算后钳到 `[1, INT32_MAX]`。
 

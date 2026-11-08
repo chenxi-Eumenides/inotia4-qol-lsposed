@@ -93,7 +93,7 @@ QolResult fake_require(const char* id, QolVersionRange, const void** out_iface) 
 QolResult fake_enter(InFlightHandle handle) {
     assert(handle.resource_id != nullptr);
     ++g_in_flight_enters;
-    if (std::strcmp(handle.resource_id, kResourceIdAddDamage) == 0) {
+    if (std::strcmp(handle.resource_id, kResourceIdAddLife) == 0) {
         ++g_damage_enters;
     } else if (std::strcmp(handle.resource_id, kResourceIdUpdateAttrFromMonster) == 0) {
         ++g_attr_enters;
@@ -112,7 +112,7 @@ QolResult fake_enter(InFlightHandle handle) {
 QolResult fake_leave(InFlightHandle handle) {
     assert(handle.resource_id != nullptr);
     ++g_in_flight_leaves;
-    if (std::strcmp(handle.resource_id, kResourceIdAddDamage) == 0) {
+    if (std::strcmp(handle.resource_id, kResourceIdAddLife) == 0) {
         ++g_damage_leaves;
     } else if (std::strcmp(handle.resource_id, kResourceIdUpdateAttrFromMonster) == 0) {
         ++g_attr_leaves;
@@ -197,9 +197,9 @@ QolResult fake_write_hp(void* character, int32_t value) {
     return ok();
 }
 
-void fake_damage_backup(void*, void*, int32_t damage, int32_t, int32_t) {
+void fake_damage_backup(void*, int32_t delta) {
     ++g_damage_backup_calls;
-    g_last_damage = damage;
+    g_last_damage = delta;
 }
 
 void fake_attr_backup(void*, int32_t) { ++g_attr_backup_calls; }
@@ -415,7 +415,7 @@ void setup_fake_interfaces() {
 
     set_gate(false);
     const auto& descriptor = plugin_descriptor();
-    descriptor.on_resource_ready(g_context, kResourceIdAddDamage, nullptr);
+    descriptor.on_resource_ready(g_context, kResourceIdAddLife, nullptr);
     descriptor.on_resource_ready(g_context, kResourceIdUpdateAttrFromMonster, nullptr);
 }
 
@@ -428,7 +428,7 @@ void install_success() {
     assert(game_host() == &g_game);
     assert(character_extras() == &g_extras);
     assert(character_facts() == &g_facts);
-    descriptor.on_resource_ready(g_context, kResourceIdAddDamage,
+    descriptor.on_resource_ready(g_context, kResourceIdAddLife,
                                  reinterpret_cast<void*>(&fake_damage_backup));
     descriptor.on_resource_ready(g_context, kResourceIdUpdateAttrFromMonster,
                                  reinterpret_cast<void*>(&fake_attr_backup));
@@ -473,9 +473,9 @@ void test_descriptor() {
     assert(descriptor.resources_count == 7);
     assert(descriptor.provides_count == 0);
     assert(descriptor.provides == nullptr);
-    assert(std::strcmp(descriptor.resources[0].id, kResourceIdAddDamage) == 0);
-    assert(std::strcmp(descriptor.resources[0].symbol, "F_CHAR_ADD_DAMAGE_VMA") == 0);
-    assert(descriptor.resources[0].handler == reinterpret_cast<void*>(&char_add_damage_wrapper));
+    assert(std::strcmp(descriptor.resources[0].id, kResourceIdAddLife) == 0);
+    assert(std::strcmp(descriptor.resources[0].symbol, "F_CHAR_ADD_LIFE_VMA") == 0);
+    assert(descriptor.resources[0].handler == reinterpret_cast<void*>(&char_add_life_wrapper));
     assert(std::strcmp(descriptor.resources[1].id, kResourceIdUpdateAttrFromMonster) == 0);
     assert(std::strcmp(descriptor.resources[1].symbol,
                        "F_CHAR_UPDATE_ATTR_FROM_MONSTER_VMA") == 0);
@@ -565,17 +565,16 @@ void test_damage_wrapper() {
     install_success();
     const auto& descriptor = plugin_descriptor();
     descriptor.on_enabled(g_context);
-    Character& attacker = g_characters[0];
-    Character& victim = g_characters[1];
-    attacker.party_member = 1;
-    victim.type = 1;
-    victim.slot = 1;
+    Character& monster = g_characters[0];
+    Character& player = g_characters[1];
+    monster.type = 1;
+    player.party_member = 1;
 
     descriptor.on_disabled(g_context);
     assert_one_damage_flight([&] {
-        char_add_damage_wrapper(&attacker, &victim, 100, 3, 4);
+        char_add_life_wrapper(&monster, -100);
     });
-    assert(g_last_damage == 100);
+    assert(g_last_damage == -100);
     assert(g_party_calls == 0);
 
     descriptor.on_enabled(g_context);
@@ -587,49 +586,40 @@ void test_damage_wrapper() {
     }
     g_party_calls = g_active_calls = g_summoner_calls = 0;
     assert_one_damage_flight([&] {
-        char_add_damage_wrapper(&attacker, &victim, 100, 3, 4);
+        char_add_life_wrapper(&monster, -100);
     });
-    assert(g_last_damage == 150);
-    // The attacker is already identified by party_member; later faction primitives are skipped.
-    assert(g_active_calls == 1 && g_summoner_calls == 1);
+    assert(g_last_damage == -150);
+    assert(g_party_calls == 1 && g_active_calls == 1 && g_summoner_calls == 1);
 
-    Character& monster = g_characters[2];
-    Character& player = g_characters[3];
-    monster.type = 1;
-    player.party_member = 1;
     g_party_calls = g_active_calls = g_summoner_calls = 0;
     assert_one_damage_flight([&] {
-        char_add_damage_wrapper(&monster, &player, 100, 0, 0);
+        char_add_life_wrapper(&player, -100);
     });
-    assert(g_last_damage == 50);
+    assert(g_last_damage == -50);
     assert(g_party_calls == 1 && g_active_calls == 0 && g_summoner_calls == 0);
 
     Character& neutral = g_characters[4];
     neutral.type = 2;
-    Character& player_victim = g_characters[5];
-    player_victim.party_member = 1;
     assert_one_damage_flight([&] {
-        char_add_damage_wrapper(&neutral, &player_victim, 100, 0, 0);
+        char_add_life_wrapper(&neutral, -100);
     });
-    assert(g_last_damage == 50);
+    assert(g_last_damage == -100);
 
     Character& active_player_victim = g_characters[15];
     active_player_victim.active_group = 1;
     g_party_calls = g_active_calls = g_summoner_calls = 0;
     assert_one_damage_flight([&] {
-        char_add_damage_wrapper(&neutral, &active_player_victim, 100, 0, 0);
+        char_add_life_wrapper(&active_player_victim, -100);
     });
-    assert(g_last_damage == 50);
+    assert(g_last_damage == -50);
     assert(g_party_calls == 1 && g_active_calls == 1 && g_summoner_calls == 0);
 
-    Character& player_attacker = g_characters[6];
-    player_attacker.party_member = 1;
     Character& neutral_victim = g_characters[7];
     neutral_victim.type = 2;
     assert_one_damage_flight([&] {
-        char_add_damage_wrapper(&player_attacker, &neutral_victim, 100, 0, 0);
+        char_add_life_wrapper(&neutral_victim, -100);
     });
-    assert(g_last_damage == 100);
+    assert(g_last_damage == -100);
 
     Character& unknown_victim = g_characters[8];
     unknown_victim.type = 1;
@@ -642,73 +632,77 @@ void test_damage_wrapper() {
         return count;
     };
     assert_one_damage_flight([&] {
-        char_add_damage_wrapper(&player_attacker, &unknown_victim, 100, 0, 0);
+        char_add_life_wrapper(&unknown_victim, -100);
     });
-    assert(g_last_damage == 100);
+    assert(g_last_damage == -100);
     assert_one_damage_flight([&] {
-        char_add_damage_wrapper(&player_attacker, &unknown_victim, 100, 0, 0);
+        char_add_life_wrapper(&unknown_victim, -100);
     });
     assert(faction_warning_count() == 1);
     g_fail_party = false;
 
     g_fail_active = true;
     assert_one_damage_flight([&] {
-        char_add_damage_wrapper(&player_attacker, &unknown_victim, 100, 0, 0);
+        char_add_life_wrapper(&unknown_victim, -100);
     });
-    assert(g_last_damage == 100);
+    assert(g_last_damage == -100);
     g_fail_active = false;
 
     g_fail_summoner = true;
     assert_one_damage_flight([&] {
-        char_add_damage_wrapper(&player_attacker, &unknown_victim, 100, 0, 0);
+        char_add_life_wrapper(&unknown_victim, -100);
     });
-    assert(g_last_damage == 100);
+    assert(g_last_damage == -100);
     g_fail_summoner = false;
 
     unknown_victim.summoner = &unknown_victim;
     assert_one_damage_flight([&] {
-        char_add_damage_wrapper(&player_attacker, &unknown_victim, 100, 0, 0);
+        char_add_life_wrapper(&unknown_victim, -100);
     });
-    assert(g_last_damage == 100);
+    assert(g_last_damage == -100);
     unknown_victim.summoner = nullptr;
 
     for (int i = 8; i < 13; ++i) g_characters[i].summoner = &g_characters[i + 1];
-    g_characters[13].summoner = &player_attacker;
+    g_characters[13].summoner = &player;
     assert_one_damage_flight([&] {
-        char_add_damage_wrapper(&player_attacker, &unknown_victim, 100, 0, 0);
+        char_add_life_wrapper(&unknown_victim, -100);
     });
-    assert(g_last_damage == 100);
+    assert(g_last_damage == -100);
     for (int i = 8; i < 14; ++i) g_characters[i].summoner = nullptr;
 
     const auto active_group_fn = g_facts.is_active_player_group;
     g_facts.is_active_player_group = nullptr;
     assert_one_damage_flight([&] {
-        char_add_damage_wrapper(&player_attacker, &unknown_victim, 100, 0, 0);
+        char_add_life_wrapper(&unknown_victim, -100);
     });
-    assert(g_last_damage == 100);
+    assert(g_last_damage == -100);
     g_facts.is_active_player_group = active_group_fn;
 
-    descriptor.on_resource_ready(g_context, kResourceIdAddDamage, nullptr);
+    descriptor.on_resource_ready(g_context, kResourceIdAddLife, nullptr);
     const int reads_before_null_backup = g_party_calls + g_active_calls + g_summoner_calls;
     const int backups_before_null_backup = g_damage_backup_calls;
     assert_one_damage_flight([&] {
-        char_add_damage_wrapper(&player_attacker, &unknown_victim, 100, 0, 0);
+        char_add_life_wrapper(&unknown_victim, -100);
     });
     assert(g_damage_backup_calls == backups_before_null_backup);
     assert(g_party_calls + g_active_calls + g_summoner_calls == reads_before_null_backup);
-    descriptor.on_resource_ready(g_context, kResourceIdAddDamage,
+    descriptor.on_resource_ready(g_context, kResourceIdAddLife,
                                  reinterpret_cast<void*>(&fake_damage_backup));
 
     const int reads_before_nonpositive = g_party_calls + g_active_calls + g_summoner_calls;
     assert_one_damage_flight([&] {
-        char_add_damage_wrapper(&player_attacker, &unknown_victim, 0, 0, 0);
+        char_add_life_wrapper(&player, 0);
     });
     assert(g_last_damage == 0);
     assert_one_damage_flight([&] {
-        char_add_damage_wrapper(&player_attacker, &unknown_victim, -7, 0, 0);
+        char_add_life_wrapper(&player, 7);
     });
-    assert(g_last_damage == -7);
+    assert(g_last_damage == 7);
     assert(g_party_calls + g_active_calls + g_summoner_calls == reads_before_nonpositive);
+    assert_one_damage_flight([&] {
+        char_add_life_wrapper(&player, -7);
+    });
+    assert(g_last_damage == -3);
 }
 
 void test_max_hp_wrapper() {
@@ -849,9 +843,7 @@ void test_deactivate_residual_wrappers() {
     install_success();
     const auto& descriptor = plugin_descriptor();
     descriptor.on_enabled(g_context);
-    Character& attacker = g_characters[0];
     Character& victim = g_characters[1];
-    attacker.party_member = 1;
     victim.type = 1;
 
     descriptor.deactivate(g_context);
@@ -859,9 +851,9 @@ void test_deactivate_residual_wrappers() {
     assert(character_extras() == nullptr && character_facts() == nullptr);
     const int damage_before = g_damage_backup_calls;
     const int attr_before = g_attr_backup_calls;
-    assert_one_damage_flight([&] { char_add_damage_wrapper(&attacker, &victim, 100, 0, 0); });
+    assert_one_damage_flight([&] { char_add_life_wrapper(&victim, -100); });
     assert_one_attr_flight([&] { char_update_attr_from_monster_wrapper(&victim, 0x1e); });
-    assert(g_damage_backup_calls == damage_before + 1 && g_last_damage == 100);
+    assert(g_damage_backup_calls == damage_before + 1 && g_last_damage == -100);
     assert(g_attr_backup_calls == attr_before + 1);
     assert(g_max_hp_writes == 0 && g_hp_writes == 0);
 }
