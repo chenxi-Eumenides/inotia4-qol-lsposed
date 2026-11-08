@@ -38,8 +38,12 @@ void test_ladder_and_metadata() {
     assert(!rate_value_valid(RateId::kGold, 0));
     assert(!rate_value_valid(RateId::kGold, -1));
     assert(rate_value_valid(RateId::kDropQuantity, 0));
-    assert(!rate_value_valid(RateId::kDropQuantity, 6));
+    assert(rate_value_valid(RateId::kDropQuantity, 6));
+    assert(rate_value_valid(RateId::kDropQuantity, 1000));
+    assert(rate_value_valid(RateId::kDropQuantity, INT32_MAX));
+    assert(!rate_value_valid(RateId::kDropQuantity, -1));
     assert(rate_value_valid(RateId::kDropReroll, 1));
+    assert(rate_value_valid(RateId::kDropReroll, 6));
     assert(!rate_value_valid(RateId::kDropReroll, 0));
 
     assert(std::strcmp(rate_key(RateId::kGold), "gold") == 0);
@@ -70,6 +74,8 @@ void test_ladder_and_metadata() {
     assert(ladder_shift(RateId::kDropReroll, 1, -1) == 1);
     assert(ladder_shift(RateId::kDropReroll, 5, 1) == 5);
     assert(rate_display(RateId::kDropQuantity, 0) == "×0");
+    assert(rate_display(RateId::kDropQuantity, 6) == "×6");
+    assert(rate_display(RateId::kDropQuantity, INT32_MAX) == "×2147483647");
     assert(rate_display(RateId::kDropReroll, 3) == "×3");
 
     assert(rate_display(RateId::kGold, 10) == "×0.1");
@@ -115,21 +121,26 @@ void test_decode_rejects_invalid() {
     };
     assert(reject(""));
     assert(reject("{"));
-    assert(reject("{\"unknown\":100}"));
+    assert(!reject("{\"unknown\":100}"));
     assert(!reject("{\"enemy_hp\":1337}"));
     assert(!reject("{\"damage_out\":100000000}"));
     assert(!reject("{\"damage_in\":2147483647}"));
-    assert(reject("{\"enemy_hp\":2147483648}"));
-    assert(reject("{\"enemy_hp\":0}"));
-    assert(reject("{\"enemy_hp\":-1}"));
-    assert(reject("{\"enemy_hp\":100.5}"));
-    assert(reject("{\"enemy_hp\":\"100\"}"));
+    assert(!reject("{\"enemy_hp\":2147483648}"));
+    assert(!reject("{\"enemy_hp\":0}"));
+    assert(!reject("{\"enemy_hp\":-1}"));
+    assert(!reject("{\"enemy_hp\":100.5}"));
+    assert(!reject("{\"enemy_hp\":\"100\"}"));
     assert(reject("{\"enemy_hp\":100,\"enemy_hp\":50}"));
     assert(reject("{\"enemy_hp\":100}x"));
-    assert(reject("{\"enemy_hp\":-100}"));
-    assert(reject("{\"drop_quantity\":6}"));
-    assert(reject("{\"drop_reroll\":0}"));
-    assert(reject("{\"drop_reroll\":6}"));
+    assert(!reject("{\"enemy_hp\":-100}"));
+    assert(!reject("{\"drop_quantity\":6}"));
+    assert(!reject("{\"drop_reroll\":0}"));
+    assert(!reject("{\"drop_reroll\":6}"));
+    Rates parsed{};
+    const char* partial = "{\"gold\":1000,\"enemy_hp\":0}";
+    assert(decode_rates(partial, std::strlen(partial), &parsed));
+    assert(parsed.value[static_cast<uint32_t>(RateId::kGold)] == 1000);
+    assert(parsed.value[static_cast<uint32_t>(RateId::kEnemyHp)] == 100);
 }
 
 // 旧配置兼容：移速倍率已移除，已持久化的 rates JSON 仍可能带 move_speed 键，解析须容忍。
@@ -171,9 +182,9 @@ void test_legacy_move_speed_key() {
 
     // 历史移速键按百分比范围校验后忽略。
     assert(!reject("{\"move_speed\":101}"));
-    // move_speed 重复仍拒绝；move_speed 与未知键并存时未知键仍拒绝。
+    // move_speed 重复仍拒绝；未知字段忽略。
     assert(reject("{\"move_speed\":100,\"move_speed\":50}"));
-    assert(reject("{\"move_speed\":100,\"unknown\":100}"));
+    assert(!reject("{\"move_speed\":100,\"unknown\":100}"));
 }
 
 void test_legacy_drop_quality_key() {
@@ -202,9 +213,11 @@ void test_legacy_drop_quality_key() {
     assert(validate_rates_config("rates", legacy, static_cast<uint32_t>(std::strlen(legacy))).ok ==
            kQolOk);
     const char* bad_zero = "{\"drop_quality\":0}";
-    assert(!decode_rates(bad_zero, static_cast<uint32_t>(std::strlen(bad_zero)), &parsed));
+    assert(decode_rates(bad_zero, static_cast<uint32_t>(std::strlen(bad_zero)), &parsed));
+    assert(parsed.value[static_cast<uint32_t>(RateId::kDropReroll)] == 1);
     const char* bad_high = "{\"drop_quality\":6}";
-    assert(!decode_rates(bad_high, static_cast<uint32_t>(std::strlen(bad_high)), &parsed));
+    assert(decode_rates(bad_high, static_cast<uint32_t>(std::strlen(bad_high)), &parsed));
+    assert(parsed.value[static_cast<uint32_t>(RateId::kDropReroll)] == 6);
     const char* duplicate = "{\"drop_quality\":2,\"drop_quality\":3}";
     assert(!decode_rates(duplicate, static_cast<uint32_t>(std::strlen(duplicate)), &parsed));
 
@@ -219,8 +232,9 @@ void test_validate_config() {
     assert(validate_rates_config("other", good, static_cast<uint32_t>(std::strlen(good))).ok ==
            kQolErrInvalidArgument);
     const char* bad = "{\"enemy_hp\":0}";
-    assert(validate_rates_config("rates", bad, static_cast<uint32_t>(std::strlen(bad))).ok ==
-           kQolErrInvalidArgument);
+    assert(validate_rates_config("rates", bad, static_cast<uint32_t>(std::strlen(bad))).ok == kQolOk);
+    const char* malformed = "{\"enemy_hp\":}";
+    assert(validate_rates_config("rates", malformed, std::strlen(malformed)).ok == kQolErrInvalidArgument);
 }
 
 void test_scaling() {

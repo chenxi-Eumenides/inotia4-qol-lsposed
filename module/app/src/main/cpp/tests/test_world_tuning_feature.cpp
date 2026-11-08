@@ -933,6 +933,18 @@ void test_drop_quantity_wrapper() {
     drop_item_wrapper(nullptr);
     assert(g_drop_item_calls == 1);
 
+    const size_t logs_before_large = g_log_messages.size();
+    set_drop_rates(17, 1);
+    g_drop_item_calls = 0;
+    drop_item_wrapper(nullptr);
+    assert(g_drop_item_calls == 17);
+    int large_warning_count = 0;
+    for (size_t i = logs_before_large; i < g_log_messages.size(); ++i) {
+        if (g_log_messages[i].find("drop quantity") != std::string::npos &&
+            g_log_messages[i].find("17") != std::string::npos) ++large_warning_count;
+    }
+    assert(large_warning_count == 1);
+
     descriptor.on_disabled(g_context);
     g_drop_item_calls = 0;
     drop_item_wrapper(nullptr);

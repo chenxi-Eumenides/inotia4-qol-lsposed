@@ -10,6 +10,7 @@
 namespace qol::features::world_tuning {
 namespace {
 
+constexpr int32_t kDropLargeWarnThreshold = 16;
 
 // 角色阵营归类结果。判定输入是查询结果而非角色指针，便于穷举。
 enum class Side {
@@ -57,6 +58,8 @@ thread_local uint32_t g_drop_depth = 0;
 // 诊断（真机验收用）：异常态只记一次，避免热路径反复刷日志。
 std::atomic<bool> g_faction_deps_missing_logged{false};
 std::atomic<bool> g_pool_slot_unresolved_logged{false};
+std::atomic<bool> g_large_drop_quantity_logged{false};
+std::atomic<bool> g_large_drop_reroll_logged{false};
 
 void log_write(int32_t level, const char* format, va_list args) {
     const auto* sdk = g_sdk;
@@ -419,6 +422,9 @@ void drop_item_wrapper(void* ch) {
         return;
     }
     const int32_t rounds = rate_value(RateId::kDropQuantity);
+    if (rounds > kDropLargeWarnThreshold && !g_large_drop_quantity_logged.exchange(true)) {
+        log_warn("drop quantity %d > %d; no hard cap applied", rounds, kDropLargeWarnThreshold);
+    }
     if (rounds <= 0) return;
     ++g_drop_depth;
     for (int32_t i = 0; i < rounds; ++i) backup(ch);
@@ -440,6 +446,9 @@ void* make_item_wrapper(int32_t category, int32_t lookup_key, int32_t flag) {
     if (rolls <= 1) return first;
     const DropQualityGroup group = quality_group(first, lookup_key);
     if (group == DropQualityGroup::kNone) return first;
+    if (rolls > kDropLargeWarnThreshold && !g_large_drop_reroll_logged.exchange(true)) {
+        log_warn("drop reroll %d > %d; no hard cap applied", rolls, kDropLargeWarnThreshold);
+    }
 
     int32_t best_level = 0;
     if (!read_item_level(first, &best_level)) return first;
@@ -483,6 +492,9 @@ void* make_equip_detail_wrapper(int32_t kind, int32_t min_level, int32_t max_lev
     if (rolls <= 1) return first;
     int32_t best_rarity = 0;
     if (!read_item_rarity(first, &best_rarity)) return first;
+    if (rolls > kDropLargeWarnThreshold && !g_large_drop_reroll_logged.exchange(true)) {
+        log_warn("drop reroll %d > %d; no hard cap applied", rolls, kDropLargeWarnThreshold);
+    }
     void* best = first;
     for (int32_t i = 1; i < rolls; ++i) {
         void* candidate = backup(kind, min_level, max_level, item, option);

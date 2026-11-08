@@ -26,8 +26,8 @@ constexpr uint32_t kRateCount = static_cast<uint32_t>(RateId::kCount);
 // 旧配置兼容：移速倍率已从面板与 encode_rates 中移除，但已持久化的 rates JSON 仍可能带
 // move_speed 键。解析时读取并忽略该键，不能因它把整份 rates 判为非法。
 constexpr const char* kLegacyMoveSpeedKey = "move_speed";
-// 旧配置兼容：drop_quality 已改名为 drop_reroll（档位同为 1..5），覆盖升级时旧 config.json
-// 仍带旧键。解析时按 drop_reroll 的别名读入，避免整份 rates 被判非法。
+// 旧配置兼容：drop_quality 已改名为 drop_reroll，旧 config.json 仍可能带该键。
+// 解析时按 drop_reroll 的别名读入。
 constexpr const char* kLegacyDropQualityKey = "drop_quality";
 
 static_assert(sizeof(kRateKeys) / sizeof(kRateKeys[0]) == kRateCount, "rate key table size");
@@ -88,6 +88,84 @@ bool read_int(const char** cursor, const char* end, int32_t* out) {
     return true;
 }
 
+bool skip_string(const char** cursor, const char* end) {
+    skip_space(cursor, end);
+    if (*cursor >= end || **cursor != '"') return false;
+    ++*cursor;
+    while (*cursor < end) {
+        const unsigned char ch = static_cast<unsigned char>(**cursor);
+        if (ch == '"') { ++*cursor; return true; }
+        if (ch < 0x20) return false;
+        if (ch == '\\') {
+            ++*cursor;
+            if (*cursor >= end) return false;
+            const char escape = **cursor;
+            if (escape == 'u') {
+                for (int i = 0; i < 4; ++i) {
+                    ++*cursor;
+                    if (*cursor >= end || !( (**cursor >= '0' && **cursor <= '9') ||
+                        (**cursor >= 'a' && **cursor <= 'f') || (**cursor >= 'A' && **cursor <= 'F'))) return false;
+                }
+            } else if (escape != '"' && escape != '\\' && escape != '/' && escape != 'b' &&
+                       escape != 'f' && escape != 'n' && escape != 'r' && escape != 't') return false;
+        }
+        ++*cursor;
+    }
+    return false;
+}
+
+bool skip_value(const char** cursor, const char* end, int depth) {
+    if (depth > 8) return false;
+    skip_space(cursor, end);
+    if (*cursor >= end) return false;
+    if (**cursor == '"') return skip_string(cursor, end);
+    if (**cursor == '[' || **cursor == '{') {
+        const bool object = **cursor == '{';
+        const char close = object ? '}' : ']';
+        ++*cursor;
+        skip_space(cursor, end);
+        if (*cursor < end && **cursor == close) { ++*cursor; return true; }
+        for (;;) {
+            if (object && !skip_string(cursor, end)) return false;
+            if (object && !consume(cursor, end, ':')) return false;
+            if (!skip_value(cursor, end, depth + 1)) return false;
+            skip_space(cursor, end);
+            if (*cursor < end && **cursor == ',') { ++*cursor; continue; }
+            return consume(cursor, end, close);
+        }
+    }
+    const char* start = *cursor;
+    if (**cursor == '-') ++*cursor;
+    if (*cursor < end && **cursor == '0') ++*cursor;
+    else {
+        if (*cursor >= end || **cursor < '1' || **cursor > '9') { *cursor = start; goto literal; }
+        while (*cursor < end && **cursor >= '0' && **cursor <= '9') ++*cursor;
+    }
+    if (*cursor < end && **cursor == '.') {
+        ++*cursor;
+        if (*cursor >= end || **cursor < '0' || **cursor > '9') { *cursor = start; return false; }
+        while (*cursor < end && **cursor >= '0' && **cursor <= '9') ++*cursor;
+    }
+    if (*cursor < end && (**cursor == 'e' || **cursor == 'E')) {
+        ++*cursor;
+        if (*cursor < end && (**cursor == '+' || **cursor == '-')) ++*cursor;
+        if (*cursor >= end || **cursor < '0' || **cursor > '9') { *cursor = start; return false; }
+        while (*cursor < end && **cursor >= '0' && **cursor <= '9') ++*cursor;
+    }
+    if (*cursor != start) return true;
+literal:
+    const char* literals[] = {"true", "false", "null"};
+    for (const char* literal : literals) {
+        const size_t length = std::strlen(literal);
+        if (static_cast<size_t>(end - *cursor) >= length && std::memcmp(*cursor, literal, length) == 0) {
+            *cursor += length;
+            return true;
+        }
+    }
+    return false;
+}
+
+
 }  // namespace
 
 bool rate_supported(RateId id) {
@@ -134,8 +212,8 @@ int32_t rate_default(RateId id) {
 
 bool rate_value_valid(RateId id, int32_t value) {
     switch (id) {
-        case RateId::kDropQuantity: return value >= 0 && value <= 5;
-        case RateId::kDropReroll: return value >= 1 && value <= 5;
+        case RateId::kDropQuantity: return value >= 0;
+        case RateId::kDropReroll: return value >= 1;
         case RateId::kGold:
         case RateId::kExp:
         case RateId::kPlayerHp:
@@ -233,7 +311,14 @@ bool decode_rates(const char* json, uint32_t size, Rates* out) {
             if (!read_string(&cursor, end, key, sizeof(key))) return false;
             if (!consume(&cursor, end, ':')) return false;
             int32_t value = 0;
-            if (!read_int(&cursor, end, &value)) return false;
+            const char* value_start = cursor;
+            const bool integer = read_int(&cursor, end, &value);
+            skip_space(&cursor, end);
+            const bool complete_integer = integer && cursor < end && (*cursor == ',' || *cursor == '}');
+            if (!complete_integer) {
+                cursor = value_start;
+                if (!skip_value(&cursor, end, 0)) return false;
+            }
             uint32_t index = kRateCount;
             for (uint32_t i = 0; i < kRateCount; ++i) {
                 if (std::strcmp(key, kRateKeys[i]) == 0) {
@@ -242,23 +327,18 @@ bool decode_rates(const char* json, uint32_t size, Rates* out) {
                 }
             }
             if (index < kRateCount) {
-                if (!rate_value_valid(static_cast<RateId>(index), value)) return false;
                 if (seen[index]) return false;
                 seen[index] = true;
-                parsed.value[index] = value;
+                if (complete_integer && rate_value_valid(static_cast<RateId>(index), value)) parsed.value[index] = value;
             } else if (std::strcmp(key, kLegacyMoveSpeedKey) == 0) {
-                // 历史移速值按百分比范围校验后忽略，不写入 rates。
-                if (!rate_value_valid(RateId::kGold, value)) return false;
                 if (seen_legacy_move_speed) return false;
                 seen_legacy_move_speed = true;
             } else if (std::strcmp(key, kLegacyDropQualityKey) == 0) {
-                // 旧配置的 drop_quality 键：作为 drop_reroll 别名读入；显式 drop_reroll 优先。
-                if (!rate_value_valid(RateId::kDropReroll, value)) return false;
                 if (seen_legacy_drop_quality) return false;
                 seen_legacy_drop_quality = true;
-                legacy_drop_quality = value;
+                if (complete_integer && rate_value_valid(RateId::kDropReroll, value)) legacy_drop_quality = value;
             } else {
-                return false;
+                // 未知字段：值已由 read_int 或 skip_value 消费，忽略。
             }
             skip_space(&cursor, end);
             if (cursor < end && *cursor == ',') {
@@ -270,7 +350,7 @@ bool decode_rates(const char* json, uint32_t size, Rates* out) {
         }
     }
     const uint32_t reroll_index = static_cast<uint32_t>(RateId::kDropReroll);
-    if (seen_legacy_drop_quality && !seen[reroll_index]) {
+    if (seen_legacy_drop_quality && legacy_drop_quality >= 1 && !seen[reroll_index]) {
         parsed.value[reroll_index] = legacy_drop_quality;
     }
     skip_space(&cursor, end);
@@ -299,7 +379,7 @@ int32_t scale_by_percent(int32_t value, int32_t percent) {
 }
 
 int64_t scale_money(int64_t value, int32_t percent) {
-    if (value <= 0 || percent == kRateDefault) return value;
+    if (value <= 0 || percent <= 0 || percent == kRateDefault) return value;
     if (value > INT64_MAX / percent) return INT64_MAX;
     return value * percent / 100;
 }

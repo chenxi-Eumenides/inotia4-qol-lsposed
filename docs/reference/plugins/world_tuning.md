@@ -11,8 +11,8 @@
 - 敌怪血量倍率：缩放怪物最大生命；
 - 伤害倍率：缩放玩家侧对怪物造成的伤害；
 - 承伤倍率（配置键 `damage_in`）：缩放玩家侧受到的伤害；
-- 掉落数量倍率（配置键 `drop_quantity`）：整数 0..5，重复整次 `CHARSYSTEM_DropItem` 结算；
-- 掉落重抽次数（配置键 `drop_reroll`）：整数 1..5，槽内造物重掷取同类别最优。
+- 掉落数量倍率（配置键 `drop_quantity`）：整数 0..INT32_MAX，重复整次 `CHARSYSTEM_DropItem` 结算；
+- 掉落重抽次数（配置键 `drop_reroll`）：整数 1..INT32_MAX，槽内造物重掷取同类别最优。
 
 玩家血量倍率尚未接线（玩家/佣兵不走 `CHAR_UpdateAttrFromMonster`），面板行只保存数值，不产生游戏效果。面板行只显示名称、数值与箭头，不显示副标题。
 
@@ -45,10 +45,11 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 
 - 字段：`gold`、`exp`、`player_hp`、`enemy_hp`、`damage_out`、`damage_in`、`drop_quantity`、`drop_reroll`；缺字段按各行默认值处理（前六项 100，`drop_quantity`/`drop_reroll` 为 1）。
 - 百分比档位仅作为面板箭头预设；`config.json` 可手写任意整数，范围为 `1..INT32_MAX`（100 = 不修改）。合法的非档位值原样生效，面板显示读取值，点击箭头后移动到该方向相邻预设。
-- `drop_quantity` 范围为整数 `0..5`（0 = 不掉落）；`drop_reroll` 范围为整数 `1..5`（1 = 不重掷）。
-- 未知字段、重复字段、非整数、负数及超出字段范围的取值一律拒绝。
-- 旧配置兼容：历史版本写入的 `move_speed` 键（已移除的移速倍率）解析时按百分比范围校验后忽略，不使整份 rates 非法；重复出现仍拒绝。
-- `validate_config` 在写入与 Store 加载两条路径生效（`host/features/controller.cpp`、`host/core_settings_config_store.cpp`）。
+- `drop_quantity` 范围为整数 `0..INT32_MAX`（0 = 不掉落）；`drop_reroll` 范围为整数 `1..INT32_MAX`（1 = 不重掷）。档位仅作为面板箭头预设。
+- 单字段的非整数、溢出、负数或低于字段下限的值只令该字段回退默认值，其余字段继续生效；未知字段忽略。重复字段、JSON 语法错误及结尾多余内容仍拒绝整份配置。
+- 旧配置兼容：历史 `move_speed` 键解析时跳过并忽略；`drop_quality` 作为 `drop_reroll` 别名，显式 `drop_reroll` 优先；重复旧键仍拒绝。
+- `validate_config` 仍校验 `rates` 对象结构；越界字段已回退默认值，不会导致 Host 删除 `rates` 键。写入与 Store 加载两条路径均执行该校验（`host/features/controller.cpp`、`host/core_settings_config_store.cpp`）。
+- `drop_quantity` 或 `drop_reroll` 超过 16 次时写一次 warning；不设置硬上限，仍按配置次数执行。
 - 读取通道：插件经 `QolFeatureApi::read_config` 读自己的 namespace；写入经 `request_set_config`，面板每帧轮询一次 receipt。`/api/config/set` 改同一键，下次打开面板或插件重新启用时生效。
 - 插件未订阅 `runtime_effects`；外部改动不会即时推送。
 
@@ -134,12 +135,12 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 
 ## 测试
 
-- `world_tuning_rates_tests`（`tests/test_world_tuning_rates.cpp`）：档位、显示文本、JSON 往返、非法输入、旧配置 `move_speed` 键兼容、`validate_config`、缩放边界。
-- `world_tuning_feature_tests`（`tests/test_world_tuning_feature.cpp`）：descriptor（7 资源、无 provides）、安装失败出口、门禁时序、伤害矩阵、HP 缩放与幂等/倍率变更、经验/金币缩放、阵营失败、残留 wrapper、entry 不可用分支；掉落数量 0/1/3 次调用、重抽的类别过滤/取最高/释放次数/掉落上下文隔离。
+- `world_tuning_rates_tests`（`tests/test_world_tuning_rates.cpp`）：档位、显示文本、JSON 往返、越界值分字段回退、未知字段忽略、重复/语法错误拒绝、旧配置 `move_speed`/`drop_quality` 键兼容、`validate_config`、缩放边界。
+- `world_tuning_feature_tests`（`tests/test_world_tuning_feature.cpp`）：descriptor（7 资源、无 provides）、安装失败出口、门禁时序、伤害矩阵、HP 缩放与幂等/倍率变更、经验/金币缩放、阵营失败、残留 wrapper、entry 不可用分支；掉落数量 0/1/3/17 次调用与 warning、重抽的类别过滤/取最高/释放次数/掉落上下文隔离。
 - `settings_contributions_tests` 编译本插件的空 contribution。
 
 面板绘制/命中与 entry 联动已有真机观察（见下）；未覆盖：真实设备 hook ABI（伤害/敌怪血量实际生效）、资源安装时序。
 
 ## 验证状态
 
-Host 测试与构建通过；2026-10-29 真机（C18L v589）已验证：设置页入口 → 面板打开、行箭头显示与点击、数值写入 `config.json`、无 FATAL（该证据时点面板为 7 行且含已移除的 `rates.move_speed` 键）。各倍率的游戏内实际效果尚未复测，按 `docs/refactor/verification.md` 的口径登记为 `PARTIAL / NOT_ACCEPTED`。
+Host 测试与 Debug 构建通过（2026-11-08：越界配置分字段回退、未知字段忽略、17 次掉落与 warning 已覆盖）；2026-10-29 真机（C18L v589）已验证：设置页入口 → 面板打开、行箭头显示与点击、数值写入 `config.json`、无 FATAL（该证据时点面板为 7 行且含已移除的 `rates.move_speed` 键）。各倍率的游戏内实际效果尚未复测，按 `docs/refactor/verification.md` 的口径登记为 `PARTIAL / NOT_ACCEPTED`。
