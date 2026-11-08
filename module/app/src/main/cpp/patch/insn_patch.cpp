@@ -224,13 +224,13 @@ bool insn_patch_install(uintptr_t site, const InsnPatchSpec* spec, void** backup
     void* slots[4]{};
     const uint32_t slot_count = spec->kind == 1 ? 1u : (spec->kind == 4 ? 4u :
                                (spec->kind == 3 ? 3u : 2u));
-    for (uint32_t i = 0; i < slot_count; ++i) {
-        slots[i] = call_patch_acquire_near_slot(site);
-        if (slots[i] == nullptr) {
-            for (uint32_t j = 0; j < i; ++j)
-                call_patch_release_near_entry(reinterpret_cast<uintptr_t>(slots[j]));
-            return false;
-        }
+    // 多槽 thunk 的槽间 fall-through 依赖槽位内存相邻：slot_count ≥ 2 时必须走
+    // 连续多槽分配（空闲表散槽无相邻性，不得复用）；单槽仍走常规空闲表路径。
+    if (slot_count == 1) {
+        slots[0] = call_patch_acquire_near_slot(site);
+        if (slots[0] == nullptr) return false;
+    } else if (call_patch_acquire_near_slots(site, slot_count, slots) == nullptr) {
+        return false;
     }
     const auto code_pc = [slots](uint32_t index) {
         return reinterpret_cast<uintptr_t>(slots[index / 8]) + (index % 8) * 4;

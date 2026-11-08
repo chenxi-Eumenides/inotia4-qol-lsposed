@@ -14,6 +14,7 @@ bool call_patch_test_candidate_address(uintptr_t base, uint64_t distance, bool p
                                        uintptr_t* out_candidate);
 void* call_patch_test_acquire_thunk_slot(uintptr_t call_addr);
 void* call_patch_test_acquire_existing_thunk_slot(uintptr_t call_addr);
+void* call_patch_test_acquire_near_slots(uintptr_t call_addr, uint32_t count, void** out_slots);
 void call_patch_test_release_thunk_slot(void* slot);
 #endif
 
@@ -50,6 +51,14 @@ void call_patch_release_near_entry(uintptr_t thunk);
 // 取一个空的近址 32B 槽（±128MB 内、可执行、未写内容），供调用方自行写入短跳/跳板；
 // 0 = 分配失败。归还用 call_patch_release_near_entry。
 void* call_patch_acquire_near_slot(uintptr_t near_addr);
+
+// 一次取 count 个**内存连续**的近址 32B 槽（out_slots[i] = base + i*32B），
+// 供多槽 thunk 按顺序落空执行（kind0/3/4 的槽间 fall-through 依赖相邻性）。
+// 相邻性只有页内 carving 能保证：空闲表中的散槽不参与多槽分配；当前所有页
+// 放不下 count 连续槽时 mmap 新页 carved。失败返回 nullptr（未写任何槽、
+// 未占用页额度）。归还仍逐槽 call_patch_release_near_entry（散槽可供
+// 单槽需求复用）。
+void* call_patch_acquire_near_slots(uintptr_t near_addr, uint32_t count, void** out_slots);
 
 // B 尾调用重定向（kBranchRedirect）：站点为 B 指令；在 call_addr ±128MB 内复用 thunk 池
 // 分配 thunk（`ldr x16, #8; br x16; .quad handler`）并把 B 改指 thunk；返回 thunk 运行期

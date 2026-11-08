@@ -1,4 +1,5 @@
 #include "patch/insn_patch.h"
+#include "patch/call_patch.h"
 #include "plugins/damage_widen/safe_scale.h"
 #include "infra/log/qol_log.h"
 
@@ -141,6 +142,17 @@ int main(int argc, char** argv) {
               "install region trampoline");
         check(reinterpret_cast<uintptr_t>(backup) == 0x1b167f76u,
               "region backup contains original instruction");
+        // 多槽相邻性回归：kind4 占 4 槽，顺序落空执行要求 4 槽内存相邻。
+        {
+            void* multi[4]{};
+            check(call_patch_test_acquire_near_slots(site, 4, multi) != nullptr,
+                  "acquire 4 contiguous near slots");
+            check(multi[1] == static_cast<char*>(multi[0]) + 32 &&
+                      multi[2] == static_cast<char*>(multi[0]) + 64 &&
+                      multi[3] == static_cast<char*>(multi[0]) + 96,
+                  "multi-slot chunks are memory contiguous");
+            for (auto* m : multi) call_patch_test_release_thunk_slot(m);
+        }
         check(insn_patch_release(site) && code[0] == 0x1b167f76u,
               "region release restores original instruction");
         code[0] = 0x1b167f75u;

@@ -754,7 +754,8 @@ add_executable(insn_patch_tests
 target_include_directories(insn_patch_tests PRIVATE ${CPP_DIR})
 target_compile_features(insn_patch_tests PRIVATE cxx_std_17)
 set_target_properties(insn_patch_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-target_compile_definitions(insn_patch_tests PRIVATE QOL_INSN_PATCH_TEST_SEAMS=1)
+target_compile_definitions(insn_patch_tests PRIVATE QOL_INSN_PATCH_TEST_SEAMS=1
+                                                    QOL_CALL_PATCH_TEST_SEAMS=1)
 add_test(NAME insn_patch_tests COMMAND insn_patch_tests)
 
 # P2 纵向样板基础层：infra 配置与命令端口 host 测试（末尾追加）

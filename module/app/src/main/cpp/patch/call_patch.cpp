@@ -350,6 +350,63 @@ void* acquire_thunk_slot_locked(uintptr_t call_addr, AllocationFailure* failure)
     return nullptr;
 }
 
+// 连续多槽分配（持有锁）：跳过空闲表——散槽不满足多槽 thunk 的相邻性要求——
+// 只在现有页内 carving count 个连续槽，放不下即按两级扫描 mmap 新页一次 carved。
+// 成功时 out_slots[i] = base + i*kThunkSlot；首槽可达性已由 encode_branch 校验，
+// 其余槽与首槽同页，天然可达。
+void* acquire_near_slots_locked(uintptr_t near_addr, uint32_t count, void** out_slots,
+                                AllocationFailure* failure) {
+    if (failure != nullptr) *failure = AllocationFailure{};
+    if (count > kSlotsPerPage) {
+        set_failure(failure, 0, 0, "multi_slot_count_over_page", 0);
+        return nullptr;
+    }
+    for (size_t page_index = 0; page_index < g_thunk_page_count; ++page_index) {
+        const size_t used = g_thunk_page_used[page_index];
+        if (used + count > kSlotsPerPage) continue;
+        const uintptr_t page = reinterpret_cast<uintptr_t>(g_thunk_pages[page_index]);
+        uint32_t ignored_branch = 0;
+        if (!encode_branch(near_addr, page + used * kThunkSlot, &ignored_branch)) continue;
+        for (uint32_t i = 0; i < count; ++i)
+            out_slots[i] = reinterpret_cast<void*>(page + (used + i) * kThunkSlot);
+        g_thunk_page_used[page_index] = used + count;
+        g_thunk_slots_allocated += count;
+        return out_slots[0];
+    }
+    for (const bool coarse : {true, false}) {
+        const uint64_t step = coarse ? 0x10000u : 0x1000u;
+        const uintptr_t base = near_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
+        for (uint64_t distance = step; distance < (uint64_t{1} << 27); distance += step) {
+            for (const bool positive : {true, false}) {
+                uintptr_t candidate = 0;
+                if (!candidate_address(base, distance, positive, &candidate) ||
+                    (candidate & (kPageSize - 1)) != 0) {
+                    set_failure(failure, candidate, 0, "candidate_address_overflow", 0);
+                    continue;
+                }
+                uint32_t ignored_branch = 0;
+                if (!encode_branch(near_addr, candidate, &ignored_branch)) continue;
+                void* region = map_candidate(near_addr, candidate, failure);
+                if (region == nullptr) continue;
+                const uintptr_t actual = reinterpret_cast<uintptr_t>(region);
+                if (g_thunk_page_count >= g_thunk_pages.size()) {
+                    (void)unmap_invalid_region(region, failure, candidate, "page_pool_capacity", 0);
+                    return nullptr;
+                }
+                const size_t page_index = g_thunk_page_count++;
+                g_thunk_pages[page_index] = region;
+                g_thunk_page_used[page_index] = count;
+                g_thunk_slots_allocated += count;
+                for (uint32_t i = 0; i < count; ++i)
+                    out_slots[i] = reinterpret_cast<void*>(actual + i * kThunkSlot);
+                return out_slots[0];
+            }
+        }
+    }
+    set_failure(failure, 0, 0, "multi_slot_no_contiguous_region", 0);
+    return nullptr;
+}
+
 void log_thunk_allocation_failure(uintptr_t call_addr, void* wrapper,
                                   const AllocationFailure& failure) {
     static std::once_flag uname_once;
@@ -439,6 +496,12 @@ void* call_patch_test_acquire_thunk_slot(uintptr_t call_addr) {
     return acquire_thunk_slot_locked(call_addr, &failure);
 }
 
+void* call_patch_test_acquire_near_slots(uintptr_t call_addr, uint32_t count, void** out_slots) {
+    std::lock_guard<std::mutex> lock(g_call_patch_mtx);
+    AllocationFailure failure;
+    return acquire_near_slots_locked(call_addr, count, out_slots, &failure);
+}
+
 void* call_patch_test_acquire_existing_thunk_slot(uintptr_t call_addr) {
     std::lock_guard<std::mutex> lock(g_call_patch_mtx);
     return acquire_existing_thunk_slot_locked(call_addr);
@@ -476,6 +539,15 @@ void* call_patch_acquire_near_slot(uintptr_t near_addr) {
     void* slot = acquire_thunk_slot_locked(near_addr, &failure);
     if (slot == nullptr) log_thunk_allocation_failure(near_addr, nullptr, failure);
     return slot;
+}
+
+void* call_patch_acquire_near_slots(uintptr_t near_addr, uint32_t count, void** out_slots) {
+    if (near_addr == 0 || count == 0 || out_slots == nullptr) return nullptr;
+    std::lock_guard<std::mutex> lock(g_call_patch_mtx);
+    AllocationFailure failure;
+    void* base = acquire_near_slots_locked(near_addr, count, out_slots, &failure);
+    if (base == nullptr) log_thunk_allocation_failure(near_addr, nullptr, failure);
+    return base;
 }
 
 bool call_patch_install_bl(uintptr_t call_addr, uint32_t expected_word, void* wrapper) {
