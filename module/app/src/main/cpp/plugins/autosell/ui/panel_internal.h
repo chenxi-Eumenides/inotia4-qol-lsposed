@@ -23,12 +23,8 @@ namespace qol::features::autosell {
 
 using UiRect = qol::contracts::UiRect;
 
-// 入口按钮：中心对齐两处——横向=扩展背包页签列（原版袋 0 右侧 68、宽 57）的中心，
-// 纵向=原版任务背包格（袋容器 child 5）的中心。齿轮本身 68×68。
+// 入口按钮：68×68 齿轮，固定在背包页右上角，镜像 ui_theme 的导航盒（左上 8,8 / 78×86）。
 constexpr int64_t kEntrySize = 68;
-constexpr int64_t kBagTabSize = 57;       // 原版袋格/扩展页签边长
-constexpr int64_t kExtTabOffsetX = 68;    // 扩展页签列相对袋 0 的偏移
-constexpr int64_t kEntryOffsetY = 3;      // 视觉微调：在中心对齐基础上整体下移 3
 
 // 面板几何（逻辑坐标基准 960×640；实际逻辑宽由 CalcResolution 推出，真机 1408）。
 // 宽度基准：2 × 0x180（假定物品详情面板宽 384）= 0x300 = 768 ≤ 1408。

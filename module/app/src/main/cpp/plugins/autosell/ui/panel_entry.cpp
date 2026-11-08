@@ -22,54 +22,33 @@ static void autosell_entry_clicked(void* ctrl) {
     }
 }
 
-// 布局回调：parent 是当帧活的袋容器。取原版袋 0 绝对位置 + 偏移、
-// 任务袋（child 5）行对齐，换算成相对 parent 的 rect。
+// 布局回调：入口固定在背包页右上角，绝对坐标与返回按钮导航盒镜像，
+// 并按父控件绝对原点换算为相对 rect。
 static QolResult autosell_entry_layout(void* parent, UiRect* out_rect, void* user) {
     (void)user;
     if (parent == nullptr || out_rect == nullptr) {
         return qol::contracts::error(kQolErrInvalidArgument, "entry layout", 12);
     }
-    constexpr uint32_t kRequiredChildren = 6;
-    uint32_t child_count = 0;
-    if (!ui_child_count(parent, &child_count) || child_count < kRequiredChildren) {
-        // 占位容器（原版 6 袋标签未就位）：本帧无法定位，下一帧重试。
-        return qol::contracts::error(kQolErrNotReady, "bag container not ready", 24);
-    }
-    void* bag0 = nullptr;
-    UiRect bag0_rect{};
-    if (!ui_child_at(parent, 0, &bag0) || bag0 == nullptr || !ui_get_rect(bag0, &bag0_rect) ||
-        bag0_rect.w <= 0) {
-        return qol::contracts::error(kQolErrNotReady, "bag0 not ready", 15);
-    }
-    int64_t bag0_abs_x = 0, bag0_abs_y = 0;
     int64_t parent_abs_x = 0, parent_abs_y = 0;
-    autosell_ctrl_abs(bag0, &bag0_abs_x, &bag0_abs_y);
     autosell_ctrl_abs(parent, &parent_abs_x, &parent_abs_y);
-    // 横向中心 = 扩展页签列中心；纵向中心 = 任务背包格中心。
-    const int64_t center_x = bag0_abs_x + kExtTabOffsetX + kBagTabSize / 2;
-    int64_t center_y = bag0_abs_y + 347 + kBagTabSize / 2;  // 任务袋缺失时的兜底
-    void* task_bag = nullptr;
-    UiRect task{};
-    if (ui_child_at(parent, 5, &task_bag) && task_bag != nullptr &&
-        ui_get_rect(task_bag, &task) && task.h > 0) {
-        int64_t task_abs_x = 0, task_abs_y = 0;
-        autosell_ctrl_abs(task_bag, &task_abs_x, &task_abs_y);
-        (void)task_abs_x;
-        center_y = task_abs_y + task.h / 2;
-    }
-    *out_rect = {center_x - kEntrySize / 2 - parent_abs_x,
-        center_y + kEntryOffsetY - kEntrySize / 2 - parent_abs_y, kEntrySize, kEntrySize};
+    const int64_t screen_w = autosell_screen_width();
+    const int64_t x_abs = screen_w - qol::contracts::ui_theme::kNavBoxAbsX -
+        qol::contracts::ui_theme::kNavBoxW +
+        (qol::contracts::ui_theme::kNavBoxW - kEntrySize) / 2;
+    const int64_t y_abs = qol::contracts::ui_theme::kNavBoxAbsY +
+        (qol::contracts::ui_theme::kNavBoxH - kEntrySize) / 2;
+    *out_rect = {x_abs - parent_abs_x, y_abs - parent_abs_y, kEntrySize, kEntrySize};
     static UiRect last_rect{};
     if (last_rect.x != out_rect->x || last_rect.y != out_rect->y ||
         last_rect.w != out_rect->w || last_rect.h != out_rect->h) {
         last_rect = *out_rect;
-        AUTOSELLUI_LOG("entry rect=(%lld,%lld,%lld,%lld) center=(%lld,%lld) bag0=(%lld,%lld) "
-                       "task_center_y=%lld",
+        AUTOSELLUI_LOG("entry rect=(%lld,%lld,%lld,%lld) abs=(%lld,%lld) screen_w=%lld "
+                       "parent_abs=(%lld,%lld)",
                        static_cast<long long>(out_rect->x), static_cast<long long>(out_rect->y),
                        static_cast<long long>(out_rect->w), static_cast<long long>(out_rect->h),
-                       static_cast<long long>(center_x), static_cast<long long>(center_y),
-                       static_cast<long long>(bag0_abs_x), static_cast<long long>(bag0_abs_y),
-                       static_cast<long long>(center_y));
+                       static_cast<long long>(x_abs), static_cast<long long>(y_abs),
+                       static_cast<long long>(screen_w), static_cast<long long>(parent_abs_x),
+                       static_cast<long long>(parent_abs_y));
     }
     return qol::contracts::ok();
 }

@@ -102,7 +102,7 @@ required capabilities 在 `plugin.cpp` 声明；`inventory.bag_source` 1.2 是�
 ### 游戏内 UI
 
 - 入口使用 `QolUiAnchoredButton`；每帧 `anchored_button_ensure` 由 `core.custom_ui` 解析活袋容器、校验句柄身份并在失效时只注销记录后重建，入口侧不删除游戏 native（`ui/panel_entry.cpp:77-104`）。
-- 入口几何：68×68；横向对齐扩展页签列中心，纵向对齐原版任务袋中心，整体下移 3px（`ui/panel_internal.h:26-31`、`ui/panel_entry.cpp:25-75`）。
+- 入口几何：68×68，固定在背包页右上角；位置取 `ui_theme` 导航盒（绝对 8,8、78×86）的水平镜像，齿轮在镜像盒内居中，再用父控件绝对原点换算为相对 rect（`ui/panel_internal.h:26-27`、`ui/panel_entry.cpp:25-53`）。
 - 入口点击只通过 `ui_panels` 能力打开 `autosell` 面板；`panels.open` 只做注册表门禁，不建立 popup 栈（`ui/panel_ui.cpp`、`ui/panel_entry.cpp:17-23`）。
 - 面板 provider 注册在 `plugin.cpp`；PopupState 与面板栈由 `core.custom_ui` 的 PopupHost 托管。面板 enter 创建控件，process 绘制，event 处理 `0x17/0x18`（`ui/panel_events.cpp`）。
 - 草稿 `g_draft` 在 enter 时从运行时配置复制；返回/关闭时 `autosell_commit_draft` 调 `autosell_store_commit_config`，随后调用 `autosell_reset_scan_timer()`：移除当前 scheduler 任务并按 20 帧重新注册，使下一次扫描从关闭时刻重新计时，避免面板关闭后抢在背包页 active 之前出售。面板打开期间 `scan_gates` 的 `panels.active("autosell")` 会阻塞扫描（`ui/panel_events.cpp`、`scan.cpp`）。
