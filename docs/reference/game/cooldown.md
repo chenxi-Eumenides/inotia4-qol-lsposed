@@ -173,14 +173,55 @@ return item_error(out, kQolErrBlocked, "on cooldown");
 - 取消冷却：把结束 tick 写成当前 tick 或更小。
 - 只读展示剩余时间：`nextTime - g_nGlobalCoolTimeCount`；物品用 `CHECKTIME_*` 同类计算。
 
-## 7. 未确认项
+## 7. 使用范围（调用者）
+
+### 7.1 技能/动作冷却
+
+判定入口 `CHAR_GetActionState` 的调用者：
+
+| 调用者 | 调用点 | 用途 |
+|---|---|---|
+| `CHAR_ProcessNormalAIOnCombat` | `0xe4a78` | 非玩家 AI（队友/佣兵等）选技能前检查 |
+| `MONSTERAI_RunAIProc` | `0xacd3c` | 怪物 AI 选技能前检查（`CHAR_FindAction` 后） |
+| `SHORTCUT_GetState` | `0x121c08` | 快捷栏 UI 状态 |
+
+写入链路：`CHAR_SetActionNextTime` 的唯一调用者是 `CHAR_SetAction`（`0xe7954`）；`CHAR_SetAction` 的调用者包括 `CHAR_BeginAction`、`CHAR_StartActionEx`、`CHAR_ActionAI`、`CHAR_SetActionForEvent`、`CHARSYSTEM_UpdateTownAll`。
+
+- 玩家路径：`GAMESTATE_PressKeyPlay` → `CHAR_ProcessShortcut` → `SHORTCUT_GetState` → `CHAR_StartActionEx` → `CHAR_SetAction`。
+- 非玩家路径：`CHAR_Process`（角色 ≠ 当前操作角色）→ `CHAR_ProcessAI`（`0xf21bc`）→ `CHAR_ProcessAIOnCombat` → `CHAR_ProcessNormalAIOnCombat`（普通 AI）或 `MONSTERAI_RunAIProc`（怪物 AI）→ `CHAR_GetActionState` → `CHAR_StartActionEx`。
+- 队友/佣兵是 AI 控制的队友角色，同样走该路径，因此受技能冷却约束。
+- 事件脚本：`EVTSYSTEM_Process` → `CHAR_SetActionForEvent` → `CHAR_SetAction`，同样写入冷却。
+
+清空全部冷却：`CHAR_InitCoolTime` 的调用者为 `CHARSYSTEM_Revive`（复活）、`CHAR_SuccessOnPhysicalAttack`（属性 70 概率触发）、`CHAR_Act_DD`（属性 54 概率触发）。
+
+### 7.2 药水/道具冷却
+
+`CHAR_UseItemEx` 的调用者：
+
+| 调用者 | 调用点 | 用途 |
+|---|---|---|
+| `UIEquip_ButtonUseExe` | `0xb8100` | 装备/物品详情“使用”按钮 |
+| `UIEquip_OKConfrimUseItem` | `0xb84ec` | 确认后使用 |
+| `CHAR_ProcessShortcut` | `0xec1f8` | 快捷栏按键使用 |
+| `CHAR_PickManaGem` | `0xec4ac` | 拾取法力宝石时使用 |
+| `CHAR_PickItemAll` | `0xec744` | 拾取地图物品时使用 |
+
+UI 判定与绘制：`SHORTCUT_GetState`（`0x121c68`、`0x121d14`）、`SHORTCUT_DrawCoolTime`。
+
+**没有怪物 AI 或佣兵 AI 使用药水/道具的路径**：所有 `CHAR_UseItemEx` 调用都来自玩家 UI、快捷栏或玩家拾取流程。
+
+### 7.3 其他 CHECKTIME 计数
+
+`CHECKTIME_nLifeTick`、`CHECKTIME_nUnitTick`、`CHECKTIME_nSiegeItemTick`、`CHECKTIME_nFreeWillTick` 等是独立系统的计时器，不参与物品/技能冷却；`CHECKTIME_Initialize` 只负责统一初始化。
+
+## 8. 未确认项
 
 - `CHAR_GetAttr(char, 95)` 的属性名称与来源表尚未确认，只确认它是 per-mille 倍率。
 - tick 与真实时间的换算按“每帧 +1”推断；游戏若使用固定步长或变速，需要真机计时校准。
 - `ACTDATABASE` 在 `game-systems.md` 中被归为事件/演出表，但技能冷却读取明确指向它；该表兼作动作参数表的语义需要补充。
 - `ITEMDATABASE +0x02 bit4`、`+0x06 bit5`、`+0x07 bit0` 与物品类别的完整对应关系未逐项枚举。
 
-## 8. 复现方法
+## 9. 复现方法
 
 ```bash
 SO=apk/decoded/c18-v520/lib/arm64-v8a/libgame.so
