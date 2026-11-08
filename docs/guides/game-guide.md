@@ -788,7 +788,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 ### 6.7 config（模块配置）
 
 > 配置以外部 `config.json` 顶层 `plugin_id → JSON object` 结构保存，每个对象是 `{"enable":bool,"features":{feature_id:bool},"config":{自定义key:任意JSON}}` 三层模型，由 native Host 常驻管理设施读写；设置页/HTTP 插件停用不停止 Store。Kotlin 只透传 HTTP raw body，不读取、解析、缓存或写配置。旧 12 个平铺字段与旧 runtime gate 已退出；未知 root 和未注册 plugin 保留。详见 [API 参考 §7.6](../reference/api-reference.md)。
-> 配置文件位于 `/sdcard/Android/data/<游戏包>/files/config.json`（用户可见可编辑）；删除后下次启动按默认值初始化。
+> 配置文件位于 `/sdcard/Android/data/<游戏包>/files/config.json`（用户可见可编辑）；删除后下次启动按默认值初始化。文件为多行缩进 JSON，便于直接编辑数值；仅支持标准 JSON（不支持注释），语法错误会在下次启动时按默认值重置。
 
 | 方法 | 路径 | 用途 | 请求 | 返回 |
 |---|---|---|---|---|

@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
     assert(committed_update.ok() && committed_update.persisted);
     assert(service.state() == CoreSettingsConfigServiceState::kReady);
     assert(service.snapshot(&config).ok() && config.listen_port == 9090);
-    assert(read_file(config_path).find("\"listenPort\":9090") != std::string::npos);
+    assert(read_file(config_path).find("\"listenPort\": 9090") != std::string::npos);
     const auto repeated_seed = service.seed_registered_plugins(plugin_ids);
     assert(repeated_seed.result.ok() && !repeated_seed.changed && !repeated_seed.durable_commit &&
            service.revision() == 2);

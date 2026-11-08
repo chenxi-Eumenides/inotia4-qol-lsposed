@@ -47,6 +47,14 @@ int int_field(const JsonValue& object, const std::string& key) {
     return std::stoi(value->scalar);
 }
 
+JsonValue root_object(const std::string& path, const std::string& key) {
+    JsonValue document;
+    assert(parse_json_document(read_file(path), &document).ok());
+    const JsonValue* value = field(document, key);
+    assert(value != nullptr && value->kind == JsonValue::Kind::kObject);
+    return *value;
+}
+
 std::vector<std::string> root_keys(const std::string& json) {
     std::vector<std::string> keys;
     std::size_t i = json.find('{');
@@ -118,8 +126,8 @@ void test_legacy_migration_and_unknown_preservation(const std::string& root) {
     JsonValue hidden_legacy;
     assert(store.read_namespace("stack_limit", &hidden_legacy).error == ConfigStoreError::kInvalidArgument);
     const std::string migrated_before_seed = read_file(path);
-    assert(migrated_before_seed.find("\"stack_limit\":{\"enable\":true") != std::string::npos);
-    assert(migrated_before_seed.find("\"listenAddress\":\"legacy-address\"") == std::string::npos);
+    assert(bool_field(root_object(path, "stack_limit"), "enable"));
+    assert(migrated_before_seed.find("legacy-address") == std::string::npos);
     assert(store.seed_registered_plugins({"autosell", "core.settings", "custom_recipe", "extension_bag",
                                           "move_merge", "push_all", "simple_mode", "stack_limit"}).result.ok());
     const ModuleConfig projection = store.snapshot();
@@ -156,7 +164,7 @@ void test_legacy_migration_and_unknown_preservation(const std::string& root) {
     assert(store.read_namespace("stack_limit", &hidden).error == ConfigStoreError::kInvalidArgument);
     assert(!store.snapshot().stack_limit_increase);
     assert(!store.update_namespace_key("core.settings", "stack_limit", "enable", "false").ok());
-    assert(read_file(path).find("\"stack_limit\":{\"enable\":true") != std::string::npos);
+    assert(bool_field(root_object(path, "stack_limit"), "enable"));
     char registered_json[4096]{};
     uint32_t registered_size = 0;
     assert(store.read_registered_json(registered_json, sizeof(registered_json), &registered_size).ok());
@@ -166,6 +174,7 @@ void test_legacy_migration_and_unknown_preservation(const std::string& root) {
     assert(store.snapshot().stack_limit_increase);
 
     const std::string migrated = read_file(path);
+    assert(migrated.find('\n') != std::string::npos);
     const auto top_keys = root_keys(migrated);
     for (const char* flat : {"listenAddress", "listenPort", "stackLimitIncrease", "moveMergeEnabled",
                              "opEnabled", "extensionBagEnabled", "customRecipeEnabled",
@@ -174,8 +183,8 @@ void test_legacy_migration_and_unknown_preservation(const std::string& root) {
         assert(std::find(top_keys.begin(), top_keys.end(), flat) == top_keys.end());
     for (const char* unknown : {"future.scalar", "future.array", "future.object", "plugin.unregistered"})
         assert(migrated.find(unknown) != std::string::npos);
-    assert(migrated.find("\"future.scalar\":18") != std::string::npos);
-    assert(migrated.find("\"future.scalar\":17") == std::string::npos);
+    assert(migrated.find("\"future.scalar\": 18") != std::string::npos);
+    assert(migrated.find("\"future.scalar\": 17") == std::string::npos);
     const auto names = store.registered_plugin_ids();
     assert(std::is_sorted(names.begin(), names.end()));
     assert(std::find(names.begin(), names.end(), "plugin.unregistered") == names.end());
@@ -248,16 +257,18 @@ void test_seeding_repair_and_unknown_update(const std::string& root) {
     const std::string path = directory + "/config.json";
     assert(store.update_namespace_key("plugin.custom", "plugin.custom", "settings",
                                       "{\"array\":[1,true,null],\"duplicate\":1,\"duplicate\":2}").ok());
-    assert(read_file(path).find("\"future.namespace\":{\"payload\":[1,2]}") != std::string::npos);
-    assert(read_file(path).find("\"future.scalar\":13") != std::string::npos);
+    const JsonValue future_namespace = root_object(path, "future.namespace");
+    const JsonValue* payload = field(future_namespace, "payload");
+    assert(payload != nullptr && payload->kind == JsonValue::Kind::kArray && payload->array.size() == 2);
+    assert(read_file(path).find("\"future.scalar\": 13") != std::string::npos);
     assert(store.read_namespace("plugin.custom", &custom).ok());
     const JsonValue* settings = field(custom, "settings");
     assert(settings != nullptr && settings->kind == JsonValue::Kind::kObject);
     const JsonValue* duplicate = field(*settings, "duplicate");
     assert(duplicate != nullptr && duplicate->scalar == "2");
     const std::string persisted = read_file(path);
-    assert(persisted.find("\"duplicate\":1") == std::string::npos);
-    assert(persisted.find("\"duplicate\":2") != std::string::npos);
+    assert(persisted.find("\"duplicate\": 1") == std::string::npos);
+    assert(persisted.find("\"duplicate\": 2") != std::string::npos);
 
     const std::string repair_dir = make_dir(root, "enable-repair");
     write_file(repair_dir + "/config.json",
@@ -444,14 +455,6 @@ void assert_drag_merge(ConfigStore* store, bool expected) {
     assert(bool_field(*features, "move_merge.drag_merge") == expected);
 }
 
-JsonValue root_object(const std::string& path, const std::string& key) {
-    JsonValue document;
-    assert(parse_json_document(read_file(path), &document).ok());
-    const JsonValue* value = field(document, key);
-    assert(value != nullptr && value->kind == JsonValue::Kind::kObject);
-    return *value;
-}
-
 void assert_old_move_merge_keys_removed(const JsonValue& old) {
     assert(field(old, "enable") == nullptr);
     const JsonValue* features = field(old, "features");
@@ -533,6 +536,41 @@ void test_move_merge_feature_migration(const std::string& root) {
     assert(field(root_object(prev_dir + "/config.json", "core.item"), "keep") != nullptr);
 }
 
+void test_formatted_input_round_trip(const std::string& root) {
+    const std::string directory = make_dir(root, "formatted-round-trip");
+    const std::string path = directory + "/config.json";
+    write_file(path,
+        "{\n"
+        "  \"plugin.pretty\": {\n"
+        "    \"enable\": true,\n"
+        "    \"features\": {},\n"
+        "    \"config\": {\n"
+        "      \"count\": 3,\n"
+        "      \"nested\": {\n"
+        "        \"flag\": true\n"
+        "      }\n"
+        "    }\n"
+        "  }\n"
+        "}\n");
+    ConfigStore store;
+    assert(store.init(directory).ok());
+    assert(store.seed_registered_plugins({"plugin.pretty"}).result.ok());
+    JsonValue plugin = root_object(path, "plugin.pretty");
+    const JsonValue* config = field(plugin, "config");
+    assert(config != nullptr && int_field(*config, "count") == 3);
+    const JsonValue* nested = field(*config, "nested");
+    assert(nested != nullptr && bool_field(*nested, "flag"));
+    const std::string persisted = read_file(path);
+    assert(persisted.find("\"plugin.pretty\": {") != std::string::npos);
+    assert(persisted.find("\"count\": 3") != std::string::npos);
+    assert(persisted.find('\n') != std::string::npos);
+
+    ConfigStore restarted;
+    assert(restarted.init(directory).ok());
+    assert(restarted.seed_registered_plugins({"plugin.pretty"}).result.ok());
+    assert(read_file(path) == persisted);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -545,5 +583,6 @@ int main(int argc, char** argv) {
     test_batch_collision_is_atomic(root);
     test_io_states(root);
     test_move_merge_feature_migration(root);
+    test_formatted_input_round_trip(root);
     std::puts("core_settings_config_store_tests: pass");
 }

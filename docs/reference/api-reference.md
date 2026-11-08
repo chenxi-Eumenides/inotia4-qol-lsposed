@@ -1691,6 +1691,8 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 
 磁盘顶层结构为 `plugin_id → JSON object`，每个对象是四部分模型：
 
+磁盘写入采用 2 空格缩进的多行 JSON（顶层 plugin 键排序、未知项保持原顺序）；读取同时接受紧凑与格式化 JSON，启动时若磁盘格式不匹配会按语义读入后重写为规范格式。仅支持标准 JSON（不支持注释）；整份文档解析失败时按默认值重置。
+
 ```json
 {
   "settings": {

@@ -906,11 +906,11 @@ void test_host_owner_migration(const std::string& root) {
 void test_failed_host_migration_is_atomic(const std::string& root) {
     const auto path = root + "/owner-migration-failed-write";
     write_migration_file(path, false, true, false, false, false, false, false);
-    const std::string original = bytes(path + "/config.json");
     auto directory = migration_directory();
     CoreSettingsConfigService service;
     assert(service.prepare_features(directory.definitions(), nullptr, nullptr).ok());
     assert(service.initialize(path).ok());
+    const std::string original = bytes(path + "/config.json");
     assert(::rename((path + "/config.json").c_str(), (path + "/saved.json").c_str()) == 0);
     assert(::mkdir((path + "/config.json").c_str(), 0700) == 0);
     const auto seeded = service.seed_features();
@@ -1181,7 +1181,14 @@ int main(int argc, char** argv) {
     assert(persisted.find("metadata-description") == std::string::npos);
     assert(persisted.find("entry-name") == std::string::npos);
     assert(persisted.find("unregistered") != std::string::npos);
-    assert(persisted.find("\"unknown\":{\"array\":[1,null,\"x\"]}") != std::string::npos);
+    JsonValue persisted_document;
+    assert(parse_json_document(persisted, &persisted_document).ok());
+    const JsonValue* persisted_alpha = json_member(persisted_document, "plugin.alpha");
+    assert(persisted_alpha != nullptr);
+    const JsonValue* persisted_config = json_member(*persisted_alpha, "config");
+    assert(persisted_config != nullptr);
+    const JsonValue* persisted_unknown = json_member(*persisted_config, "unknown");
+    assert(persisted_unknown != nullptr && json_member(*persisted_unknown, "array") != nullptr);
     assert(persisted.find("core.settings") == std::string::npos);
     std::vector<PluginDesiredSnapshot> snapshots;
     assert(controller.desired(&snapshots).ok());

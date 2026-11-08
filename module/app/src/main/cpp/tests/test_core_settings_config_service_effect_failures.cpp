@@ -145,9 +145,9 @@ int main(int argc, char** argv) {
     assert(service.snapshot(&config).ok());
     assert(config.op_enabled && config.debug_log_enabled && config.listen_port == 9000);
     const std::string persisted = read_file(directory + "/config.json");
-    assert(persisted.find("\"opEnabled\":true") != std::string::npos);
-    assert(persisted.find("\"debugLogEnabled\":true") != std::string::npos);
-    assert(persisted.find("\"listenPort\":9000") != std::string::npos);
+    assert(persisted.find("\"opEnabled\": true") != std::string::npos);
+    assert(persisted.find("\"debugLogEnabled\": true") != std::string::npos);
+    assert(persisted.find("\"listenPort\": 9000") != std::string::npos);
     {
         std::lock_guard<std::mutex> lock(observers.mutex);
         assert(observers.surviving_revisions.size() == 4);

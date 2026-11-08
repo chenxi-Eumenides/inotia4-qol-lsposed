@@ -392,6 +392,38 @@ std::string serialize_value(const JsonValue& value) {
     return "null";
 }
 
+std::string serialize_value_pretty(const JsonValue& value, int depth) {
+    const auto indent = [](int level) { return std::string(static_cast<std::size_t>(level * 2), ' '); };
+    switch (value.kind) {
+        case JsonValue::Kind::kNull: return "null";
+        case JsonValue::Kind::kBoolean: return boolean(value.boolean);
+        case JsonValue::Kind::kNumber: return value.scalar;
+        case JsonValue::Kind::kString: return quote(value.scalar);
+        case JsonValue::Kind::kArray: {
+            if (value.array.empty()) return "[]";
+            std::string out = "[\n";
+            for (std::size_t i = 0; i < value.array.size(); ++i) {
+                out += indent(depth + 1) + serialize_value_pretty(value.array[i], depth + 1);
+                if (i + 1 != value.array.size()) out.push_back(',');
+                out.push_back('\n');
+            }
+            return out + indent(depth) + ']';
+        }
+        case JsonValue::Kind::kObject: {
+            if (value.object.empty()) return "{}";
+            std::string out = "{\n";
+            for (std::size_t i = 0; i < value.object.size(); ++i) {
+                out += indent(depth + 1) + quote(value.object[i].first) + ": " +
+                       serialize_value_pretty(value.object[i].second, depth + 1);
+                if (i + 1 != value.object.size()) out.push_back(',');
+                out.push_back('\n');
+            }
+            return out + indent(depth) + '}';
+        }
+    }
+    return "null";
+}
+
 const JsonValue* member(const JsonValue& object, const std::string& key) {
     if (object.kind != JsonValue::Kind::kObject) return nullptr;
     const auto found = std::find_if(object.object.begin(), object.object.end(),
@@ -1004,6 +1036,24 @@ std::string serialize(const std::vector<std::pair<std::string, JsonValue>>& name
     return out;
 }
 
+std::string serialize_pretty(const std::vector<std::pair<std::string, JsonValue>>& namespaces,
+                             const std::vector<std::pair<std::string, JsonValue>>& unknown_root) {
+    std::map<std::string, const JsonValue*> sorted_namespaces;
+    for (const auto& entry : namespaces) sorted_namespaces[entry.first] = &entry.second;
+    std::string out = "{";
+    bool first = true;
+    const auto append_entry = [&out, &first](const std::string& id, const JsonValue& value) {
+        out += first ? "\n" : ",\n";
+        first = false;
+        out += "  " + quote(id) + ": " + serialize_value_pretty(value, 1);
+    };
+    for (const auto& entry : sorted_namespaces) append_entry(entry.first, *entry.second);
+    for (const auto& entry : unknown_root) append_entry(entry.first, entry.second);
+    if (!first) out.push_back('\n');
+    out += "}\n";
+    return out;
+}
+
 std::string serialize_registered_namespaces(
     const std::vector<std::pair<std::string, JsonValue>>& namespaces,
     const std::vector<std::string>& registered_plugin_ids) {
@@ -1263,7 +1313,7 @@ ConfigStoreSeedResult ConfigStore::seed_features() {
     std::sort(ids.begin(), ids.end());
     const bool changed = ids != registered_plugin_ids_ || serialize(next, unknown) != serialize(namespaces_, unknown_root_);
     if (!changed && !writeback_pending_) return {{}, false, true, false};
-    if (degraded_read_only_ || !write_atomic(path_, serialize(next, unknown))) {
+    if (degraded_read_only_ || !write_atomic(path_, serialize_pretty(next, unknown))) {
         if (migration_changed)
             return {fail(ConfigStoreError::kPersistence, "feature migration persistence failed"),
                     changed, false, false};
@@ -1386,7 +1436,7 @@ ConfigStoreResult ConfigStore::update_feature_model(const std::string& id, Featu
         }
         set_member(object, "enable", boolean_value(any_enabled));
     }
-    if (!write_atomic(path_, serialize(next, unknown_root_))) return fail(ConfigStoreError::kPersistence, "configuration persistence failed");
+    if (!write_atomic(path_, serialize_pretty(next, unknown_root_))) return fail(ConfigStoreError::kPersistence, "configuration persistence failed");
     namespaces_ = std::move(next);
     writeback_pending_ = false;
     return {};
@@ -1459,8 +1509,7 @@ ConfigStoreSeedResult ConfigStore::seed_registered_plugins(const std::vector<std
 
     if (!changed && !writeback_pending_) return {{}, false, true, false};
     const bool durable_commit = changed || writeback_pending_;
-    const std::string canonical = serialize(next_namespaces, next_unknown);
-    if (!write_atomic(path_, canonical)) {
+    if (!write_atomic(path_, serialize_pretty(next_namespaces, next_unknown))) {
         registered_plugin_ids_ = std::move(ids);
         namespaces_ = std::move(next_namespaces);
         unknown_root_ = std::move(next_unknown);
@@ -1548,7 +1597,7 @@ ConfigStoreResult ConfigStore::init(const std::string& directory) {
                 namespaces_.emplace_back(plugin_id, default_namespace(plugin_id));
             config_ = project_config(namespaces_, registered_plugin_ids_);
             initialized_ = true;
-            if (!write_atomic(path_, serialize(namespaces_, unknown_root_))) {
+            if (!write_atomic(path_, serialize_pretty(namespaces_, unknown_root_))) {
                 writeback_pending_ = true;
                 init_result_ = fail(ConfigStoreError::kPersistence,
                                     "configuration persistence failed", false);
@@ -1562,6 +1611,13 @@ ConfigStoreResult ConfigStore::init(const std::string& directory) {
         if (feature_model_) {
             unknown_root_ = std::move(root.object);
             initialized_ = true;
+            const std::string canonical = serialize_pretty({}, unknown_root_);
+            if (canonical != bytes && !write_atomic(path_, canonical)) {
+                writeback_pending_ = true;
+                init_result_ = fail(ConfigStoreError::kPersistence,
+                                    "configuration rewrite persistence failed");
+                return init_result_;
+            }
             init_result_ = {};
             return init_result_;
         }
@@ -1636,7 +1692,7 @@ ConfigStoreResult ConfigStore::init(const std::string& directory) {
         }
         config_ = project_config(namespaces_, registered_plugin_ids_);
         initialized_ = true;
-        const std::string canonical = serialize(namespaces_, unknown_root_);
+        const std::string canonical = serialize_pretty(namespaces_, unknown_root_);
         needs_migration = needs_migration || canonical != bytes;
         if (needs_migration && !write_atomic(path_, canonical)) {
             writeback_pending_ = true;
@@ -1654,7 +1710,7 @@ ConfigStoreResult ConfigStore::init(const std::string& directory) {
     for (const std::string& plugin_id : feature_model_ ? std::vector<std::string>{} : legacy_namespace_ids())
         (void)seed_and_repair_namespace(plugin_id, &namespaces_);
     config_ = project_config(namespaces_, registered_plugin_ids_);
-    if (!write_atomic(path_, serialize(namespaces_, unknown_root_))) {
+    if (!write_atomic(path_, serialize_pretty(namespaces_, unknown_root_))) {
         init_result_ = fail(ConfigStoreError::kPersistence, "configuration persistence failed", false);
         initialized_ = true;
         writeback_pending_ = true;
@@ -1723,7 +1779,7 @@ ConfigStoreResult ConfigStore::update(const ModuleConfigPatch& requested) {
     set_enabled("custom_recipe", requested.custom_recipe_enabled, next.custom_recipe_enabled);
     set_enabled("push_all", requested.push_all_enabled, next.push_all_enabled);
     set_enabled("autosell", requested.auto_sell_enabled, next.auto_sell_enabled);
-    if (!write_atomic(path_, serialize(next_namespaces, unknown_root_)))
+    if (!write_atomic(path_, serialize_pretty(next_namespaces, unknown_root_)))
         return fail(ConfigStoreError::kPersistence, "configuration persistence failed");
     namespaces_ = std::move(next_namespaces);
     config_ = project_config(namespaces_, registered_plugin_ids_);
@@ -1806,7 +1862,7 @@ ConfigStoreResult ConfigStore::update_namespace_key(const std::string& caller_pl
         return fail(ConfigStoreError::kValidation, "plugin enable must be boolean");
     set_member(target, key, std::move(value));
     const ModuleConfig next_config = project_config(next_namespaces, registered_plugin_ids_);
-    if (!write_atomic(path_, serialize(next_namespaces, unknown_root_)))
+    if (!write_atomic(path_, serialize_pretty(next_namespaces, unknown_root_)))
         return fail(ConfigStoreError::kPersistence, "configuration persistence failed");
     namespaces_ = std::move(next_namespaces);
     config_ = next_config;
@@ -1836,7 +1892,7 @@ ConfigStoreResult ConfigStore::replace_namespace(const std::string& plugin_id,
     *existing = std::move(value);
     (void)seed_and_repair_namespace(plugin_id, &next_namespaces);
     const ModuleConfig next_config = project_config(next_namespaces, registered_plugin_ids_);
-    if (!write_atomic(path_, serialize(next_namespaces, unknown_root_)))
+    if (!write_atomic(path_, serialize_pretty(next_namespaces, unknown_root_)))
         return fail(ConfigStoreError::kPersistence, "configuration persistence failed");
     namespaces_ = std::move(next_namespaces);
     config_ = next_config;
@@ -1856,7 +1912,7 @@ ConfigStoreResult ConfigStore::clear_namespace(const std::string& plugin_id) {
     if (existing == nullptr) return fail(ConfigStoreError::kNotFound, "namespace not found");
     *existing = default_namespace(plugin_id);
     const ModuleConfig next_config = project_config(next_namespaces, registered_plugin_ids_);
-    if (!write_atomic(path_, serialize(next_namespaces, unknown_root_)))
+    if (!write_atomic(path_, serialize_pretty(next_namespaces, unknown_root_)))
         return fail(ConfigStoreError::kPersistence, "configuration persistence failed");
     namespaces_ = std::move(next_namespaces);
     config_ = next_config;
