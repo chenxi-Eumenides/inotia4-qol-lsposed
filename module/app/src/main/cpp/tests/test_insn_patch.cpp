@@ -68,12 +68,22 @@ int main(int argc, char** argv) {
     check(insn_patch_test_generate(&region_spec, words, 40, &count) && count == 27,
           "region thunk generation with replay");
     check(words[3] == 0x93407f70u && words[4] == 0xd2807d11u &&
-              words[5] == 0x9ad10e12u && words[6] == 0x9b118253u &&
+              words[5] == 0x9ad10e12u && words[6] == 0x9b12c613u &&
+              words[8] == 0x9b157e54u && words[9] == 0x9b367e75u &&
               words[19] == 0x2a1003f6u &&
               words[20] == 0x39400000u && words[21] == 0xf9400042u &&
               words[22] == 0x1b007ee0u &&
               words[23] == 0xa94257f4u && words[25] == 0xa8c347f0u,
           "region decomposition then original-order replay");
+    // EF20C 的实际操作数：A=w27, B/D=w22；逐指令断言防止读未初始化 x0/x20。
+    InsnPatchSpec ef20c_spec{4, 27, 22, 22, 1000, 0xef234, 4,
+                             {0x39400000u, 0xf9400042u, 0x1b007ee0u, 0x93407c00u}, 0, 22};
+    check(insn_patch_test_generate(&ef20c_spec, words, 40, &count) && count == 28,
+          "EF20C thunk generation with live sxtw replay");
+    check(words[6] == 0x9b12c613u &&  // msub x19,x16,x18,x17
+              words[8] == 0x9b157e54u &&  // mul x20,x18,x21
+              words[9] == 0x9b367e75u,     // smull x21,w19,w22
+          "EF20C safe_scale operands use initialized quotient/remainder/input registers");
     // ÷100 与 ÷1000 同构分解式（除数参数化）；置标志 replay 位于非标志 replay 之后、恢复之前。
     InsnPatchSpec region_div100{4, 3, 1, 26, 100, 0x123450, 2,
                                 {0x51005842u, 0x7100145fu}, 0, 1};
