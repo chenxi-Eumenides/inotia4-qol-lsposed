@@ -49,14 +49,12 @@ void test_ladder_and_metadata() {
     assert(std::strcmp(rate_key(RateId::kGold), "gold") == 0);
     assert(std::strcmp(rate_name(RateId::kGold), "金币倍率") == 0);
     assert(std::strcmp(rate_key(RateId::kExp), "exp") == 0);
-    assert(std::strcmp(rate_key(RateId::kPlayerHp), "player_hp") == 0);
     assert(std::strcmp(rate_key(RateId::kEnemyHp), "enemy_hp") == 0);
     assert(std::strcmp(rate_key(RateId::kDamageOut), "damage_out") == 0);
     assert(std::strcmp(rate_key(RateId::kDamageIn), "damage_in") == 0);
 
     assert(rate_supported(RateId::kGold));
     assert(rate_supported(RateId::kExp));
-    assert(!rate_supported(RateId::kPlayerHp));
     assert(rate_supported(RateId::kEnemyHp));
     assert(rate_supported(RateId::kDamageOut));
     assert(rate_supported(RateId::kDamageIn));
@@ -150,7 +148,7 @@ void test_legacy_move_speed_key() {
         return !decode_rates(json, static_cast<uint32_t>(std::strlen(json)), &parsed);
     };
 
-    // 旧版完整 7 字段 JSON：move_speed 读取后忽略，其余字段正常生效。
+    // 旧配置中的 player_hp 与 move_speed 均作为未知/历史键忽略，其余字段正常生效。
     const char* legacy =
         "{\"gold\":150,\"exp\":100,\"player_hp\":100,\"enemy_hp\":50,\"damage_out\":150,"
         "\"damage_in\":30,\"move_speed\":120}";
@@ -172,7 +170,7 @@ void test_legacy_move_speed_key() {
     // encode 不再输出 move_speed。
     const std::string json = encode_rates(default_rates());
     assert(json.find("move_speed") == std::string::npos);
-    assert(json == "{\"gold\":100,\"exp\":100,\"player_hp\":100,\"enemy_hp\":100,"
+    assert(json == "{\"gold\":100,\"exp\":100,\"enemy_hp\":100,"
                    "\"damage_out\":100,\"damage_in\":100,"
                    "\"drop_quantity\":1,\"drop_reroll\":1}");
 

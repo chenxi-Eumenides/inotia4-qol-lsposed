@@ -13,7 +13,6 @@ namespace qol::features::world_tuning {
 enum class RateId : uint8_t {
     kGold = 0,
     kExp,
-    kPlayerHp,
     kEnemyHp,
     kDamageOut,
     kDamageIn,
@@ -42,7 +41,7 @@ struct Rates {
     int32_t value[static_cast<uint32_t>(RateId::kCount)]{};
 };
 
-// 当前实现真正接线的倍率。其余行在面板中可见但箭头禁用（界面先行、行为未接）。
+// 查询倍率是否已接入游戏行为。
 bool rate_supported(RateId id);
 
 const char* rate_key(RateId id);         // 配置 JSON 键名

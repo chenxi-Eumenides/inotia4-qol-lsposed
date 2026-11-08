@@ -20,7 +20,7 @@ enum class Side {
 };
 
 constexpr uint32_t kRateCount = static_cast<uint32_t>(RateId::kCount);
-static_assert(kRateCount == 8, "rates table size");
+static_assert(kRateCount == 7, "rates table size");
 
 std::atomic<bool> g_gate{false};
 const contracts::QolHostSdk* g_sdk = nullptr;
@@ -31,7 +31,7 @@ contracts::QolOwnerToken g_owner{};
 const char* g_plugin_id = nullptr;
 
 std::atomic<int32_t> g_rates[kRateCount] = {
-    kRateDefault, kRateDefault, kRateDefault, kRateDefault, kRateDefault, kRateDefault,
+    kRateDefault, kRateDefault, kRateDefault, kRateDefault, kRateDefault,
     kDropQuantityDefault, kDropRerollDefault};
 
 // wrapper 入口函数指针类型：与游戏函数 ABI 一致。原函数入口由宿主经 on_resource_ready 交还。

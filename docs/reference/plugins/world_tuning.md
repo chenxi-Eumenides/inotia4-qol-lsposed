@@ -14,8 +14,6 @@
 - 掉落数量倍率（配置键 `drop_quantity`）：整数 0..INT32_MAX，重复整次 `CHARSYSTEM_DropItem` 结算；
 - 掉落重抽次数（配置键 `drop_reroll`）：整数 1..INT32_MAX，槽内造物重掷取同类别最优。
 
-玩家血量倍率尚未接线（玩家/佣兵不走 `CHAR_UpdateAttrFromMonster`），面板行只保存数值，不产生游戏效果。面板行只显示名称、数值与箭头，不显示副标题。
-
 插件 id 由旧 `simple_mode` 改为 `world_tuning`，旧 `simple_mode.combat` feature 与旧配置不再迁移。除特别说明，文中路径均相对 `module/app/src/main/cpp/`。
 
 ## 定位与 descriptor
@@ -40,14 +38,15 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 单键 `rates`，值为整数对象：
 
 ```json
-{"gold":100,"exp":100,"player_hp":100,"enemy_hp":50,"damage_out":150,"damage_in":50,"drop_quantity":1,"drop_reroll":1}
+{"gold":100,"exp":100,"enemy_hp":50,"damage_out":150,"damage_in":50,"drop_quantity":1,"drop_reroll":1}
 ```
 
-- 字段：`gold`、`exp`、`player_hp`、`enemy_hp`、`damage_out`、`damage_in`、`drop_quantity`、`drop_reroll`；缺字段按各行默认值处理（前六项 100，`drop_quantity`/`drop_reroll` 为 1）。
+- 字段：`gold`、`exp`、`enemy_hp`、`damage_out`、`damage_in`、`drop_quantity`、`drop_reroll`；缺字段按各行默认值处理（前五项 100，`drop_quantity`/`drop_reroll` 为 1）。
 - 百分比档位仅作为面板箭头预设；`config.json` 可手写任意整数，范围为 `1..INT32_MAX`（100 = 不修改）。合法的非档位值原样生效，面板显示读取值，点击箭头后移动到该方向相邻预设。
 - `drop_quantity` 范围为整数 `0..INT32_MAX`（0 = 不掉落）；`drop_reroll` 范围为整数 `1..INT32_MAX`（1 = 不重掷）。档位仅作为面板箭头预设。
 - 单字段的非整数、溢出、负数或低于字段下限的值只令该字段回退默认值，其余字段继续生效；未知字段忽略。重复字段、JSON 语法错误及结尾多余内容仍拒绝整份配置。
 - 旧配置兼容：历史 `move_speed` 键解析时跳过并忽略；`drop_quality` 作为 `drop_reroll` 别名，显式 `drop_reroll` 优先；重复旧键仍拒绝。
+- 旧配置里的 `player_hp` 键作为未知字段忽略。
 - `validate_config` 仍校验 `rates` 对象结构；越界字段已回退默认值，不会导致 Host 删除 `rates` 键。写入与 Store 加载两条路径均执行该校验（`host/features/controller.cpp`、`host/core_settings_config_store.cpp`）。
 - `drop_quantity` 或 `drop_reroll` 超过 16 次时写一次 warning；不设置硬上限，仍按配置次数执行。
 - 读取通道：插件经 `QolFeatureApi::read_config` 读自己的 namespace；写入经 `request_set_config`，面板每帧轮询一次 receipt。`/api/config/set` 改同一键，下次打开面板或插件重新启用时生效。
@@ -58,9 +57,9 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 面板 id `world_tuning`，provider 在 `plugin_install` 内注册（需要 `ui_panels` + `ui_components` 同时可用）。
 
 - 960×640 root，单栏容器 `{28,100,920,444}`；与设置页相同的 `kPanelBg` 底、`draw_container_styled`（`ornamented=1`）边框/内底和左右装饰图（`draw_image_part` unit `0x4f`/`0x50`）；不绘制标题与说明行。迁移前使用的 `draw_container_ornamented` 已随 ui_components Major 2 移除。
-- 8 行，行高 71，使用 `scroll_list`（关闭选中态）；每行：名称、数值、左右 `arrow_button`；行底 2 逻辑单位金色分割线，与设置页行样式一致。
-- 列表视口高 428，内容高 568（8 行 × 71），超出部分由 `scroll_list` 滚动；滚动条沿用原生 `scroll_list` 自带的一条，不额外自绘。
-- 百分比行显示 `×1.5` 形式；掉落数量/重抽行显示 `×0`..`×5` 整数。全部 8 行的箭头都可用、样式一致；未接线行（玩家血量）只保存数值，不产生游戏效果。
+- 7 行，行高 71，使用 `scroll_list`（关闭选中态）；每行：名称、数值、左右 `arrow_button`；行底 2 逻辑单位金色分割线，与设置页行样式一致。
+- 列表视口高 428，内容高 497（7 行 × 71），超出部分由 `scroll_list` 滚动；滚动条沿用原生 `scroll_list` 自带的一条，不额外自绘。
+- 百分比行显示 `×1.5` 形式；掉落数量/重抽行显示 `×0`..`×5` 整数。全部 7 行的箭头都可用、样式一致。
 - 点击箭头 → 生成完整 `rates` JSON → `request_set_config` → 进入 pending（全部箭头禁用）→ 持久化确认后 `apply_rates`；成功不显示提示，失败/状态未知才在底部显示错误并回滚。
 - 面板打开时重新读取配置，覆盖外部编辑；关闭/插件停用销毁全部控件与回调。
 

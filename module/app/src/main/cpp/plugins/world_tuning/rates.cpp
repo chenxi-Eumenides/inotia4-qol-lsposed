@@ -8,19 +8,19 @@ namespace qol::features::world_tuning {
 namespace {
 
 constexpr const char* kRateKeys[] = {
-    "gold", "exp", "player_hp", "enemy_hp", "damage_out", "damage_in",
+    "gold", "exp", "enemy_hp", "damage_out", "damage_in",
     "drop_quantity", "drop_reroll",
 };
 constexpr const char* kRateNames[] = {
-    "金币倍率", "经验倍率", "血量倍率", "敌怪血量倍率", "伤害倍率", "承伤倍率",
+    "金币倍率", "经验倍率", "敌怪血量倍率", "伤害倍率", "承伤倍率",
     "掉落数量倍率", "掉落重抽次数",
 };
 constexpr const char* kRateDescriptions[] = {
-    "获得的金钱缩放", "获得的经验缩放", "玩家最大生命的缩放", "怪物最大生命的缩放", "对怪物造成的伤害缩放",
+    "获得的金钱缩放", "获得的经验缩放", "怪物最大生命的缩放", "对怪物造成的伤害缩放",
     "受到的伤害缩放，数值越低越耐打",
     "每次击杀的掉落结算次数", "可重掷的掉落物取同类别最优（卷轴/宝石/背包/骰子）",
 };
-constexpr bool kRateSupported[] = {true, true, false, true, true, true, true, true};
+constexpr bool kRateSupported[] = {true, true, true, true, true, true, true};
 constexpr uint32_t kRateCount = static_cast<uint32_t>(RateId::kCount);
 
 // 旧配置兼容：移速倍率已从面板与 encode_rates 中移除，但已持久化的 rates JSON 仍可能带
@@ -216,7 +216,6 @@ bool rate_value_valid(RateId id, int32_t value) {
         case RateId::kDropReroll: return value >= 1;
         case RateId::kGold:
         case RateId::kExp:
-        case RateId::kPlayerHp:
         case RateId::kEnemyHp:
         case RateId::kDamageOut:
         case RateId::kDamageIn: return value >= 1;
