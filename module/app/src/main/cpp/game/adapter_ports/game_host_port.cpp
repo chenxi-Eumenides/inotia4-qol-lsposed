@@ -958,6 +958,41 @@ QolResult read_character_attr(void* character, int32_t attr_id, int32_t* out_val
     return contracts::ok();
 }
 
+QolResult calculate_physical_defense_formula(void* character, int32_t first_arg,
+                                              int32_t* out_value) {
+    if (character == nullptr || out_value == nullptr || g_base == 0)
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    const uint8_t* const* index_slot =
+        reinterpret_cast<const uint8_t* const*>(g_base + 0x2f3e70);
+    const auto* text_list_slot = reinterpret_cast<const uintptr_t*>(g_base + 0x2f55a0);
+    if (!game_memory_accessible(index_slot, sizeof(*index_slot), 'r') ||
+        !game_memory_accessible(text_list_slot, sizeof(*text_list_slot), 'r')) return not_ready();
+    const uint8_t* index_ptr = *index_slot;
+    const uintptr_t list_indirect = *text_list_slot;
+    if (index_ptr == nullptr || list_indirect == 0 ||
+        !game_memory_accessible(index_ptr, 1, 'r') ||
+        !game_memory_accessible(reinterpret_cast<void*>(list_indirect), sizeof(uintptr_t), 'r'))
+        return not_ready();
+    const uint8_t index = *index_ptr;
+    const uintptr_t list = *reinterpret_cast<const uintptr_t*>(list_indirect);
+    if (list == 0 || !game_memory_accessible(reinterpret_cast<void*>(list),
+                                              (static_cast<size_t>(index) + 1) * 8, 'r'))
+        return not_ready();
+    const uint16_t text_id = *reinterpret_cast<const uint16_t*>(list +
+                                                                 static_cast<uintptr_t>(index) * 8);
+    using GetTextE = const char* (*)(uint16_t);
+    using Calculate = int32_t (*)(const char*, int32_t*, int32_t);
+    const auto get_text = reinterpret_cast<GetTextE>(g_base + 0x1186cc);
+    const auto calculate = reinterpret_cast<Calculate>(g_base + 0xd9968);
+    const char* formula = get_text(text_id);
+    if (formula == nullptr || !game_memory_accessible(formula, 1, 'r')) return not_ready();
+    const auto* character_bytes = static_cast<const uint8_t*>(character);
+    if (!game_memory_accessible(character_bytes, 15, 'r')) return not_ready();
+    int32_t args[2]{first_arg, static_cast<int32_t>(character_bytes[14])};
+    *out_value = calculate(formula, args, 2);
+    return contracts::ok();
+}
+
 contracts::QolGameHost make_game_host() {
     contracts::QolGameHost host{};
     host.abi = {sizeof(contracts::QolGameHost), contracts::kGameHostMajor,
@@ -1001,7 +1036,7 @@ contracts::QolGameHost make_game_host() {
     host.game_identity = {&game_query_identity};
     host.attr_range_c18 = {&read_attr_jewel_generation_range};
     host.item_category = {&read_item_category};
-    host.character_read = {&read_character_attr};
+    host.character_read = {&read_character_attr, &calculate_physical_defense_formula};
     return host;
 }
 

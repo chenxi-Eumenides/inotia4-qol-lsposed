@@ -1,5 +1,6 @@
 #include "plugin.h"
 #include "feature.h"
+#include "safe_scale.h"
 
 #include <array>
 #include <atomic>
@@ -20,6 +21,7 @@ constexpr const char* kResourceNormal = "hook:CHAR_GetNormalDamage";
 constexpr const char* kResourceMagic = "hook:CHAR_GetNormalMagicDamage";
 constexpr const char* kResourceCritical = "hook:CHAR_GetCriticalDamage";
 constexpr const char* kResourceDefense = "hook:CHAR_CalcMagicalDefense";
+constexpr const char* kResourcePhysical = kResourcePhysicalDefense;
 constexpr const char* kDamageGate = "damage_widen.enabled";
 
 using NormalFn = int32_t (*)(void*);
@@ -33,7 +35,8 @@ std::atomic<NormalFn> g_normal_backup{nullptr};
 std::atomic<NormalFn> g_magic_backup{nullptr};
 std::atomic<CriticalFn> g_critical_backup{nullptr};
 std::atomic<DefenseFn> g_defense_backup{nullptr};
-std::atomic<bool> g_attr_warned[4]{};
+std::atomic<DefenseFn> g_physical_backup{nullptr};
+std::atomic<bool> g_attr_warned[5]{};
 
 // 日志经 contracts 面 QolHostSdk.log 输出（core.item inventory_logging 同模式），
 // 插件不得 include infra/game 层日志头。域序数 16 = infra QolDomain::kWorldTuning（数值域）。
@@ -82,7 +85,7 @@ bool read_attr(void* character, int32_t attr_id, uint32_t resource_index, int32_
         contracts::succeeded(api->attr(character, attr_id, out_value))) {
         return true;
     }
-    if (resource_index < 4 && !g_attr_warned[resource_index].exchange(true)) {
+    if (resource_index < 5 && !g_attr_warned[resource_index].exchange(true)) {
         log_write(2, __FILE__, __LINE__,
                   "damage_widen CHAR_GetAttr failed resource=%u attr=%d; fallback to original",
                   resource_index, attr_id);
@@ -100,16 +103,16 @@ int32_t get_normal_damage_wrapper(void* ch) {
         return backup == nullptr ? 0 : backup(ch);
     }
     int32_t atk = 0;
-    int32_t bonus = 0;
+    int32_t bonus_base = 0;
     int32_t crit_gate = 0;
     int32_t crit_extra = 0;
-    if (!read_attr(ch, 0x04, 0, &atk) || !read_attr(ch, 0x05, 0, &bonus) ||
+    if (!read_attr(ch, 0x04, 0, &atk) || !read_attr(ch, 0x05, 0, &bonus_base) ||
         !read_attr(ch, 0x6a, 0, &crit_gate) || !read_attr(ch, 0x6d, 0, &crit_extra)) {
         return backup == nullptr ? 0 : backup(ch);
     }
-    if (crit_gate > 0) bonus += crit_extra;
-    return clamp_damage_i64(static_cast<int64_t>(bonus + 1000) *
-                            static_cast<int64_t>(atk) / 1000);
+    const int64_t bonus = static_cast<int64_t>(bonus_base) +
+                          (crit_gate > 0 ? crit_extra : 0);
+    return clamp_damage_i64(safe_scale(atk, bonus + 1000));
 }
 
 int32_t get_normal_magic_damage_wrapper(void* ch) {
@@ -129,8 +132,7 @@ int32_t get_normal_magic_damage_wrapper(void* ch) {
         !read_attr(ch, 8, 1, &matk) || !read_attr(ch, 9, 1, &rate)) {
         return backup == nullptr ? 0 : backup(ch);
     }
-    return clamp_damage_i64(static_cast<int64_t>(rate + 1000) *
-                            static_cast<int64_t>(matk) / 1000);
+    return clamp_damage_i64(safe_scale(matk, static_cast<int64_t>(rate) + 1000));
 }
 
 int32_t get_critical_damage_wrapper(void* unused, void* ch, int32_t damage) {
@@ -150,8 +152,7 @@ int32_t get_critical_damage_wrapper(void* unused, void* ch, int32_t damage) {
     int32_t diff = 1000 - resist;
     if (diff < 0) diff = 0;  // 原函数 csel ge：暴抗超过 1000 时加成段钳 0
     const int64_t total = static_cast<int64_t>(bonus_base) + diff;
-    const int64_t result = static_cast<int64_t>(damage) +
-                           total * static_cast<int64_t>(damage) / 1000;
+    const int64_t result = static_cast<int64_t>(damage) + safe_scale(damage, total);
     return clamp_damage_i64(result);
 }
 
@@ -168,8 +169,60 @@ int32_t calc_magical_defense_wrapper(void* unused, void* defender, int32_t damag
     if (!read_attr(defender, 0x0b, 3, &rate)) {
         return backup == nullptr ? 0 : backup(unused, defender, damage);
     }
-    return clamp_damage_i64((static_cast<int64_t>(1000) - rate) *
-                            static_cast<int64_t>(damage) / 1000);
+    return clamp_damage_i64(safe_scale(static_cast<int64_t>(1000) - rate, damage));
+}
+
+int32_t clamp_signed_i32(int64_t value) {
+    if (value < std::numeric_limits<int32_t>::min()) return std::numeric_limits<int32_t>::min();
+    if (value > std::numeric_limits<int32_t>::max()) return std::numeric_limits<int32_t>::max();
+    return static_cast<int32_t>(value);
+}
+
+int32_t calc_physical_defense_wrapper(void* unused, void* defender, int32_t damage) {
+    const auto* sdk = g_sdk.load(std::memory_order_acquire);
+    const contracts::InFlightGuard guard(sdk == nullptr ? nullptr : &sdk->in_flight,
+                                          {kResourcePhysical});
+    const auto backup = g_physical_backup.load(std::memory_order_acquire);
+    const auto* api = g_character_read.load(std::memory_order_acquire);
+    if (!g_enabled.load(std::memory_order_acquire) || api == nullptr ||
+        defender == nullptr) {
+        return backup == nullptr ? 0 : backup(unused, defender, damage);
+    }
+
+    int32_t attr17 = 0, attr18 = 0, attr7 = 0, attr81 = 0;
+    if (!read_attr(defender, 17, 4, &attr17) || !read_attr(defender, 18, 4, &attr18))
+        return backup == nullptr ? 0 : backup(unused, defender, damage);
+    const int64_t scaled = safe_scale(attr17, static_cast<int64_t>(attr18) + 1000);
+    const int32_t cal_arg = clamp_signed_i32(scaled);
+    int32_t cal_result = 0;
+    if (api->physical_defense_calculate == nullptr ||
+        !contracts::succeeded(api->physical_defense_calculate(defender, cal_arg, &cal_result)))
+        return backup == nullptr ? 0 : backup(unused, defender, damage);
+    if (!read_attr(defender, 7, 4, &attr7) || !read_attr(defender, 81, 4, &attr81))
+        return backup == nullptr ? 0 : backup(unused, defender, damage);
+    int64_t rate = static_cast<int64_t>(cal_result) + attr7;
+    if (attr81 > 0) {
+        const int64_t adjusted = safe_scale(rate, attr81);
+        if (adjusted > 0 && rate > std::numeric_limits<int64_t>::max() - adjusted)
+            rate = std::numeric_limits<int64_t>::max();
+        else if (adjusted < 0 && rate < std::numeric_limits<int64_t>::min() - adjusted)
+            rate = std::numeric_limits<int64_t>::min();
+        else {
+            rate += adjusted;
+        }
+    }
+    if (damage == 0) return 0;
+    const int64_t magnitude = damage < 0 ? -static_cast<int64_t>(damage) : damage;
+    const int64_t threshold = static_cast<int64_t>(std::numeric_limits<int32_t>::max()) * 1000 /
+                              magnitude;
+    if (damage > 0) {
+        if (rate >= 1000) return 0;
+        if (rate < 1000 - threshold) return std::numeric_limits<int32_t>::max();
+    } else {
+        if (rate <= 1000) return 0;
+        if (rate > 1000 + threshold) return std::numeric_limits<int32_t>::max();
+    }
+    return clamp_damage_i64(safe_scale(static_cast<int64_t>(1000) - rate, damage));
 }
 
 const contracts::ResourceClaim kResources[] = {
@@ -207,14 +260,44 @@ const contracts::ResourceClaim kResources[] = {
      contracts::ResourcePolicy::kPrivate, contracts::ResourceRequirement::kOptional,
      contracts::ResourceFailure::kFailSoft, true, kPluginId,
      "CHAR_Act_M_DD 的暴击增伤两级千分比乘除链使用 int64 并钳制",
-     kDamageGate, 120, nullptr, false},
+      kDamageGate, 120, nullptr, false},
+    {kResourceActEf20c, "INSN_ACT_DD_EF20C", contracts::ResourceMechanism::kInsnPatch,
+     contracts::ResourcePolicy::kPrivate, contracts::ResourceRequirement::kOptional,
+     contracts::ResourceFailure::kFailSoft, true, kPluginId,
+     "CHAR_Act_DD 0xef20c 区域级有符号乘除钳制", kDamageGate, 120, nullptr, false},
+    {kResourceActEf4d0, "INSN_ACT_DD_EF4D0", contracts::ResourceMechanism::kInsnPatch,
+     contracts::ResourcePolicy::kPrivate, contracts::ResourceRequirement::kOptional,
+     contracts::ResourceFailure::kFailSoft, true, kPluginId,
+     "CHAR_Act_DD 0xef4d0 区域级有符号乘除钳制", kDamageGate, 120, nullptr, false},
+    {kResourceActEf530, "INSN_ACT_DD_EF530", contracts::ResourceMechanism::kInsnPatch,
+     contracts::ResourcePolicy::kPrivate, contracts::ResourceRequirement::kOptional,
+     contracts::ResourceFailure::kFailSoft, true, kPluginId,
+     "CHAR_Act_DD 0xef530 区域级有符号乘除钳制", kDamageGate, 120, nullptr, false},
+    {kResourceActEf560, "INSN_ACT_DD_EF560", contracts::ResourceMechanism::kInsnPatch,
+     contracts::ResourcePolicy::kPrivate, contracts::ResourceRequirement::kOptional,
+     contracts::ResourceFailure::kFailSoft, true, kPluginId,
+     "CHAR_Act_DD 0xef560 区域级有符号乘除钳制", kDamageGate, 120, nullptr, false},
+    {kResourceActEf5d8, "INSN_ACT_DD_EF5D8", contracts::ResourceMechanism::kInsnPatch,
+     contracts::ResourcePolicy::kPrivate, contracts::ResourceRequirement::kOptional,
+     contracts::ResourceFailure::kFailSoft, true, kPluginId,
+     "CHAR_Act_DD 0xef5d8 区域级有符号乘除钳制", kDamageGate, 120, nullptr, false},
+    {kResourceAttrAttackEb1b4, "INSN_ATTR_ATTACK_EB1B4", contracts::ResourceMechanism::kInsnPatch,
+     contracts::ResourcePolicy::kPrivate, contracts::ResourceRequirement::kOptional,
+     contracts::ResourceFailure::kFailSoft, true, kPluginId,
+     "CHAR_AttrAttackDamage 0xeb1b4 区域级有符号乘除钳制", kDamageGate, 120, nullptr, false},
+    {kResourcePhysical, "F_CHAR_CALC_PHYSICAL_DEFENSE_VMA",
+     contracts::ResourceMechanism::kEntryHook, contracts::ResourcePolicy::kPrivate,
+     contracts::ResourceRequirement::kOptional, contracts::ResourceFailure::kFailSoft,
+     true, kPluginId, "物理防御保留 CAL 文本公式并以宽中间值计算", nullptr, 120,
+     reinterpret_cast<void*>(&calc_physical_defense_wrapper), true},
 };
 
 bool character_read_available(const contracts::QolGameHost* game) {
     return game != nullptr && game->abi.size >= sizeof(contracts::QolGameHost) &&
            game->abi.major == contracts::kGameHostMajor &&
            game->abi.minor >= contracts::kGameHostCharacterReadMinor &&
-           game->character_read.attr != nullptr;
+           game->character_read.attr != nullptr &&
+           game->character_read.physical_defense_calculate != nullptr;
 }
 
 int plugin_install(contracts::PluginContext& ctx) {
@@ -249,6 +332,8 @@ int32_t on_resource_ready(contracts::PluginContext&, const char* resource_id, vo
         g_critical_backup.store(reinterpret_cast<CriticalFn>(backup), std::memory_order_release);
     else if (std::strcmp(resource_id, kResourceDefense) == 0)
         g_defense_backup.store(reinterpret_cast<DefenseFn>(backup), std::memory_order_release);
+    else if (std::strcmp(resource_id, kResourcePhysical) == 0)
+        g_physical_backup.store(reinterpret_cast<DefenseFn>(backup), std::memory_order_release);
     return 0;
 }
 

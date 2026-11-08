@@ -1,4 +1,5 @@
 #include "patch/insn_patch.h"
+#include "plugins/damage_widen/safe_scale.h"
 #include "infra/log/qol_log.h"
 
 #include <cstdint>
@@ -20,7 +21,13 @@ void qol_log_set_debug_enabled(bool) {}
 bool qol_log_debug_enabled() { return false; }
 
 int main(int argc, char** argv) {
-    uint32_t words[24]{};
+    check(qol::features::damage_widen::safe_scale(-1501, 70) == -105,
+          "safe_scale truncates negative values toward zero");
+    check(qol::features::damage_widen::safe_scale(2147483647, 2147483647) ==
+              (2147483647LL / 1000) * 2147483647LL +
+                  ((2147483647LL % 1000) * 2147483647LL) / 1000,
+          "safe_scale handles full int32 operands");
+    uint32_t words[40]{};
     uint32_t count = 0;
     // A 型：w2 = clamp32((i64)w23 × w0 / 1000)，subs 收尾模拟原习语标志。
     InsnPatchSpec a{0, 23, 0, 2, 1000, 0x123450};
@@ -53,7 +60,35 @@ int main(int argc, char** argv) {
               words[4] == 0x52807d11u && words[5] == 0x9ad10e10u &&
               words[6] == 0xf100021fu && words[15] == 0x71000202u &&
               words[16] == 0xa8c147f0u && words[17] == 0x14000000u,
-          "BC thunk instruction words");
+           "BC thunk instruction words");
+    // 区域级：safe_scale 分解式（高位先除后乘 + 低位先乘后除），重放先行、置标志重放末置。
+    InsnPatchSpec region_spec{4, 27, 22, 22, 1000, 0x123450, 3,
+                         {0x39400000u, 0xf9400042u, 0x1b007ee0u, 0}, 0, 22};
+    check(insn_patch_test_generate(&region_spec, words, 40, &count) && count == 27,
+          "region thunk generation with replay");
+    check(words[3] == 0x39400000u && words[4] == 0xf9400042u &&
+              words[5] == 0x1b007ee0u && words[6] == 0x93407f70u &&
+              words[8] == 0x9ad10e12u && words[9] == 0x9b118253u &&
+              words[23] == 0xa9427bf4u && words[25] == 0xa8c347f0u,
+          "region replay-first then scale instruction sequence");
+    // ÷100 与 ÷1000 同构分解式（除数参数化）；置标志 replay 位于写回之后、恢复之前。
+    InsnPatchSpec region_div100{4, 3, 1, 26, 100, 0x123450, 2,
+                                {0x51005842u, 0x7100145fu}, 0, 1};
+    check(insn_patch_test_generate(&region_div100, words, 40, &count) && count == 26,
+          "div-100 region uses same decomposition");
+    check(words[4] == 0x93407c70u && words[5] == 0xd2800c91u &&
+              words[21] == 0x7100145fu && words[22] == 0xa9427bf4u,
+          "divisor parameterized; flag replay ordered after clamp, before restore");
+    InsnPatchSpec bad_replay{4, 27, 22, 22, 1000, 0x123450, 5, {}, 0};
+    check(!insn_patch_test_generate(&bad_replay, words, 24, &count),
+          "reject oversized region replay");
+    InsnPatchSpec bad_region_branch{4, 22, 1, 22, 1000, 0x123450, 1,
+                                    {0x54000000u, 0, 0, 0}, 0};
+    check(!insn_patch_test_generate(&bad_region_branch, words, 40, &count),
+          "reject condition branch in region replay");
+    bad_region_branch.replay_words[0] = 0x90000000u;
+    check(!insn_patch_test_generate(&bad_region_branch, words, 40, &count),
+          "reject ADRP in region replay");
     void* region = mmap(nullptr, 4096, PROT_READ | PROT_WRITE | PROT_EXEC,
                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     check(region != MAP_FAILED, "allocate test code page");
@@ -87,6 +122,27 @@ int main(int argc, char** argv) {
         check((code[0] & 0xfc000000u) == 0x94000000u, "BC site branches to a near thunk");
         check(insn_patch_release(site) && code[0] == 0x9b217ea1u,
               "BC release restores the original instruction");
+        code[0] = 0x1b167f76u;
+        InsnPatchSpec region_patch{4, 27, 22, 22, 1000, site + 0x100, 3,
+                                   {0x39400000u, 0xf9400042u, 0x1b007ee0u, 0}, 0, 22};
+        check(insn_patch_install(site, &region_patch, &backup),
+              "install region trampoline");
+        check(reinterpret_cast<uintptr_t>(backup) == 0x1b167f76u,
+              "region backup contains original instruction");
+        check(insn_patch_release(site) && code[0] == 0x1b167f76u,
+              "region release restores original instruction");
+        code[0] = 0x1b167f75u;
+        check(!insn_patch_install(site, &region_patch, &backup),
+              "reject mismatched region start instruction");
+        code[0] = 0x1b167f76u;
+        InsnPatchSpec region_bl{4, 27, 22, 22, 1000, site + 0x100, 1,
+                                {0xffffffffu, 0, 0, 0}, site + 0x200, 22};
+        check(insn_patch_test_generate(&region_bl, words, 40, &count),
+              "generate region with relocated BL replay");
+        check(insn_patch_install(site, &region_bl, &backup),
+              "install region with relocated BL replay");
+        check(insn_patch_release(site) && code[0] == 0x1b167f76u,
+              "relocated BL region release restores original instruction");
         (void)munmap(region, 4096);
     }
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

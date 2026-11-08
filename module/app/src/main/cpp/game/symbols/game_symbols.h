@@ -495,6 +495,7 @@ constexpr uintptr_t F_CHAR_GET_NORMAL_DAMAGE_VMA = 0xe0bd0; // int (void* ch)，
 constexpr uintptr_t F_CHAR_GET_NORMAL_MAGIC_DAMAGE_VMA = 0xe0c54; // int (void* ch)，(attr9+1000) × attr8 / 1000
 constexpr uintptr_t F_CHAR_GET_CRITICAL_DAMAGE_VMA = 0xe0768; // int (void* unused, void* ch, int32 damage)，首参保存后未使用；damage+damage×(attr3+max(1000-attr2,0))/1000
 constexpr uintptr_t F_CHAR_CALC_MAGICAL_DEFENSE_VMA = 0xe0910; // int (void* unused, void* defender, int32 damage)，首参未使用；damage×(1000-attr11)/1000
+constexpr uintptr_t F_CHAR_CALC_PHYSICAL_DEFENSE_VMA = 0xe07d8; // int (void* unused, void* defender, int32 damage)，动态 CAL 物防公式
 constexpr uintptr_t F_GET_EQUIP_VMA = 0xda20c;       // void* (void*, int)
 constexpr uintptr_t F_GET_EXP_VMA = 0xd9b54;         // int64 (void*)
 constexpr uintptr_t F_GET_NEXT_EXP_VMA = 0xd9b68;    // int64 (void*)

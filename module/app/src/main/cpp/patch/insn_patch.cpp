@@ -12,7 +12,7 @@ constexpr size_t kMaxEntries = 32;
 struct Entry {
     uintptr_t site = 0;
     uint32_t original = 0;
-    void* slots[3]{};
+    void* slots[4]{};
     uint32_t slot_count = 0;
 };
 std::array<Entry, kMaxEntries> g_entries{};
@@ -24,6 +24,27 @@ uint32_t movz_w(uint32_t reg, uint32_t value) {
 }
 uint32_t movz_x(uint32_t reg, uint32_t value) {
     return 0xd2800000u | ((value & 0xffffu) << 5) | reg;
+}
+uint32_t csel_x(uint32_t d, uint32_t n, uint32_t m, uint32_t cond) {
+    return 0x9a800000u | (m << 16) | (cond << 12) | (n << 5) | d;
+}
+bool replay_word_supported(uint32_t word) {
+    if (word == 0xffffffffu) return true; // BL target is relocated at install time.
+    if ((word & 0x1f000000u) == 0x10000000u || // ADR/ADRP
+        (word & 0xff000010u) == 0x54000000u || // B.cond
+        (word & 0x7c000000u) == 0x14000000u || // B/BL
+        (word & 0x7e000000u) == 0x34000000u || // CBZ/CBNZ
+        (word & 0x7e000000u) == 0x36000000u)   // TBZ/TBNZ
+        return false;
+    return true;
+}
+// 置标志指令（SUBS/ADDS/CMP/CMN/TST/ANDS，imm 与 register 两族）必须排在重放末尾：
+// 区域外分支消费的最终标志须等于这些指令的结果，而非 thunk 钳制序列的 cmp。
+bool replay_sets_flags(uint32_t word) {
+    const uint32_t head = word >> 24;
+    return head == 0x31 || head == 0x71 || head == 0xB1 || head == 0xF1 ||
+           head == 0x2B || head == 0x6B || head == 0xAB || head == 0xEB ||
+           head == 0x6A || head == 0xEA;
 }
 bool bcond(uint32_t from, uint32_t to, uint32_t condition, uint32_t* out) {
     const int64_t delta = static_cast<int64_t>(to) - from;
@@ -75,6 +96,43 @@ bool generate(const InsnPatchSpec& s, uint32_t* out, uint32_t cap, uint32_t* cou
             !emit(0x14000000u | (b_store_delta / 4))) return false;
         if (n != 12 || !emit(movz_x(16, 0)) || n != 13 ||
             !emit(0x71000200u | s.d_reg) || !emit(0xa8c147f0u) || !emit(0x14000000u)) return false;
+    } else if (s.kind == 4) {
+        // 区域替换：千分比运算一律走 safe_scale 分解式（X÷D×N + (X mod D)×N÷D，除法向零截断），
+        // 与 trunc(X×N÷D) 整数恒等；中间积 ≤ ~(X÷D)×N，不可能超 int64（用户裁决的硬性形态）。
+        // 重放分组：非标志指令先于分解式重放（约束：replay 不得写分解式的源寄存器 a_reg/b_reg，
+        // 现有 6 点位均满足）；置标志指令在写回后最后重放（区域外分支消费最终标志）。
+        if (s.a_reg > 30 || s.b_reg > 30 || s.d_reg > 30 || s.divisor == 0 ||
+            s.divisor > 0xffff || s.ret_addr == 0 || s.replay_count > 4 || cap < 29)
+            return false;
+        uint32_t relocated_bl_count = 0;
+        for (uint32_t i = 0; i < s.replay_count; ++i) {
+            if (!replay_word_supported(s.replay_words[i])) return false;
+            if (s.replay_words[i] == 0xffffffffu) ++relocated_bl_count;
+        }
+        if (relocated_bl_count > 1 || (relocated_bl_count != 0 && s.replay_bl_target == 0))
+            return false;
+        if (!emit(0xa9bd47f0u) || // save x16-x21（x30 已由宿主函数序言保存，thunk 尾 b 返回不用 x30）
+            !emit(0xa9014ff2u) || !emit(0xa9027bf4u)) return false;
+        for (uint32_t i = 0; i < s.replay_count; ++i)
+            if (!replay_sets_flags(s.replay_words[i]) && !emit(s.replay_words[i])) return false;
+        if (!emit(0x93407c00u | (s.a_reg << 5) | 16u) || // sxtw x16,wA
+            !emit(movz_x(17, s.divisor)) ||
+            !emit(0x9ad10e12u) || // x18 = x16 ÷ divisor（高位先除）
+            !emit(0x9b118253u) || // x19 = x16 − x18×divisor（低 D 位余数）
+            !emit(0x93407c00u | (s.b_reg << 5) | 21u) || // sxtw x21,wB
+            !emit(0x9b157e94u) || // x20 = x18×x21（高位段乘）
+            !emit(0x9b207c00u | (s.b_reg << 16) | (19u << 5) | 21u) ||
+            !emit(0x9ad10eb5u) || // x21 = (余数×wB)÷divisor（低位段先乘后除）
+            !emit(0x8b150294u) || // x20 += x21
+            !emit(0xaa1403f0u)) return false; // x16 = 结果
+        if (!emit(0xeb1f021fu) || !emit(csel_x(16, 31, 16, 0xb)) ||
+            !emit(movz_x(17, 0xffff)) || !emit(0xf2bfffe1u) ||
+            !emit(0xeb11021fu) || !emit(csel_x(16, 17, 16, 0xc)) ||
+            !emit(0x2a1003e0u | s.d_reg)) return false;
+        for (uint32_t i = 0; i < s.replay_count; ++i)
+            if (replay_sets_flags(s.replay_words[i]) && !emit(s.replay_words[i])) return false;
+        if (!emit(0xa9427bf4u) || !emit(0xa9414ff2u) || !emit(0xa8c347f0u) ||
+            !emit(0x14000000u)) return false;
     } else if (s.kind == 3) {
         // 语义：wD = clamp32(x21 ÷ divisor × (sxtw wB) ÷ divisor)；x21 = 64 位乘积（点 B 写入）。
         // 替换 monster v29 Act_M_DD 0xee1c4..0xee1eb 九条（smull/lsr/asr/sub ×2 + mul）。
@@ -131,17 +189,19 @@ bool insn_patch_install(uintptr_t site, const InsnPatchSpec* spec, void** backup
     }
     if (g_count == g_entries.size()) return false;
     const uint32_t original = *reinterpret_cast<const uint32_t*>(site);
-    std::array<uint32_t, 24> code{};
+    std::array<uint32_t, 40> code{};
     uint32_t words = 0;
     if (!generate(*spec, code.data(), code.size(), &words)) return false;
     // 原指令校验：kind 0/1 为 MUL Wd,Wn,Wm = MADD(Wd,Wn,Wm,WZR)，基值 0x1b007c00（Ra=xzr）；
     // kind 3 首条为 smull x1,w21,w1（其真 64 位乘积由点 B 的 thunk 写入 x21）。
     const uint32_t expected_mul = 0x1b007c00u | (spec->b_reg << 16) |
-                                  (spec->a_reg << 5) | spec->a_reg;
+                                  (spec->a_reg << 5) |
+                                  (spec->kind == 4 ? spec->expected_d_reg : spec->a_reg);
     const uint32_t expected_original = spec->kind == 3 ? 0x9b217ea1u : expected_mul;
     if (original != expected_original) return false;
-    void* slots[3]{};
-    const uint32_t slot_count = spec->kind == 1 ? 1u : (spec->kind == 3 ? 3u : 2u);
+    void* slots[4]{};
+    const uint32_t slot_count = spec->kind == 1 ? 1u : (spec->kind == 4 ? 4u :
+                               (spec->kind == 3 ? 3u : 2u));
     for (uint32_t i = 0; i < slot_count; ++i) {
         slots[i] = call_patch_acquire_near_slot(site);
         if (slots[i] == nullptr) {
@@ -159,9 +219,37 @@ bool insn_patch_install(uintptr_t site, const InsnPatchSpec* spec, void** backup
             call_patch_release_near_entry(reinterpret_cast<uintptr_t>(slots[i]));
         return false;
     }
-    if (spec->kind == 0 || spec->kind == 3) {
+    if (spec->kind == 0 || spec->kind == 3 || spec->kind == 4) {
         // kind 0：b_lt@5→12、b_le@9→13、b_store@11→13、b_return@words-1
         // kind 3：b_lt@7→14、b_le@11→15、b_store@13→15、b_return@words-1
+        if (spec->kind == 4) {
+            // 重放分组后 BL 的实际槽位：3 条保存之后按非标志词顺序计数（标志词排在写回之后）。
+            uint32_t emitted = 3u;
+            for (uint32_t i = 0; i < spec->replay_count; ++i) {
+                if (spec->replay_words[i] != 0xffffffffu) {
+                    if (!replay_sets_flags(spec->replay_words[i])) ++emitted;
+                    continue;
+                }
+                const uintptr_t from = code_pc(emitted);
+                const int64_t delta = static_cast<int64_t>(spec->replay_bl_target) -
+                                      static_cast<int64_t>(from);
+                if (spec->replay_bl_target == 0 || (delta & 3) != 0 ||
+                    delta < -(int64_t{1} << 27) || delta >= (int64_t{1} << 27)) {
+                    for (uint32_t j = 0; j < slot_count; ++j)
+                        call_patch_release_near_entry(reinterpret_cast<uintptr_t>(slots[j]));
+                    return false;
+                }
+                code[emitted] = 0x94000000u |
+                    (static_cast<uint32_t>(delta / 4) & 0x03ffffffu);
+            }
+            uint32_t branch = 0;
+            if (!encode_b(code_pc(words - 1), spec->ret_addr, &branch)) {
+                for (uint32_t i = 0; i < slot_count; ++i)
+                    call_patch_release_near_entry(reinterpret_cast<uintptr_t>(slots[i]));
+                return false;
+            }
+            code[words - 1] = branch;
+        } else {
         const uint32_t b_lt_idx = spec->kind == 0 ? 5u : 7u;
         const uint32_t b_le_idx = spec->kind == 0 ? 9u : 11u;
         const uint32_t b_store_idx = spec->kind == 0 ? 11u : 13u;
@@ -178,6 +266,7 @@ bool insn_patch_install(uintptr_t site, const InsnPatchSpec* spec, void** backup
         }
         code[b_lt_idx] = b_lt; code[b_le_idx] = b_le; code[b_store_idx] = b_store;
         code[words - 1] = b_return;
+        }
     }
     for (uint32_t i = 0; i < slot_count; ++i) {
         const uint32_t begin = i * 8;

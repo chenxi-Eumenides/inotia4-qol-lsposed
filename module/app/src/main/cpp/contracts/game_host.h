@@ -66,6 +66,9 @@ struct QolItemCategoryApi {
 // 只读；线程语义：仅游戏逻辑线程调用（与原函数相同线程域）。
 struct QolCharacterReadApi {
     QolResult (*attr)(void* character, int32_t attr_id, int32_t* out_value);
+    // Evaluate the defender-selected native physical-defense text formula with its first argument.
+    QolResult (*physical_defense_calculate)(void* character, int32_t first_arg,
+                                            int32_t* out_value);
 };
 struct QolReadApi {
     QolAttrRangeReadApi attr_range;
@@ -295,7 +298,7 @@ constexpr uint16_t kGameHostTwoHandedMinor = 8;
 constexpr uint16_t kGameHostC18JewelRangeMinor = 9;
 // 2.10 appended the raw-item category tail used by world_tuning drop quality reroll.
 constexpr uint16_t kGameHostItemCategoryMinor = 10;
-constexpr uint16_t kGameHostCharacterReadMinor = 11;
+constexpr uint16_t kGameHostCharacterReadMinor = 12;
 constexpr uint16_t kGameHostMinor = kGameHostCharacterReadMinor;
 
 }  // namespace qol::contracts
