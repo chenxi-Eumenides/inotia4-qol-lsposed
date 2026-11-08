@@ -87,7 +87,7 @@
 | 敌人坐标 | `CHARLOCSYSTEM_pPool` + `CHARLOCSYSTEM_Find` | 所有单位位置（含敌人），字段偏移待逆向 |
 | 地图瓦片/阻挡 | `MAP_nBaseTile`（8192B）+ `MapBlockingcheck` | 当前地图通行矩阵 |
 | 存档槽 | `SAVE_pSaveSlot`（87 字节） | 离线兜底 |
-| 各类计时 | `CHECKTIME_*`（Buff/药水/单位/攻城道具 tick） | |
+| 各类计时 | `CHECKTIME_*`（Buff/药水/单位/攻城道具 tick） | 冷却结构与公式见 [`cooldown.md`](cooldown.md) |
 
 ## 4.5 坐标与地图能力（外部程序可用）
 
