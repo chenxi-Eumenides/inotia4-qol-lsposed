@@ -726,6 +726,31 @@ void test_damage_wrapper() {
     });
     assert(g_last_damage == -7);
     assert(g_party_calls + g_active_calls + g_summoner_calls == reads_before_nonpositive);
+
+    // 倍率 100（×1.0）必须恒等；配置 10/100 只让玩家侧缩小 10 倍。
+    apply_rates(default_rates());
+    assert_one_damage_flight([&] {
+        char_add_damage_wrapper(&attacker, &victim, 100, 0, 0);
+    });
+    assert(g_last_damage == 100);
+    assert_one_damage_flight([&] {
+        char_add_damage_wrapper(&monster, &player, 100, 0, 0);
+    });
+    assert(g_last_damage == 100);
+    {
+        Rates rates = default_rates();
+        rates.value[static_cast<uint32_t>(RateId::kDamageOut)] = 10;
+        rates.value[static_cast<uint32_t>(RateId::kDamageIn)] = 100;
+        apply_rates(rates);
+    }
+    assert_one_damage_flight([&] {
+        char_add_damage_wrapper(&attacker, &victim, 100, 0, 0);
+    });
+    assert(g_last_damage == 10);
+    assert_one_damage_flight([&] {
+        char_add_damage_wrapper(&monster, &player, 100, 0, 0);
+    });
+    assert(g_last_damage == 100);
 }
 
 void test_max_hp_wrapper() {
