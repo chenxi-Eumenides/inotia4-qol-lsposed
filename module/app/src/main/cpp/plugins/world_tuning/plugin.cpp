@@ -44,22 +44,22 @@ const contracts::QolPortRequirement kPorts[] = {
       contracts::kQolPortCharacterExtrasVersion.minor}},
 };
 
-// 入口 hook 均为 optional + fail-soft：某个落点不可用时只影响对应倍率，
+// 两个入口 hook 均为 optional + fail-soft：某个落点不可用时只影响对应倍率，
 // 插件仍保持可用（面板可打开）；资源安装失败不把插件置 failed。
 const contracts::ResourceClaim kResources[] = {
     {
-        kResourceIdAddLife,
-        "F_CHAR_ADD_LIFE_VMA",
+        kResourceIdAddDamage,
+        "F_CHAR_ADD_DAMAGE_VMA",
         contracts::ResourceMechanism::kEntryHook,
         contracts::ResourcePolicy::kPrivate,
         contracts::ResourceRequirement::kOptional,
         contracts::ResourceFailure::kFailSoft,
         true,
         kPluginId,
-        "monster v29 的 mod 会周期性还原 AddDamage 入口跳板导致钩子失效；AddLife 为干净序言且是全部伤害的最终汇合点",
+        "无函数指针槽，15 个静态调用点经此单点汇合",
         nullptr,
         120,
-        reinterpret_cast<void*>(&char_add_life_wrapper),
+        reinterpret_cast<void*>(&char_add_damage_wrapper),
     },
     {
         kResourceIdUpdateAttrFromMonster,
