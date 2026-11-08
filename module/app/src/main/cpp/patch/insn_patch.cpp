@@ -113,8 +113,11 @@ bool generate(const InsnPatchSpec& s, uint32_t* out, uint32_t cap, uint32_t* cou
             return false;
         if (!emit(0xa9bd47f0u) || // save x16-x21（x30 已由宿主函数序言保存，thunk 尾 b 返回不用 x30）
             !emit(0xa9014ff2u) || !emit(0xa90257f4u)) return false;
-        for (uint32_t i = 0; i < s.replay_count; ++i)
-            if (!replay_sets_flags(s.replay_words[i]) && !emit(s.replay_words[i])) return false;
+        for (uint32_t i = 0; i < s.replay_count; ++i) {
+            if (s.replay_words[i] == 0xffffffffu || replay_sets_flags(s.replay_words[i]))
+                continue;
+            if (!emit(s.replay_words[i])) return false;
+        }
         if (!emit(0x93407c00u | (s.a_reg << 5) | 16u) || // sxtw x16,wA
             !emit(movz_x(17, s.divisor)) ||
             !emit(0x9ad10e12u) || // x18 = x16 ÷ divisor（高位先除）
@@ -126,9 +129,15 @@ bool generate(const InsnPatchSpec& s, uint32_t* out, uint32_t cap, uint32_t* cou
             !emit(0x8b150294u) || // x20 += x21
             !emit(0xaa1403f0u)) return false; // x16 = 结果
         if (!emit(0xeb1f021fu) || !emit(csel_x(16, 31, 16, 0xb)) ||
-            !emit(movz_x(17, 0xffff)) || !emit(0xf2bfffe1u) ||
+            !emit(movz_x(17, 0xffff)) || !emit(0xf2affff1u) ||
             !emit(0xeb11021fu) || !emit(csel_x(16, 17, 16, 0xc)) ||
             !emit(0x2a1003e0u | s.d_reg)) return false;
+        // 重放组二：BL 在写回之后执行——BL 按调用约定可改写调用者保存寄存器（含分解式输入），
+        // 原代码中 BL 位于乘法之后，此处保持同样的"分解式已消费输入"次序；分解式不触碰 x0，
+        // BL 的 x0 实参保持进入 thunk 时的原值。
+        for (uint32_t i = 0; i < s.replay_count; ++i)
+            if (s.replay_words[i] == 0xffffffffu && !emit(0xffffffffu)) return false;
+        // 重放组三：置标志指令最后重放（区域外分支消费最终标志）。
         for (uint32_t i = 0; i < s.replay_count; ++i)
             if (replay_sets_flags(s.replay_words[i]) && !emit(s.replay_words[i])) return false;
         if (!emit(0xa94257f4u) || !emit(0xa9414ff2u) || !emit(0xa8c347f0u) ||
@@ -223,24 +232,27 @@ bool insn_patch_install(uintptr_t site, const InsnPatchSpec* spec, void** backup
         // kind 0：b_lt@5→12、b_le@9→13、b_store@11→13、b_return@words-1
         // kind 3：b_lt@7→14、b_le@11→15、b_store@13→15、b_return@words-1
         if (spec->kind == 4) {
-            // 重放分组后 BL 的实际槽位：3 条保存之后按非标志词顺序计数（标志词排在写回之后）。
-            uint32_t emitted = 3u;
+            // 重放分三组后的 BL 实际槽位：3 条保存 + 组一非标志非 BL 词数 + 20 词分解式/钳制
+            // + BL 组内序号。
+            uint32_t non_flag = 0u, bl_ordinal = 0u;
             for (uint32_t i = 0; i < spec->replay_count; ++i) {
-                if (spec->replay_words[i] != 0xffffffffu) {
-                    if (!replay_sets_flags(spec->replay_words[i])) ++emitted;
-                    continue;
+                if (spec->replay_words[i] == 0xffffffffu) {
+                    const uint32_t emitted = 3u + non_flag + 20u + bl_ordinal;
+                    const uintptr_t from = code_pc(emitted);
+                    const int64_t delta = static_cast<int64_t>(spec->replay_bl_target) -
+                                          static_cast<int64_t>(from);
+                    if (spec->replay_bl_target == 0 || (delta & 3) != 0 ||
+                        delta < -(int64_t{1} << 27) || delta >= (int64_t{1} << 27)) {
+                        for (uint32_t j = 0; j < slot_count; ++j)
+                            call_patch_release_near_entry(reinterpret_cast<uintptr_t>(slots[j]));
+                        return false;
+                    }
+                    code[emitted] = 0x94000000u |
+                        (static_cast<uint32_t>(delta / 4) & 0x03ffffffu);
+                    ++bl_ordinal;
+                } else if (!replay_sets_flags(spec->replay_words[i])) {
+                    ++non_flag;
                 }
-                const uintptr_t from = code_pc(emitted);
-                const int64_t delta = static_cast<int64_t>(spec->replay_bl_target) -
-                                      static_cast<int64_t>(from);
-                if (spec->replay_bl_target == 0 || (delta & 3) != 0 ||
-                    delta < -(int64_t{1} << 27) || delta >= (int64_t{1} << 27)) {
-                    for (uint32_t j = 0; j < slot_count; ++j)
-                        call_patch_release_near_entry(reinterpret_cast<uintptr_t>(slots[j]));
-                    return false;
-                }
-                code[emitted] = 0x94000000u |
-                    (static_cast<uint32_t>(delta / 4) & 0x03ffffffu);
             }
             uint32_t branch = 0;
             if (!encode_b(code_pc(words - 1), spec->ret_addr, &branch)) {

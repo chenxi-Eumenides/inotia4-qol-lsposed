@@ -14,7 +14,7 @@
 
 | 函数 | 点位 | 处理 |
 |---|---|---|
-| `CHAR_Act_DD` | `0xef20c` | kind4：×1000，重放 `ldrb`、`ldr`、独立索引 `mul` |
+| `CHAR_Act_DD` | `0xef20c` | kind4：×1000，重放 `ldrb`、`ldr`、独立索引 `mul`、`sxtw x0,w0`（区域内活性写） |
 | `CHAR_Act_DD` | `0xef4d0` | kind4：×1000 |
 | `CHAR_Act_DD` | `0xef530` | kind4：×1000，重定位并重放 `CHAR_GetAttr` BL |
 | `CHAR_Act_DD` | `0xef560` | kind4：×1000，返回原后续分支前 |

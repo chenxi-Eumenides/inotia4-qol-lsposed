@@ -79,6 +79,15 @@ int main(int argc, char** argv) {
     check(words[4] == 0x93407c70u && words[5] == 0xd2800c91u &&
               words[21] == 0x7100145fu && words[22] == 0xa94257f4u,
           "divisor parameterized; flag replay ordered after clamp, before restore");
+    // BL 重放归入写回之后的组二：非标志非 BL 先行，BL 紧随钳制，标志组最后。
+    InsnPatchSpec region_bl{4, 22, 2, 22, 1000, 0x123450, 3,
+                            {0xffffffffu, 0x52807d03u, 0x4b000060u}, 0xdfd18u, 22};
+    check(insn_patch_test_generate(&region_bl, words, 40, &count) && count == 27,
+          "bl replay placed after clamp");
+    check(words[3] == 0x52807d03u && words[4] == 0x4b000060u &&
+              words[5] == 0x93407ed0u && words[15] == 0xeb1f021fu &&
+              words[18] == 0xf2affff1u && words[22] == 0xffffffffu,
+          "bl group ordering after clamp, before restore");
     InsnPatchSpec bad_replay{4, 27, 22, 22, 1000, 0x123450, 5, {}, 0};
     check(!insn_patch_test_generate(&bad_replay, words, 24, &count),
           "reject oversized region replay");
