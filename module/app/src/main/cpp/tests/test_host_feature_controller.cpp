@@ -369,17 +369,15 @@ void test_seed_type_validation(const std::string& root, const FeatureDirectory& 
     struct InvalidSchema {
         const char* name;
         const char* object;
-        const char* message;
     };
     const InvalidSchema cases[] = {
-        {"enable", R"({"enable":null})", "plugin enable must be boolean"},
-        {"feature", R"({"features":{"toggle":1}})", "registered feature must be boolean"},
-        {"features-section", R"({"features":false})", "plugin features must be an object"},
-        {"config-section", R"({"config":[]})", "plugin config must be an object"}};
+        {"enable", R"({"enable":null})"},
+        {"feature", R"({"features":{"toggle":1}})"},
+        {"features-section", R"({"features":false})"},
+        {"config-section", R"({"config":[]})"}};
     for (const auto& test : cases) {
         const auto path = root + "/invalid-" + test.name;
         assert(::mkdir(path.c_str(), 0700) == 0);
-        // The earlier plugin needs defaults; a later invalid plugin must reject the whole batch.
         const std::string original = std::string("{\"plugin.alpha\":{},\"plugin.beta\":") + test.object + "}";
         {
             std::ofstream file(path + "/config.json");
@@ -390,34 +388,64 @@ void test_seed_type_validation(const std::string& root, const FeatureDirectory& 
         state.service = &service;
         assert(service.prepare_features(directory.definitions(), &pending, &state).ok());
         assert(service.initialize(path).ok());
+        const auto seeded = service.seed_features();
+        assert(seeded.result.ok() && seeded.changed && seeded.durable_commit && seeded.memory_committed);
+        JsonValue alpha, beta;
+        assert(service.read_feature_namespace("plugin.alpha", &alpha).ok());
+        assert(service.read_feature_namespace("plugin.beta", &beta).ok());
+        assert(json_member(*json_member(alpha, "features"), "toggle")->boolean);
+        assert(!json_member(*json_member(alpha, "features"), "entry")->boolean);
+        assert(json_member(*json_member(beta, "features"), "toggle")->boolean);
+        std::vector<PluginDesiredSnapshot> snapshots;
+        assert(service.desired_snapshots(&snapshots).ok() && snapshots.size() == 2);
+        assert(snapshots[1].desired_enable && snapshots[1].any_feature);
+        const std::string normalized = bytes(path + "/config.json");
+        assert(normalized != original && normalized.find("\"plugin.beta\"") != std::string::npos);
         const auto revision = service.revision();
-        assert(revision == 1 && state.revisions.empty());
-        JsonValue before;
-        const auto before_read = service.read_namespace("plugin.alpha", &before);
-        assert(!before_read.ok());
-        for (int attempt = 0; attempt < 2; ++attempt) {
-            const auto seeded = service.seed_features();
-            assert(seeded.result.error == ConfigStoreError::kValidation);
-            assert(seeded.result.message == test.message && !seeded.result.persisted);
-            assert(!seeded.changed && !seeded.memory_committed && !seeded.durable_commit);
-            assert(bytes(path + "/config.json") == original);
-            assert(service.revision() == revision && state.revisions.empty());
-            JsonValue after;
-            assert(service.read_namespace("plugin.alpha", &after).error == before_read.error);
-            assert(serialize_json_value(after) == serialize_json_value(before));
-        }
-        // The Store registration set also stays unchanged; repeated rejection proves that
-        // the invalid persisted values were not replaced by defaults in memory.
-        ConfigStore store;
-        assert(store.prepare_features(directory.definitions()).ok());
-        assert(store.init(path).ok());
-        const auto ids = store.registered_plugin_ids();
-        assert(ids.empty());
-        assert(store.seed_features().result.error == ConfigStoreError::kValidation);
-        assert(store.registered_plugin_ids() == ids);
-        assert(store.seed_features().result.error == ConfigStoreError::kValidation);
-        assert(bytes(path + "/config.json") == original);
+        const auto repeated = service.seed_features();
+        assert(repeated.result.ok() && !repeated.changed && !repeated.durable_commit);
+        assert(service.revision() == revision && bytes(path + "/config.json") == normalized);
     }
+
+    const auto entry_path = root + "/entry-selection-repair";
+    assert(::mkdir(entry_path.c_str(), 0700) == 0);
+    { std::ofstream file(entry_path + "/config.json");
+      file << R"({"plugin.alpha":{"enable":true,"features":{"entry":true},"selections":{"entry":"x"}}})"; }
+    CoreSettingsConfigService entry_service;
+    assert(entry_service.prepare_features(directory.definitions(), nullptr, nullptr).ok());
+    assert(entry_service.initialize(entry_path).ok() && entry_service.seed_features().result.ok());
+    JsonValue entry_namespace;
+    assert(entry_service.read_feature_namespace("plugin.alpha", &entry_namespace).ok());
+    assert(!json_member(*json_member(entry_namespace, "features"), "entry")->boolean);
+    assert(json_member(*json_member(entry_namespace, "selections"), "entry") == nullptr);
+
+    static const FeatureDefinition validator_features[] = {
+        {"toggle", 1, FeatureCategory::kHidden, FeatureType::kToggle,
+         "toggle", "toggle", &toggle, nullptr}};
+    const auto validator = +[](const char* key, const char*, uint32_t) -> QolResult {
+        return std::strcmp(key, "bad") == 0 ? error(kQolErrInvalidArgument, nullptr, 0) : ok();
+    };
+    PluginDescriptor validator_plugin{};
+    validator_plugin.id = "plugin.validator";
+    validator_plugin.features = validator_features;
+    validator_plugin.feature_count = 1;
+    validator_plugin.validate_config = validator;
+    FeatureDirectory validator_directory;
+    assert(validator_directory.add(validator_plugin).ok());
+    assert(validator_directory.add(descriptor("plugin.other")).ok());
+    const auto validator_path = root + "/config-validator-repair";
+    assert(::mkdir(validator_path.c_str(), 0700) == 0);
+    { std::ofstream file(validator_path + "/config.json");
+      file << R"({"plugin.validator":{"features":{"toggle":false},"config":{"bad":1,"good":2}},"plugin.other":{"features":{"toggle":false}}})"; }
+    CoreSettingsConfigService validator_service;
+    assert(validator_service.prepare_features(validator_directory.definitions(), nullptr, nullptr).ok());
+    assert(validator_service.initialize(validator_path).ok() && validator_service.seed_features().result.ok());
+    JsonValue validated, other;
+    assert(validator_service.read_feature_namespace("plugin.validator", &validated).ok());
+    assert(validator_service.read_feature_namespace("plugin.other", &other).ok());
+    assert(json_member(*json_member(validated, "config"), "bad") == nullptr);
+    assert(json_member(*json_member(validated, "config"), "good") != nullptr);
+    assert(!json_member(*json_member(other, "features"), "toggle")->boolean);
 
     const auto valid_path = root + "/valid-existing-bools";
     assert(::mkdir(valid_path.c_str(), 0700) == 0);
@@ -438,7 +466,7 @@ void test_seed_type_validation(const std::string& root, const FeatureDirectory& 
     const auto json = serialize_json_value(existing);
     assert(json.find("\"toggle\":false") != std::string::npos);
     assert(json.find("\"entry\":true") != std::string::npos);
-    std::puts("host_feature_seed_validation: pass (enable/feature/features-section/config-section rejected without file/memory/revision/effect changes; existing bools preserved)");
+    std::puts("host_feature_seed_validation: pass (persisted type repair, config-key pruning, entry selection reset, valid bools and choice repair)");
 }
 
 struct SnapshotReentry {
@@ -860,16 +888,19 @@ void test_host_owner_migration(const std::string& root) {
         std::ofstream file(invalid + "/config.json", std::ios::trunc);
         file << R"({"module.platform":{"enable":true,"features":{"debug.logging":false,"api.enabled":true},"config":{"listen_port":70000}},"core.api":{"enable":true,"features":{"core.api.http_registry":true},"config":{}},"module.security":{"enable":true,"features":{}}})";
     }
-    const std::string invalid_original = bytes(invalid + "/config.json");
     auto invalid_directory = migration_directory();
     CoreSettingsConfigService invalid_service;
     assert(invalid_service.prepare_features(invalid_directory.definitions(), nullptr, nullptr).ok());
     assert(invalid_service.initialize(invalid).ok());
     const auto invalid_seed = invalid_service.seed_features();
-    assert(invalid_seed.result.error == ConfigStoreError::kValidation &&
-           !invalid_seed.memory_committed && !invalid_seed.durable_commit);
-    assert(bytes(invalid + "/config.json") == invalid_original);
-    assert(invalid_service.revision() == 1);
+    assert(invalid_seed.result.ok() && invalid_seed.memory_committed && invalid_seed.durable_commit);
+    JsonValue migrated_platform, migrated_api;
+    assert(invalid_service.read_feature_namespace("module.platform", &migrated_platform).ok());
+    assert(invalid_service.read_feature_namespace("core.api", &migrated_api).ok());
+    assert(json_member(*json_member(migrated_platform, "config"), "listen_port") == nullptr);
+    assert(json_member(*json_member(migrated_api, "config"), "listen_port") == nullptr);
+    assert(bytes(invalid + "/config.json").find("70000") == std::string::npos);
+    assert(invalid_service.revision() == 2);
 }
 
 void test_failed_host_migration_is_atomic(const std::string& root) {

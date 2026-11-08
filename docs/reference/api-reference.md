@@ -1709,9 +1709,9 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 ```
 
 - `enable`（bool）：Host 独占的 lifecycle 期望状态。普通插件不可读写；显式 deactivate 写 `false`。
-- `features`（object）：当前注册 feature 的布尔值由注册元数据 default 补齐，已有值优先；历史或其他未注册 feature 键可继续保留在存储投影中，但不成为可写 feature 或 lifecycle 聚合成员。
-- `selections`（object）：choice feature 的稳定 value，键为 feature id。关闭时删除该键；没有键表示关闭。label 不持久化。启动 seed 遇到已注册 choice 的未知/非法 value 时删除该键并把 `features[id]` 修复为 `false`；缺 selection 也修复为关闭，不从 boolean 推导默认选项。未知 feature 的 selection 键保留但不会执行。
-- `config`（object）：插件业务自由键值，值可为任意合法 JSON。
+- `features`（object）：当前注册 feature 的布尔值由注册元数据 default 补齐，已有值优先；启动 seed 遇到持久化值类型不符时自动修复为注册默认值并回写。历史或其他未注册 feature 键可继续保留在存储投影中，但不成为可写 feature 或 lifecycle 聚合成员。
+- `selections`（object）：choice feature 的稳定 value，键为 feature id。关闭时删除该键；没有键表示关闭。label 不持久化。启动 seed 遇到已注册 choice 的未知/非法 value 时删除该键并把 `features[id]` 修复为 `false`；缺 selection 也修复为关闭，不从 boolean 推导默认选项。非 choice feature 遗留的 selection 会被删除，并将该 feature 重置为注册默认值。未知 feature 的 selection 键保留但不会执行。
+- `config`（object）：插件业务自由键值，值可为任意合法 JSON。启动 seed 时插件 `validate_config` 拒绝的键会被删除，同插件其他合法键保留；未知键仍保留。
 
 注册元数据（`feature_id`、`default`、`category`(`kGeneral`|`kGameplay`|`kTools`|`kHidden`|`kBasicOptimization`，后者数值为 4)、`type`(`kToggle`|`kEntry`)、`name`、`description`、`callback`、可选 `action_label`）由插件 descriptor 静态提供、**不持久化**；禁止零 feature 插件；`entry` 与 toggle 同样有布尔状态并参与运行判定。`FeatureDefinition` 在 `on_entry` 后追加 `const char* action_label = nullptr`；`QolFeatureCatalogItem` 在 `description` 后有同样的可选尾随字段，Host 将注册值复制到该 native catalog view。非空时该文案用于 entry 按钮，空值表示未提供显式文案。此字段不属于配置 schema，不写入 `config.json`，也不出现在 `GET /api/config/list` 的 JSON 投影中。旧平铺字段不是当前 schema；Host 仅按已实现的 owner 迁移规则导入受支持的 API、OP 与 listener 配置遗留值，其他未知 root 与未注册 plugin 原样保留在磁盘。
 

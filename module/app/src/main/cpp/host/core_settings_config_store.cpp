@@ -743,8 +743,8 @@ bool migrate_host_owner_values(const std::vector<PluginFeatureSeed>& definitions
                                                           "core.api", move.new_key);
             JsonValue old_copy = *old;
             if (target == nullptr) {
-                if (!validate_migrated_config(definitions, "core.api", move.new_key, old_copy))
-                    return false;
+                const bool valid_config =
+                    validate_migrated_config(definitions, "core.api", move.new_key, old_copy);
                 const bool valid_address = std::strcmp(move.new_key, "listen_address") == 0 &&
                     old->kind == JsonValue::Kind::kString &&
                     old->scalar.find_first_not_of(" \t\r\n\f\v") != std::string::npos;
@@ -759,7 +759,7 @@ bool migrate_host_owner_values(const std::vector<PluginFeatureSeed>& definitions
                         valid_port = false;
                     }
                 }
-                if ((valid_address || valid_port) &&
+                if (valid_config && (valid_address || valid_port) &&
                     !set_raw_config(namespaces, unknown, "core.api", move.new_key, old_copy))
                     continue;
             }
@@ -775,8 +775,8 @@ bool migrate_host_owner_values(const std::vector<PluginFeatureSeed>& definitions
                                                           "core.api", move.new_key);
             if (target == nullptr) {
                 const JsonValue copy = *old;
-                if (!validate_migrated_config(definitions, "core.api", move.new_key, copy))
-                    return false;
+                const bool valid_config =
+                    validate_migrated_config(definitions, "core.api", move.new_key, copy);
                 const bool address = std::strcmp(move.new_key, "listen_address") == 0 &&
                     old->kind == JsonValue::Kind::kString &&
                     old->scalar.find_first_not_of(" \t\r\n\f\v") != std::string::npos;
@@ -791,7 +791,7 @@ bool migrate_host_owner_values(const std::vector<PluginFeatureSeed>& definitions
                         port = false;
                     }
                 }
-                if ((address || port) &&
+                if (valid_config && (address || port) &&
                     !set_raw_config(namespaces, unknown, "core.api", move.new_key, copy))
                     continue;
             }
@@ -1153,34 +1153,42 @@ ConfigStoreSeedResult ConfigStore::seed_features() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!feature_model_ || !initialized_)
         return {fail(ConfigStoreError::kNotReady, "feature model not initialized")};
-    // Validate the entire persisted batch before constructing defaults or a commit candidate.
-    // Defaults fill absent values only; an existing value with the wrong type is an error.
-    for (const auto& plugin : feature_definitions_) {
-        const JsonValue* object = find_namespace(namespaces_, plugin.plugin_id);
-        if (!object) object = find_namespace(unknown_root_, plugin.plugin_id);
-        if (!object) continue;
-        if (object->kind != JsonValue::Kind::kObject)
-            return {fail(ConfigStoreError::kValidation, "plugin namespace must be an object")};
-        const auto* enable = member(*object, "enable");
-        if (enable && enable->kind != JsonValue::Kind::kBoolean)
-            return {fail(ConfigStoreError::kValidation, "plugin enable must be boolean")};
-        const auto* features = member(*object, "features");
-        if (features && features->kind != JsonValue::Kind::kObject)
-            return {fail(ConfigStoreError::kValidation, "plugin features must be an object")};
-        const auto* config = member(*object, "config");
-        if (config && config->kind != JsonValue::Kind::kObject)
-            return {fail(ConfigStoreError::kValidation, "plugin config must be an object")};
-        const auto* selections = member(*object, "selections");
-        if (selections && selections->kind != JsonValue::Kind::kObject)
-            return {fail(ConfigStoreError::kValidation, "plugin selections must be an object")};
-        if (features) for (const auto& feature : plugin.features) {
-            const auto* value = member(*features, feature.id);
-            if (value && value->kind != JsonValue::Kind::kBoolean)
-                return {fail(ConfigStoreError::kValidation, "registered feature must be boolean")};
-        }
-    }
     auto next = namespaces_;
     auto unknown = unknown_root_;
+    for (const auto& plugin : feature_definitions_) {
+        JsonValue* object = find_namespace(&next, plugin.plugin_id);
+        if (object == nullptr) object = find_namespace(&unknown, plugin.plugin_id);
+        if (object == nullptr) continue;
+        if (object->kind != JsonValue::Kind::kObject) {
+            *object = JsonValue{};
+            object->kind = JsonValue::Kind::kObject;
+        }
+        const auto repair_section = [object](const char* key) {
+            JsonValue* section = mutable_member(object, key);
+            if (section != nullptr && section->kind != JsonValue::Kind::kObject) {
+                *section = JsonValue{};
+                section->kind = JsonValue::Kind::kObject;
+            }
+        };
+        const JsonValue* enable = member(*object, "enable");
+        if (enable != nullptr && enable->kind != JsonValue::Kind::kBoolean)
+            remove_member(object, "enable");
+        repair_section("features");
+        repair_section("selections");
+        repair_section("config");
+        JsonValue* features = mutable_member(object, "features");
+        JsonValue* selections = mutable_member(object, "selections");
+        for (const auto& feature : plugin.features) {
+            const JsonValue* value = features == nullptr ? nullptr : member(*features, feature.id);
+            if (value != nullptr && value->kind != JsonValue::Kind::kBoolean)
+                remove_member(features, feature.id);
+            if (feature.type != contracts::FeatureType::kChoice && selections != nullptr &&
+                member(*selections, feature.id) != nullptr) {
+                remove_member(selections, feature.id);
+                remove_member(features, feature.id);
+            }
+        }
+    }
     const std::string before_migration = serialize(next, unknown);
     if (!migrate_host_owner_values(feature_definitions_, &next, &unknown))
         return {fail(ConfigStoreError::kValidation, "migrated plugin config validation failed")};
@@ -1206,14 +1214,15 @@ ConfigStoreSeedResult ConfigStore::seed_features() {
         if (plugin.validate_config != nullptr) {
             const JsonValue* config = member(*object, "config");
             if (config != nullptr && config->kind == JsonValue::Kind::kObject) {
+                std::vector<std::string> invalid_keys;
                 for (const auto& entry : config->object) {
                     const std::string json = serialize_value(entry.second);
                     const QolResult validation = plugin.validate_config(
                         entry.first.c_str(), json.data(), static_cast<uint32_t>(json.size()));
-                    if (!contracts::succeeded(validation))
-                        return {fail(ConfigStoreError::kValidation,
-                                     "plugin config validation failed")};
+                    if (!contracts::succeeded(validation)) invalid_keys.push_back(entry.first);
                 }
+                JsonValue* mutable_config = mutable_member(object, "config");
+                for (const auto& key : invalid_keys) remove_member(mutable_config, key.c_str());
             }
         }
         JsonValue schema;
