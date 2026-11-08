@@ -27,6 +27,13 @@ inline constexpr int32_t kRateLadder[] = {10, 30, 50, 80, 100, 120, 150, 200, 30
 inline constexpr uint32_t kRateLadderSize = sizeof(kRateLadder) / sizeof(kRateLadder[0]);
 inline constexpr int32_t kRateDefault = 100;
 
+// 伤害输出专属档位（百分比）。扩到 ×1000000：配合 scale_by_percent 的 int64 计算与
+// [1, INT32_MAX] 钳制，任意正基础伤害都可打到原生上限 2147483647，途中无数值回绕。
+inline constexpr int32_t kDamageOutLadder[] = {10, 30, 50, 80, 100, 120, 150, 200, 300, 500,
+                                               1000, 5000, 20000, 100000, 1000000, 100000000};
+inline constexpr uint32_t kDamageOutLadderSize =
+    sizeof(kDamageOutLadder) / sizeof(kDamageOutLadder[0]);
+
 // 掉落数量：整数倍率 0..5（0 = 不掉落）。不参与百分比档位。
 inline constexpr int32_t kDropQuantityLadder[] = {0, 1, 2, 3, 4, 5};
 inline constexpr uint32_t kDropQuantityLadderSize =

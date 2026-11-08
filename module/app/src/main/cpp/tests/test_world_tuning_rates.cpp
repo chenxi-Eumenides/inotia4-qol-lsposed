@@ -23,6 +23,19 @@ void test_ladder_and_metadata() {
     assert(ladder_shift(RateId::kGold, 100, 0) == 100);
     assert(ladder_shift(RateId::kGold, 101, 1) == 101);
 
+    // 伤害输出专属档位：上限 ×1000000，配合钳制可从任意正基础伤害到达原生上限。
+    uint32_t damage_out_ladder_size = 0;
+    const int32_t* damage_out_ladder = rate_ladder(RateId::kDamageOut, &damage_out_ladder_size);
+    assert(damage_out_ladder == kDamageOutLadder && damage_out_ladder_size == kDamageOutLadderSize);
+    assert(damage_out_ladder[9] == 500 && damage_out_ladder[10] == 1000 &&
+           damage_out_ladder[kDamageOutLadderSize - 1] == 100000000);
+    assert(ladder_index(RateId::kDamageOut, 100000000) == kDamageOutLadderSize - 1);
+    assert(ladder_index(RateId::kDamageOut, 750) == -1);
+    assert(ladder_shift(RateId::kDamageOut, 500, 1) == 1000);
+    assert(ladder_shift(RateId::kDamageOut, 100000000, 1) == 100000000);
+    assert(rate_display(RateId::kDamageOut, 100000000) == "×1000000.0");
+    assert(rate_display(RateId::kDamageOut, 1000000) == "×10000.0");
+
     assert(std::strcmp(rate_key(RateId::kGold), "gold") == 0);
     assert(std::strcmp(rate_name(RateId::kGold), "金币倍率") == 0);
     assert(std::strcmp(rate_key(RateId::kExp), "exp") == 0);
@@ -164,6 +177,13 @@ void test_legacy_drop_quality_key() {
     assert(parsed.value[static_cast<uint32_t>(RateId::kDropReroll)] == 5);
     assert(parsed.value[static_cast<uint32_t>(RateId::kGold)] == 500);
 
+    // 伤害输出扩档：decode/validate 接受新档位 100000000。
+    const char* extended =
+        "{\"gold\":100,\"exp\":100,\"player_hp\":100,\"enemy_hp\":100,\"damage_out\":100000000,"
+        "\"damage_in\":100,\"drop_quantity\":1,\"drop_reroll\":1}";
+    assert(decode_rates(extended, static_cast<uint32_t>(std::strlen(extended)), &parsed));
+    assert(parsed.value[static_cast<uint32_t>(RateId::kDamageOut)] == 100000000);
+
     // 只有旧键时也按别名生效，其余字段回默认值。
     const char* legacy_only = "{\"drop_quality\":3}";
     assert(decode_rates(legacy_only, static_cast<uint32_t>(std::strlen(legacy_only)), &parsed));
@@ -210,6 +230,10 @@ void test_scaling() {
     assert(scale_by_percent(-7, 500) == -7);
     assert(scale_by_percent(INT32_MAX, 500) == INT32_MAX);
     assert(scale_by_percent(10, 30) == 3);
+    // 伤害输出扩档后：任意正基础伤害 ×100000000 都钳到原生上限（int64 途中不回绕）。
+    assert(scale_by_percent(3600, 100000000) == INT32_MAX);
+    assert(scale_by_percent(21474836, 100000000) == INT32_MAX);
+    assert(scale_by_percent(2147, 100000000) == 2147000000);
 
     assert(scale_attribute(100, 100) == 100);
     assert(scale_attribute(100, 50) == 50);

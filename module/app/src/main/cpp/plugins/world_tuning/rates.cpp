@@ -82,7 +82,8 @@ bool read_int(const char** cursor, const char* end, int32_t* out) {
     int64_t value = 0;
     while (*cursor < end && **cursor >= '0' && **cursor <= '9') {
         value = value * 10 + (**cursor - '0');
-        if (value > 1000000) return false;
+        // 上限 = damage_out 顶档 100000000；超出部分由档位校验拒绝，解析层只防 int32 溢出。
+        if (value > 100000000) return false;
         ++*cursor;
     }
     if (*cursor == start) return false;
@@ -120,6 +121,9 @@ const int32_t* rate_ladder(RateId id, uint32_t* out_size) {
         case RateId::kDropReroll:
             if (out_size != nullptr) *out_size = kDropRerollLadderSize;
             return kDropRerollLadder;
+        case RateId::kDamageOut:
+            if (out_size != nullptr) *out_size = kDamageOutLadderSize;
+            return kDamageOutLadder;
         default:
             if (out_size != nullptr) *out_size = kRateLadderSize;
             return kRateLadder;

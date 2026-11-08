@@ -20,7 +20,6 @@ constexpr const char* kResourceNormal = "hook:CHAR_GetNormalDamage";
 constexpr const char* kResourceMagic = "hook:CHAR_GetNormalMagicDamage";
 constexpr const char* kResourceCritical = "hook:CHAR_GetCriticalDamage";
 constexpr const char* kResourceDefense = "hook:CHAR_CalcMagicalDefense";
-constexpr const char* kDamageGate = "damage_widen.enabled";
 
 using NormalFn = int32_t (*)(void*);
 using CriticalFn = int32_t (*)(void*, void*, int32_t);
@@ -197,17 +196,17 @@ const contracts::ResourceClaim kResources[] = {
      contracts::ResourcePolicy::kPrivate, contracts::ResourceRequirement::kOptional,
      contracts::ResourceFailure::kFailSoft, true, kPluginId,
      "CHAR_Act_M_DD 的怪物伤害千分比乘法使用 int64 并钳制",
-     kDamageGate, 120, nullptr, false},
+     nullptr, 120, nullptr, false},
     {kResourceWrapB, "INSN_ACT_M_DD_WRAP_B", contracts::ResourceMechanism::kInsnPatch,
      contracts::ResourcePolicy::kPrivate, contracts::ResourceRequirement::kOptional,
      contracts::ResourceFailure::kFailSoft, true, kPluginId,
      "CHAR_Act_M_DD 的乘积保存在 64 位寄存器中",
-     kDamageGate, 120, nullptr, false},
+     nullptr, 120, nullptr, false},
     {kResourceWrapBC, "INSN_ACT_M_DD_WRAP_BC", contracts::ResourceMechanism::kInsnPatch,
      contracts::ResourcePolicy::kPrivate, contracts::ResourceRequirement::kOptional,
      contracts::ResourceFailure::kFailSoft, true, kPluginId,
      "CHAR_Act_M_DD 的暴击增伤两级千分比乘除链使用 int64 并钳制",
-     kDamageGate, 120, nullptr, false},
+     nullptr, 120, nullptr, false},
 };
 
 bool character_read_available(const contracts::QolGameHost* game) {
