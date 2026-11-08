@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <mutex>
 
 #include "contracts/bag.h"
 #include "contracts/craft_facts.h"
@@ -28,6 +29,9 @@
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/runtime/session.h"
+#include "plugins/extension_bag/usecases/set_bag_count.h"
+#include "plugins/extension_bag/model/bag_catalog.h"
+#include "plugins/extension_bag/model/bag_count_setting.h"
 
 #include <cstdlib>
 #include <string>
@@ -56,6 +60,14 @@ namespace {
 
 constexpr const char* kPluginId = "extension_bag";
 constexpr const char* kPluginVersion = "0.1.0";
+constexpr const char* kBagCountConfigKey = "bagCount";
+
+constexpr contracts::FeatureChoiceOption kBagCountOptions[] = {
+    {"5", "5"}, {"6", "6"}, {"7", "7"}, {"8", "8"},
+    {"9", "9"}, {"10", "10"}, {"11", "11"}, {"12", "12"},
+    {"13", "13"}, {"14", "14"}, {"15", "15"}, {"16", "16"},
+    {"17", "17"}, {"18", "18"}, {"19", "19"}, {"20", "20"},
+};
 
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
@@ -182,6 +194,12 @@ const qol::contracts::QolPortRequirement kPorts[] = {
 // 插件停用 provider——表指针由宿主 capability 表持有，此处不管理其生命周期）。
 uint64_t g_slot_data_flush_task = 0;
 uint64_t g_deferred_free_task = 0;
+uint64_t g_config_apply_task = 0;
+std::mutex g_config_mutex;
+int32_t g_queued_bag_count = 5;
+bool g_bag_count_choice_enabled = false;
+uint64_t g_pending_config_write = 0;
+qol::contracts::QolOwnerToken g_pending_config_owner{};
 const qol::contracts::QolSlotDataApi* g_slot_data_api_cache = nullptr;
 
 void close_extension_bag_gates() {
@@ -191,9 +209,17 @@ void close_extension_bag_gates() {
     merge::set_enabled(false);
 }
 
+void remove_config_apply_task() {
+    const uint64_t task = g_config_apply_task;
+    g_config_apply_task = 0;
+    if (task != 0 && g_sdk != nullptr && g_sdk->scheduler.remove != nullptr)
+        (void)g_sdk->scheduler.remove(task);
+}
+
 // Resident callbacks are gated off on install failure; only reversible registrations
 // (slot_data / bag source) are revoked.
 void rollback_extension_bag_install(const qol::contracts::QolSlotDataApi* slot_data_api = nullptr) {
+    remove_config_apply_task();
     close_extension_bag_gates();
     if (slot_data_api == nullptr) slot_data_api = g_slot_data_api_cache;
     if (slot_data_api != nullptr) (void)extension_bag_slot_data_unregister(slot_data_api);
@@ -218,6 +244,148 @@ int32_t slot_data_flush_frame(int64_t, void*) {
     return 1;
 }
 
+void queue_bag_count(int32_t count) {
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    g_queued_bag_count = count == 0 ? 5 : count;
+    g_bag_count_choice_enabled = count != 0;
+}
+
+bool parse_count_string(const char* value, uint32_t size, int32_t minimum,
+                        int32_t maximum, int32_t* out) {
+    return bag_count_setting::parse_integer(value, size, minimum, maximum, out);
+}
+
+bool write_bag_count_config(const qol::contracts::PluginContext& ctx, int32_t count) {
+    const auto* api = contracts::feature_if_available(ctx.sdk);
+    if (api == nullptr || api->request_set_config == nullptr) {
+    if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
+            constexpr char message[] = "bagCount config write unavailable";
+            (void)g_sdk->log.write(2, 1, kPluginId, message,
+                                   static_cast<uint32_t>(sizeof(message) - 1));
+        }
+        return false;
+    }
+    char json[16]{};
+    const int length = std::snprintf(json, sizeof(json), "%d", count);
+    if (length <= 0 || static_cast<size_t>(length) >= sizeof(json)) return false;
+    contracts::FeatureReceipt receipt{};
+    const QolResult result = api->request_set_config(api->context, ctx.owner_token,
+        kPluginId, kBagCountConfigKey, json, static_cast<uint32_t>(length), &receipt);
+    if (!contracts::succeeded(result) || receipt.admission != contracts::FeatureAdmission::kAdmitted ||
+        receipt.request_id == 0) {
+        if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
+            constexpr char message[] = "bagCount config write failed; runtime choice retained";
+            (void)g_sdk->log.write(2, 1, kPluginId, message,
+                                   static_cast<uint32_t>(sizeof(message) - 1));
+        }
+        return false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_config_mutex);
+        g_pending_config_write = receipt.request_id;
+        g_pending_config_owner = ctx.owner_token;
+    }
+    return true;
+}
+
+void poll_bag_count_config_write() {
+    uint64_t request_id = 0;
+    qol::contracts::QolOwnerToken owner{};
+    {
+        std::lock_guard<std::mutex> lock(g_config_mutex);
+        request_id = g_pending_config_write;
+        owner = g_pending_config_owner;
+    }
+    if (request_id == 0) return;
+    const auto* api = contracts::feature_if_available(g_sdk);
+    if (api == nullptr || api->receipt == nullptr) return;
+    contracts::FeatureReceipt receipt{};
+    const QolResult result = api->receipt(api->context, owner, request_id, &receipt);
+    if (!contracts::succeeded(result)) {
+        if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
+            constexpr char message[] = "bagCount config receipt unavailable";
+            (void)g_sdk->log.write(2, 1, kPluginId, message,
+                                   static_cast<uint32_t>(sizeof(message) - 1));
+        }
+    } else if (receipt.persistence == contracts::FeaturePersistence::kPending) {
+        return;
+    } else if (receipt.persistence == contracts::FeaturePersistence::kFailed ||
+               receipt.admission != contracts::FeatureAdmission::kAdmitted) {
+        if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
+            constexpr char message[] = "bagCount config persistence failed; runtime value retained";
+            (void)g_sdk->log.write(2, 1, kPluginId, message,
+                                   static_cast<uint32_t>(sizeof(message) - 1));
+        }
+    }
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    if (g_pending_config_write == request_id) {
+        g_pending_config_write = 0;
+        g_pending_config_owner = {};
+    }
+}
+
+bag_count_setting::Value read_choice_fallback(const qol::contracts::PluginContext& ctx) {
+    const auto* api = contracts::feature_choice_if_available(ctx.sdk);
+    if (api == nullptr || api->read_choice == nullptr) {
+        return {};
+    }
+    char selected[32]{};
+    uint32_t size = 0;
+    const QolResult result = api->read_choice(api->context, ctx.owner_token, kPluginId,
+        "extension_bag.bagCount", selected, sizeof(selected), &size);
+    if (!contracts::succeeded(result) || size > sizeof(selected)) {
+        return {};
+    }
+    int32_t count = 0;
+    if (!parse_count_string(selected, size, 5, 20, &count)) return {};
+    return bag_count_setting::from_count(count);
+}
+
+void read_initial_bag_count(const qol::contracts::PluginContext& ctx) {
+    const auto* api = contracts::feature_if_available(ctx.sdk);
+    auto read_state = bag_count_setting::ConfigRead::kNotFound;
+    char json[32]{};
+    uint32_t size = 0;
+    if (api != nullptr && api->read_config != nullptr) {
+        const QolResult result = api->read_config(api->context, ctx.owner_token, kPluginId,
+            kBagCountConfigKey, json, sizeof(json), &size);
+        if (contracts::succeeded(result)) read_state = bag_count_setting::ConfigRead::kFound;
+        else if (result.code != kQolErrNotFound) read_state = bag_count_setting::ConfigRead::kFailed;
+    }
+    auto fallback = bag_count_setting::Value{};
+    if (read_state == bag_count_setting::ConfigRead::kNotFound)
+        fallback = read_choice_fallback(ctx);
+    char fallback_raw[16]{};
+    uint32_t fallback_size = 0;
+    if (fallback.enabled) {
+        const int written = std::snprintf(fallback_raw, sizeof(fallback_raw), "%d", fallback.count);
+        if (written > 0 && static_cast<size_t>(written) < sizeof(fallback_raw))
+            fallback_size = static_cast<uint32_t>(written);
+    }
+    const auto setting = bag_count_setting::resolve_startup(read_state,
+        read_state == bag_count_setting::ConfigRead::kFound ? json : nullptr,
+        read_state == bag_count_setting::ConfigRead::kFound ? size : 0,
+        fallback_size != 0, fallback_size != 0 ? fallback_raw : nullptr, fallback_size);
+    queue_bag_count(setting.enabled ? setting.count : 0);
+    if (!setting.enabled && read_state != bag_count_setting::ConfigRead::kNotFound &&
+        g_sdk != nullptr && g_sdk->log.write != nullptr) {
+        constexpr char message[] = "bagCount config invalid or unreadable; extension bag disabled";
+        (void)g_sdk->log.write(2, 1, kPluginId, message,
+                               static_cast<uint32_t>(sizeof(message) - 1));
+    }
+}
+
+int32_t apply_config_frame(int64_t, void*) {
+    poll_bag_count_config_write();
+    if (!g_source_active.load(std::memory_order_acquire)) return 1;
+    int32_t desired = 5;
+    bool enabled = false;
+    { std::lock_guard<std::mutex> lock(g_config_mutex);
+      desired = g_queued_bag_count; enabled = g_bag_count_choice_enabled; }
+    if (enabled) (void)usecases::usecase_set_bag_count(desired);
+    return 1;
+}
+
 bool register_bag_source_if_available() {
     if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return false;
     const void* iface = nullptr;
@@ -230,6 +398,11 @@ bool register_bag_source_if_available() {
         static_cast<const qol::contracts::QolBagSourceRegistryApi*>(iface));
 }
 
+bool bag_count_choice_enabled() {
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    return g_bag_count_choice_enabled;
+}
+
 int plugin_install(qol::contracts::PluginContext& ctx) {
     if (extension_bag_bag_source_registered() || g_slot_data_api_cache != nullptr) {
         rollback_extension_bag_install();
@@ -238,6 +411,7 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
     }
     g_sdk = ctx.sdk;
     g_game = ctx.game;
+    read_initial_bag_count(ctx);
     g_write_port = nullptr;
     extension_bag_bind_character_extras(nullptr);
     extension_bag_bind_inventory_extras(nullptr);
@@ -477,6 +651,11 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
             g_slot_data_flush_task = task;
         }
     }
+    if (g_sdk->scheduler.add != nullptr && g_config_apply_task == 0) {
+        uint64_t task = 0;
+        if (contracts::succeeded(g_sdk->scheduler.add(qol::contracts::kQolRuntimeFramePointLogicPre,
+                &apply_config_frame, nullptr, 1, 0, &task))) g_config_apply_task = task;
+    }
     // 等价原 core.item merge::attach 成功置位：安装成功即允许合并（wrapper 就绪态
     // 由 on_resource_ready 单独维护，未就绪前门禁仍透传）。
     merge::set_enabled(true);
@@ -516,6 +695,7 @@ void plugin_deactivate(qol::contracts::PluginContext& ctx) {
         }
         g_deferred_free_task = 0;
     }
+    remove_config_apply_task();
     // Resources are returned by the host; this callback only closes feature gates.
     g_source_active.store(false, std::memory_order_release);
     extension_bag_set_enabled(false);
@@ -536,6 +716,7 @@ void plugin_deactivate(qol::contracts::PluginContext& ctx) {
 // 启停仅切门禁，资源安装/还原由宿主完成（§3.3）。
 void plugin_on_enabled(qol::contracts::PluginContext& ctx) {
     close_extension_bag_gates();
+    read_initial_bag_count(ctx);
     // P3c 生命周期：启停会经 owner suspend/resume 换发 token；此处以本次 ctx.owner_token
     // 重新注册 slot_data（register 内部先注销旧凭据参与者），使 CB 回调的 owner 校验
     // 始终对应当前有效 token（§9 双凭据迁移）。
@@ -555,6 +736,14 @@ void plugin_on_enabled(qol::contracts::PluginContext& ctx) {
                 &extension_bag_deferred_free_tick, nullptr, 1, 0, &task)) && task != 0) {
             g_deferred_free_task = task;
         }
+    }
+    if (!bag_count_choice_enabled()) {
+        extension_bag_bag_source_unregister();
+        unregister_projection_callbacks();
+        g_source_active.store(false, std::memory_order_release);
+        extension_bag_set_enabled(false);
+        merge::set_enabled(true);
+        return;
     }
     // enable 会重新注册袋源，保证 core.item 的注册表代次变化、快照失效。
     if (!register_bag_source_if_available()) {
@@ -620,7 +809,7 @@ int32_t plugin_on_resource_ready(qol::contracts::PluginContext& ctx, const char*
     return extension_bag_bind_backup(resource_id, backup);
 }
 
-// Features：扩展背包主开关 + 拖拽合并（自 core.item 迁入，文案/默认值沿用原定义）。
+// Features：背包数量 choice 取代旧主开关；拖拽合并独立保留。
 QolResult extension_bag_toggle(contracts::PluginContext&, uint8_t enabled) {
     if (enabled != 0) {
         extension_bag_set_enabled(true);
@@ -643,15 +832,30 @@ QolResult extension_bag_toggle(contracts::PluginContext&, uint8_t enabled) {
         unregister_projection_callbacks();
         extension_bag_set_enabled(false);
         g_source_active.store(false, std::memory_order_release);
-        merge::set_enabled(false);
     }
     return contracts::ok();
 }
 
+QolResult extension_bag_bag_count_choice(contracts::PluginContext& ctx, const char* value) {
+    int32_t count = 0;
+    if (value != nullptr && value[0] != '\0') {
+        if (!parse_count_string(value, static_cast<uint32_t>(std::strlen(value)), 5, 20, &count))
+            return contracts::error(kQolErrInvalidArgument, "bagCount choice must be 5..20", 29);
+    }
+    return bag_count_setting::apply_and_persist_nonblocking(count,
+        [&](int32_t chosen) {
+            queue_bag_count(chosen);
+            return extension_bag_toggle(ctx, chosen == 0 ? 0 : 1);
+        },
+        [&](int32_t chosen) { return write_bag_count_config(ctx, chosen); });
+}
+
 constexpr qol::contracts::FeatureDefinition kFeatures[] = {
-    {"extension_bag.extended_bag", 1, qol::contracts::FeatureCategory::kGameplay,
-     qol::contracts::FeatureType::kToggle, "额外背包", "添加一列额外背包",
-      &extension_bag_toggle, nullptr, nullptr, -2},
+    {"extension_bag.bagCount", 0, qol::contracts::FeatureCategory::kGameplay,
+     qol::contracts::FeatureType::kChoice, "额外背包数量",
+     "扩展背包可用袋数量（页签最多显示 20 个）", nullptr, nullptr, nullptr, -2,
+     kBagCountOptions, static_cast<uint32_t>(std::size(kBagCountOptions)),
+     &extension_bag_bag_count_choice},
     {"move_merge.drag_merge", 1, qol::contracts::FeatureCategory::kBasicOptimization,
      qol::contracts::FeatureType::kToggle, "拖动合并", "允许合并同种可堆叠物品",
      [](contracts::PluginContext&, uint8_t enabled) -> QolResult {
@@ -686,11 +890,16 @@ const qol::contracts::PluginDescriptor kDescriptor = {
     kFeatures, 2,
     nullptr,
     0,
-    nullptr,
+    &bag_count_setting::validate_config,
     nullptr, 0,
 };
 
 }  // namespace
+
+int extension_bag_configured_bag_count() {
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    return g_queued_bag_count;
+}
 
 const qol::contracts::PluginDescriptor& plugin_descriptor() {
     return kDescriptor;

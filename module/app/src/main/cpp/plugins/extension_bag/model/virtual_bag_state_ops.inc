@@ -198,20 +198,8 @@ inline bool set_bag_count(State* state, int count) {
         state->bag_count < 1 || state->bag_count > kMaxExtensionBags) {
         return false;
     }
-    const int old_count = state->bag_count;
-    if (count < old_count) {
-        for (int bag = count; bag < old_count; ++bag) {
-            if (bag_has_data(*state, bag)) return false;
-        }
-    }
-    if (count > old_count) {
-        for (int bag = old_count; bag < count; ++bag) {
-            state->types[bag] = 0;
-            state->capacities[bag] = 0;
-            state->items[bag] = {};
-        }
-    }
     state->bag_count = count;
+    state->stored_bag_count = std::max(state->stored_bag_count, count);
     if (state->selected >= count) {
         state->selected = -1;
         state->inspected = -1;
@@ -219,6 +207,15 @@ inline bool set_bag_count(State* state, int count) {
         state->mode = Mode::kOriginal;
     }
     return true;
+}
+
+inline int stored_bag_count(const State& state) {
+    int high_water = std::max(clamp_active_extension_bags(state.stored_bag_count),
+                              clamp_active_extension_bags(state.bag_count));
+    for (int bag = 0; bag < kMaxExtensionBags; ++bag) {
+        if (bag_has_data(state, bag)) high_water = std::max(high_water, bag + 1);
+    }
+    return clamp_active_extension_bags(high_water);
 }
 
 // ---- JSON 桥接（Kotlin ExtensionBagUiBridge 往返，payload 以 base64 安全编码）----

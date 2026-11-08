@@ -16,20 +16,20 @@
 > 数据面只注册 `QolBagSource` 1.1（space=2），提供
 > `count/info/item_at/for_each_item/export_item/import_item/remove/identify/use`。
 > 原版/改版袋读写、跨空间移动、出售、入库、装备/镶嵌编排归 `core.item`；EB 只保留扩展袋数据原语与 UI 适配。
-> `bagCount` 只由设置页修改。装备页、商店与合成投影均使用
+> `bagCount` 是模块级全局配置：设置页以 choice（5–20，默认「关闭」）写入，插件 config 键 `bagCount`（0–128，0=关闭）为运行时权威值。装备页、商店与合成投影均使用
 > `ControlItem_SetItem/GetItem` 和 `INVEN_GetBagSize` 读取入口虚拟化，不写 `INVEN_pItem` 或容量字
 > （见 [`docs/refactor/extension-bag/display-hook.md`](../../refactor/extension-bag/display-hook.md)）。
 > 袋源契约与注册细节见 [`core.item`](core.item.md) 的「`QolBagSource` 契约」一节。
 
 ## 摘要
 
-功能插件：提供可配置数量的扩展逻辑背包（默认 5，范围 1–8）、原生风格页签、投影显示与 sidecar 持久化；同时兼容 C18L 的原生追加袋布局。
+功能插件：提供可配置数量的扩展逻辑背包（设置页 choice 5–20，默认「关闭」；配置文件 `bagCount` 0–128）、原生风格页签、投影显示与 sidecar 持久化；同时兼容 C18L 的原生追加袋布局。
 
 - 插件 id `extension_bag`，版本 `0.1.0`（`plugin.cpp`）。
 - 对外能力：`inventory_refresh` 1.2（自 `core.item` 迁入）。数据面向 `inventory.bag_source` 注册 `QolBagSource` 1.1（space=2；注册面由 `core.inventory` 提供）；不再提供 `extension_bag` / `inventory.merge_projection` / `move_merge.control`。
 - HTTP：无。扩展袋数据查询与操作经 `core.item` 的库存面提供；EB 不拥有 HTTP 路由。
-- 持久化：`extensionbags.items` **v5**（v4 自动迁移，默认 5 袋）。
-- 设置：`bagCount` 只由设置页修改。
+- 持久化：`extensionbags.items` **v6**（v5/v4 自动迁移；`storedBagCount` 记录数据范围，active 数量来自全局配置）。
+- 设置：`extension_bag.bagCount` choice（5–20，默认「关闭」）取代原「额外背包」开关；插件 config 键 `bagCount`（0–128）是运行时权威值，设置页范围只是 UI 限制。
 - 线程模型：所有 `QolBagSource` 回调与 UI 入口在游戏主线程；查询由 `core.item` 快照承担。
 
 除特别说明，路径相对 `module/app/src/main/cpp/plugins/extension_bag/`。
@@ -56,7 +56,7 @@
 | Equip UI hooks | `ui/equip_hooks.cpp` | `UIEquip_ButtonEquipExe`/`ButtonUnequipExe`/`OKConfirmUseItem`/`RefreshItemArea`/`EquipControlEventProc` 的三态分流与 backup 交付；`RefreshItemArea` backup 槽兼作 `inventory_refresh.call_original` trampoline |
 | Move merge wrapper | `core/move_merge_hook.cpp`、`core/move_merge.cpp` | `ptrslot:MOVE_MERGE_GOT` 事件分流（0x02 投影 drop / 0x04 原生合并 gate），`move_merge.drag_merge` feature 门控 |
 | inventory_refresh provider | `plugin.cpp`（capability 提供） | `inventory_refresh` 1.2：`call_original` 与 `update_shortcut_category`（owner=本插件，消费者经 capability 请求） |
-| Bag state / persistence | `runtime/`、sidecar participant | 扩展袋数据状态、sidecar v5 与对象物化 |
+| Bag state / persistence | `runtime/`、sidecar participant | 扩展袋数据状态、sidecar v6 与对象物化 |
 | NativeTabLayout | `runtime/native_tab_layout.*` | C18 布局解析、reflow、命中、锚定 |
 | UI adapters | `ui/`、`runtime/` | 页签、输入、投影宿主与页面事件适配 |
 | Removed history | 旧 `api/provider`、`http/`、`interface command`、`transaction/`、`usecases/move` | 已删除；相应全库存/跨空间操作归 `core.item` |
@@ -72,18 +72,19 @@
 ### 2.2 袋定义
 
 ```cpp
-kMaxExtensionBags = 8;        // 数组上限
+kMaxExtensionBags = 128;      // 数组上限
 kSlotCount = 16;              // 游戏槽上限，固定
-active_extension_bags();      // 1..8，来自 State.bag_count
+active_extension_bags();      // 1..128，来自全局配置（State.bag_count 为运行时副本）
 capacity_for_bag_type(type);  // {0,4,8,12,16}，生成表
 extension_logical_bag_last(); // 6 + active - 1
+kMaxRenderedExtensionBagTabs = 20; // UI 页签上限（4 列 × 5 行）
 ```
 
-`State.types/capacities/items` 固定按上限分配；`bag_count` 只控制可见/可用范围，不改变内存布局。
+`State.types/capacities/items` 固定按上限分配；`bag_count` 只控制可见/可用范围，不改变内存布局；`stored_bag_count` 是 sidecar 数据范围高水位。
 
 ### 2.3 State
 
-- `types[8]`、`capacities[8]`、`items[8][16]`、`bag_count`、`mode`、`original_selected`、`selected`、`inspected`、`info_bag`。
+- `types[128]`、`capacities[128]`、`items[128][16]`、`bag_count`、`stored_bag_count`、`mode`、`original_selected`、`selected`、`inspected`、`info_bag`。
 - `Item`：category、canonical count、payload 长度与 256B 固定缓冲。
 - `mode`：Original / Module / ExitingModule；`ExitingModule` 过渡态用于原版回调收尾。
 - 扩展物品对象与句柄由 EB 维护，供 `QolBagSource` 回调和 UI 投影使用；跨空间所有权转移由 `core.item` 负责。
@@ -101,16 +102,16 @@ extension_logical_bag_last(); // 6 + active - 1
 
 ## 3. 数据驱动
 
-- `bagCount` 是设置页设置项：随存档写入 sidecar 状态 JSON 顶层 `bagCount`；没有 HTTP 修改入口。
-- 增加袋：新袋 `types=0`、`capacities=0`、items 空；减少袋：被移除袋必须为空，否则拒绝。
-- 数量变更由设置页执行，并同步更新 `QolBagSource` 注册状态。
+- `bagCount` 是模块级全局配置：设置页 choice `extension_bag.bagCount`（5–20，默认「关闭」）负责 UI；插件 config 键 `bagCount`（0–128，0=关闭）是运行时权威值，启动/启用时先读 config，缺失才回退 choice。没有 HTTP 修改入口。
+- 增加袋不清零新袋数据；减少袋不删除数据、不因非空拒绝；只清理离开 active 范围的运行时对象身份。
+- 数量变更在主线程安全点 apply，并同步更新 `QolBagSource` 注册状态；`selected/inspected/info_bag` 越界时归一化。
 - 容量表由 `scripts/maintenance/build_bag_catalog.py` 从 `apk/static-data/json/tables/ITEMSTATICBASE.json` 生成；业务代码不得再写死 5/16/容量数组。
-- 原版/C18 袋仍由游戏数据驱动；扩展袋由 sidecar 驱动，显示时通过读取入口投影。
+- 原版/C18 袋仍由游戏数据驱动；扩展袋由 sidecar 数据 + 全局数量驱动，显示时通过读取入口投影。
 
 ## 4. 持久化
 
-- section `extensionbags.items`，版本 **v5**；v4 读取时按默认 5 袋迁移并记录日志。
-- `bagCount` 越界或非整数 → 拒绝加载，不静默截断。
+- section `extensionbags.items`，版本 **v6**：写 `storedBagCount`（数据范围高水位）与 `[0,storedBagCount)` 的 types/capacities/items；active 数量不在 sidecar 中作为权威值。v5 读取时把旧 `bagCount` 当作 `storedBagCount`；v4 读取时按默认 5 袋迁移。
+- `storedBagCount` 越界或非整数 → 拒绝加载，不静默截断；写入时取 `max(旧高水位, active, 有数据最高袋+1)`，clamp 1..128。
 - load：缺失清空并放行；版本不符、不可读、payload 损坏阻断会话。
 - capture/complete：sidecar participant 对接 `core.save`，维护扩展袋状态与 dirty revision。
 - dirty staging：每 revision 至多一次 `request_write`；失败清回 staged，安全点重试。
@@ -138,11 +139,12 @@ extension_logical_bag_last(); // 6 + active - 1
 - 页签宿主：背包装备页、商店、合成器；挂载在游戏袋容器上，所有权归游戏。
 - 锚定：每次完整 ensure 重新解析活容器并证明身份（proc/type/user_type/data 快照）；失效只注销记录并重建；禁用/退出时 detach 后删除。
 - 子控件缓存：Host UI adapter 的 `child_count`/`child_at` 按 `root + epoch` 缓存一次链表遍历；控件创建/删除/root 变化立即失效，返回前仍校验 root/child，保持 fail-closed。
-- 页签 ensure 门控：root、子控件数、inventory generation（商店/合成为扩展袋数）未变时每 10 帧完整 ensure 一次；其余帧只逐个校验已挂载按钮存活，任一失效立即完整重建。
+- 页签 ensure 门控：root、子控件数、inventory generation（商店/合成为可见页签数）未变时每 10 帧完整 ensure 一次；其余帧只逐个校验已挂载按钮存活，任一失效立即完整重建。
 - ControlItem 投影：`control→slot` 映射按 `root/bag/capacity` 缓存，命中仍用 `valid_child_locked` 复核；控件重建后自动重扫。
 - C18 袋数：`native_bag_count_locked()` 按 EB revision 缓存；`native_bag_layout()` 1 秒 TTL，避免商店/合成页每帧扫描候选袋。
 - 页签控件：user type 2、data 16 字节；点击经 proc 投递，主线程消费；同一帧多击做合并。
-- 当前页签渲染上限 `kMaxRenderedExtensionBagTabs = 5`；`bagCount > 5` 时只渲染前 5 个，多列布局待实现。
+- 页签渲染上限 `kMaxRenderedExtensionBagTabs = 20`（每列 5 个，最多 4 列，向右排列）；`active > 20` 时只创建/绘制/命中前 20 个，其余袋仍 active、数据与袋源有效但无页签入口。
+- 列/行映射：`column = index / 5`、`row = index % 5`；非 C18 的 x 步进 68、y 步进 70；C18 reflow 按完整 4 列组 bounds 计算 frame 与原生列 clearance，放不下时 fail-closed。
 - 输入：UI 事件由 EB 适配后交给 `core.item` 操作面；EB 不再执行跨空间移动事务。
 - 详情/商店/合成页面保留 UI 适配；出售、入库、装备与镶嵌编排归 `core.item`。
 
@@ -178,7 +180,7 @@ extension_logical_bag_last(); // 6 + active - 1
 ### 8.6 HTTP（已删除）
 
 - EB 不注册 HTTP 路由，也没有 typed command；扩展袋库存能力由 `core.item` 的库存接口提供。
-- `bagCount` 只由设置页修改，不提供 HTTP 修改入口。
+- `bagCount` 由设置页 choice 或配置文件 `bagCount` 修改，不提供 HTTP 修改入口。
 
 ## 9. 线程、锁与重入
 
@@ -195,7 +197,8 @@ extension_logical_bag_last(); // 6 + active - 1
 
 | 限制 | 影响 | 后续 |
 |---|---|---|
-| `bagCount > 5` 只渲染前 5 个页签 | 6–8 袋无法全部通过页签直接访问 | 多列页签布局 + reflow 区域加宽 |
+| `active > 20` 只渲染前 20 个页签 | 第 21 个及之后的袋无法通过页签直接访问，但数据/接口仍有效 | 单独设计更多背包显示的 UI 方案 |
+| 设置页 choice 只提供 5–20 | 手改配置文件 `bagCount` 到 1–4 或 21–128 时设置页显示「关闭」或非法态，但运行时按配置生效 | 如需 UI 覆盖更大范围，扩展 choice 选项 |
 | UI 物品操作依赖 `core.item` 操作能力 | 尚未接通的操作不能由 EB 自行执行 | 按 `core.item` 操作面接线并验收，不恢复 EB 事务 |
 | C18 高亮抑制依赖“页签总数” | 依赖原生无该索引 | 新版本需复核页签计数 |
 

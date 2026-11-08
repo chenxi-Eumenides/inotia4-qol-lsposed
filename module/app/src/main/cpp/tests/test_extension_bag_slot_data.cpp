@@ -8,6 +8,7 @@
 #include "plugins/core.save/slot_data_provider.h"
 #include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
 #include "plugins/extension_bag/model/serialization.h"
+#include "plugins/extension_bag/model/bag_count_setting.h"
 #include "plugins/extension_bag/runtime/session.h"
 
 #include <cstdio>
@@ -32,11 +33,13 @@ QolResult extension_bag_slot_data_load_for_test(
 
 namespace qol::features::extension_bag {
 const qol::contracts::QolHostSdk* extension_bag_host_sdk() { return nullptr; }
+int extension_bag_configured_bag_count() { return 5; }
 }  // namespace qol::features::extension_bag
 
 namespace {
 
 using namespace qol::contracts;
+namespace bag_count_setting = qol::features::extension_bag::bag_count_setting;
 static int g_pass = 0, g_fail = 0;
 #define CHECK(c) do { if (c) ++g_pass; else { ++g_fail; \
     std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); } } while (0)
@@ -200,7 +203,7 @@ bool test_slot_data_load_fail_closed_matrix(const QolSlotDataContext& context) {
     CHECK(extension_bag_session_admitted_locked());
     CHECK(g_state.items[0][0].category == 321 && g_state.items[0][0].count == 7);
 
-    for (const uint32_t version : {1u, 2u, 3u, 5u, 6u}) {
+    for (const uint32_t version : {1u, 2u, 3u, 7u}) {
         const auto unsupported = extension_bag_slot_data_load_for_test(
             &context, static_cast<uint32_t>(QolSlotDataPresence::kVersionUnsupported), version,
             nullptr, 0);
@@ -208,6 +211,14 @@ bool test_slot_data_load_fail_closed_matrix(const QolSlotDataContext& context) {
         CHECK(!extension_bag_session_admitted_locked());
         CHECK(g_state.items[0][0].category == 321 && g_state.items[0][0].count == 7);
     }
+    const auto legacy_v5 = extension_bag_slot_data_load_for_test(
+        &context, static_cast<uint32_t>(QolSlotDataPresence::kVersionUnsupported), 5,
+        valid_bytes, valid_json.size());
+    CHECK(succeeded(legacy_v5));
+    const auto legacy_v4 = extension_bag_slot_data_load_for_test(
+        &context, static_cast<uint32_t>(QolSlotDataPresence::kVersionUnsupported), 4,
+        valid_bytes, valid_json.size());
+    CHECK(succeeded(legacy_v4));
 
     g_state.items[1][0] = virtual_bag::Item{222, 4};
     const auto missing = extension_bag_slot_data_load_for_test(
@@ -309,7 +320,8 @@ int main() {
         CHECK(succeeded(slot_data_save_capture_next(90, &section, &version, buffer.data(),
                                                     buffer.size(), &size)));
         const std::string captured(buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(size));
-        CHECK(!captured.empty() && captured == panel_open_state);
+        CHECK(version == 6);
+        CHECK(!captured.empty() && captured == virtual_bag::state_json(g_state, false, true));
         slot_data_save_finish(90, static_cast<uint32_t>(QolSlotDataOutcome::kCancelled));
     }
     CHECK(qol::features::extension_bag::model::main_menu_cleanup_due(5, 4, true, false));
@@ -346,6 +358,32 @@ int main() {
         CHECK(virtual_bag::parse_state_json_at(first.c_str(), &roundtrip, 0,
                                                virtual_bag_category_uses_stack_count));
         CHECK(virtual_bag::state_json(roundtrip) == first);  // 空状态往返字节等价。
+        virtual_bag::State hidden{};
+        hidden.bag_count = 1;
+        hidden.stored_bag_count = 3;
+        hidden.items[2][0] = virtual_bag::Item{321, 9};
+        const std::string persisted = virtual_bag::state_json(hidden, false, true);
+        CHECK(persisted.find("\"storedBagCount\":3") != std::string::npos);
+        CHECK(persisted.find("\"bagCount\"") == std::string::npos);
+        CHECK(virtual_bag::state_json(hidden).find("321") == std::string::npos);
+        virtual_bag::State restored{};
+        CHECK(virtual_bag::parse_state_json_at(persisted.c_str(), &restored, 0,
+            virtual_bag_category_uses_stack_count));
+        CHECK(restored.stored_bag_count == 3 && restored.items[2][0].category == 321);
+        CHECK(virtual_bag::set_bag_count(&restored, 3));
+        CHECK(restored.items[2][0].category == 321);
+        virtual_bag::State shrunk{};
+        shrunk.items[4][0] = virtual_bag::Item{654, 11};
+        CHECK(virtual_bag::set_bag_count(&shrunk, 1));
+        CHECK(shrunk.items[4][0].category == 654);
+        CHECK(virtual_bag::state_json(shrunk).find("654") == std::string::npos);
+        const std::string shrunk_persisted = virtual_bag::state_json(shrunk, false, true);
+        virtual_bag::State after_restart{};
+        CHECK(virtual_bag::parse_state_json_at(shrunk_persisted.c_str(), &after_restart, 0,
+            virtual_bag_category_uses_stack_count));
+        CHECK(after_restart.items[4][0].category == 654);
+        CHECK(virtual_bag::set_bag_count(&after_restart, 5));
+        CHECK(after_restart.items[4][0].category == 654);
         g_state.types[0] = 1;
         g_state.items[0][0] = virtual_bag::Item{321, 7};
         virtual_bag::normalize(&g_state);  // capacities 是派生字段：先归一再序列化。
@@ -462,6 +500,43 @@ int main() {
     CHECK(g_request_write_calls == 1);  // 注销后不排空。
 
     slot_data_set_available(false);
+    {
+        using bag_count_setting::ConfigRead;
+        using bag_count_setting::resolve_startup;
+        const char* accepted[] = {"0", "1", "100", "128"};
+        for (const char* value : accepted) {
+            CHECK(succeeded(bag_count_setting::validate_config("bagCount", value,
+                static_cast<uint32_t>(std::strlen(value)))));
+        }
+        const char* rejected[] = {"129", "-1", "1.0", "1e2", "\"5\"", "true", "{}"};
+        for (const char* value : rejected) {
+            CHECK(!succeeded(bag_count_setting::validate_config("bagCount", value,
+                static_cast<uint32_t>(std::strlen(value)))));
+        }
+        CHECK(!succeeded(bag_count_setting::validate_config("unknown", "5", 1)));
+
+        auto setting = resolve_startup(ConfigRead::kFound, "100", 3, false, nullptr, 0);
+        CHECK(setting.enabled && setting.count == 100);
+        virtual_bag::State configured{};
+        CHECK(virtual_bag::set_bag_count(&configured, setting.count));
+        CHECK(configured.bag_count == 100);
+        CHECK(!virtual_bag::set_bag_count(&configured, 0));
+        setting = resolve_startup(ConfigRead::kFound, "0", 1, true, "12", 2);
+        CHECK(!setting.enabled && setting.count == 5);  // Config is authoritative over choice.
+        setting = resolve_startup(ConfigRead::kNotFound, nullptr, 0, true, "12", 2);
+        CHECK(setting.enabled && setting.count == 12);
+        setting = resolve_startup(ConfigRead::kNotFound, nullptr, 0, true, nullptr, 0);
+        CHECK(!setting.enabled && setting.count == 5);
+        setting = resolve_startup(ConfigRead::kFailed, nullptr, 0, true, "12", 2);
+        CHECK(!setting.enabled);  // Only not-found permits choice fallback.
+
+        int applied = -1;
+        int persisted = -1;
+        const bool apply_result = bag_count_setting::apply_and_persist_nonblocking(0,
+            [&](int32_t count) { applied = count; return true; },
+            [&](int32_t count) { persisted = count; return false; });
+        CHECK(apply_result && applied == 0 && persisted == 0);
+    }
     std::printf("extension_bag_slot_data: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

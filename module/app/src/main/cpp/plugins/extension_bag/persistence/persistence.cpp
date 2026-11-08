@@ -46,6 +46,9 @@ using namespace qol::contracts;
 // game_ui_virtbag.cpp 的共享锁与 dirty 标记（跨 TU 引用；锁边界见 rulebook §2）。
 // extern 声明在文件作用域：匿名 namespace 内的声明是内部链接，无法引用其他 TU 的定义。
 uint64_t extension_bag_item_revision_locked();
+namespace qol::features::extension_bag {
+int extension_bag_configured_bag_count();
+}
 
 namespace {
 
@@ -54,8 +57,9 @@ namespace {
 using namespace qol::contracts;
 
 constexpr const char* kEbSectionName = "extensionbags.items";
-constexpr uint16_t kEbSectionVersion = 5;
-constexpr uint16_t kLegacyEbSectionVersion = 4;
+constexpr uint16_t kEbSectionVersion = 6;
+constexpr uint16_t kLegacyEbSectionVersion = 5;
+constexpr uint16_t kLegacyV4SectionVersion = 4;
 
 // ---- 会话准入状态（provider 回调维护；操作面/排空面读取）----
 // load 不可读/版本不支持、complete degraded、session closing 等都会置位阻断：
@@ -114,6 +118,9 @@ QolResult eb_sd_load(void* /*user*/, const QolSlotDataContext* ctx, uint32_t pre
         // 默认状态：空背包、原版视图；pending 不存在。
         ::qol::extension_bag::ReentryLock lock;
         *state = {};
+        if (!virtual_bag::set_bag_count(state,
+                qol::features::extension_bag::extension_bag_configured_bag_count()))
+            return qol::contracts::error(kQolErrInvalidArgument, "configured bag count invalid", 29);
         eb_reset_loaded_revision_state_locked();
         extension_bag_session_set_blocked(false);
         QOL_LOG_INFO(QolDomain::kExtensionBag, "slot data load slot=%d presence=missing "
@@ -121,9 +128,11 @@ QolResult eb_sd_load(void* /*user*/, const QolSlotDataContext* ctx, uint32_t pre
                      static_cast<unsigned long long>(ctx->session.epoch));
         return eb_ok();
     }
-    const bool legacy_v4 = presence_kind == qol::contracts::QolSlotDataPresence::kVersionUnsupported &&
+    const bool legacy_v5 = presence_kind == qol::contracts::QolSlotDataPresence::kVersionUnsupported &&
                            stored_version == kLegacyEbSectionVersion;
-    if (presence_kind == qol::contracts::QolSlotDataPresence::kVersionUnsupported && !legacy_v4) {
+    const bool legacy_v4 = presence_kind == qol::contracts::QolSlotDataPresence::kVersionUnsupported &&
+                           stored_version == kLegacyV4SectionVersion;
+    if (presence_kind == qol::contracts::QolSlotDataPresence::kVersionUnsupported && !legacy_v4 && !legacy_v5) {
         extension_bag_session_set_blocked(true);
         QOL_LOG_WARN(QolDomain::kExtensionBag, "slot data blocked reason=version "
                      "stored=%u expected=%u", stored_version, kEbSectionVersion);
@@ -144,9 +153,13 @@ QolResult eb_sd_load(void* /*user*/, const QolSlotDataContext* ctx, uint32_t pre
     std::string payload;
     if (size > 0) payload.assign(reinterpret_cast<const char*>(bytes),
                                  static_cast<std::size_t>(size));
-    if (legacy_v4) {
+    if (legacy_v5) {
         QOL_LOG_INFO(QolDomain::kExtensionBag,
-                     "slot data migrate section_version=%u->%u default_bag_count=5",
+                     "slot data migrate section_version=%u->%u stored_bag_count=legacy bagCount",
+                     stored_version, kEbSectionVersion);
+    } else if (legacy_v4) {
+        QOL_LOG_INFO(QolDomain::kExtensionBag,
+                     "slot data migrate section_version=%u->%u stored_bag_count=5",
                      stored_version, kEbSectionVersion);
     }
     // 非法 pending 仅隔离该事务；状态 JSON 解析失败则阻断会话。
@@ -207,6 +220,11 @@ QolResult eb_sd_load(void* /*user*/, const QolSlotDataContext* ctx, uint32_t pre
                      ctx->session.slot);
         return qol::contracts::error(kQolErrInternal, "state parse failed", 18);
     }
+    if (!virtual_bag::set_bag_count(state,
+            qol::features::extension_bag::extension_bag_configured_bag_count())) {
+        extension_bag_session_set_blocked(true);
+        return qol::contracts::error(kQolErrInvalidArgument, "configured bag count invalid", 29);
+    }
     eb_reset_loaded_revision_state_locked();
     extension_bag_session_set_blocked(false);
     QOL_LOG_INFO(QolDomain::kExtensionBag, "slot data load slot=%d parsed=1 epoch=%llu",
@@ -224,7 +242,7 @@ QolResult eb_sd_capture(void* /*user*/, const QolSlotDataContext* ctx, uint8_t* 
     ::qol::extension_bag::ReentryLock lock;
     if (!virtual_bag_module_save_validate_locked())
         return qol::contracts::error(kQolErrBlocked, "capacity validation rejected", 24);
-    const std::string json = virtual_bag::state_json(*extension_bag_state());
+    const std::string json = virtual_bag::state_json(*extension_bag_state(), false, true);
     if (json.size() > capacity)
         return qol::contracts::error(kQolErrInvalidArgument, "capture too large", 16);
     std::memcpy(out_buffer, json.data(), json.size());

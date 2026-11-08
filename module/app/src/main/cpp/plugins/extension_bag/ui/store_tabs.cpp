@@ -47,8 +47,7 @@ namespace {
 uint64_t store_tab_item_proc(void*, uint64_t, void*, void*);
 int store_tab_index(void* ctrl) {
     const int active = virtual_bag::active_extension_bags();
-    const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
-                            ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
+    const int visible = virtual_bag::rendered_extension_bag_tabs(active);
     for (int index = 0; index < visible; ++index) {
         if (qol::extension_bag::ui_state().store.tab_buttons[index] == ctrl) return index;
     }
@@ -59,9 +58,8 @@ void store_refresh_tab_bag_items_locked() {
     for (int index = 0; index < virtual_bag::kMaxExtensionBags; ++index) {
         const uint8_t type = ::qol::extension_bag::access::bag().types[index];
         void*& item = qol::extension_bag::ui_state().store.tab_bag_items[index];
-        const int visible = virtual_bag::active_extension_bags() < virtual_bag::kMaxRenderedExtensionBagTabs
-                                ? virtual_bag::active_extension_bags()
-                                : virtual_bag::kMaxRenderedExtensionBagTabs;
+        const int visible = virtual_bag::rendered_extension_bag_tabs(
+            virtual_bag::active_extension_bags());
         if (type == 0 || index >= visible) {
             if (item != nullptr) {
                 if (defer_item_free_locked(item)) item = nullptr;
@@ -91,8 +89,7 @@ void store_refresh_tab_bag_items_locked() {
 }
 bool store_all_tab_buttons_installed_locked() {
     const int active = virtual_bag::active_extension_bags();
-    const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
-                            ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
+    const int visible = virtual_bag::rendered_extension_bag_tabs(active);
     for (int index = 0; index < visible; ++index) {
         if (qol::extension_bag::ui_state().store.tab_buttons[static_cast<size_t>(index)] == nullptr) return false;
     }
@@ -170,8 +167,10 @@ QolResult store_tab_anchor_layout(void* parent, qol::contracts::UiRect* out_rect
     int64_t bag0_abs_x = 0, bag0_abs_y = 0, mount_abs_x = 0, mount_abs_y = 0;
     extension_bag_control_abs_pos(bag0, &bag0_abs_x, &bag0_abs_y);
     extension_bag_control_abs_pos(parent, &mount_abs_x, &mount_abs_y);
-    *out_rect = {bag0_abs_x + 68 - mount_abs_x,
-        bag0_abs_y + 2 - mount_abs_y + ctx->index * 70, 57, 57};
+    *out_rect = {bag0_abs_x + 68 - mount_abs_x +
+                     virtual_bag::rendered_tab_column(ctx->index) * 68,
+        bag0_abs_y + 2 - mount_abs_y + virtual_bag::rendered_tab_row(ctx->index) * 70,
+        57, 57};
     return qol::contracts::ok();
 }
 
@@ -218,8 +217,7 @@ bool store_refresh_tab_anchors_locked(const qol::contracts::QolUiComponents* com
     if (components == nullptr || components->anchored_control_ensure == nullptr) return false;
     bool all = true;
     const int active = virtual_bag::active_extension_bags();
-    const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
-                            ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
+    const int visible = virtual_bag::rendered_extension_bag_tabs(active);
     for (int index = 0; index < visible; ++index) {
         auto& ctx = g_store_tab_anchor_ctx[static_cast<size_t>(index)];
         ctx.index = index;
@@ -250,11 +248,10 @@ void store_install_tab_buttons_locked() {
     // 每帧完整 ensure 的成本主要在控件遍历/校验；root、子控件数和扩展袋数
     // 未变时每 10 帧做一次存活校验即可，其余帧只保留绘制路径。
     const int active = virtual_bag::active_extension_bags();
-    const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
-                            ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
+    const int visible = virtual_bag::rendered_extension_bag_tabs(active);
     static qol::features::extension_bag::TabEnsureGate s_gate;
     if (qol::features::extension_bag::tab_ensure_can_skip(
-            s_gate, bag_container, bag_child_count, static_cast<uint64_t>(active),
+            s_gate, bag_container, bag_child_count, static_cast<uint64_t>(visible),
             qol::extension_bag::ui_state().store.tab_buttons.data(), visible)) {
         return;
     }
@@ -297,8 +294,7 @@ void store_draw_tab_buttons_locked() {
     // 每帧 ensure：游戏切页/关闭面板会销毁页签子树，锚定层负责证明并重建。
     store_install_tab_buttons_locked();
     const int active = virtual_bag::active_extension_bags();
-    const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
-                            ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
+    const int visible = virtual_bag::rendered_extension_bag_tabs(active);
     for (int index = visible - 1; index >= 0; --index) {
         void* button = qol::extension_bag::ui_state().store.tab_buttons[index];
         if (button == nullptr) continue;

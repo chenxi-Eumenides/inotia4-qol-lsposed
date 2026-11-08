@@ -137,7 +137,7 @@ draw hook → 读快照 + mode
 | 需求 | 改动点 |
 |---|---|
 | 新增 C18 版本 | 跑变体表生成器，确认 capabilities=8 |
-| 调整扩展袋数量 | 设置项 `bagCount`（1..8），无需改代码 |
+| 调整扩展袋数量 | 设置页 choice `extension_bag.bagCount`（5..20，默认关闭）；插件 config 键 `bagCount`（0..128）为运行时权威值，无需改代码 |
 | 新增袋类型/容量 | 改 ITEMSTATICBASE.json，重跑 `build_bag_catalog.py` |
 | 新增移动方向 | 新增 usecase + transaction 方向实现，复用 coordinator |
 

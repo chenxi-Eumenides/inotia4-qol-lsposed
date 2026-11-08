@@ -93,6 +93,7 @@ struct State {
     std::array<uint8_t, kMaxExtensionBags> capacities{}; // 派生容量 = derive_capacity(types[i])，禁止直写
     std::array<std::array<Item, kSlotCount>, kMaxExtensionBags> items{};
     int bag_count = 5;
+    int stored_bag_count = 5;
     Mode mode = Mode::kOriginal;
     int original_selected = 0;
     int selected = -1;

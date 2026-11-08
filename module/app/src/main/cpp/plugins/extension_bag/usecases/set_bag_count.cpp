@@ -6,33 +6,14 @@
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/runtime/object_state_port.h"
+#include "plugins/extension_bag/runtime/ownership_port.h"
+#include "plugins/extension_bag/runtime/logging.h"
+#include "plugins/extension_bag/core/projection.h"
+#include "plugins/extension_bag/core/ui_state.h"
 
-#include <algorithm>
-#include <iterator>
 #include <mutex>
-#include <thread>
 
 namespace qol::features::extension_bag::usecases {
-namespace {
-
-bool module_bag_index_has_runtime_data_locked(int bag) {
-    if (virtual_bag::bag_has_data(runtime_state().objects.bag, bag)) return true;
-    for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-        const auto object = module_object_slot_port(bag, slot);
-        if (object.item != nullptr || object.handle != 0) {
-            return true;
-        }
-        const ModuleUseState& use = object.use;
-        if (use.active || use.consumed || use.pending_release || use.item != nullptr ||
-            use.generation != 0 || use.owner != std::thread::id{}) {
-            return true;
-        }
-    }
-    return false;
-}
-
-}  // namespace
-
 SetBagCountResult usecase_set_bag_count(int count) {
     if (count < 1 || count > virtual_bag::kMaxExtensionBags) {
         return {false, Error::kInvalidBagCount, 0};
@@ -48,22 +29,26 @@ SetBagCountResult usecase_set_bag_count(int count) {
         return {false, Error::kDragActive, 0};
     }
     const int old_count = state.bag_count;
+    if (count == old_count) return {true, Error::kNone, count};
+    auto& objects = qol::extension_bag::ui_state().objects;
+    if (count < old_count && objects.module_view_installed && objects.module_view_index >= count)
+        restore_module_view_locked();
     if (count < old_count) {
+        bool cleanup_complete = true;
         for (int bag = count; bag < old_count; ++bag) {
-            if (module_bag_index_has_runtime_data_locked(bag)) return {false, Error::kBagNotEmpty, 0};
-        }
-    } else if (count > old_count) {
-        for (int bag = old_count; bag < count; ++bag) {
-            if (module_bag_index_has_runtime_data_locked(bag)) {
-                return {false, Error::kInactiveBagHasRuntimeData, 0};
+            for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+                if (!free_module_object_locked(bag, slot)) cleanup_complete = false;
             }
+        }
+        if (!cleanup_complete) {
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "bag count apply deferred reason=runtime cleanup failed old=%d requested=%d",
+                         old_count, count);
+            return {false, Error::kBagCountChangeRejected, 0};
         }
     }
     if (!virtual_bag::set_bag_count(&state, count)) {
         return {false, Error::kBagCountChangeRejected, 0};
-    }
-    for (int bag = std::min(old_count, count); bag < std::max(old_count, count); ++bag) {
-        clear_module_object_bag_state(bag);
     }
     extension_bag_mark_dirty_locked();
     if (!persist_state_locked()) return {false, Error::kPersistFailed, 0};

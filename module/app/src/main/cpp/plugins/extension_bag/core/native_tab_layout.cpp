@@ -3,6 +3,7 @@
 
 #include "plugins/extension_bag/core/geometry.h"
 #include "plugins/extension_bag/core/equip_tab_layout.h"
+#include "plugins/extension_bag/model/bag_catalog.h"
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/runtime/session.h"
 #include "plugins/extension_bag/runtime/state.h"
@@ -26,6 +27,7 @@ struct C18GeometryPlanCache {
     bool valid = false;
     void* root = nullptr;
     uint64_t generation = 0;
+    int rendered_tabs = 0;
     size_t child_count = 0;
     int64_t parent_x = 0;
     int64_t parent_y = 0;
@@ -41,6 +43,8 @@ struct C18AppliedReflow {
     bool active = false;
     void* root = nullptr;
     uint64_t generation = 0;
+    int rendered_tabs = 0;
+    int columns = 0;
     int64_t delta = 0;
     std::array<uint8_t, qol::extension_bag::kMaxEquipBagChildren> changed{};
     std::array<qol::contracts::UiRect, qol::extension_bag::kMaxEquipBagChildren> original_rects{};
@@ -48,11 +52,12 @@ struct C18AppliedReflow {
 C18AppliedReflow g_c18_applied_reflow{};
 
 bool same_c18_geometry(const C18GeometryPlanCache& cache, void* root, uint64_t generation,
-                       size_t count, int64_t parent_x, int64_t parent_y,
+                       size_t count, int rendered_tabs, int64_t parent_x, int64_t parent_y,
                        int64_t screen_width, int64_t screen_height,
                        const std::array<qol::extension_bag::NativeTabBounds,
                                         qol::extension_bag::kMaxEquipBagChildren>& children) {
     if (!cache.valid || cache.root != root || cache.generation != generation ||
+        cache.rendered_tabs != rendered_tabs ||
         cache.child_count != count || cache.parent_x != parent_x || cache.parent_y != parent_y ||
         cache.screen_width != screen_width || cache.screen_height != screen_height) return false;
     for (size_t i = 0; i < count; ++i) {
@@ -196,15 +201,17 @@ QolResult resolve_c18_layout(void* parent,
     }
     const int64_t screen_width = 960 + static_cast<int64_t>(inset_width) * 2;
     const int64_t screen_height = 640 + static_cast<int64_t>(inset_height) * 2;
+    const int rendered_tabs = virtual_bag::rendered_extension_bag_tabs(
+        virtual_bag::active_extension_bags());
     const uint64_t generation = qol::extension_bag::ui_state().ui.inventory_generation;
     if (same_c18_geometry(g_c18_geometry_plan_cache, parent, generation,
-            static_cast<size_t>(child_count), *out_parent_x, *out_parent_y,
+            static_cast<size_t>(child_count), rendered_tabs, *out_parent_x, *out_parent_y,
             screen_width, screen_height, *out_children)) {
         *out_plan = g_c18_geometry_plan_cache.plan;
     } else {
         if (!qol::extension_bag::c18_extension_tab_layout(*out_children,
                 static_cast<size_t>(child_count), *out_parent_x, *out_parent_y,
-                screen_width, screen_height, out_plan)) {
+                screen_width, screen_height, rendered_tabs, out_plan)) {
             g_c18_geometry_plan_cache.valid = false;
             return c18_layout_not_ready(parent, "native layout ambiguous or out of bounds", 18,
                                         inset_width, inset_height, screen_width, screen_height);
@@ -212,6 +219,7 @@ QolResult resolve_c18_layout(void* parent,
         g_c18_geometry_plan_cache.valid = true;
         g_c18_geometry_plan_cache.root = parent;
         g_c18_geometry_plan_cache.generation = generation;
+        g_c18_geometry_plan_cache.rendered_tabs = rendered_tabs;
         g_c18_geometry_plan_cache.child_count = static_cast<size_t>(child_count);
         g_c18_geometry_plan_cache.parent_x = *out_parent_x;
         g_c18_geometry_plan_cache.parent_y = *out_parent_y;
@@ -231,6 +239,73 @@ bool c18_shifted_local_x(int64_t original_x, int64_t delta, int64_t* out_x) {
     return true;
 }
 
+bool restore_c18_applied_reflow(void* parent, uint64_t generation) {
+    if (!g_c18_applied_reflow.active) return true;
+    int child_count = 0;
+    if (!extension_bag_ui_child_count(parent, &child_count)) {
+        VIRTBAG_LOG("C18 native reflow restore deferred root=%p generation=%llu reason=child_count",
+                    parent, static_cast<unsigned long long>(generation));
+        return false;
+    }
+    std::array<int32_t, qol::extension_bag::kMaxEquipBagChildren> restored{};
+    size_t restored_count = 0;
+    for (size_t i = 0; i < g_c18_applied_reflow.changed.size(); ++i) {
+        if (g_c18_applied_reflow.changed[i] == 0) continue;
+        if (i >= static_cast<size_t>(child_count)) {
+            VIRTBAG_LOG("C18 native reflow restore deferred root=%p generation=%llu child=%zu reason=missing",
+                        parent, static_cast<unsigned long long>(generation), i);
+            return false;
+        }
+        void* control = extension_bag_ui_child_at(parent, static_cast<int>(i));
+        qol::contracts::UiRect current{};
+        const auto& original = g_c18_applied_reflow.original_rects[i];
+        int64_t shifted_x = 0;
+        if (control == nullptr || extension_bag_ui_parent(control) != parent ||
+            extension_bag_ui_user_type(control) != 2 ||
+            !extension_bag_ui_rect(control, &current) ||
+            !c18_shifted_local_x(original.x, g_c18_applied_reflow.delta, &shifted_x) ||
+            current.y != original.y || current.w != original.w || current.h != original.h ||
+            (current.x != shifted_x && current.x != original.x)) {
+            for (size_t n = restored_count; n > 0; --n) {
+                const size_t index = static_cast<size_t>(restored[n - 1]);
+                void* rollback = extension_bag_ui_child_at(parent, static_cast<int>(index));
+                const auto& saved = g_c18_applied_reflow.original_rects[index];
+                int64_t rollback_x = 0;
+                if (rollback != nullptr && extension_bag_ui_parent(rollback) == parent &&
+                    c18_shifted_local_x(saved.x, g_c18_applied_reflow.delta, &rollback_x)) {
+                    (void)extension_bag_ui_set_rect(rollback,
+                        {rollback_x, saved.y, saved.w, saved.h});
+                }
+            }
+            VIRTBAG_LOG("C18 native reflow restore deferred root=%p generation=%llu child=%zu",
+                        parent, static_cast<unsigned long long>(generation), i);
+            return false;
+        }
+        if (current.x == shifted_x && !extension_bag_ui_set_rect(control, original)) {
+            for (size_t n = restored_count; n > 0; --n) {
+                const size_t index = static_cast<size_t>(restored[n - 1]);
+                void* rollback = extension_bag_ui_child_at(parent, static_cast<int>(index));
+                const auto& saved = g_c18_applied_reflow.original_rects[index];
+                int64_t rollback_x = 0;
+                if (rollback != nullptr && extension_bag_ui_parent(rollback) == parent &&
+                    c18_shifted_local_x(saved.x, g_c18_applied_reflow.delta, &rollback_x)) {
+                    (void)extension_bag_ui_set_rect(rollback,
+                        {rollback_x, saved.y, saved.w, saved.h});
+                }
+            }
+            VIRTBAG_LOG("C18 native reflow restore deferred root=%p generation=%llu child=%zu",
+                        parent, static_cast<unsigned long long>(generation), i);
+            return false;
+        }
+        if (current.x == shifted_x) {
+            restored[restored_count++] = static_cast<int32_t>(i);
+        }
+    }
+    VIRTBAG_LOG("C18 native reflow restored root=%p generation=%llu", parent,
+                static_cast<unsigned long long>(generation));
+    g_c18_applied_reflow = {};
+    return true;
+}
 
 }  // namespace
 
@@ -247,49 +322,24 @@ void prepare_c18_native_bag_layout_locked_impl() {
         // Root/generation changes invalidate geometry; never reuse old handles.
         g_c18_applied_reflow = {};
     }
+    const int rendered_tabs = virtual_bag::rendered_extension_bag_tabs(
+        virtual_bag::active_extension_bags());
+    if (g_c18_applied_reflow.active &&
+        g_c18_applied_reflow.rendered_tabs != rendered_tabs) {
+        VIRTBAG_LOG("C18 native reflow resize root=%p generation=%llu tabs=%d->%d",
+                    parent, static_cast<unsigned long long>(generation),
+                    g_c18_applied_reflow.rendered_tabs, rendered_tabs);
+        if (!restore_c18_applied_reflow(parent, generation)) {
+            VIRTBAG_LOG("C18 native reflow resize restore failed root=%p generation=%llu",
+                        parent, static_cast<unsigned long long>(generation));
+            return;
+        }
+    }
     const bool should_reflow = runtime_state().enabled.load() &&
         extension_bag_session_admitted_locked() && !qol::extension_bag::ui_state().store.view_installed;
     if (!should_reflow) {
         if (!g_c18_applied_reflow.active) return;
-        int child_count = 0;
-        if (!extension_bag_ui_child_count(parent, &child_count)) return;
-        std::array<int32_t, qol::extension_bag::kMaxEquipBagChildren> restored{};
-        size_t restored_count = 0;
-        for (size_t i = 0; i < g_c18_applied_reflow.changed.size(); ++i) {
-            if (g_c18_applied_reflow.changed[i] == 0) continue;
-            if (i >= static_cast<size_t>(child_count)) return;
-            void* control = extension_bag_ui_child_at(parent, static_cast<int>(i));
-            qol::contracts::UiRect current{};
-            const auto& original = g_c18_applied_reflow.original_rects[i];
-            int64_t shifted_x = 0;
-            if (control == nullptr || extension_bag_ui_parent(control) != parent ||
-                extension_bag_ui_user_type(control) != 2 ||
-                !extension_bag_ui_rect(control, &current) ||
-                !c18_shifted_local_x(original.x, g_c18_applied_reflow.delta, &shifted_x) ||
-                current.x != shifted_x ||
-                current.y != original.y || current.w != original.w || current.h != original.h ||
-                !extension_bag_ui_set_rect(control, original)) {
-                for (size_t n = restored_count; n > 0; --n) {
-                    const int index = restored[n - 1];
-                    void* rollback = extension_bag_ui_child_at(parent, index);
-                    const auto& saved = g_c18_applied_reflow.original_rects[static_cast<size_t>(index)];
-                    int64_t shifted_x = 0;
-                    if (rollback != nullptr && extension_bag_ui_parent(rollback) == parent) {
-                        if (c18_shifted_local_x(saved.x, g_c18_applied_reflow.delta, &shifted_x)) {
-                            (void)extension_bag_ui_set_rect(rollback,
-                                {shifted_x, saved.y, saved.w, saved.h});
-                        }
-                    }
-                }
-                VIRTBAG_LOG("C18 native reflow restore deferred root=%p generation=%llu child=%zu",
-                            parent, static_cast<unsigned long long>(generation), i);
-                return;
-            }
-            restored[restored_count++] = static_cast<int32_t>(i);
-        }
-        VIRTBAG_LOG("C18 native reflow restored root=%p generation=%llu",
-                    parent, static_cast<unsigned long long>(generation));
-        g_c18_applied_reflow = {};
+        (void)restore_c18_applied_reflow(parent, generation);
         return;
     }
     std::array<qol::extension_bag::NativeTabBounds,
@@ -298,20 +348,35 @@ void prepare_c18_native_bag_layout_locked_impl() {
     int64_t parent_x = 0, parent_y = 0;
     qol::extension_bag::C18ReflowPlan plan{};
     if (!qol::contracts::succeeded(resolve_c18_layout(parent, &children, &child_count,
-            &parent_x, &parent_y, &plan)) || plan.vertical_delta == 0) return;
+            &parent_x, &parent_y, &plan))) return;
+    if (plan.vertical_delta == 0) return;
     if (g_c18_applied_reflow.active) {
-        VIRTBAG_LOG("C18 native reflow unexpected renewed collision root=%p generation=%llu",
+        if (g_c18_applied_reflow.rendered_tabs == rendered_tabs) {
+            VIRTBAG_LOG("C18 native reflow unexpected renewed collision root=%p generation=%llu",
                     parent, static_cast<unsigned long long>(generation));
+            return;
+        }
         return;
     }
-    std::array<int32_t, qol::extension_bag::kMaxEquipBagChildren> changed{};
     size_t changed_count = 0;
+    g_c18_applied_reflow = {};
+    g_c18_applied_reflow.root = parent;
+    g_c18_applied_reflow.generation = generation;
+    g_c18_applied_reflow.rendered_tabs = rendered_tabs;
+    g_c18_applied_reflow.columns = plan.columns;
+    g_c18_applied_reflow.delta = plan.vertical_delta;
     for (int i = 0; i < child_count; ++i) {
         if (plan.move_vertical[static_cast<size_t>(i)] == 0) continue;
         void* control = extension_bag_ui_child_at(parent, i);
         const auto& candidate = children[static_cast<size_t>(i)];
         qol::contracts::UiRect current_rect{};
         int64_t shifted_x = 0;
+        if (plan.move_vertical[static_cast<size_t>(i)] != 0) {
+            g_c18_applied_reflow.changed[static_cast<size_t>(i)] = 1;
+            g_c18_applied_reflow.original_rects[static_cast<size_t>(i)] = {
+                candidate.local_x, candidate.local_y, candidate.width, candidate.height};
+            g_c18_applied_reflow.active = true;
+        }
         if (control == nullptr || extension_bag_ui_parent(control) != parent ||
             extension_bag_ui_user_type(control) != 2 ||
             !extension_bag_ui_rect(control, &current_rect) ||
@@ -321,39 +386,27 @@ void prepare_c18_native_bag_layout_locked_impl() {
             !extension_bag_ui_set_rect(control,
                 {shifted_x, candidate.local_y,
                  candidate.width, candidate.height})) {
-            for (size_t n = changed_count; n > 0; --n) {
-                const int index = changed[n - 1];
-                void* rollback = extension_bag_ui_child_at(parent, index);
-                const auto& original = children[static_cast<size_t>(index)];
-                if (rollback != nullptr && extension_bag_ui_parent(rollback) == parent) {
-                    (void)extension_bag_ui_set_rect(rollback,
-                        {original.local_x, original.local_y, original.width, original.height});
-                }
-            }
             VIRTBAG_LOG("C18 native reflow aborted root=%p generation=%llu failed_child=%d",
                         parent, static_cast<unsigned long long>(qol::extension_bag::ui_state().ui.inventory_generation), i);
+            (void)restore_c18_applied_reflow(parent, generation);
             return;
         }
-        changed[changed_count++] = i;
+        ++changed_count;
     }
-    VIRTBAG_LOG("C18 native reflow applied root=%p generation=%llu moved=%zu delta=%lld",
+    VIRTBAG_LOG("C18 native reflow applied root=%p generation=%llu moved=%zu tabs=%d columns=%d delta=%lld",
                 parent, static_cast<unsigned long long>(qol::extension_bag::ui_state().ui.inventory_generation),
-                changed_count, static_cast<long long>(plan.vertical_delta));
-    g_c18_applied_reflow.active = changed_count != 0;
-    g_c18_applied_reflow.root = parent;
-    g_c18_applied_reflow.generation = generation;
-    g_c18_applied_reflow.delta = plan.vertical_delta;
-    for (size_t n = 0; n < changed_count; ++n) {
-        const size_t index = static_cast<size_t>(changed[n]);
-        g_c18_applied_reflow.changed[index] = 1;
-        const auto& candidate = children[index];
-        g_c18_applied_reflow.original_rects[index] = {
-            candidate.local_x, candidate.local_y, candidate.width, candidate.height};
-    }
+                changed_count, rendered_tabs, plan.columns,
+                static_cast<long long>(plan.vertical_delta));
+    if (changed_count == 0) g_c18_applied_reflow = {};
 }
 
 QolResult c18_native_tab_anchor_layout_locked(void* parent, int index,
                                                qol::contracts::UiRect* out_rect) {
+    const int rendered_tabs = virtual_bag::rendered_extension_bag_tabs(
+        virtual_bag::active_extension_bags());
+    if (out_rect == nullptr || index < 0 || index >= rendered_tabs) {
+        return qol::contracts::error(kQolErrInvalidArgument, "C18 tab index", 1);
+    }
     std::array<qol::extension_bag::NativeTabBounds,
                qol::extension_bag::kMaxEquipBagChildren> native_candidates{};
     int child_count = 0;
@@ -362,7 +415,13 @@ QolResult c18_native_tab_anchor_layout_locked(void* parent, int index,
     const QolResult resolved = resolve_c18_layout(parent, &native_candidates, &child_count,
                                                    &parent_x, &parent_y, &plan);
     if (!qol::contracts::succeeded(resolved)) return resolved;
-    *out_rect = {plan.module_x, plan.module_y[static_cast<size_t>(index)], 57, 57};
+    const int column = virtual_bag::rendered_tab_column(index);
+    const int row = virtual_bag::rendered_tab_row(index);
+    if (column >= plan.columns || row < 0 || row >= static_cast<int>(plan.module_y.size())) {
+        return qol::contracts::error(kQolErrInvalidArgument, "C18 tab index", 1);
+    }
+    *out_rect = {plan.module_x + static_cast<int64_t>(column) * 68,
+                 plan.module_y[static_cast<size_t>(row)], 57, 57};
     return qol::contracts::ok();
 }
 

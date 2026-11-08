@@ -6,7 +6,9 @@
 #include "plugins/extension_bag/runtime/logging.h"
 
 int extension_tab_index(void* ctrl) {
-    for (int index = 0; index < virtual_bag::active_extension_bags(); ++index) {
+    const int visible = virtual_bag::rendered_extension_bag_tabs(
+        virtual_bag::active_extension_bags());
+    for (int index = 0; index < visible; ++index) {
         if (qol::extension_bag::ui_state().ui.extension_tab_buttons[index] == ctrl) return index;
     }
     return -1;
@@ -16,10 +18,12 @@ int extension_tab_index(void* ctrl) {
 bool defer_item_free_locked(void* item);
 
 void refresh_tab_bag_items_locked() {
+    const int visible = virtual_bag::rendered_extension_bag_tabs(
+        virtual_bag::active_extension_bags());
     for (int i = 0; i < virtual_bag::kMaxExtensionBags; ++i) {
         const uint8_t type = runtime_state().objects.bag.types[i];
         void*& slot = qol::extension_bag::ui_state().ui.tab_bag_items[i];
-        if (type == 0) {
+        if (type == 0 || i >= visible) {
             if (slot != nullptr) {
                 if (defer_item_free_locked(slot)) {
                     slot = nullptr;

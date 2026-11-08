@@ -15,6 +15,21 @@ int main() {
 
     check(virtual_bag::kMaxExtensionBags == 128, "maximum bag count");
     check(virtual_bag::kSlotCount == 16, "slot count");
+    check(virtual_bag::kRenderedExtensionBagTabsPerColumn == 5, "tabs per column");
+    check(virtual_bag::kMaxRenderedExtensionBagTabs == 20, "maximum rendered tabs");
+    for (const int active : {1, 5, 6, 20, 21, 128}) {
+        const int expected_tabs = active > 20 ? 20 : active;
+        const int expected_columns = (expected_tabs + 4) / 5;
+        check(virtual_bag::rendered_extension_bag_tabs(active) == expected_tabs,
+              "rendered tab count boundary");
+        check(virtual_bag::rendered_extension_bag_columns(active) == expected_columns,
+              "rendered column count boundary");
+    }
+    check(virtual_bag::rendered_extension_bag_tabs(0) == 1, "rendered tabs minimum");
+    check(virtual_bag::rendered_tab_column(5) == 1 && virtual_bag::rendered_tab_row(5) == 0,
+          "second column starts at index five");
+    check(virtual_bag::rendered_tab_column(19) == 3 && virtual_bag::rendered_tab_row(19) == 4,
+          "fourth column ends at index nineteen");
     check(virtual_bag::capacity_for_bag_type(0) == 0, "type 0 capacity");
     check(virtual_bag::capacity_for_bag_type(1) == 4, "type 1 capacity");
     check(virtual_bag::capacity_for_bag_type(2) == 8, "type 2 capacity");

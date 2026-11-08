@@ -254,8 +254,10 @@ QolResult equip_tab_anchor_layout(void* parent, qol::contracts::UiRect* out_rect
     int64_t bag0_abs_x = 0, bag0_abs_y = 0, mount_abs_x = 0, mount_abs_y = 0;
     extension_bag_control_abs_pos(bag0, &bag0_abs_x, &bag0_abs_y);
     extension_bag_control_abs_pos(parent, &mount_abs_x, &mount_abs_y);
-    *out_rect = {bag0_abs_x + 68 - mount_abs_x,
-        bag0_abs_y + 2 - mount_abs_y + ctx->index * 70, 57, 57};
+    *out_rect = {bag0_abs_x + 68 - mount_abs_x +
+                     virtual_bag::rendered_tab_column(ctx->index) * 68,
+        bag0_abs_y + 2 - mount_abs_y + virtual_bag::rendered_tab_row(ctx->index) * 70,
+        57, 57};
     return qol::contracts::ok();
 }
 
@@ -300,17 +302,16 @@ QolResult equip_tab_anchor_create(void* parent, qol::contracts::UiRect rect, voi
     return qol::contracts::ok();
 }
 
-// 每帧刷新：解析活袋容器、证明/重建 5 个页签，并把句柄同步到运行视图数组。
+// 每帧刷新：解析活袋容器、证明/重建可见页签，并把句柄同步到运行视图数组。
 bool refresh_extension_tab_anchors_locked(const qol::contracts::QolUiComponents* components,
                                           void* parent, bool* out_created_any) {
     if (out_created_any != nullptr) *out_created_any = false;
     if (components == nullptr || components->anchored_control_ensure == nullptr) return false;
     bool all = true;
     const int active = virtual_bag::active_extension_bags();
-    const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
-                            ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
+    const int visible = virtual_bag::rendered_extension_bag_tabs(active);
     if (active > virtual_bag::kMaxRenderedExtensionBagTabs) {
-        VIRTBAG_LOG("tab layout pending multi-column count=%d", active);
+        VIRTBAG_LOG("tab layout rendered cap reached count=%d", active);
     }
     for (int index = 0; index < visible; ++index) {
         auto& ctx = g_equip_tab_anchor_ctx[static_cast<size_t>(index)];
@@ -355,11 +356,11 @@ void install_extension_tab_buttons_locked() {
     // generation 未变时每 10 帧做一次存活校验即可，其余帧只保留绘制路径。
     const uint64_t generation = qol::extension_bag::ui_state().ui.inventory_generation;
     const int active = virtual_bag::active_extension_bags();
-    const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
-                            ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
+    const int visible = virtual_bag::rendered_extension_bag_tabs(active);
     static qol::features::extension_bag::TabEnsureGate s_gate;
     if (qol::features::extension_bag::tab_ensure_can_skip(
-            s_gate, bag_container, bag_child_count, generation,
+            s_gate, bag_container, bag_child_count,
+            (generation << 8) ^ static_cast<uint64_t>(visible),
             qol::extension_bag::ui_state().ui.extension_tab_buttons.data(), visible)) {
         return;
     }
@@ -400,8 +401,7 @@ void handle_extension_tab_click_impl_locked(int extension_bag,
 
 bool extension_tab_buttons_complete_locked() {
     const int active = virtual_bag::active_extension_bags();
-    const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
-                            ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
+    const int visible = virtual_bag::rendered_extension_bag_tabs(active);
     for (int index = 0; index < visible; ++index) {
         if (qol::extension_bag::ui_state().ui.extension_tab_buttons[static_cast<size_t>(index)] == nullptr) return false;
     }
@@ -452,6 +452,8 @@ void handle_pending_extension_tab_click_locked(::qol::extension_bag::ReentryLock
 void handle_extension_tab_click_impl_locked(int extension_bag,
                                             ::qol::extension_bag::ReentryLock* unlockable_lock) {
     if (!virtual_bag::valid_index(extension_bag) ||
+        extension_bag >= virtual_bag::rendered_extension_bag_tabs(
+            virtual_bag::active_extension_bags()) ||
         !extension_bag_session_admitted_locked()) return;
     if (runtime_state().objects.bag.mode == virtual_bag::Mode::kOriginal) {
         const int original_bag = original_bag_locked();
@@ -700,7 +702,9 @@ void extension_tab_button_clicked(void* ctrl) {
 
 bool extension_tab_control_is_current_locked(int index, void* control) {
     if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked() ||
-        !virtual_bag::valid_index(index) || control == nullptr ||
+        !virtual_bag::valid_index(index) ||
+        index >= virtual_bag::rendered_extension_bag_tabs(
+            virtual_bag::active_extension_bags()) || control == nullptr ||
         qol::extension_bag::ui_state().ui.extension_tab_root == nullptr ||
         qol::extension_bag::ui_state().ui.extension_tab_anchors[index].mounted == 0 ||
         qol::extension_bag::ui_state().ui.extension_tab_anchors[index].handle != control ||
@@ -740,7 +744,9 @@ void commit_pending_extension_tab_locked(::qol::extension_bag::ReentryLock& lock
 }
 
 bool extension_tab_hit(int index, int64_t x, int64_t y) {
-    if (!virtual_bag::valid_index(index)) return false;
+    if (!virtual_bag::valid_index(index) ||
+        index >= virtual_bag::rendered_extension_bag_tabs(
+            virtual_bag::active_extension_bags())) return false;
     if (runtime_state().objects.bag.capacities[index] == 0) {
         // 未装备袋只有在当前拖动物品满足装备规则时可命中；否则仍保持
         // G-12 的不可命中门禁，避免普通物品误落到未装备标签。

@@ -1,9 +1,12 @@
-inline std::string state_json(const State& state, bool include_isolations = false) {
-    const int bag_count = clamp_active_extension_bags(state.bag_count);
+inline std::string state_json(const State& state, bool include_isolations = false,
+                              bool persistence = false) {
+    const int bag_count = persistence ? stored_bag_count(state) :
+        clamp_active_extension_bags(state.bag_count);
     std::string json = "{\"mode\":\"";
     json += state.mode == Mode::kModule ? "module" : "original";
     json += "\",\"originalSelected\":" + std::to_string(state.original_selected);
-    json += ",\"bagCount\":" + std::to_string(bag_count);
+    if (persistence) json += ",\"storedBagCount\":" + std::to_string(bag_count);
+    else json += ",\"bagCount\":" + std::to_string(bag_count);
     json += ",\"types\":[";
     for (int index = 0; index < bag_count; ++index) {
         if (index > 0) json += ',';
@@ -221,13 +224,21 @@ inline bool parse_state_json(const char* json, State* state,
     // State 随 kMaxExtensionBags 增长，放堆上避免解析调用栈溢出。
     auto parsed_storage = std::make_unique<State>();
     State& parsed = *parsed_storage;
+    const char* stored_count_key = strstr(json, "\"storedBagCount\":");
     const char* bag_count_key = strstr(json, "\"bagCount\":");
-    if (bag_count_key != nullptr) {
-        const char* count_cursor = bag_count_key + strlen("\"bagCount\":");
+    const char* count_key = stored_count_key != nullptr ? stored_count_key : bag_count_key;
+    if (count_key != nullptr) {
+        const char* count_cursor = count_key + (stored_count_key != nullptr
+            ? strlen("\"storedBagCount\":") : strlen("\"bagCount\":"));
         char* count_end = nullptr;
         const long count = strtol(count_cursor, &count_end, 10);
-        if (count_end == count_cursor || count < 1 || count > kMaxExtensionBags) return false;
+        const char* delimiter = count_end;
+        while (*delimiter == ' ' || *delimiter == '\t' || *delimiter == '\n' || *delimiter == '\r')
+            ++delimiter;
+        if (count_end == count_cursor || (*delimiter != ',' && *delimiter != '}') ||
+            count < 1 || count > kMaxExtensionBags) return false;
         parsed.bag_count = static_cast<int>(count);
+        parsed.stored_bag_count = static_cast<int>(count);
     }
     const int bag_count = parsed.bag_count;
     const char* types = strstr(json, "\"types\":[");

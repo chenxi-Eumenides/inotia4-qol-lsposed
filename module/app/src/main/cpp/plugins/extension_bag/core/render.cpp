@@ -155,17 +155,16 @@ void draw_tab_buttons_in_frame_locked() {
         qol::extension_bag::ui_state().ui.extension_tab_generation == qol::extension_bag::ui_state().ui.inventory_generation;
     if (!tabs_are_current || !can_draw_original_button) return;
     const int active = virtual_bag::active_extension_bags();
-    const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
-                            ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
-    static int last_pending_multi_column_count = 0;
+    const int visible = virtual_bag::rendered_extension_bag_tabs(active);
+    static int last_rendered_cap_count = 0;
     if (active > virtual_bag::kMaxRenderedExtensionBagTabs &&
-        last_pending_multi_column_count != active) {
-        VIRTBAG_LOG("tab layout pending multi-column count=%d", active);
-        last_pending_multi_column_count = active;
+        last_rendered_cap_count != active) {
+        VIRTBAG_LOG("tab layout rendered cap reached count=%d", active);
+        last_rendered_cap_count = active;
     } else if (active <= virtual_bag::kMaxRenderedExtensionBagTabs) {
-        last_pending_multi_column_count = 0;
+        last_rendered_cap_count = 0;
     }
-    // 第一遍：底框 loc20，最多绘制已有单列布局可容纳的前五个页签。
+    // 第一遍：底框 loc20，绘制最多 20 个页签。
     for (int index = visible - 1; index >= 0; --index) {
         void* button = qol::extension_bag::ui_state().ui.extension_tab_buttons[index];
         if (button == nullptr) continue;

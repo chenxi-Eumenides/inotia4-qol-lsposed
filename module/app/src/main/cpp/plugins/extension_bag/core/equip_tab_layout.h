@@ -23,6 +23,10 @@ struct NativeTabBounds {
 struct C18ReflowPlan {
     int64_t module_x = 0;
     std::array<int64_t, 5> module_y{};
+    int columns = 1;
+    int rendered_tabs = 5;
+    int64_t frame_right = 0;
+    int64_t native_clearance_x = 0;
     int64_t vertical_delta = 0;
     std::array<uint8_t, kMaxEquipBagChildren> move_vertical{};
 };
@@ -30,7 +34,8 @@ struct C18ReflowPlan {
 inline bool c18_extension_tab_layout(
     const std::array<NativeTabBounds, kMaxEquipBagChildren>& children,
     size_t child_count, int64_t parent_x, int64_t parent_y,
-    int64_t screen_width, int64_t screen_height, C18ReflowPlan* out_plan) {
+    int64_t screen_width, int64_t screen_height, int rendered_tabs,
+    C18ReflowPlan* out_plan) {
     const auto add_fits = [](int64_t left, int64_t right) {
         return right >= 0 ? left <= std::numeric_limits<int64_t>::max() - right
                           : left >= std::numeric_limits<int64_t>::min() - right;
@@ -41,6 +46,7 @@ inline bool c18_extension_tab_layout(
             : (b < std::numeric_limits<int64_t>::min() + 3 || a >= b - 3);
     };
     if (child_count > kMaxEquipBagChildren || out_plan == nullptr ||
+        rendered_tabs < 1 || rendered_tabs > 20 ||
         screen_width <= 0 || screen_height <= 0) return false;
 
     C18ReflowPlan plan{};
@@ -230,20 +236,27 @@ inline bool c18_extension_tab_layout(
     if (original_x > std::numeric_limits<int64_t>::max() - 67) return false;
     const int64_t module_abs_x = original_x + 67; // 5px original-column to frame clearance.
     const int64_t frame_left = module_abs_x - 5;
-    if (!add_fits(frame_left, 72)) return false;
-    const int64_t frame_right = frame_left + 72;
+    const int columns = (rendered_tabs + 4) / 5;
+    const int64_t column_offset = static_cast<int64_t>(columns - 1) * 68;
+    if (!add_fits(module_abs_x, column_offset) ||
+        !add_fits(module_abs_x + column_offset, 67)) return false;
+    const int64_t frame_right = module_abs_x + column_offset + 67;
     if (frame_right > std::numeric_limits<int64_t>::max() - 5) return false;
     const int64_t native_clearance_x = frame_right + 5;
+    plan.frame_right = frame_right;
+    plan.native_clearance_x = native_clearance_x;
     for (int row = 0; row < 5; ++row) {
         const int64_t tab_y = original_rows[static_cast<size_t>(row)];
         if (tab_y < std::numeric_limits<int64_t>::min() + 12) return false;
         const int64_t frame_y = tab_y - 12;
         if (!add_fits(frame_y, 84) || frame_left < 0 || frame_y < 0 ||
-            frame_right > screen_width || frame_y + 84 > screen_height ||
+            frame_y + 84 > screen_height ||
             tab_y < parent_y ||
             (parent_y < 0 && tab_y > std::numeric_limits<int64_t>::max() + parent_y)) return false;
         plan.module_y[static_cast<size_t>(row)] = tab_y - parent_y;
     }
+    plan.columns = columns;
+    plan.rendered_tabs = rendered_tabs;
     if (module_abs_x < parent_x ||
         (parent_x < 0 && module_abs_x > std::numeric_limits<int64_t>::max() + parent_x)) return false;
     plan.module_x = module_abs_x - parent_x;
