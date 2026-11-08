@@ -61,33 +61,36 @@ int main(int argc, char** argv) {
               words[6] == 0xf100021fu && words[15] == 0x71000202u &&
               words[16] == 0xa8c147f0u && words[17] == 0x14000000u,
            "BC thunk instruction words");
-    // 区域级：safe_scale 分解式（高位先除后乘 + 低位先乘后除），重放先行、置标志重放末置。
+    // 区域级：safe_scale 分解式（高位先除后乘 + 低位先乘后除），重放按原序排在分解式之后。
     InsnPatchSpec region_spec{4, 27, 22, 22, 1000, 0x123450, 3,
                          {0x39400000u, 0xf9400042u, 0x1b007ee0u, 0}, 0, 22};
     check(insn_patch_test_generate(&region_spec, words, 40, &count) && count == 27,
           "region thunk generation with replay");
-    check(words[3] == 0x39400000u && words[4] == 0xf9400042u &&
-              words[5] == 0x1b007ee0u && words[6] == 0x93407f70u &&
-              words[8] == 0x9ad10e12u && words[9] == 0x9b118253u &&
+    check(words[3] == 0x93407f70u && words[4] == 0xd2807d11u &&
+              words[5] == 0x9ad10e12u && words[6] == 0x9b118253u &&
+              words[19] == 0x2a1003f6u &&
+              words[20] == 0x39400000u && words[21] == 0xf9400042u &&
+              words[22] == 0x1b007ee0u &&
               words[23] == 0xa94257f4u && words[25] == 0xa8c347f0u,
-          "region replay-first then scale instruction sequence");
-    // ÷100 与 ÷1000 同构分解式（除数参数化）；置标志 replay 位于写回之后、恢复之前。
+          "region decomposition then original-order replay");
+    // ÷100 与 ÷1000 同构分解式（除数参数化）；置标志 replay 位于非标志 replay 之后、恢复之前。
     InsnPatchSpec region_div100{4, 3, 1, 26, 100, 0x123450, 2,
                                 {0x51005842u, 0x7100145fu}, 0, 1};
     check(insn_patch_test_generate(&region_div100, words, 40, &count) && count == 26,
           "div-100 region uses same decomposition");
-    check(words[4] == 0x93407c70u && words[5] == 0xd2800c91u &&
-              words[21] == 0x7100145fu && words[22] == 0xa94257f4u,
-          "divisor parameterized; flag replay ordered after clamp, before restore");
-    // BL 重放归入写回之后的组二：非标志非 BL 先行，BL 紧随钳制，标志组最后。
+    check(words[3] == 0x93407c70u && words[4] == 0xd2800c91u &&
+              words[20] == 0x51005842u && words[21] == 0x7100145fu &&
+              words[22] == 0xa94257f4u,
+          "divisor parameterized; flag replay ordered after non-flag replay, before restore");
+    // BL 重放保持原序：分解式结束后先 BL 占位，再执行 BL 之后的原始指令。
     InsnPatchSpec region_bl{4, 22, 2, 22, 1000, 0x123450, 3,
                             {0xffffffffu, 0x52807d03u, 0x4b000060u}, 0xdfd18u, 22};
     check(insn_patch_test_generate(&region_bl, words, 40, &count) && count == 27,
-          "bl replay placed after clamp");
-    check(words[3] == 0x52807d03u && words[4] == 0x4b000060u &&
-              words[5] == 0x93407ed0u && words[15] == 0xeb1f021fu &&
-              words[18] == 0xf2affff1u && words[22] == 0xffffffffu,
-          "bl group ordering after clamp, before restore");
+          "bl replay placed after decomposition in original order");
+    check(words[3] == 0x93407ed0u && words[19] == 0x2a1003f6u &&
+              words[20] == 0xffffffffu && words[21] == 0x52807d03u &&
+              words[22] == 0x4b000060u && words[23] == 0xa94257f4u,
+          "bl placeholder and post-BL replay ordering");
     InsnPatchSpec bad_replay{4, 27, 22, 22, 1000, 0x123450, 5, {}, 0};
     check(!insn_patch_test_generate(&bad_replay, words, 24, &count),
           "reject oversized region replay");
@@ -150,6 +153,20 @@ int main(int argc, char** argv) {
               "generate region with relocated BL replay");
         check(insn_patch_install(site, &region_bl, &backup),
               "install region with relocated BL replay");
+        {
+            uint32_t tramp[32]{};
+            uint32_t tramp_count = 0;
+            check(insn_patch_test_read(site, tramp, 32, &tramp_count),
+                  "read installed region trampoline");
+            bool placeholder = false;
+            bool relocated_bl = false;
+            for (uint32_t i = 0; i < count; ++i) {
+                if (tramp[i] == 0xffffffffu) placeholder = true;
+                if ((tramp[i] & 0xfc000000u) == 0x94000000u) relocated_bl = true;
+            }
+            check(!placeholder, "BL placeholder must be relocated at install");
+            check(relocated_bl, "relocated BL present in region trampoline");
+        }
         check(insn_patch_release(site) && code[0] == 0x1b167f76u,
               "relocated BL region release restores original instruction");
         (void)munmap(region, 4096);

@@ -22,4 +22,5 @@ bool insn_patch_release(uintptr_t site);
 #if defined(QOL_INSN_PATCH_TEST_SEAMS)
 bool insn_patch_test_generate(const InsnPatchSpec* spec, uint32_t* words,
                               uint32_t capacity, uint32_t* count);
+bool insn_patch_test_read(uintptr_t site, uint32_t* words, uint32_t capacity, uint32_t* count);
 #endif
