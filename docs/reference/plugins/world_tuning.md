@@ -2,7 +2,7 @@
 
 ## 摘要
 
-功能插件「游戏世界调整」，插件版本 `0.1.0`。设置页只有一个入口行；点击后启用插件并打开自有面板，面板内每行一个倍率，左右箭头在固定档位间调整。改动经 Host 配置 Store 持久化，写入 `config.json` 的 `world_tuning` namespace。
+功能插件「游戏世界调整」，插件版本 `0.1.0`。设置页只有一个入口行；点击后启用插件并打开自有面板，面板内每行一个倍率，左右箭头在档位间调整；OP 关闭时使用基础档位，OP 开启时使用扩展档位。改动经 Host 配置 Store 持久化，写入 `config.json` 的 `world_tuning` namespace。
 
 当前真正接线的倍率有七项：
 
@@ -12,7 +12,7 @@
 - 伤害倍率：缩放玩家侧对怪物造成的伤害；
 - 承伤倍率（配置键 `damage_in`）：缩放玩家侧受到的伤害；
 - 掉落数量倍率（配置键 `drop_quantity`）：整数 0..INT32_MAX，重复整次 `CHARSYSTEM_DropItem` 结算；
-- 掉落重抽次数（配置键 `drop_reroll`）：整数 1..INT32_MAX，槽内造物重掷取同类别最优。
+- 掉落重抽次数（配置键 `drop_reroll`）：整数 0..INT32_MAX，槽内造物重掷取同类别最优。
 
 插件 id 由旧 `simple_mode` 改为 `world_tuning`，旧 `simple_mode.combat` feature 与旧配置不再迁移。除特别说明，文中路径均相对 `module/app/src/main/cpp/`。
 
@@ -42,9 +42,9 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 ```
 
 - 字段：`gold`、`exp`、`enemy_hp`、`damage_out`、`damage_in`、`drop_quantity`、`drop_reroll`；缺字段按各行默认值处理（前五项 100，`drop_quantity`/`drop_reroll` 为 1）。
-- 百分比档位仅作为面板箭头预设；`config.json` 可手写任意整数，范围为 `1..INT32_MAX`（100 = 不修改）。合法的非档位值原样生效，面板显示读取值，点击箭头后移动到该方向相邻预设。
-- `drop_quantity` 范围为整数 `0..INT32_MAX`（0 = 不掉落）；`drop_reroll` 范围为整数 `1..INT32_MAX`（1 = 不重掷）。档位仅作为面板箭头预设。
-- 单字段的非整数、溢出、负数或低于字段下限的值只令该字段回退默认值，其余字段继续生效；未知字段忽略。重复字段、JSON 语法错误及结尾多余内容仍拒绝整份配置。
+- 百分比配置范围为 `0..INT32_MAX`（100 = 不修改），掉落数量和重抽范围均为 `0..INT32_MAX`。配置不限制档位上限；面板档位仅为操作预设，手写的合法非档位值原样生效。
+- `gold`、`exp`、`damage_out`、`damage_in` 的 0 表示 ×0；`enemy_hp` 的 0 按 1e-6 缩放，结果下限为 1。`drop_quantity` 或 `drop_reroll` 为 0 时均不掉落；重抽值 1 表示保留首抽、不重掷。
+- 单字段的非整数、溢出或负数只令该字段回退默认值，其余字段继续生效；未知字段忽略。重复字段、JSON 语法错误及结尾多余内容仍拒绝整份配置。
 - 旧配置兼容：历史 `move_speed` 键解析时跳过并忽略；`drop_quality` 作为 `drop_reroll` 别名，显式 `drop_reroll` 优先；重复旧键仍拒绝。
 - 旧配置里的 `player_hp` 键作为未知字段忽略。
 - `validate_config` 仍校验 `rates` 对象结构；越界字段已回退默认值，不会导致 Host 删除 `rates` 键。写入与 Store 加载两条路径均执行该校验（`host/features/controller.cpp`、`host/core_settings_config_store.cpp`）。
@@ -59,7 +59,9 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 - 960×640 root，单栏容器 `{28,100,920,444}`；与设置页相同的 `kPanelBg` 底、`draw_container_styled`（`ornamented=1`）边框/内底和左右装饰图（`draw_image_part` unit `0x4f`/`0x50`）；不绘制标题与说明行。迁移前使用的 `draw_container_ornamented` 已随 ui_components Major 2 移除。
 - 7 行，行高 71，使用 `scroll_list`（关闭选中态）；每行：名称、数值、左右 `arrow_button`；行底 2 逻辑单位金色分割线，与设置页行样式一致。
 - 列表视口高 428，内容高 497（7 行 × 71），超出部分由 `scroll_list` 滚动；滚动条沿用原生 `scroll_list` 自带的一条，不额外自绘。
-- 百分比行显示 `×1.5` 形式；掉落数量/重抽行显示 `×0`..`×5` 整数。全部 7 行的箭头都可用、样式一致。
+- OP 关闭时使用基础档位：百分比 `{10,30,50,80,100,120,150,200,300,500}`，掉落数量/重抽 `{1,2,3,4,5}`。因此基础档位不提供 0。
+- OP 开启时使用扩展档位：百分比从 0、10 开始，500 后为 1000、10000……100000000（最高显示 `×1000000.0`）；掉落数量/重抽从 0、1、2、3、4、5 开始，之后按 10 递增至 200。
+- 百分比行显示 `×1.5` 形式（0 显示 `×0`）；掉落数量/重抽行显示整数。配置值无上限（int32 范围内），面板档位上限为百分比 100000000、掉落 200。
 - 点击箭头 → 生成完整 `rates` JSON → `request_set_config` → 进入 pending（全部箭头禁用）→ 持久化确认后 `apply_rates`；成功不显示提示，失败/状态未知才在底部显示错误并回滚。
 - 面板打开时重新读取配置，覆盖外部编辑；关闭/插件停用销毁全部控件与回调。
 
@@ -75,7 +77,7 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 | `hook:ITEMSYSTEM_MakeItem` | `F_MAKE_ITEM_VMA` | 掉落槽内造物 `void*(category, lookup_key, flag)`；重抽按类别过滤 |
 | `hook:ITEMSYSTEM_MakeEquipDetail` | `F_MAKE_EQUIP_DETAIL_VMA` | 装备候选选取 `void*(kind,min,max,item,option)`；重抽只按稀有度 |
 
-经验：入口对 `ch` 做阵营判定，只缩放玩家侧（主角/队友/召唤物）；负数/零原样透传。
+经验：入口对 `ch` 做阵营判定，只缩放玩家侧（主角/队友/召唤物）；负数原样透传，倍率 0 结果为 0。
 
 金币：`INVEN_AddMoney` 是增量入口（出售、商店/网络商店、存档相关回补等）；`EVTSYSTEM_Process` 的任务奖励走 `INVEN_SetMoney` 写绝对值，不在本倍率覆盖范围内。
 
@@ -89,7 +91,7 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 | 攻击者玩家侧且受害者怪物 | `damage_out` |
 | 其余 | 100 |
 
-`scale_by_percent`：`value<=0` 或 100 原样返回；int64 计算后钳到 `[1, INT32_MAX]`。
+`scale_by_percent`：`value<=0` 或倍率 100 原样返回；倍率 0 返回 0；其他正倍率以 int64 计算并钳到 `[1, INT32_MAX]`。
 
 敌怪最大生命：
 
@@ -97,10 +99,12 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 - 账本按池槽保存 `{ch, raw, applied}`。进入时若槽值仍等于上次 `applied`，先把 `raw` 写回槽再调用原函数；原函数返回后读取游戏结果，按 `enemy_hp` 缩放并记录新的 `raw/applied`。这样倍率变化在下一次属性重算时生效且不会累积缩放。
 - 缩放后若当前 HP 高于新上限，同步写回 HP 上限值。
 - 倍率 100 时不缩放；若上次有缩放，先把 raw 写回槽再透传，之后清空 applied。
+- `enemy_hp` 倍率 0 按 raw / 1,000,000 计算，正数结果下限为 1。
 
 掉落数量：
 
 - 入口 `CHARSYSTEM_DropItem` 是整次结算（12 个槽逐个独立判定，可同时命中多个槽）。数量倍率 `N` 表示同步调用原函数 `N` 次；`0` 表示直接返回、不掉落。
+- `drop_reroll=0` 同样在入口直接返回、不掉落；该检查先于槽内 maker 调用。
 - 倍率是**相对该变体原版行为**：C18/C18L 自带每击 3 轮槽扫描，`×2` 实际为 6 轮；大修/monster 的阈值补丁同样保留。
 - monster 变体的入口被改写成 `b 0x1b58f8`，宿主的 `resolve_hook_entry` 会跟随该跳转后再装 hook，专用掉落（id 554/558）仍会执行。
 
@@ -134,12 +138,12 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 
 ## 测试
 
-- `world_tuning_rates_tests`（`tests/test_world_tuning_rates.cpp`）：档位、显示文本、JSON 往返、越界值分字段回退、未知字段忽略、重复/语法错误拒绝、旧配置 `move_speed`/`drop_quality` 键兼容、`validate_config`、缩放边界。
-- `world_tuning_feature_tests`（`tests/test_world_tuning_feature.cpp`）：descriptor（7 资源、无 provides）、安装失败出口、门禁时序、伤害矩阵、HP 缩放与幂等/倍率变更、经验/金币缩放、阵营失败、残留 wrapper、entry 不可用分支；掉落数量 0/1/3/17 次调用与 warning、重抽的类别过滤/取最高/释放次数/掉落上下文隔离。
+- `world_tuning_rates_tests`（`tests/test_world_tuning_rates.cpp`）：基础/扩展档位、显示文本、JSON 往返、0 值缩放与 1e-6 敌怪血量、配置非负范围、越界值分字段回退、未知字段忽略、重复/语法错误拒绝、旧配置 `move_speed`/`drop_quality` 键兼容、`validate_config`、缩放边界。
+- `world_tuning_feature_tests`（`tests/test_world_tuning_feature.cpp`）：descriptor（7 资源、无 provides）、安装失败出口、门禁时序、伤害/经验/金币/血量 0 倍率、伤害矩阵、HP 缩放与幂等/倍率变更、阵营失败、残留 wrapper、entry 不可用分支；掉落数量 0/1/3/17 次调用与 warning、重抽 0 不掉落、重抽的类别过滤/取最高/释放次数/掉落上下文隔离。
 - `settings_contributions_tests` 编译本插件的空 contribution。
 
 面板绘制/命中与 entry 联动已有真机观察（见下）；未覆盖：真实设备 hook ABI（伤害/敌怪血量实际生效）、资源安装时序。
 
 ## 验证状态
 
-Host 测试与 Debug 构建通过（2026-11-08：越界配置分字段回退、未知字段忽略、17 次掉落与 warning 已覆盖）；2026-10-29 真机（C18L v589）已验证：设置页入口 → 面板打开、行箭头显示与点击、数值写入 `config.json`、无 FATAL（该证据时点面板为 7 行且含已移除的 `rates.move_speed` 键）。各倍率的游戏内实际效果尚未复测，按 `docs/refactor/verification.md` 的口径登记为 `PARTIAL / NOT_ACCEPTED`。
+Host 测试与 Debug 构建通过（2026-11-08：0 倍率语义、基础/扩展档位、越界配置分字段回退、未知字段忽略、17 次掉落与 warning 已覆盖）；2026-10-29 真机（C18L v589）已验证：设置页入口 → 面板打开、行箭头显示与点击、数值写入 `config.json`、无 FATAL（该证据时点面板为 7 行且含已移除的 `rates.move_speed` 键）。各倍率的游戏内实际效果尚未复测，按 `docs/refactor/verification.md` 的口径登记为 `PARTIAL / NOT_ACCEPTED`。

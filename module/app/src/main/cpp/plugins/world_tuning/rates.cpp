@@ -188,15 +188,27 @@ const char* rate_description(RateId id) {
     return index < kRateCount ? kRateDescriptions[index] : nullptr;
 }
 
-const int32_t* rate_ladder(RateId id, uint32_t* out_size) {
+const int32_t* rate_ladder(RateId id, bool extended, uint32_t* out_size) {
     switch (id) {
         case RateId::kDropQuantity:
+            if (extended) {
+                if (out_size != nullptr) *out_size = kDropQuantityLadderExtendedSize;
+                return kDropQuantityLadderExtended;
+            }
             if (out_size != nullptr) *out_size = kDropQuantityLadderSize;
             return kDropQuantityLadder;
         case RateId::kDropReroll:
+            if (extended) {
+                if (out_size != nullptr) *out_size = kDropRerollLadderExtendedSize;
+                return kDropRerollLadderExtended;
+            }
             if (out_size != nullptr) *out_size = kDropRerollLadderSize;
             return kDropRerollLadder;
         default:
+            if (extended) {
+                if (out_size != nullptr) *out_size = kRateLadderExtendedSize;
+                return kRateLadderExtended;
+            }
             if (out_size != nullptr) *out_size = kRateLadderSize;
             return kRateLadder;
     }
@@ -213,29 +225,29 @@ int32_t rate_default(RateId id) {
 bool rate_value_valid(RateId id, int32_t value) {
     switch (id) {
         case RateId::kDropQuantity: return value >= 0;
-        case RateId::kDropReroll: return value >= 1;
+        case RateId::kDropReroll: return value >= 0;
         case RateId::kGold:
         case RateId::kExp:
         case RateId::kEnemyHp:
         case RateId::kDamageOut:
-        case RateId::kDamageIn: return value >= 1;
+        case RateId::kDamageIn: return value >= 0;
         default: return false;
     }
 }
 
-int32_t ladder_index(RateId id, int32_t value) {
+int32_t ladder_index(RateId id, int32_t value, bool extended) {
     uint32_t size = 0;
-    const int32_t* ladder = rate_ladder(id, &size);
+    const int32_t* ladder = rate_ladder(id, extended, &size);
     for (uint32_t i = 0; i < size; ++i) {
         if (ladder[i] == value) return static_cast<int32_t>(i);
     }
     return -1;
 }
 
-int32_t ladder_shift(RateId id, int32_t value, int32_t delta) {
+int32_t ladder_shift(RateId id, int32_t value, int32_t delta, bool extended) {
     uint32_t size = 0;
-    const int32_t* ladder = rate_ladder(id, &size);
-    const int32_t index = ladder_index(id, value);
+    const int32_t* ladder = rate_ladder(id, extended, &size);
+    const int32_t index = ladder_index(id, value, extended);
     if (delta == 0) return value;
     if (index < 0) {
         if (delta > 0) {
@@ -255,12 +267,13 @@ int32_t ladder_shift(RateId id, int32_t value, int32_t delta) {
     return ladder[target];
 }
 
-bool ladder_can_shift(RateId id, int32_t value, int32_t delta) {
-    return delta != 0 && ladder_shift(id, value, delta) != value;
+bool ladder_can_shift(RateId id, int32_t value, int32_t delta, bool extended) {
+    return delta != 0 && ladder_shift(id, value, delta, extended) != value;
 }
 
 std::string rate_display(RateId id, int32_t value) {
     char buffer[32]{};
+    if (id != RateId::kDropQuantity && id != RateId::kDropReroll && value == 0) return "×0";
     if (id == RateId::kDropQuantity || id == RateId::kDropReroll) {
         std::snprintf(buffer, sizeof(buffer), "×%d", value);
         return std::string(buffer);
@@ -297,6 +310,7 @@ bool decode_rates(const char* json, uint32_t size, Rates* out) {
     bool seen[kRateCount]{};
     bool seen_legacy_move_speed = false;
     bool seen_legacy_drop_quality = false;
+    bool legacy_drop_quality_valid = false;
     int32_t legacy_drop_quality = 0;
     const char* cursor = json;
     const char* end = json + size;
@@ -335,7 +349,10 @@ bool decode_rates(const char* json, uint32_t size, Rates* out) {
             } else if (std::strcmp(key, kLegacyDropQualityKey) == 0) {
                 if (seen_legacy_drop_quality) return false;
                 seen_legacy_drop_quality = true;
-                if (complete_integer && rate_value_valid(RateId::kDropReroll, value)) legacy_drop_quality = value;
+                if (complete_integer && rate_value_valid(RateId::kDropReroll, value)) {
+                    legacy_drop_quality = value;
+                    legacy_drop_quality_valid = true;
+                }
             } else {
                 // 未知字段：值已由 read_int 或 skip_value 消费，忽略。
             }
@@ -349,7 +366,7 @@ bool decode_rates(const char* json, uint32_t size, Rates* out) {
         }
     }
     const uint32_t reroll_index = static_cast<uint32_t>(RateId::kDropReroll);
-    if (seen_legacy_drop_quality && legacy_drop_quality >= 1 && !seen[reroll_index]) {
+    if (seen_legacy_drop_quality && legacy_drop_quality_valid && !seen[reroll_index]) {
         parsed.value[reroll_index] = legacy_drop_quality;
     }
     skip_space(&cursor, end);
@@ -371,6 +388,8 @@ QolResult validate_rates_config(const char* key, const char* json, uint32_t size
 
 int32_t scale_by_percent(int32_t value, int32_t percent) {
     if (value <= 0 || percent == kRateDefault) return value;
+    if (percent == 0) return 0;
+    if (percent < 0) return value;
     const int64_t scaled = static_cast<int64_t>(value) * percent / 100;
     if (scaled > INT32_MAX) return INT32_MAX;
     if (scaled < 1) return 1;
@@ -378,13 +397,20 @@ int32_t scale_by_percent(int32_t value, int32_t percent) {
 }
 
 int64_t scale_money(int64_t value, int32_t percent) {
-    if (value <= 0 || percent <= 0 || percent == kRateDefault) return value;
+    if (value <= 0 || percent == kRateDefault) return value;
+    if (percent == 0) return 0;
+    if (percent < 0) return value;
     if (value > INT64_MAX / percent) return INT64_MAX;
     return value * percent / 100;
 }
 
 int32_t scale_attribute(int32_t raw, int32_t percent) {
     if (raw <= 0 || percent == kRateDefault) return raw;
+    if (percent == 0) {
+        const int64_t scaled = static_cast<int64_t>(raw) / 1000000;
+        return static_cast<int32_t>(scaled < 1 ? 1 : scaled > INT32_MAX ? INT32_MAX : scaled);
+    }
+    if (percent < 0) return raw;
     const int64_t scaled = static_cast<int64_t>(raw) * percent / 100;
     if (scaled > INT32_MAX) return INT32_MAX;
     if (scaled < 1) return 1;

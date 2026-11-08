@@ -604,6 +604,23 @@ void test_damage_wrapper() {
     assert(g_last_damage == 50);
     assert(g_party_calls == 1 && g_active_calls == 0 && g_summoner_calls == 0);
 
+    {
+        Rates rates = current_rates();
+        rates.value[static_cast<uint32_t>(RateId::kDamageOut)] = 0;
+        rates.value[static_cast<uint32_t>(RateId::kDamageIn)] = 0;
+        apply_rates(rates);
+    }
+    assert_one_damage_flight([&] { char_add_damage_wrapper(&attacker, &victim, 100, 0, 0); });
+    assert(g_last_damage == 0);
+    assert_one_damage_flight([&] { char_add_damage_wrapper(&monster, &player, 100, 0, 0); });
+    assert(g_last_damage == 0);
+    {
+        Rates rates = current_rates();
+        rates.value[static_cast<uint32_t>(RateId::kDamageOut)] = 150;
+        rates.value[static_cast<uint32_t>(RateId::kDamageIn)] = 50;
+        apply_rates(rates);
+    }
+
     Character& neutral = g_characters[4];
     neutral.type = 2;
     Character& player_victim = g_characters[5];
@@ -762,6 +779,19 @@ void test_max_hp_wrapper() {
         rates.value[static_cast<uint32_t>(RateId::kEnemyHp)] = 50;
         apply_rates(rates);
     }
+    {
+        Rates rates = current_rates();
+        rates.value[static_cast<uint32_t>(RateId::kEnemyHp)] = 0;
+        apply_rates(rates);
+    }
+    monster.max_hp = 100;
+    assert_one_attr_flight([&] { char_update_attr_from_monster_wrapper(&monster, 0x1e); });
+    assert(monster.max_hp == 1);
+    {
+        Rates rates = current_rates();
+        rates.value[static_cast<uint32_t>(RateId::kEnemyHp)] = 50;
+        apply_rates(rates);
+    }
 
     Character& player_summon = g_characters[10];
     player_summon.type = 1;
@@ -897,6 +927,14 @@ void test_exp_and_money() {
     (void)inven_add_money_wrapper(-5);
     assert(g_last_money == -5);
 
+    rates.value[static_cast<uint32_t>(RateId::kExp)] = 0;
+    rates.value[static_cast<uint32_t>(RateId::kGold)] = 0;
+    apply_rates(rates);
+    (void)char_add_experience_wrapper(&player, 100, 1);
+    assert(g_last_exp == 0);
+    (void)inven_add_money_wrapper(100);
+    assert(g_last_money == 0);
+
     descriptor.on_disabled(g_context);
     (void)char_add_experience_wrapper(&player, 100, 1);
     assert(g_last_exp == 100);
@@ -924,6 +962,11 @@ void test_drop_quantity_wrapper() {
     assert(g_drop_item_calls == 3);
 
     set_drop_rates(0, 1);
+    g_drop_item_calls = 0;
+    drop_item_wrapper(nullptr);
+    assert(g_drop_item_calls == 0);
+
+    set_drop_rates(3, 0);
     g_drop_item_calls = 0;
     drop_item_wrapper(nullptr);
     assert(g_drop_item_calls == 0);

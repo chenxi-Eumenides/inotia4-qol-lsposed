@@ -422,10 +422,11 @@ void drop_item_wrapper(void* ch) {
         return;
     }
     const int32_t rounds = rate_value(RateId::kDropQuantity);
+    const int32_t rolls = rate_value(RateId::kDropReroll);
+    if (rounds <= 0 || rolls <= 0) return;
     if (rounds > kDropLargeWarnThreshold && !g_large_drop_quantity_logged.exchange(true)) {
         log_warn("drop quantity %d > %d; no hard cap applied", rounds, kDropLargeWarnThreshold);
     }
-    if (rounds <= 0) return;
     ++g_drop_depth;
     for (int32_t i = 0; i < rounds; ++i) backup(ch);
     --g_drop_depth;

@@ -86,6 +86,13 @@ bool components_ready() {
         g_ui->touch_coordinates != nullptr && g_ui->hit_test != nullptr;
 }
 
+bool op_extended() {
+    const auto* security = g_sdk == nullptr ? nullptr : g_sdk->security;
+    uint8_t enabled = 0;
+    return security != nullptr && security->op_enabled != nullptr &&
+        contracts::succeeded(security->op_enabled(security->context, &enabled)) && enabled != 0;
+}
+
 void set_message(const char* text, bool error) {
     g_message = text == nullptr ? "" : text;
     g_message_error = error;
@@ -150,6 +157,7 @@ void draw_item(void*, uint32_t index, QolUiHandle row, uint8_t) {
 void sync_arrow_states() {
     if (g_components == nullptr || g_components->arrow_button_set_enabled == nullptr) return;
     const bool config_ready = rates_config_available();
+    const bool extended = op_extended();
     for (uint32_t row = 0; row < kRowCount; ++row) {
         const auto id = static_cast<RateId>(row);
         // 只禁用正在保存的行；其它行保持原状态，避免整屏箭头闪动。
@@ -157,7 +165,8 @@ void sync_arrow_states() {
         for (int side = 0; side < 2; ++side) {
             QolUiHandle handle = g_arrows[row][side];
             if (handle == nullptr) continue;
-            const bool can_shift = ladder_can_shift(id, g_confirmed.value[row], side == 0 ? -1 : 1);
+            const bool can_shift = ladder_can_shift(id, g_confirmed.value[row], side == 0 ? -1 : 1,
+                                                    extended);
             const bool enabled = config_ready && !pending && can_shift;
             if (g_arrow_enabled[row][side] == enabled) continue;
             g_arrow_enabled[row][side] = enabled;
@@ -200,7 +209,8 @@ void arrow_clicked(void* user) {
     const uint32_t row = context->row;
     if (!rates_config_available()) return;
     const int32_t current = g_confirmed.value[row];
-    const int32_t next = ladder_shift(static_cast<RateId>(row), current, context->delta);
+    const bool extended = op_extended();
+    const int32_t next = ladder_shift(static_cast<RateId>(row), current, context->delta, extended);
     if (next == current) return;
     Rates candidate = g_confirmed;
     candidate.value[row] = next;
