@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
     check(words[3] == 0x39400000u && words[4] == 0xf9400042u &&
               words[5] == 0x1b007ee0u && words[6] == 0x93407f70u &&
               words[8] == 0x9ad10e12u && words[9] == 0x9b118253u &&
-              words[23] == 0xa9427bf4u && words[25] == 0xa8c347f0u,
+              words[23] == 0xa94257f4u && words[25] == 0xa8c347f0u,
           "region replay-first then scale instruction sequence");
     // ÷100 与 ÷1000 同构分解式（除数参数化）；置标志 replay 位于写回之后、恢复之前。
     InsnPatchSpec region_div100{4, 3, 1, 26, 100, 0x123450, 2,
@@ -77,7 +77,7 @@ int main(int argc, char** argv) {
     check(insn_patch_test_generate(&region_div100, words, 40, &count) && count == 26,
           "div-100 region uses same decomposition");
     check(words[4] == 0x93407c70u && words[5] == 0xd2800c91u &&
-              words[21] == 0x7100145fu && words[22] == 0xa9427bf4u,
+              words[21] == 0x7100145fu && words[22] == 0xa94257f4u,
           "divisor parameterized; flag replay ordered after clamp, before restore");
     InsnPatchSpec bad_replay{4, 27, 22, 22, 1000, 0x123450, 5, {}, 0};
     check(!insn_patch_test_generate(&bad_replay, words, 24, &count),

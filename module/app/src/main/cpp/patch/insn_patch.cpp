@@ -112,7 +112,7 @@ bool generate(const InsnPatchSpec& s, uint32_t* out, uint32_t cap, uint32_t* cou
         if (relocated_bl_count > 1 || (relocated_bl_count != 0 && s.replay_bl_target == 0))
             return false;
         if (!emit(0xa9bd47f0u) || // save x16-x21（x30 已由宿主函数序言保存，thunk 尾 b 返回不用 x30）
-            !emit(0xa9014ff2u) || !emit(0xa9027bf4u)) return false;
+            !emit(0xa9014ff2u) || !emit(0xa90257f4u)) return false;
         for (uint32_t i = 0; i < s.replay_count; ++i)
             if (!replay_sets_flags(s.replay_words[i]) && !emit(s.replay_words[i])) return false;
         if (!emit(0x93407c00u | (s.a_reg << 5) | 16u) || // sxtw x16,wA
@@ -131,7 +131,7 @@ bool generate(const InsnPatchSpec& s, uint32_t* out, uint32_t cap, uint32_t* cou
             !emit(0x2a1003e0u | s.d_reg)) return false;
         for (uint32_t i = 0; i < s.replay_count; ++i)
             if (replay_sets_flags(s.replay_words[i]) && !emit(s.replay_words[i])) return false;
-        if (!emit(0xa9427bf4u) || !emit(0xa9414ff2u) || !emit(0xa8c347f0u) ||
+        if (!emit(0xa94257f4u) || !emit(0xa9414ff2u) || !emit(0xa8c347f0u) ||
             !emit(0x14000000u)) return false;
     } else if (s.kind == 3) {
         // 语义：wD = clamp32(x21 ÷ divisor × (sxtw wB) ÷ divisor)；x21 = 64 位乘积（点 B 写入）。
