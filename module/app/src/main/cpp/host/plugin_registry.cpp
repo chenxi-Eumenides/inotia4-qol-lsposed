@@ -2305,14 +2305,30 @@ bool feature_registry_prepare(const HostDeps& deps) {
     if (g_feature_mode) return false;
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
         const auto& plugin = g_plugins[i].descriptor;
-        if (!plugin.features || !plugin.feature_count || plugin_has_active_tx(plugin.id)) return false;
+        if (!plugin.features || !plugin.feature_count) {
+            QOL_LOG_ERROR(QolDomain::kCore, "feature prepare: missing features id=%s", plugin.id);
+            return false;
+        }
+        if (plugin_has_active_tx(plugin.id)) {
+            QOL_LOG_ERROR(QolDomain::kCore, "feature prepare: active tx id=%s", plugin.id);
+            return false;
+        }
         for (uint32_t r = 0; r < plugin.resources_count; ++r) {
             // A migrated descriptor has no second gate truth or preinstalled resources.
-            if (plugin.resources[r].gate || hooks::state_of(plugin.resources[r].id) !=
-                                             contracts::ResourceState::kFree) return false;
+            const auto state = hooks::state_of(plugin.resources[r].id);
+            if (plugin.resources[r].gate || state != contracts::ResourceState::kFree) {
+                QOL_LOG_ERROR(QolDomain::kCore, "feature prepare: resource not free id=%s resource=%s state=%d gate=%d",
+                              plugin.id, plugin.resources[r].id,
+                              static_cast<int>(state), plugin.resources[r].gate ? 1 : 0);
+                return false;
+            }
         }
         infra::FeatureStatus status{};
-        if (infra::status_get(plugin.id, &status) && status.state != infra::FeatureState::kRegistered) return false;
+        if (infra::status_get(plugin.id, &status) && status.state != infra::FeatureState::kRegistered) {
+            QOL_LOG_ERROR(QolDomain::kCore, "feature prepare: status not registered id=%s state=%d",
+                          plugin.id, static_cast<int>(status.state));
+            return false;
+        }
     }
     g_install_deps = deps;
     owner_save_route_stopped_try_handler(&save_route::owner_stopped_poll);

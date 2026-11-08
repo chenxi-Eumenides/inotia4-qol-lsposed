@@ -2,6 +2,7 @@
 
 #include "host/owner_identity.h"
 #include "infra/capabilities.h"
+#include "infra/log/qol_log.h"
 #include <cstring>
 
 namespace qol::host {
@@ -57,13 +58,28 @@ bool FeatureReconciler::bind(const HostDeps& deps) {
         if (controller_.host_owned(plugin.plugin_id.c_str())) continue;
         ++ordinary;
         const auto* descriptor = find_plugin(plugin.plugin_id.c_str());
-        if (!descriptor || !descriptor->features || descriptor->feature_count != plugin.features.size()) return false;
+        if (!descriptor || !descriptor->features || descriptor->feature_count != plugin.features.size()) {
+            QOL_LOG_ERROR(QolDomain::kCore, "feature bind: descriptor mismatch id=%s count=%u descriptor_count=%u",
+                          plugin.plugin_id.c_str(), static_cast<unsigned>(plugin.features.size()),
+                          descriptor != nullptr ? static_cast<unsigned>(descriptor->feature_count) : 0U);
+            return false;
+        }
         for (uint32_t f = 0; f < descriptor->feature_count; ++f) {
-            if (std::strcmp(descriptor->features[f].id, plugin.features[f].id) != 0) return false;
+            if (std::strcmp(descriptor->features[f].id, plugin.features[f].id) != 0) {
+                QOL_LOG_ERROR(QolDomain::kCore, "feature bind: feature id mismatch id=%s", plugin.plugin_id.c_str());
+                return false;
+            }
         }
     }
-    if (ordinary != plugin_count()) return false;
-    if (!feature_registry_prepare(deps)) return false;
+    if (ordinary != plugin_count()) {
+        QOL_LOG_ERROR(QolDomain::kCore, "feature bind: plugin count mismatch ordinary=%u registered=%u",
+                      static_cast<unsigned>(ordinary), static_cast<unsigned>(plugin_count()));
+        return false;
+    }
+    if (!feature_registry_prepare(deps)) {
+        QOL_LOG_ERROR(QolDomain::kCore, "feature bind: registry prepare failed");
+        return false;
+    }
     // bind() runs on the bridge-init thread (assembly), not the game thread; the main-thread
     // reference is captured lazily by the first step() so frame-driven work is only accepted
     // from the game's logical thread.
