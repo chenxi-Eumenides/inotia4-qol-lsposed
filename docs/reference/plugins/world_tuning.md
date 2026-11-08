@@ -44,10 +44,10 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 ```
 
 - 字段：`gold`、`exp`、`player_hp`、`enemy_hp`、`damage_out`、`damage_in`、`drop_quantity`、`drop_reroll`；缺字段按各行默认值处理（前六项 100，`drop_quantity`/`drop_reroll` 为 1）。
-- 百分比行只允许档位 `10/30/50/80/100/120/150/200/300/500`（即 ×0.1 … ×5.0）。
-- `drop_quantity` 只允许 `0/1/2/3/4/5`（0 = 不掉落）；`drop_reroll` 只允许 `1/2/3/4/5`（1 = 不重掷）。
-- 未知字段、重复字段、非整数、档位外取值一律拒绝。
-- 旧配置兼容：历史版本写入的 `move_speed` 键（已移除的移速倍率）解析时读取并忽略，不使整份 rates 非法；其取值仍须为合法档位，重复出现仍拒绝。
+- 百分比档位仅作为面板箭头预设；`config.json` 可手写任意整数，范围为 `1..INT32_MAX`（100 = 不修改）。合法的非档位值原样生效，面板显示读取值，点击箭头后移动到该方向相邻预设。
+- `drop_quantity` 范围为整数 `0..5`（0 = 不掉落）；`drop_reroll` 范围为整数 `1..5`（1 = 不重掷）。
+- 未知字段、重复字段、非整数、负数及超出字段范围的取值一律拒绝。
+- 旧配置兼容：历史版本写入的 `move_speed` 键（已移除的移速倍率）解析时按百分比范围校验后忽略，不使整份 rates 非法；重复出现仍拒绝。
 - `validate_config` 在写入与 Store 加载两条路径生效（`host/features/controller.cpp`、`host/core_settings_config_store.cpp`）。
 - 读取通道：插件经 `QolFeatureApi::read_config` 读自己的 namespace；写入经 `request_set_config`，面板每帧轮询一次 receipt。`/api/config/set` 改同一键，下次打开面板或插件重新启用时生效。
 - 插件未订阅 `runtime_effects`；外部改动不会即时推送。

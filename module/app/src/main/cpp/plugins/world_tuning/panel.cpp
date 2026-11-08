@@ -152,17 +152,13 @@ void sync_arrow_states() {
     const bool config_ready = rates_config_available();
     for (uint32_t row = 0; row < kRowCount; ++row) {
         const auto id = static_cast<RateId>(row);
-        uint32_t ladder_size = 0;
-        (void)rate_ladder(id, &ladder_size);
-        const int32_t index = ladder_index(id, g_confirmed.value[row]);
         // 只禁用正在保存的行；其它行保持原状态，避免整屏箭头闪动。
         const bool pending = g_pending_row == static_cast<int>(row);
         for (int side = 0; side < 2; ++side) {
             QolUiHandle handle = g_arrows[row][side];
             if (handle == nullptr) continue;
-            const bool at_edge = index < 0 ||
-                (side == 0 ? index == 0 : index == static_cast<int32_t>(ladder_size) - 1);
-            const bool enabled = config_ready && !pending && !at_edge;
+            const bool can_shift = ladder_can_shift(id, g_confirmed.value[row], side == 0 ? -1 : 1);
+            const bool enabled = config_ready && !pending && can_shift;
             if (g_arrow_enabled[row][side] == enabled) continue;
             g_arrow_enabled[row][side] = enabled;
             (void)g_components->arrow_button_set_enabled(handle, enabled ? 1 : 0);

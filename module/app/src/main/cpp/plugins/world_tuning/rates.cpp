@@ -37,8 +37,6 @@ static_assert(sizeof(kRateDescriptions) / sizeof(kRateDescriptions[0]) == kRateC
 static_assert(sizeof(kRateSupported) / sizeof(kRateSupported[0]) == kRateCount,
               "rate support table size");
 
-bool valid_rate(RateId id, int32_t value) { return ladder_index(id, value) >= 0; }
-
 void skip_space(const char** cursor, const char* end) {
     while (*cursor < end && (**cursor == ' ' || **cursor == '\t' || **cursor == '\n' ||
                              **cursor == '\r')) {
@@ -74,7 +72,7 @@ bool read_int(const char** cursor, const char* end, int32_t* out) {
     skip_space(cursor, end);
     const char* start = *cursor;
     bool negative = false;
-    if (*cursor < end && (**cursor == '-' || **cursor == '+')) {
+    if (*cursor < end && **cursor == '-') {
         negative = **cursor == '-';
         ++*cursor;
     }
@@ -82,7 +80,7 @@ bool read_int(const char** cursor, const char* end, int32_t* out) {
     int64_t value = 0;
     while (*cursor < end && **cursor >= '0' && **cursor <= '9') {
         value = value * 10 + (**cursor - '0');
-        if (value > 1000000) return false;
+        if (value > INT32_MAX) return false;
         ++*cursor;
     }
     if (*cursor == start) return false;
@@ -134,6 +132,20 @@ int32_t rate_default(RateId id) {
     }
 }
 
+bool rate_value_valid(RateId id, int32_t value) {
+    switch (id) {
+        case RateId::kDropQuantity: return value >= 0 && value <= 5;
+        case RateId::kDropReroll: return value >= 1 && value <= 5;
+        case RateId::kGold:
+        case RateId::kExp:
+        case RateId::kPlayerHp:
+        case RateId::kEnemyHp:
+        case RateId::kDamageOut:
+        case RateId::kDamageIn: return value >= 1;
+        default: return false;
+    }
+}
+
 int32_t ladder_index(RateId id, int32_t value) {
     uint32_t size = 0;
     const int32_t* ladder = rate_ladder(id, &size);
@@ -147,15 +159,31 @@ int32_t ladder_shift(RateId id, int32_t value, int32_t delta) {
     uint32_t size = 0;
     const int32_t* ladder = rate_ladder(id, &size);
     const int32_t index = ladder_index(id, value);
-    if (index < 0 || delta == 0) return value;
+    if (delta == 0) return value;
+    if (index < 0) {
+        if (delta > 0) {
+            for (uint32_t i = 0; i < size; ++i) {
+                if (ladder[i] > value) return ladder[i];
+            }
+        } else {
+            for (uint32_t i = size; i > 0; --i) {
+                if (ladder[i - 1] < value) return ladder[i - 1];
+            }
+        }
+        return value;
+    }
     int64_t target = static_cast<int64_t>(index) + delta;
     if (target < 0) target = 0;
     if (target >= static_cast<int64_t>(size)) target = static_cast<int64_t>(size) - 1;
     return ladder[target];
 }
 
+bool ladder_can_shift(RateId id, int32_t value, int32_t delta) {
+    return delta != 0 && ladder_shift(id, value, delta) != value;
+}
+
 std::string rate_display(RateId id, int32_t value) {
-    char buffer[16]{};
+    char buffer[32]{};
     if (id == RateId::kDropQuantity || id == RateId::kDropReroll) {
         std::snprintf(buffer, sizeof(buffer), "×%d", value);
         return std::string(buffer);
@@ -214,18 +242,18 @@ bool decode_rates(const char* json, uint32_t size, Rates* out) {
                 }
             }
             if (index < kRateCount) {
-                if (!valid_rate(static_cast<RateId>(index), value)) return false;
+                if (!rate_value_valid(static_cast<RateId>(index), value)) return false;
                 if (seen[index]) return false;
                 seen[index] = true;
                 parsed.value[index] = value;
             } else if (std::strcmp(key, kLegacyMoveSpeedKey) == 0) {
-                // 旧配置的 move_speed 键：值仍要求合法档位，读取后忽略，不写入 rates。
-                if (!valid_rate(RateId::kGold, value)) return false;
+                // 历史移速值按百分比范围校验后忽略，不写入 rates。
+                if (!rate_value_valid(RateId::kGold, value)) return false;
                 if (seen_legacy_move_speed) return false;
                 seen_legacy_move_speed = true;
             } else if (std::strcmp(key, kLegacyDropQualityKey) == 0) {
                 // 旧配置的 drop_quality 键：作为 drop_reroll 别名读入；显式 drop_reroll 优先。
-                if (!valid_rate(RateId::kDropReroll, value)) return false;
+                if (!rate_value_valid(RateId::kDropReroll, value)) return false;
                 if (seen_legacy_drop_quality) return false;
                 seen_legacy_drop_quality = true;
                 legacy_drop_quality = value;

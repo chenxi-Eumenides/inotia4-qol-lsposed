@@ -1,6 +1,7 @@
 #include "plugins/world_tuning/rates.h"
 
 #include <cassert>
+#include <climits>
 #include <cstring>
 #include <string>
 
@@ -21,7 +22,25 @@ void test_ladder_and_metadata() {
     assert(ladder_shift(RateId::kGold, 10, -1) == 10);
     assert(ladder_shift(RateId::kGold, 500, 1) == 500);
     assert(ladder_shift(RateId::kGold, 100, 0) == 100);
-    assert(ladder_shift(RateId::kGold, 101, 1) == 101);
+    assert(ladder_shift(RateId::kGold, 1337, 1) == 1337);
+    assert(ladder_shift(RateId::kGold, 1337, -1) == 500);
+    assert(ladder_shift(RateId::kGold, 5, -1) == 5);
+    assert(ladder_shift(RateId::kGold, 600, 1) == 600);
+    assert(!ladder_can_shift(RateId::kGold, 1000, 1));
+    assert(!ladder_can_shift(RateId::kGold, 1337, 1));
+    assert(ladder_can_shift(RateId::kGold, 1337, -1));
+    assert(!ladder_can_shift(RateId::kGold, 5, -1));
+    assert(!ladder_can_shift(RateId::kGold, 600, 1));
+    assert(!ladder_can_shift(RateId::kGold, 100, 0));
+    assert(rate_value_valid(RateId::kGold, 10));
+    assert(rate_value_valid(RateId::kGold, 1337));
+    assert(rate_value_valid(RateId::kGold, INT32_MAX));
+    assert(!rate_value_valid(RateId::kGold, 0));
+    assert(!rate_value_valid(RateId::kGold, -1));
+    assert(rate_value_valid(RateId::kDropQuantity, 0));
+    assert(!rate_value_valid(RateId::kDropQuantity, 6));
+    assert(rate_value_valid(RateId::kDropReroll, 1));
+    assert(!rate_value_valid(RateId::kDropReroll, 0));
 
     assert(std::strcmp(rate_key(RateId::kGold), "gold") == 0);
     assert(std::strcmp(rate_name(RateId::kGold), "金币倍率") == 0);
@@ -57,6 +76,7 @@ void test_ladder_and_metadata() {
     assert(rate_display(RateId::kGold, 100) == "×1.0");
     assert(rate_display(RateId::kGold, 150) == "×1.5");
     assert(rate_display(RateId::kGold, 500) == "×5.0");
+    assert(rate_display(RateId::kGold, INT32_MAX) == "×21474836.4");
 }
 
 void test_roundtrip_and_defaults() {
@@ -96,14 +116,17 @@ void test_decode_rejects_invalid() {
     assert(reject(""));
     assert(reject("{"));
     assert(reject("{\"unknown\":100}"));
-    assert(reject("{\"enemy_hp\":101}"));
+    assert(!reject("{\"enemy_hp\":1337}"));
+    assert(!reject("{\"damage_out\":100000000}"));
+    assert(!reject("{\"damage_in\":2147483647}"));
+    assert(reject("{\"enemy_hp\":2147483648}"));
     assert(reject("{\"enemy_hp\":0}"));
+    assert(reject("{\"enemy_hp\":-1}"));
     assert(reject("{\"enemy_hp\":100.5}"));
     assert(reject("{\"enemy_hp\":\"100\"}"));
     assert(reject("{\"enemy_hp\":100,\"enemy_hp\":50}"));
     assert(reject("{\"enemy_hp\":100}x"));
     assert(reject("{\"enemy_hp\":-100}"));
-    assert(reject("{\"enemy_hp\":999999999}"));
     assert(reject("{\"drop_quantity\":6}"));
     assert(reject("{\"drop_reroll\":0}"));
     assert(reject("{\"drop_reroll\":6}"));
@@ -146,8 +169,8 @@ void test_legacy_move_speed_key() {
     assert(validate_rates_config("rates", legacy, static_cast<uint32_t>(std::strlen(legacy))).ok ==
            kQolOk);
 
-    // 值规则与现行字段一致：非档位取值仍拒绝。
-    assert(reject("{\"move_speed\":101}"));
+    // 历史移速键按百分比范围校验后忽略。
+    assert(!reject("{\"move_speed\":101}"));
     // move_speed 重复仍拒绝；move_speed 与未知键并存时未知键仍拒绝。
     assert(reject("{\"move_speed\":100,\"move_speed\":50}"));
     assert(reject("{\"move_speed\":100,\"unknown\":100}"));
@@ -195,7 +218,7 @@ void test_validate_config() {
            kQolOk);
     assert(validate_rates_config("other", good, static_cast<uint32_t>(std::strlen(good))).ok ==
            kQolErrInvalidArgument);
-    const char* bad = "{\"enemy_hp\":55}";
+    const char* bad = "{\"enemy_hp\":0}";
     assert(validate_rates_config("rates", bad, static_cast<uint32_t>(std::strlen(bad))).ok ==
            kQolErrInvalidArgument);
 }
