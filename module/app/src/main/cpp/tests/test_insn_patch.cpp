@@ -24,6 +24,9 @@ bool qol_log_debug_enabled() { return false; }
 int main(int argc, char** argv) {
     check(qol::features::damage_widen::safe_scale(-1501, 70) == -105,
           "safe_scale truncates negative values toward zero");
+    check(qol::features::damage_widen::safe_scale(19, 1000) == 19 &&
+              qol::features::damage_widen::safe_scale(141, 1000) == 141,
+          "safe_scale preserves low normal-attack base values");
     check(qol::features::damage_widen::safe_scale(2147483647, 2147483647) ==
               (2147483647LL / 1000) * 2147483647LL +
                   ((2147483647LL % 1000) * 2147483647LL) / 1000,
@@ -68,7 +71,7 @@ int main(int argc, char** argv) {
     check(insn_patch_test_generate(&region_spec, words, 40, &count) && count == 27,
           "region thunk generation with replay");
     check(words[3] == 0x93407f70u && words[4] == 0xd2807d11u &&
-              words[5] == 0x9ad10e12u && words[6] == 0x9b12c613u &&
+              words[5] == 0x9ad10e12u && words[6] == 0x9b11c253u &&
               words[8] == 0x9b157e54u && words[9] == 0x9b367e75u &&
               words[19] == 0x2a1003f6u &&
               words[20] == 0x39400000u && words[21] == 0xf9400042u &&
@@ -80,7 +83,7 @@ int main(int argc, char** argv) {
                              {0x39400000u, 0xf9400042u, 0x1b007ee0u, 0x93407c00u}, 0, 22};
     check(insn_patch_test_generate(&ef20c_spec, words, 40, &count) && count == 28,
           "EF20C thunk generation with live sxtw replay");
-    check(words[6] == 0x9b12c613u &&  // msub x19,x16,x18,x17
+    check(words[6] == 0x9b11c253u &&  // msub x19,x18,x17,x16
               words[8] == 0x9b157e54u &&  // mul x20,x18,x21
               words[9] == 0x9b367e75u,     // smull x21,w19,w22
           "EF20C safe_scale operands use initialized quotient/remainder/input registers");

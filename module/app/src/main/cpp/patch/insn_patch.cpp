@@ -116,7 +116,7 @@ bool generate(const InsnPatchSpec& s, uint32_t* out, uint32_t cap, uint32_t* cou
         if (!emit(0x93407c00u | (s.a_reg << 5) | 16u) || // sxtw x16,wA
             !emit(movz_x(17, s.divisor)) ||
             !emit(0x9ad10e12u) || // x18 = x16 ÷ divisor（高位先除）
-            !emit(0x9b12c613u) || // msub x19, x16, x18, x17：低 D 位余数 = X − floor0(X/D)×D
+            !emit(0x9b11c253u) || // msub x19, x18, x17, x16：低 D 位余数 = X − floor0(X/D)×D
             !emit(0x93407c00u | (s.b_reg << 5) | 21u) || // sxtw x21,wB
             !emit(0x9b007c00u | (21u << 16) | (18u << 5) | 20u) ||
                 // mul x20, x18, x21：高位段乘
