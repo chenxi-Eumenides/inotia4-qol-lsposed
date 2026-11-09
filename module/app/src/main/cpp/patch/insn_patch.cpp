@@ -207,6 +207,17 @@ bool insn_patch_test_read(uintptr_t site, uint32_t* words, uint32_t capacity,
     }
     return false;
 }
+
+bool insn_patch_test_slot_base(uintptr_t site, uintptr_t* out_base) {
+    if (out_base == nullptr) return false;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    for (size_t i = 0; i < g_count; ++i) {
+        if (g_entries[i].site != site) continue;
+        *out_base = reinterpret_cast<uintptr_t>(g_entries[i].slots[0]);
+        return true;
+    }
+    return false;
+}
 #endif
 
 bool insn_patch_install(uintptr_t site, const InsnPatchSpec* spec, void** backup) {

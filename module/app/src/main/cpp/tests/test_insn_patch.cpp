@@ -307,7 +307,7 @@ int main(int argc, char** argv) {
     // 参考实现：safe_scale 与精确向零截断一致（覆盖 int32 边界与负值）。
     {
         const int32_t xs[] = {0, 1, 19, 141, 999, 1000, 1001, 2147483647,
-                              -1, -999, -1000, -2147483647};
+                              -1, -999, -1000, -2147483647, INT32_MIN};
         const int32_t ns[] = {0, 1, 700, 1000, -1, 2147483647, -2147483647};
         for (int32_t xv : xs) {
             for (int32_t nv : ns) {
@@ -323,9 +323,10 @@ int main(int argc, char** argv) {
     // 机器码级：按生成器实际产出的指令执行分解式，与精确参考比较（含钳制）。
     {
         const int32_t xs[] = {0, 1, 19, 141, 999, 1000, 1001, 1999, 2000,
-                              123456, 2147483647, -1, -999, -1000, -1001, -2147483647};
+                              123456, 2147483647, -1, -999, -1000, -1001,
+                              -2147483647, INT32_MIN};
         const int32_t ns[] = {0, 1, 700, 1000, -1, 2147483647, -2147483647};
-        for (uint32_t divisor : {1000u, 100u}) {
+        for (uint32_t divisor : {1u, 7u, 100u, 1000u, 65535u}) {
             for (int32_t xv : xs) {
                 for (int32_t nv : ns) {
                     InsnPatchSpec spec{4, 2, 3, 4, divisor, 0x123450, 0, {}, 0, 4};
@@ -351,6 +352,39 @@ int main(int argc, char** argv) {
                               static_cast<int32_t>(expected), message);
                 }
             }
+        }
+    }
+    // 伪随机参数补充覆盖：任意 divisor 1..65535、含 int32 全域。
+    {
+        uint32_t seed = 0x12345678u;
+        for (int i = 0; i < 512; ++i) {
+            seed = seed * 1664525u + 1013904223u;
+            const int32_t xv = static_cast<int32_t>(seed);
+            seed = seed * 1664525u + 1013904223u;
+            const int32_t nv = static_cast<int32_t>(seed);
+            seed = seed * 1664525u + 1013904223u;
+            const uint32_t divisor = (seed % 65535u) + 1u;
+            InsnPatchSpec spec{4, 2, 3, 4, divisor, 0x123450, 0, {}, 0, 4};
+            uint32_t generated = 0;
+            if (!insn_patch_test_generate(&spec, words, 40, &generated)) {
+                check(false, "random semantic generation");
+                continue;
+            }
+            Sim sim;
+            sim.set(2, static_cast<uint32_t>(xv));
+            sim.set(3, static_cast<uint32_t>(nv));
+            check(run_thunk(words, generated, sim), "random semantic execution");
+            int64_t expected = static_cast<int64_t>(
+                static_cast<__int128>(xv) * nv / divisor);
+            if (expected < 0) expected = 0;
+            if (expected > std::numeric_limits<int32_t>::max())
+                expected = std::numeric_limits<int32_t>::max();
+            char message[160];
+            std::snprintf(message, sizeof(message),
+                          "random kind4 machine code matches trunc(X*N/%u): X=%d N=%d",
+                          divisor, xv, nv);
+            check(static_cast<int32_t>(sim.get(4)) == static_cast<int32_t>(expected),
+                  message);
         }
     }
     // EF20C 实机组合：w27=19, w22=1000 必须产出 19；replay 的 ldrb/ldr/mul/sxtw 保序。
@@ -479,6 +513,21 @@ int main(int argc, char** argv) {
             }
             check(!placeholder, "BL placeholder must be relocated at install");
             check(relocated_bl, "relocated BL present in region trampoline");
+            uintptr_t slot_base = 0;
+            check(insn_patch_test_slot_base(site, &slot_base),
+                  "read region trampoline slot base");
+            int64_t bl_target = -1;
+            if (relocated_bl && slot_base != 0) {
+                for (uint32_t i = 0; i < tramp_count; ++i) {
+                    if ((tramp[i] & 0xfc000000u) != 0x94000000u) continue;
+                    const int64_t delta = static_cast<int64_t>(
+                        static_cast<int32_t>(tramp[i] << 6) >> 6);  // 符号扩展 imm26
+                    bl_target = static_cast<int64_t>(slot_base + i * 4u) + delta * 4;
+                    break;
+                }
+            }
+            check(relocated_bl && bl_target == static_cast<int64_t>(site + 0x200),
+                  "relocated BL targets replay_bl_target");
         }
         check(insn_patch_release(site) && code[0] == 0x1b167f76u,
               "relocated BL region release restores original instruction");
