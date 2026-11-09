@@ -1251,7 +1251,7 @@ int main(int argc, char** argv) {
     assert(std::strcmp(custom_recipe.id, "custom_recipe") == 0);
     assert(custom_recipe.provides_count == 0 && custom_recipe.provides == nullptr);
     assert(custom_recipe.requires_count == 6);
-    assert(custom_recipe.optional_count == 2);
+    assert(custom_recipe.optional_count == 3);
     assert(custom_recipe.jni_count == 0);
     assert(custom_recipe.port_count == 3);
     assert(custom_recipe.ports[0].id == QolPortId::QOL_PORT_CUSTOM_RECIPE_WRITE);

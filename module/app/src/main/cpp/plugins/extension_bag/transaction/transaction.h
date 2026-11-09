@@ -14,6 +14,10 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
 bool extension_save_item_on_empty(void* item, int bag);
 bool serialize_item_payload_locked(
     void* item, std::array<uint8_t, virtual_bag::kSerializedItemBuffer>* out, int* out_size);
+// 把物化对象的新内容写回槽 descriptor（payload + canonical count + hash）。游戏侧在
+// 原地改写 provider 物品后调用；`out_changed` 报告 descriptor 是否实际变化。
+bool sync_item_descriptor_from_object_locked(int bag, int slot, void* item,
+                                             bool* out_changed = nullptr);
 void* load_item_payload_locked(const uint8_t* payload, int payload_size, const char* context);
 void generate_transaction_id_locked(char* out);
 bool txn_record_pending_locked(virtual_bag::TransactionContext* txn);

@@ -21,11 +21,13 @@ add_library(qol_plugin_extension_bag STATIC
     core/move_merge_hook.cpp
     core/tabs_ui.cpp
     core/orchestrator.cpp
+    core/item_descriptor_sync.cpp
     public/projection.cpp
     public/bridge.cpp
     core/bind.cpp
     api/api_impl.cpp
     api/bag_source.cpp
+    api/item_writeback.cpp
     usecases/item.cpp
     usecases/move.cpp
     usecases/set_bag_count.cpp

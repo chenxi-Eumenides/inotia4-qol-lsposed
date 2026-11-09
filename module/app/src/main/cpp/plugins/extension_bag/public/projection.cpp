@@ -380,21 +380,11 @@ bool apply_extension_material_to_slot_locked(
         return false;
     }
 
-    std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
-    int payload_size = 0;
-    if (!serialize_item_payload_locked(target_item, &payload, &payload_size)) {
+    if (!sync_item_descriptor_from_object_locked(dst_bag, dst_slot, target_item)) {
         VIRTBAG_LOG("apply reject reason=target_payload_sync_failed kind=%s equip=%p material=%p",
                     kind, target_item, material);
         return false;
     }
-    virtual_bag::Item& target_descriptor = ::qol::extension_bag::access::bag().items[dst_bag][dst_slot];
-    target_descriptor.payload = payload;
-    target_descriptor.payload_size = payload_size;
-    // descriptor.count 恒为 canonical（R-38/R-48；getter 关闭态只返回 b 视图）。
-    if (read_item_cumulate_count(target_item, &target_descriptor.count)) {
-        target_descriptor.count = static_cast<int>(virtual_bag_canonical_count(target_item, 1));
-    }
-    qol::extension_bag::ui_state().objects.module_object_hashes[dst_bag][dst_slot] = virtual_bag::payload_hash(target_descriptor);
     extension_bag_mark_dirty_locked();
     persist_state_locked();
     refresh_projected_module_view_after_move_locked();

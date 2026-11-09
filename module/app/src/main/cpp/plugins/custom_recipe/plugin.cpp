@@ -11,6 +11,7 @@
 #include "../../contracts/game_ports/custom_recipe_write_port.h"
 #include "../../contracts/game_ports/recipe_table_port.h"
 #include "../../contracts/inventory_action.h"
+#include "../../contracts/inventory_item_writeback.h"
 #include "../../contracts/inventory_slot.h"
 #include "../../contracts/item_facts.h"
 #include "../../contracts/save_facts.h"
@@ -344,14 +345,19 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
     return ui::on_resource_ready(ctx, resource_id, backup);
 }
 
-// optional_requires=[attribute.quality, inventory.bag_source]：可选依赖缺失/失效只置 degraded，
-// 不级联停用。bag_source 缺失时扩展背包物品的扣料回退原版类别入口。
+// optional_requires=[attribute.quality, inventory.bag_source, inventory.item_writeback]：
+// 可选依赖缺失/失效只置 degraded，不级联停用。bag_source 缺失时扩展背包物品的扣料回退
+// 原版类别入口；item_writeback 缺失时升阶写入只落在游戏对象上，provider 权威存储不同步
+// （扩展袋物品会在移动/存档后回退）。
 const contracts::CapabilityRequirement kOptionalRequires[] = {
     {contracts::kAttributeQualityCapabilityId,
      QolVersionRange{static_cast<uint16_t>(contracts::kAttributeQualityVersionMajor),
                      static_cast<uint16_t>(contracts::kAttributeQualityVersionMinor)}},
     {contracts::kBagSourceCapabilityId,
      {contracts::kBagSourceVersion.major, contracts::kBagSourceVersion.minor}},
+    {contracts::kInventoryItemWritebackCapabilityId,
+     QolVersionRange{static_cast<uint16_t>(contracts::kInventoryItemWritebackVersionMajor),
+                     static_cast<uint16_t>(contracts::kInventoryItemWritebackVersionMinor)}},
 };
 
 const contracts::CapabilityRequirement kRequires[] = {
@@ -416,7 +422,8 @@ const contracts::PluginDescriptor& plugin_descriptor() {
         kPluginVersion,
         6, kRequires,  // requires=item.facts + craft.facts + save.facts + text_layer +
                        //           inventory.action + inventory.slot
-        2, kOptionalRequires,    // optional_requires=[attribute.quality, inventory.bag_source]
+        3, kOptionalRequires,    // optional_requires=[attribute.quality, inventory.bag_source,
+                                  //                    inventory.item_writeback]
         0, nullptr,              // provides=无（craft_result 内部化）
         claim_table.count, claim_table.items,  // resources=12 UI hooks + ownership
         0, nullptr,              // jni

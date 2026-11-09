@@ -19,6 +19,7 @@
 
 #include "../../../contracts/attribute_quality.h"
 #include "../../../contracts/events.h"
+#include "../../../contracts/inventory_item_writeback.h"
 #include "../../../contracts/plugin.h"
 #include "../model/catalog.h"
 #include "../model/rules.h"
@@ -274,6 +275,25 @@ QolResult require_attribute_quality_api(const contracts::AttributeQualityApi** o
     }
     *out_api = api;
     return contracts::ok();
+}
+
+// provider（扩展背包）物品在游戏侧被原地改写后，把新内容同步回 provider 的权威存储。
+// 能力缺失（纯原版物品/EB 未启用）即无操作；同步失败只记录，不回滚已完成的写入。
+void commit_provider_item_writeback(qol::contracts::QolItemHandle item) {
+    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return;
+    const void* iface = nullptr;
+    const QolResult required = g_sdk->capabilities.require(
+        contracts::kInventoryItemWritebackCapabilityId,
+        {contracts::kInventoryItemWritebackVersionMajor,
+         contracts::kInventoryItemWritebackVersionMinor},
+        &iface);
+    if (required.ok != kQolOk || iface == nullptr) return;
+    const auto* api = static_cast<const contracts::InventoryItemWritebackApi*>(iface);
+    if (api->commit_item == nullptr) return;
+    const QolResult committed = api->commit_item(item);
+    if (committed.ok != kQolOk) {
+        log_message(3, "make item writeback failed code=%d", committed.code);
+    }
 }
 
 QolResult query_jewel_quality(qol::contracts::QolItemHandle item,
@@ -1633,6 +1653,7 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
                         jewel_written.code);
             return 1;
         }
+        commit_provider_item_writeback(in->item);
         if (g_verify_log_budget.fetch_sub(1) > 0) {
             log_message(0, "make item tier-up type=%d value=%d->%d range=[%d,%d] target=%d", type,
                         value, new_value, range.min, range.max, tier_ordinal(target));
@@ -1743,6 +1764,7 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
                     option_written.code);
         return 1;
     }
+    commit_provider_item_writeback(in->item);
     if (g_verify_log_budget.fetch_sub(1) > 0) {
         log_message(0,
                     "make item equipment tier-up option_index=%u option_id=%d value=%d->%d "

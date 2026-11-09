@@ -34,7 +34,7 @@
 |---|---|
 | `provides` | 无。结果 API `result::CraftResultApi` 只在插件内部由 UI 子层调用。 |
 | `requires` | `item.facts` v3.6、`craft.facts` v1.0、`save.facts` v1.1、`text_layer` v1.0、`inventory.action` v3.3、`inventory.slot` v1.0（`plugin.cpp:359-378`）。 |
-| `optional_requires` | `attribute.quality` v2.0、`inventory.bag_source` v1.2；缺失/失效只置 degraded，前者只影响升阶路径，后者使扩展袋物品的扣料回退原版类别入口（`plugin.cpp:351-357`）。 |
+| `optional_requires` | `attribute.quality` v2.0、`inventory.bag_source` v1.2、`inventory.item_writeback` v1.0；缺失/失效只置 degraded，`attribute.quality` 只影响升阶路径，`inventory.bag_source` 使扩展袋物品的扣料回退原版类别入口，`inventory.item_writeback` 缺失时升阶写入只落在游戏对象上、provider 权威存储不同步（`plugin.cpp:349-359`）。 |
 | `ports` | 三条（`plugin.cpp:324-334`）：`QOL_PORT_CUSTOM_RECIPE_WRITE` v1.4、`QOL_PORT_CRAFT_UI_WRITE` v1.1、`QOL_PORT_RECIPE_TABLE` v1.0。 |
 | `resources` | 13 条：5 条核心 UI hook（required/fail-closed）+ 7 条装饰 UI hook（optional/fail-soft）+ 1 条 `own:RECIPEBASE_MIXTUREBASE`（required/fail-soft）。顺序即释放逆序，ownership 最后声明、最先释放。 |
 | `jni` / HTTP | 均为 0（`plugin.cpp:359-377`）。 |
@@ -227,6 +227,10 @@ H-05 补扣承担。
   不恒返回下界、不静默 clamp。
 - 装备写回只改第 `native_index` 条 type 0 节点的 int16 存储值，不重建 option 链表、不改
   宝石词条、不改附魔字段。
+- 写值成功后调用 `inventory.item_writeback.commit_item(item)`：若目标属于 provider（扩展背包），
+  provider 把物化对象的新内容同步回自己的权威存储；原版袋物品没有该 provider，调用是成功无操作。
+  能力缺失（旧 provider/独立部署）只降级为不通知；同步失败仅记录 `make item writeback failed`，
+  不回滚已完成的数值写入。
 
 ## 8. 状态与线程
 

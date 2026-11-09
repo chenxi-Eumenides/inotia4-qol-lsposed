@@ -26,7 +26,7 @@
 功能插件：提供可配置数量的扩展逻辑背包（设置页 choice 5–20，默认「关闭」；配置文件 `bagCount` 0–128）、原生风格页签、投影显示与 sidecar 持久化；同时兼容 C18L 的原生追加袋布局。
 
 - 插件 id `extension_bag`，版本 `0.1.0`（`plugin.cpp`）。
-- 对外能力：`inventory_refresh` 1.2（自 `core.item` 迁入）。数据面向 `inventory.bag_source` 注册 `QolBagSource` 1.1（space=2；注册面由 `core.inventory` 提供）；不再提供 `extension_bag` / `inventory.merge_projection` / `move_merge.control`。
+- 对外能力：`inventory_refresh` 1.2（自 `core.item` 迁入）、`inventory.item_writeback` 1.0（provider 物品被游戏侧原地改写后的权威存储回写）。数据面向 `inventory.bag_source` 注册 `QolBagSource` 1.1（space=2；注册面由 `core.inventory` 提供）；不再提供 `extension_bag` / `inventory.merge_projection` / `move_merge.control`。
 - HTTP：无。扩展袋数据查询与操作经 `core.item` 的库存面提供；EB 不拥有 HTTP 路由。
 - 持久化：`extensionbags.items` **v6**（v5/v4 自动迁移；`storedBagCount` 记录数据范围，active 数量来自全局配置）。
 - 设置：`extension_bag.bagCount` choice（5–20，默认「关闭」）取代原「额外背包」开关；插件 config 键 `bagCount`（0–128）是运行时权威值，设置页范围只是 UI 限制。
@@ -56,6 +56,7 @@
 | Equip UI hooks | `ui/equip_hooks.cpp` | `UIEquip_ButtonEquipExe`/`ButtonUnequipExe`/`OKConfirmUseItem`/`RefreshItemArea`/`EquipControlEventProc` 的三态分流与 backup 交付；`RefreshItemArea` backup 槽兼作 `inventory_refresh.call_original` trampoline |
 | Move merge wrapper | `core/move_merge_hook.cpp`、`core/move_merge.cpp` | `ptrslot:MOVE_MERGE_GOT` 事件分流（0x02 投影 drop / 0x04 原生合并 gate），`move_merge.drag_merge` feature 门控 |
 | inventory_refresh provider | `plugin.cpp`（capability 提供） | `inventory_refresh` 1.2：`call_original` 与 `update_shortcut_category`（owner=本插件，消费者经 capability 请求） |
+| Item writeback provider | `api/item_writeback.cpp` | `inventory.item_writeback` 1.0：游戏侧原地改写物化对象后，把新内容同步回 descriptor（payload/count/hash + dirty） |
 | Bag state / persistence | `runtime/`、sidecar participant | 扩展袋数据状态、sidecar v6 与对象物化 |
 | NativeTabLayout | `runtime/native_tab_layout.*` | C18 布局解析、reflow、命中、锚定 |
 | UI adapters | `ui/`、`runtime/` | 页签、输入、投影宿主与页面事件适配 |
@@ -182,6 +183,17 @@ kMaxRenderedExtensionBagTabs = 20; // UI 页签上限（4 列 × 5 行）
 - EB 不注册 HTTP 路由，也没有 typed command；扩展袋库存能力由 `core.item` 的库存接口提供。
 - `bagCount` 由设置页 choice 或配置文件 `bagCount` 修改，不提供 HTTP 修改入口。
 
+### 8.7 `inventory.item_writeback` 1.0（provider 物品回写）
+
+- 提供面：`contracts/inventory_item_writeback.h`；EB 在 `plugin.cpp` 声明 provide，实现在 `api/item_writeback.cpp`。
+- 语义：游戏侧代码经句柄原地改写 EB 物品的物化对象后（例如 `custom_recipe` 升阶直接写 jewel word / 原生词条），
+  调用 `commit_item(handle)`。EB 把物化对象重新序列化，更新对应槽的 `descriptor.payload`、canonical count 与
+  `module_object_hashes`，并在内容确实变化时标记 dirty；句柄不属于 EB 时返回成功且无操作。
+- 为什么需要：物化对象是显示/游戏逻辑载体，权威存储是 sidecar descriptor；只写对象会让后续
+  `export_item`/`import_item`（移动）和存档 capture 读回旧内容。已有的镶嵌/强化 `apply_stuff` 路径在
+  `public/projection.cpp` 内部做同样的同步；跨插件写入必须经本能力走同一语义。
+- 失败：序列化失败或槽 descriptor 无效返回 `kQolErrInternal`；调用方已完成的原地写入不回滚，只应记录日志。
+
 ## 9. 线程、锁与重入
 
 - `QolBagSource` 回调与 UI/显示 hook 在游戏主线程执行。
@@ -212,6 +224,7 @@ kMaxRenderedExtensionBagTabs = 20; // UI 页签上限（4 列 × 5 行）
 4. 布局或投影来源无法确认时 fail-closed。
 5. `QolBagSource` 回调与 UI 入口在主线程；跨线程查询由 `core.item` 快照承担。
 6. 容量/上限/槽数只从 catalog 取，业务代码不写死。
+7. 游戏侧原地改写 EB 物化对象后必须调用 `inventory.item_writeback.commit_item`；只改对象不回写 descriptor 会在移动/存档后回退。
 
 ## 13. 测试与验收
 

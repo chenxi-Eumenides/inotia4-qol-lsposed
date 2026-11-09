@@ -1,6 +1,8 @@
 #include "contracts/bag.h"
+#include "contracts/inventory_item_writeback.h"
 #include "plugins/extension_bag/api/api_impl.h"
 #include "plugins/extension_bag/api/bag_source.h"
+#include "plugins/extension_bag/api/item_writeback.h"
 #include "plugins/extension_bag/core/geometry.h"
 #include "plugins/extension_bag/core/item_display_hook.h"
 #include "plugins/extension_bag/core/lifecycle.h"
@@ -17,6 +19,7 @@
 #include "plugins/extension_bag/runtime/session.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/runtime/state_access.h"
 
 #include <array>
 #include <cstdio>
@@ -469,6 +472,29 @@ bool persist_state_locked(bool force) {
     return true;
 }
 
+std::array<uint8_t, virtual_bag::kSerializedItemBuffer> g_serialized_payload{};
+int g_serialized_payload_size = 0;
+
+bool serialize_item_payload_locked(
+    void* item, std::array<uint8_t, virtual_bag::kSerializedItemBuffer>* out, int* out_size) {
+    (void)item;
+    if (out == nullptr || out_size == nullptr || g_serialized_payload_size <= 0) return false;
+    *out = g_serialized_payload;
+    *out_size = g_serialized_payload_size;
+    return true;
+}
+
+bool read_item_cumulate_count(const void* item, int* out_count) {
+    (void)item;
+    (void)out_count;
+    return false;
+}
+
+uint32_t virtual_bag_canonical_count(const void* item, uint32_t fallback_canonical) {
+    (void)item;
+    return fallback_canonical;
+}
+
 const qol::contracts::QolExtensionBagWritePort* extension_bag_write_api() {
     return nullptr;
 }
@@ -686,6 +712,48 @@ void test_deferred_free_skips_game_owned_and_clears_on_load() {
     CHECK(deferred_free_pending_count_locked() == 0);
 }
 
+void test_provider_item_writeback_syncs_descriptor_from_object() {
+    reset_fixture();
+    static int item_object = 0;
+    auto& bag = ::qol::extension_bag::access::bag();
+    bag.items[0][2] = make_item(65, 1);
+    auto& objects = qol::extension_bag::ui_state().objects;
+    objects.module_objects[0][2] = &item_object;
+    objects.module_object_categories[0][2] = 65;
+    objects.module_object_hashes[0][2] = virtual_bag::payload_hash(bag.items[0][2]);
+    g_handle_item = &item_object;
+    g_public_handle = qol::contracts::QolItemHandle{41, 19};
+
+    // 模拟游戏侧原地改写物化对象后，序列化结果与 descriptor 不同。
+    g_serialized_payload = bag.items[0][2].payload;
+    g_serialized_payload_size = bag.items[0][2].payload_size;
+    g_serialized_payload[3] ^= 0x5a;
+    runtime_state().persistence.dirty = false;
+
+    const QolResult committed =
+        qol::features::extension_bag::kInventoryItemWritebackApi.commit_item(g_public_handle);
+    CHECK(committed.ok == kQolOk);
+    CHECK(bag.items[0][2].payload == g_serialized_payload);
+    CHECK(bag.items[0][2].payload_size == g_serialized_payload_size);
+    CHECK(objects.module_object_hashes[0][2] ==
+          virtual_bag::payload_hash(bag.items[0][2]));
+    CHECK(runtime_state().persistence.dirty);
+
+    // 内容未变化时不制造新的 revision。
+    runtime_state().persistence.dirty = false;
+    const QolResult unchanged =
+        qol::features::extension_bag::kInventoryItemWritebackApi.commit_item(g_public_handle);
+    CHECK(unchanged.ok == kQolOk);
+    CHECK(!runtime_state().persistence.dirty);
+
+    // 非本 provider 的句柄：成功无操作。
+    g_handle_item = nullptr;
+    const QolResult foreign =
+        qol::features::extension_bag::kInventoryItemWritebackApi.commit_item({7, 3});
+    CHECK(foreign.ok == kQolOk);
+    CHECK(g_persist_calls == 0);
+}
+
 int main() {
     test_free_rejection_preserves_slot_and_active_use_custody();
     test_materialize_rejection_restores_empty_descriptor_and_handle_state();
@@ -694,6 +762,7 @@ int main() {
     test_import_merges_same_identity_into_occupied_slot();
     test_import_different_payload_conflicts_without_write();
     test_import_non_stackable_category_never_merges();
+    test_provider_item_writeback_syncs_descriptor_from_object();
     std::printf("extension_bag_bag_source_mutation: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
