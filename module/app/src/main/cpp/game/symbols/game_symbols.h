@@ -480,6 +480,7 @@ constexpr size_t CB_SIZE = 0x78;             // 按钮私有数据总大小
 
 // ---- 函数 VMA ----
 constexpr uintptr_t F_CHAR_ACT_M_DD_VMA = 0xede88; // CHAR_Act_M_DD：怪物伤害公式函数入口
+constexpr uintptr_t F_CHAR_ACT_DD_VMA = 0xeef80; // CHAR_Act_DD：角色动作伤害结算入口
 constexpr uintptr_t F_CHAR_ACT_M_DD_WRAP_A_VMA = 0xee06c;
 constexpr uintptr_t F_CHAR_ACT_M_DD_WRAP_A_RET_VMA = 0xee080;
 constexpr uintptr_t F_CHAR_ACT_M_DD_WRAP_B_VMA = 0xee1a8;
@@ -493,7 +494,7 @@ constexpr uintptr_t F_GET_ATTR_VMA = 0xdfd18;        // int32 (void*, int)
 // libgame.so dynsym 在 c18/c18-v514/c18-v520/monster/overhaul 中同名同 VMA；入口 ABI 均核对一致。
 constexpr uintptr_t F_CHAR_GET_NORMAL_DAMAGE_VMA = 0xe0bd0; // int (void* ch)，attr5(+attr109 if attr106>0)+1000 × attr4 / 1000；8位乘回绕点，damage_widen 一期替换
 constexpr uintptr_t F_CHAR_GET_NORMAL_MAGIC_DAMAGE_VMA = 0xe0c54; // int (void* ch)，(attr9+1000) × attr8 / 1000
-constexpr uintptr_t F_CHAR_GET_CRITICAL_DAMAGE_VMA = 0xe0768; // int (void* unused, void* ch, int32 damage)，首参保存后未使用；damage+damage×(attr3+max(1000-attr2,0))/1000
+constexpr uintptr_t F_CHAR_GET_CRITICAL_DAMAGE_VMA = 0xe0768; // int (void* attacker, void* defender, int32 damage)：attr2（暴抗）取自 defender，attr3（暴伤增伤）取自 attacker；damage+damage×(attr3+max(1000-attr2,0))/1000
 constexpr uintptr_t F_CHAR_CALC_MAGICAL_DEFENSE_VMA = 0xe0910; // int (void* unused, void* defender, int32 damage)，首参未使用；damage×(1000-attr11)/1000
 constexpr uintptr_t F_CHAR_CALC_PHYSICAL_DEFENSE_VMA = 0xe07d8; // int (void* unused, void* defender, int32 damage)，动态 CAL 物防公式
 constexpr uintptr_t F_GET_EQUIP_VMA = 0xda20c;       // void* (void*, int)

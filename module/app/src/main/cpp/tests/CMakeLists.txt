@@ -758,6 +758,16 @@ target_compile_definitions(insn_patch_tests PRIVATE QOL_INSN_PATCH_TEST_SEAMS=1
                                                     QOL_CALL_PATCH_TEST_SEAMS=1)
 add_test(NAME insn_patch_tests COMMAND insn_patch_tests)
 
+# damage_widen 暴击 wrapper：attr2 来自 defender、attr3 来自 attacker，防止再次混用同一角色。
+add_executable(damage_widen_critical_tests
+    test_damage_widen_critical.cpp
+)
+target_include_directories(damage_widen_critical_tests PRIVATE ${CPP_DIR})
+target_compile_features(damage_widen_critical_tests PRIVATE cxx_std_17)
+set_target_properties(damage_widen_critical_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME damage_widen_critical_tests COMMAND damage_widen_critical_tests)
+
 # P2 纵向样板基础层：infra 配置与命令端口 host 测试（末尾追加）
 add_executable(infra_config_commands_tests
     test_infra_config_commands.cpp
