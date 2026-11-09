@@ -72,8 +72,10 @@ CURATION = {
 }
 
 # v28 and v29 ship the same libgame.so; retain the existing v29 runtime label.
+# v603 共存版与顶层 v603 共用同一 libgame.so；保留顶层 v603 的运行时标签。
 PREFERRED_DUPLICATE_SOURCE = {
     "4c332e9b508b35fe1e97f1f26e56f04d": "apk/game-apk/艾诺迪亚4_monster_v29.apk",
+    "a95491dc78e0213d621136eb04aac36e": "apk/game-apk/艾诺迪亚4_C18L_v603.apk",
 }
 
 # Preserve established runtime labels after the source APKs were renamed.
@@ -103,12 +105,14 @@ EXCLUDED_SOURCES = {
 # 文件名解析
 # ---------------------------------------------------------------------------
 def parse_series(name: str) -> str:
-    """系列：monster / c18 / overhaul(盗版大修) / original(原版) / unknown。"""
+    """系列：monster / c18 / fantasy(幻想) / overhaul(盗版大修) / original(原版) / unknown。"""
     lower = name.lower()
     if "monster" in lower:
         return "monster"
     if "c18" in lower:
         return "c18"
+    if "幻想" in name:
+        return "fantasy"
     if "盗版大修" in name:
         return "overhaul"
     if "原版" in name:
@@ -247,7 +251,7 @@ def collect() -> tuple[list[dict], list[str]]:
     return entries, sources
 
 
-SERIES_ORDER = {"original": 0, "overhaul": 1, "monster": 2, "c18": 3, "unknown": 4}
+SERIES_ORDER = {"original": 0, "overhaul": 1, "monster": 2, "c18": 3, "fantasy": 4, "unknown": 5}
 
 
 def md5_bytes_literal(hex32: str) -> str:
@@ -265,7 +269,7 @@ def render(entries: list[dict], sources: list[str]) -> str:
     for src in sources:
         lines.append(f"//   {src}")
     lines.append("//")
-    lines.append("// 排序：系列(original/overhaul/monster/unknown) → 版本标签 → md5")
+    lines.append("// 排序：系列(original/overhaul/monster/c18/fantasy/unknown) → 版本标签 → md5")
     lines.append("// 能力位：bit0 kCapHiddenSegment / bit1 kCapWarehouse / bit2 kCapWarehouseInline / bit3 kCapC18NativeBagLayoutCandidate")
     lines.append("// 条目为 qol::GameVariant 聚合初始化；known 由运行时命中后置位。")
     lines.append("")

@@ -5,6 +5,7 @@
 //   apk/game-apk/艾诺迪亚4_C18L_v603.apk
 //   apk/game-apk/艾诺迪亚4_monster_v29.apk
 //   apk/game-apk/艾诺迪亚4_原版_v1.3.2.apk
+//   apk/game-apk/艾诺迪亚4_幻想_v1.2.apk
 //   apk/game-apk/艾诺迪亚4_盗版大修_v0810.apk
 //   apk/game-apk/history/艾诺迪亚4_C18L_v507.apk
 //   apk/game-apk/history/艾诺迪亚4_C18L_v508.apk
@@ -15,6 +16,7 @@
 //   apk/game-apk/history/艾诺迪亚4_C18L_v586.apk
 //   apk/game-apk/history/艾诺迪亚4_C18L_v588.apk
 //   apk/game-apk/history/艾诺迪亚4_C18L_v589.apk
+//   apk/game-apk/history/艾诺迪亚4_C18L_v603_共存版.apk
 //   apk/game-apk/history/艾诺迪亚4_C18_v0.2.apk
 //   apk/game-apk/history/艾诺迪亚4_C18_v0.38b.apk
 //   apk/game-apk/history/艾诺迪亚4_monster_v19.apk
@@ -40,7 +42,7 @@
 //   apk/game-apk/history/艾诺迪亚4_魔法使_v1.2.9.apk
 //   apk/game-apk/history/艾诺迪亚4_原版_v1.4.0.xapk
 //
-// 排序：系列(original/overhaul/monster/unknown) → 版本标签 → md5
+// 排序：系列(original/overhaul/monster/c18/fantasy/unknown) → 版本标签 → md5
 // 能力位：bit0 kCapHiddenSegment / bit1 kCapWarehouse / bit2 kCapWarehouseInline / bit3 kCapC18NativeBagLayoutCandidate
 // 条目为 qol::GameVariant 聚合初始化；known 由运行时命中后置位。
 
@@ -79,6 +81,7 @@ static const GameVariant kGameVariantTable[] = {
     {GameSeries::kC18, "v588", 0x00000008u, {0x7a, 0x4c, 0x3e, 0xbd, 0x52, 0x4b, 0x7c, 0xbc, 0xc7, 0x84, 0xaa, 0x08, 0x4b, 0x91, 0x22, 0x21}},
     {GameSeries::kC18, "v589", 0x00000008u, {0x1b, 0x0c, 0x1b, 0x02, 0x2c, 0xaf, 0xf0, 0xe4, 0x29, 0xaa, 0x08, 0xd8, 0xb3, 0x89, 0x02, 0x8a}},
     {GameSeries::kC18, "v603", 0x00000008u, {0xa9, 0x54, 0x91, 0xdc, 0x78, 0xe0, 0x21, 0x3d, 0x62, 0x11, 0x36, 0xeb, 0x04, 0xaa, 0xc3, 0x6e}},
+    {GameSeries::kFantasy, "v1.2", 0x00000001u, {0x86, 0x9a, 0x34, 0x8a, 0x2a, 0xdd, 0x56, 0x33, 0x29, 0x64, 0x25, 0xfa, 0x75, 0xe1, 0x5c, 0xe2}},
 };
 
 static const size_t kGameVariantTableSize =

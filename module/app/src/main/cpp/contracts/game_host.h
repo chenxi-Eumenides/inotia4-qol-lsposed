@@ -182,7 +182,7 @@ struct QolItemAbiDispatchApi {
 
 // 游戏身份只读面（v2.4 尾追加）：设置页展示用；字符串为静态存储或进程内有效。
 struct QolGameIdentity {
-    const char* series_name;    // "unknown"/"original"/"overhaul"/"monster"/"c18"
+    const char* series_name;    // "unknown"/"original"/"overhaul"/"monster"/"c18"/"fantasy"
     const char* version_label;  // 变体表静态标签，可能为空串
     const char* game_version_name;  // 宿主游戏 APK versionName；未下发为 nullptr
     const char* android_release;    // 宿主 Android 版本（Build.VERSION.RELEASE）；未下发为 nullptr

@@ -82,7 +82,7 @@ bool read_state(int* out) {
 }
 
 // 变体序列经既有插件面接口 QolGameHost.target.query_variant 读取；id 为 GameSeries
-// 序数（0=Unknown、1=Original、2=Overhaul、3=Monster、4=C18，见 game_host_port.cpp
+// 序数（0=Unknown、1=Original、2=Overhaul、3=Monster、4=C18、5=Fantasy，见 game_host_port.cpp
 // game_query_variant）。接口缺失或读取失败按 Unknown 处理。
 bool read_series(int* out) {
     const auto* game = qol::features::world_teleport::game_host();
@@ -230,7 +230,7 @@ void open_choice_panel() {
                 record_count, max_map_id, current_id);
 
     // 选择面板统一；回调按变体分流：monster/大修走确认与扣费，c18/原版/未知免费直传。
-    // QolTargetVariant.id = GameSeries 序数（0=Unknown、1=Original、2=Overhaul、3=Monster、4=C18）。
+    // QolTargetVariant.id = GameSeries 序数（0=Unknown、1=Original、2=Overhaul、3=Monster、4=C18、5=Fantasy）。
     constexpr int kSeriesOverhaul = 2;
     constexpr int kSeriesMonster = 3;
     int series = 0;

@@ -13,7 +13,7 @@ usage() {
             -> 集成 Inotia4_<name>_<version>_<debug|release>_<lspatch|npatch>.apk；
   release 模块在通道段后追加模块版本号：
             -> Inotia4_<name>_<version>_release_<模块版本>_<lspatch|npatch>.apk。
-  <name> 变体映射：原版->Original、大修->Overhaul、monster->Monster、C18L->C18L、C18->C18；
+  <name> 变体映射：原版->Original、大修->Overhaul、monster->Monster、C18L->C18L、C18->C18、幻想->Fantasy；
   <version> 从原始 APK 文件名透传（如 v507、v29、v1.3.2）；
   <debug|release> 取模块 APK 文件名中的构建通道（..._debug_... / ..._release_...）；
   <lspatch|npatch> 取所用 JAR（JAR 文件名含 npatch 即 NPatch，否则 LSPatch；当前默认 LSPatch）。
@@ -213,12 +213,14 @@ fi
 #     艾诺迪亚4_monster_v29.apk   -> Inotia4_Monster_v29
 #     艾诺迪亚4_原版_v1.3.2.apk    -> Inotia4_Original_v1.3.2
 #     艾诺迪亚4_盗版大修_v0810.apk -> Inotia4_Overhaul_v0810
+#     艾诺迪亚4_幻想_v1.2.apk      -> Inotia4_Fantasy_v1.2
 #   <version> 取尾部 v 开头的版本号原样透传；变体未登记或无版本号则失败。
 release_stem() {
     local stem=$1 name=
     case "$stem" in
         *C18L*) name=C18L ;;
         *C18*) name=C18 ;;
+        *幻想*) name=Fantasy ;;
         *大修*) name=Overhaul ;;
         *原版*) name=Original ;;
         *[Mm][Oo][Nn][Ss][Tt][Ee][Rr]*) name=Monster ;;
@@ -270,6 +272,7 @@ for target_apk in "${game_apks[@]}"; do
         case "$target_name" in
             *[Mm][Oo][Nn][Ss][Tt][Ee][Rr]*) patch_name='艾4QoL(monster)' ;;
             *原版*) patch_name='艾4QoL(original)' ;;
+            *幻想*) patch_name='艾4QoL(fantasy)' ;;
             *盗版大修*) patch_name='艾4QoL(overhaul)' ;;
             *C18*) patch_name='艾4QoL(c18)' ;;
             *) patch_name='艾4QoL' ;;

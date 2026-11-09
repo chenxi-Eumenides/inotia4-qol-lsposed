@@ -1106,7 +1106,7 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 
 **返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；成功 result 为 `{"ok":true,"price":N,"slots":[…],"money":N}`，包含变化槽差量和更新后的金币，不含完整 Inventory。
 
-**注意**：空槽→`slot empty`；任务袋 `(space=0, bag=5)` 拒绝；倍率按游戏变体：original/unknown 0%、overhaul/monster 70%、c18 85%。原价（100%）仅用于商店手动出售，不用于本 API。
+**注意**：空槽→`slot empty`；任务袋 `(space=0, bag=5)` 拒绝；倍率按游戏变体：original/unknown/fantasy 0%、overhaul/monster 70%、c18 85%。原价（100%）仅用于商店手动出售，不用于本 API。
 
 #### 穿装备
 
@@ -1420,7 +1420,7 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 - `ok`：服务存活，恒为 `true`（原有字段，语义不变）。
 - `ready`：native 侧 `NativeBridge.ready`。该端点经 `ControllerGuard` 校验后就绪才返回 200，因此成功响应中恒为 `true`，属诚实上报。
 - `variant`：当前 libgame.so 的变体查表结果（`{"series","version","known","capabilities"}`）。
-  - `series`：`unknown` / `original` / `overhaul` / `monster` / `c18`。
+  - `series`：`unknown` / `original` / `overhaul` / `monster` / `c18` / `fantasy`。
   - `version`：变体表内静态版本标签，可能为空串 `""`。
   - `known`：是否命中变体表。
   - `capabilities`：能力位十进制整数（bit0 隐藏段、bit1 WH4JRN01 仓库容器、bit2 内嵌 WH96v002 仓库段）。

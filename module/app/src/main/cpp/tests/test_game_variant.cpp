@@ -97,6 +97,20 @@ static void test_lookup_c18_entry() {
     }
 }
 
+static void test_lookup_fantasy_entry() {
+    // 幻想 v1.2 的实算 md5（有隐藏可执行段，无 WH4JRN01、无 C18 标记）。
+    const uint8_t md5[16] = {0x86, 0x9a, 0x34, 0x8a, 0x2a, 0xdd, 0x56, 0x33,
+                             0x29, 0x64, 0x25, 0xfa, 0x75, 0xe1, 0x5c, 0xe2};
+    const qol::GameVariant* hit = qol::game_variant_detail::lookup(md5);
+    CHECK(hit != nullptr);
+    if (hit != nullptr) {
+        CHECK(hit->series == qol::GameSeries::kFantasy);
+        CHECK(std::strcmp(hit->version_label, "v1.2") == 0);
+        CHECK((hit->capabilities & qol::kCapHiddenSegment) != 0);
+        CHECK((hit->capabilities & qol::kCapWarehouse) == 0);
+    }
+}
+
 static void check_c18_native_bag_layout_candidate(const uint8_t md5[16],
                                                   const char* version_label,
                                                   bool expected) {
@@ -328,6 +342,7 @@ static void test_series_names() {
     CHECK(std::strcmp(qol::game_series_name(qol::GameSeries::kOverhaul), "overhaul") == 0);
     CHECK(std::strcmp(qol::game_series_name(qol::GameSeries::kMonster), "monster") == 0);
     CHECK(std::strcmp(qol::game_series_name(qol::GameSeries::kC18), "c18") == 0);
+    CHECK(std::strcmp(qol::game_series_name(qol::GameSeries::kFantasy), "fantasy") == 0);
 }
 
 static void test_sell_multipliers() {
@@ -341,6 +356,7 @@ static void test_sell_multipliers() {
         {qol::GameSeries::kOverhaul, 7, 10},
         {qol::GameSeries::kMonster, 7, 10},
         {qol::GameSeries::kC18, 17, 20},
+        {qol::GameSeries::kFantasy, 0, 10},
         {qol::GameSeries::kUnknown, 0, 10},
     };
     for (const Expected& expected : kDetail) {
@@ -371,6 +387,7 @@ int main() {
     test_md5_hex_equals();
     test_lookup_real_entry();
     test_lookup_c18_entry();
+    test_lookup_fantasy_entry();
     test_lookup_c18_native_bag_layout_candidate();
     test_c18_signature_detection_and_unknown_fallback();
     test_runtime_mapping_fixture_filters_and_table_authority();

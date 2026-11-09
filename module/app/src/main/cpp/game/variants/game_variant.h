@@ -16,10 +16,11 @@ enum class GameSeries : uint8_t {
     kOverhaul,
     kMonster,
     kC18,
+    kFantasy,
 };
 
 enum : uint32_t {
-    kCapHiddenSegment   = 1u << 0,  // 存在隐藏可执行 PT_LOAD 段（monster 注入段）
+    kCapHiddenSegment   = 1u << 0,  // 存在隐藏可执行 PT_LOAD 段（monster/幻想等改版注入段）
     kCapWarehouse       = 1u << 1,  // 隐藏段内含 ASCII WH4JRN01（wh4 仓库容器）
     kCapWarehouseInline = 1u << 2,  // block3 内嵌 WH96v002 仓库段（语义位，未验证为 0）
     kCapC18NativeBagLayoutCandidate = 1u << 3,  // C18 背包布局候选；最终准入仍需 2×5 拓扑校验
@@ -40,7 +41,7 @@ const GameVariant& game_variant();
 // C18L v507+ 的 MakeJewel 用表驱动宝石数值（0x14ee68）；旧 C18 仍走 CAL 公式。
 bool c18_gem_table_supported(const GameVariant& variant);
 bool c18_gem_table_available();
-// "unknown" / "original" / "overhaul" / "monster" / "c18"
+// "unknown" / "original" / "overhaul" / "monster" / "c18" / "fantasy"
 const char* game_series_name(GameSeries s);
 bool sell_multiplier(GameSeries series, uint32_t sale_path, uint32_t* num, uint32_t* den);
 

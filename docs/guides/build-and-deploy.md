@@ -92,13 +92,13 @@ scripts/build-release.sh -PtargetPackages=com.com2us.inotia4.normal.freefull.goo
 # 用法：scripts/patch-apk.sh [选项] <模块 APK>
 # 脚本遍历 apk/game-apk/ 下的每个 .apk（不含 history/ 子目录），逐个生成
 # output/Inotia4_<变体>_<游戏版本>_<debug|release>[_<模块版本>]_<lspatch|npatch>.apk；
-# 变体固定映射：Original / Overhaul / Monster / C18 / C18L；游戏版本取源 APK 文件名尾部 v<...>。
+# 变体固定映射：Original / Overhaul / Monster / C18 / C18L / Fantasy；游戏版本取源 APK 文件名尾部 v<...>。
 # <模块版本> 仅 release 模块 APK 追加，取自 ..._release_vX.Y.Z.apk 文件名；debug 包不追加。
 scripts/patch-apk.sh <模块.apk>
 # 生成前删除 output/ 下当前集成工具的旧产物（Inotia4_*_<lspatch|npatch>.apk）再重新生成，不做按版本比对；
 # 模块包（小写 inotia4_qol_lsposed_* 前缀）与非 APK 文件不匹配该 glob，原样保留。
 # 默认用 AOSP 公开 testkey（scripts/keys/aosp-testkey.bks，已入库）签名输出：
-#   - 改版（盗版大修 / monster）本就由该 testkey 签名，集成版与其证书身份一致，可覆盖安装；
+#   - 改版（盗版大修 / monster / 幻想）本就由该 testkey 签名，集成版与其证书身份一致，可覆盖安装；
 #   - 原版由 Com2us 私钥签名（私钥不可得），集成版签名身份仍与原版不同，需先卸载原版。
 # 指定其它集成 JAR（JAR 文件名含 npatch 即按 NPatch 输出 _npatch）：
 scripts/patch-apk.sh --lspatch-jar /path/to/lspatch-v1.2-release.jar <模块.apk>
@@ -183,6 +183,7 @@ curl -s http://<设备IP>:8088/api/ui/state
    - 大修版：`Inotia4_Overhaul_<游戏版本>_release_v<模块版本>_lspatch.apk`
    - monster 版：`Inotia4_Monster_<游戏版本>_release_v<模块版本>_lspatch.apk`
    - C18 / C18L 版：`Inotia4_C18_<游戏版本>_release_v<模块版本>_lspatch.apk`（变体名与游戏版本均取自源 APK 文件名）
+   - 幻想版：`Inotia4_Fantasy_<游戏版本>_release_v<模块版本>_lspatch.apk`
    - 示例（模块 `v0.7.14`）：`Inotia4_Original_v1.3.2_release_v0.7.14_lspatch.apk`、
      `Inotia4_Overhaul_v0810_release_v0.7.14_lspatch.apk`、`Inotia4_Monster_v29_release_v0.7.14_lspatch.apk`
 4. **生成 release 说明文本并交用户确认**：整理覆盖「上一个版本 → 当前版本」的全部改动（新增 / 优化 /

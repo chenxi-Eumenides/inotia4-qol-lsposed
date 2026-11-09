@@ -397,6 +397,7 @@ const char* game_series_name(GameSeries s) {
         case GameSeries::kOverhaul: return "overhaul";
         case GameSeries::kMonster: return "monster";
         case GameSeries::kC18: return "c18";
+        case GameSeries::kFantasy: return "fantasy";
     }
     return "unknown";
 }
@@ -432,6 +433,7 @@ bool sell_multiplier(GameSeries series, uint32_t sale_path, uint32_t* num, uint3
     switch (series) {
         case GameSeries::kOriginal:
         case GameSeries::kUnknown:
+        case GameSeries::kFantasy:
             *num = 0;
             return true;
         case GameSeries::kOverhaul:
