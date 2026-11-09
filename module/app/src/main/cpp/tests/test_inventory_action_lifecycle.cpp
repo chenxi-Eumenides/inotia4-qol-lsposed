@@ -311,11 +311,17 @@ QolResult fake_transfer_locate(int32_t space, QolItemHandle item, QolBagRef* out
     return fail(kQolErrNotFound, "item not located");
 }
 
+QolResult fake_transfer_replace(QolItemHandle, const QolBagTransfer*,
+                                QolBagMutationResult*) {
+    return fail(kQolErrUnsupported, "unused replace");
+}
+
 const QolInventoryTransferApi g_transfer_api{
     sizeof(QolInventoryTransferApi),
     &fake_transfer_move,
     &fake_transfer_serialize,
     &fake_transfer_locate,
+    &fake_transfer_replace,
 };
 
 QolResult fake_capability_require(const char* id, QolVersionRange, const void** out) {

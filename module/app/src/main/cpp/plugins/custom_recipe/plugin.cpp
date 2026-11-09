@@ -11,9 +11,10 @@
 #include "../../contracts/game_ports/custom_recipe_write_port.h"
 #include "../../contracts/game_ports/recipe_table_port.h"
 #include "../../contracts/inventory_action.h"
-#include "../../contracts/inventory_item_writeback.h"
 #include "../../contracts/inventory_slot.h"
+#include "../../contracts/inventory_transfer.h"
 #include "../../contracts/item_facts.h"
+#include "../../contracts/item_payload.h"
 #include "../../contracts/save_facts.h"
 #include "../../contracts/text_layer.h"
 #include "../../contracts/version.h"
@@ -124,8 +125,7 @@ bool recipe_write_port_ready(const contracts::QolCustomRecipeWritePort* port) {
     }
     return port->write_stuff_need != nullptr && port->set_stuff_item != nullptr &&
            port->description_set_off != nullptr && port->read_jewel_word != nullptr &&
-           port->write_jewel_word != nullptr && port->set_max_socket_enchant != nullptr &&
-           port->random_inclusive != nullptr && port->write_native_option_value != nullptr;
+           port->random_inclusive != nullptr;
 }
 
 bool table_port_ready(const contracts::QolRecipeTablePort* port) {
@@ -215,6 +215,29 @@ int plugin_install(contracts::PluginContext& ctx) {
 
     iface = nullptr;
     if (!contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kItemPayloadCapabilityId,
+            {contracts::kItemPayloadVersionMajor, contracts::kItemPayloadVersionMinor}, &iface)) ||
+        iface == nullptr ||
+        !contracts::item_payload_api_valid(static_cast<const contracts::ItemPayloadApi*>(iface))) {
+        return 1;
+    }
+    const auto* item_payload = static_cast<const contracts::ItemPayloadApi*>(iface);
+
+    iface = nullptr;
+    if (!contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kInventoryTransferCapabilityId,
+            {contracts::kInventoryTransferVersion.major, contracts::kInventoryTransferVersion.minor},
+            &iface)) ||
+        iface == nullptr ||
+        !contracts::qol_inventory_transfer_api_valid(
+            static_cast<const contracts::QolInventoryTransferApi*>(iface))) {
+        return 1;
+    }
+    const auto* inventory_transfer =
+        static_cast<const contracts::QolInventoryTransferApi*>(iface);
+
+    iface = nullptr;
+    if (!contracts::succeeded(ctx.sdk->capabilities.require(
             contracts::kInventorySlotCapabilityId,
             {contracts::kInventorySlotVersion.major, contracts::kInventorySlotVersion.minor},
             &iface)) ||
@@ -275,6 +298,8 @@ int plugin_install(contracts::PluginContext& ctx) {
     set_write_port(recipe_write_port);
     set_inventory_action(inventory_action);
     set_inventory_slot(inventory_slot);
+    set_item_payload(item_payload);
+    set_inventory_transfer(inventory_transfer);
     set_bag_source_registry(bag_source_registry);
     ::custom_recipe::table_bind_port(table_port);
     set_context(ctx);
@@ -305,6 +330,8 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     set_write_port(nullptr);
     set_inventory_action(nullptr);
     set_inventory_slot(nullptr);
+    set_item_payload(nullptr);
+    set_inventory_transfer(nullptr);
     set_bag_source_registry(nullptr);
     ::custom_recipe::custom_recipe_table_deactivate();
     ::custom_recipe::table_bind_port(nullptr);
@@ -345,19 +372,15 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
     return ui::on_resource_ready(ctx, resource_id, backup);
 }
 
-// optional_requires=[attribute.quality, inventory.bag_source, inventory.item_writeback]：
+// optional_requires=[attribute.quality, inventory.bag_source]：
 // 可选依赖缺失/失效只置 degraded，不级联停用。bag_source 缺失时扩展背包物品的扣料回退
-// 原版类别入口；item_writeback 缺失时升阶写入只落在游戏对象上，provider 权威存储不同步
-// （扩展袋物品会在移动/存档后回退）。
+// 原版类别入口。
 const contracts::CapabilityRequirement kOptionalRequires[] = {
     {contracts::kAttributeQualityCapabilityId,
      QolVersionRange{static_cast<uint16_t>(contracts::kAttributeQualityVersionMajor),
                      static_cast<uint16_t>(contracts::kAttributeQualityVersionMinor)}},
     {contracts::kBagSourceCapabilityId,
      {contracts::kBagSourceVersion.major, contracts::kBagSourceVersion.minor}},
-    {contracts::kInventoryItemWritebackCapabilityId,
-     QolVersionRange{static_cast<uint16_t>(contracts::kInventoryItemWritebackVersionMajor),
-                     static_cast<uint16_t>(contracts::kInventoryItemWritebackVersionMinor)}},
 };
 
 const contracts::CapabilityRequirement kRequires[] = {
@@ -378,6 +401,11 @@ const contracts::CapabilityRequirement kRequires[] = {
      {contracts::kInventoryActionVersionMajor, contracts::kInventoryActionVersionMinor}},
     {contracts::kInventorySlotCapabilityId,
      {contracts::kInventorySlotVersion.major, contracts::kInventorySlotVersion.minor}},
+    // 升阶/产物配置：payload 生成并原地写对象 + provider 权威副本提交。
+    {contracts::kItemPayloadCapabilityId,
+     {contracts::kItemPayloadVersionMajor, contracts::kItemPayloadVersionMinor}},
+    {contracts::kInventoryTransferCapabilityId,
+     {contracts::kInventoryTransferVersion.major, contracts::kInventoryTransferVersion.minor}},
 };
 
 // 两条写端口 + 一条表槽位端口：custom recipe 结果/材料写面、UIMix 控件写面、RECIPEBASE/
@@ -420,10 +448,10 @@ const contracts::PluginDescriptor& plugin_descriptor() {
     static const contracts::PluginDescriptor descriptor = {
         kPluginId,
         kPluginVersion,
-        6, kRequires,  // requires=item.facts + craft.facts + save.facts + text_layer +
-                       //           inventory.action + inventory.slot
-        3, kOptionalRequires,    // optional_requires=[attribute.quality, inventory.bag_source,
-                                  //                    inventory.item_writeback]
+        8, kRequires,  // requires=item.facts + craft.facts + save.facts + text_layer +
+                       //           inventory.action + inventory.slot + item.payload +
+                       //           inventory.transfer
+        2, kOptionalRequires,    // optional_requires=[attribute.quality, inventory.bag_source]
         0, nullptr,              // provides=无（craft_result 内部化）
         claim_table.count, claim_table.items,  // resources=12 UI hooks + ownership
         0, nullptr,              // jni

@@ -47,5 +47,8 @@ QolResult put_jewel_handles(int32_t role, contracts::QolItemHandle equip_item,
                             contracts::QolItemInventoryStateWriteResult* out);
 // 按 category 删除单件（原版袋经 fn_remove_item 指针路径；扩展袋经中立 provider）。
 QolResult remove_item(int32_t category, contracts::QolItemInventoryStateWriteResult* out);
+// v2.5 payload 字段写入。
+QolResult apply_payload_mutation(contracts::QolItemHandle item,
+                                 const contracts::QolItemPayloadMutation* mutation);
 
 }  // namespace qol::game::ops

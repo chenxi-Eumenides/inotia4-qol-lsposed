@@ -27,7 +27,6 @@ add_library(qol_plugin_extension_bag STATIC
     core/bind.cpp
     api/api_impl.cpp
     api/bag_source.cpp
-    api/item_writeback.cpp
     usecases/item.cpp
     usecases/move.cpp
     usecases/set_bag_count.cpp

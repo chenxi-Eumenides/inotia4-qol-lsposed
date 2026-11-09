@@ -7,6 +7,7 @@
 #include "../version.h"
 #include "../game_host.h"
 #include "../item_handle.h"
+#include "../item_payload.h"
 #include "ports.h"
 #include "item_port.h"
 
@@ -72,6 +73,9 @@ using QolItemInventoryStateCreatePerfectItemFn = QolResult (*)(
     int32_t category, QolItemHandle* out_item);
 using QolItemInventoryStateFreeItemFn = QolResult (*)(QolItemHandle item);
 using QolItemInventoryStateSaveItemFn = QolResult (*)(QolItemHandle item, int32_t* out_saved);
+// 对句柄指向的对象应用一次 payload 字段写入；只改对象，不改槽位与 provider 存储。
+using QolItemInventoryStateApplyPayloadMutationFn = QolResult (*)(
+    QolItemHandle item, const QolItemPayloadMutation* mutation);
 
 struct QolItemInventoryStateWritePort {
     QolVersion abi_version;
@@ -96,6 +100,7 @@ struct QolItemInventoryStateWritePort {
     QolItemInventoryStateCreatePerfectItemFn create_perfect_item;
     QolItemInventoryStateFreeItemFn free_item;
     QolItemInventoryStateSaveItemFn save_item;
+    QolItemInventoryStateApplyPayloadMutationFn apply_payload_mutation;
 };
 
 // 1.2：尾部追加 SAVE_LoadItem、原生精确写槽与按句柄移除原语。
@@ -116,6 +121,8 @@ struct QolItemInventoryStateWritePort {
 // 2.4：尾部追加 save_item（INVEN_SaveItem 自动找槽与合并）。out_saved 低 8 位非 0 表示保存落地：
 // 成功即把 detached 对象交给原生库存（句柄转 game-owned），否则 rebind 回 detached 且不释放，
 // 调用方仍可 free_item。
+// 2.5：尾部追加 payload 字段写入。apply_payload_mutation 只改对象字段，供 core.item
+// 的 item.payload 在临时对象上生成新 payload，并保留源对象身份（craft UI 持有其指针）。
 constexpr uint32_t kQolItemInventoryStateWritePortSize = sizeof(QolItemInventoryStateWritePort);
 
 static_assert(std::is_standard_layout<QolItemInventoryStateGainedItem>::value,

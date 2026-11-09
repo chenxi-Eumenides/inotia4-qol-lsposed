@@ -76,32 +76,6 @@ QolResult resolve_craft_item(contracts::QolItemHandle handle, void** out_item) {
     return contracts::ok();
 }
 
-// 数据面写入口接受游戏持有对象、inventory.action.create 产生的 detached 产物与 Provider
-// 自管对象；扩展物品指针同为合法游戏对象，词条/字段写入与 Game-owned 语义一致。
-// detached 产物在 place 之前归调用方，配置写入仍必须可用。
-QolResult resolve_craft_game_item(contracts::QolItemHandle handle, void** out_item) {
-    if (out_item == nullptr || handle.slot == 0 || handle.generation == 0) {
-        return invalid_argument();
-    }
-    *out_item = nullptr;
-    const ItemHandleResolution resolved = item_handle_registry().resolve_item(
-        handle, contracts::kQolItemHandleOwnerAny);
-    if (resolved.error == ItemHandleError::kWrongThread) return wrong_thread();
-    if (resolved.error == ItemHandleError::kType) {
-        return contracts::error(kQolErrConflict, "craft item owner mismatch", 25);
-    }
-    if (resolved.error != ItemHandleError::kNone || resolved.item == nullptr) return not_found();
-    uint32_t owner = contracts::kQolItemHandleOwnerAny;
-    if (lookup_item(resolved.item, &owner).slot == 0 ||
-        (owner != contracts::kQolItemHandleOwnerGame &&
-         owner != contracts::kQolItemHandleOwnerProvider &&
-         owner != kQolLoadedItemHandleOwner)) {
-        return contracts::error(kQolErrConflict, "craft item owner unavailable", 29);
-    }
-    *out_item = resolved.item;
-    return contracts::ok();
-}
-
 QolResult read_item_handle(void* item, contracts::QolItemHandle* out_item) {
     if (out_item == nullptr) return invalid_argument();
     *out_item = contracts::kInvalidItemHandle;
@@ -304,66 +278,6 @@ QolResult call_read_jewel_word(contracts::QolItemHandle handle, uint32_t* out_wo
     return contracts::ok();
 }
 
-QolResult call_write_jewel_word(contracts::QolItemHandle handle, uint32_t value) {
-    void* item = nullptr;
-    const QolResult resolved = resolve_craft_game_item(handle, &item);
-    if (!contracts::succeeded(resolved)) return resolved;
-    auto* word = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(item) + I_COUNT);
-    if (!game_memory_accessible(word, sizeof(*word), 'w')) return not_ready();
-    *word = value;
-    return contracts::ok();
-}
-
-QolResult call_set_max_socket_enchant(contracts::QolItemHandle handle) {
-    void* item = nullptr;
-    const QolResult resolved = resolve_craft_game_item(handle, &item);
-    if (!contracts::succeeded(resolved)) return resolved;
-    auto* bytes = static_cast<uint8_t*>(item);
-    uint8_t* socket = bytes + I_SOCKET;
-    uint16_t* enchant = reinterpret_cast<uint16_t*>(bytes + I_ENCHANT);
-    if (!game_memory_accessible(socket, sizeof(*socket), 'r') ||
-        !game_memory_accessible(enchant, sizeof(*enchant), 'r')) return not_ready();
-    const uint8_t socket_value = static_cast<uint8_t>((*socket & 0x0Fu) | (0x0Fu << 4));
-    const uint16_t enchant_value = static_cast<uint16_t>((*enchant & ~(0x0Fu << 2)) |
-                                                         (0x0Fu << 2));
-    if (!game_memory_accessible(socket, sizeof(*socket), 'w') ||
-        !game_memory_accessible(enchant, sizeof(*enchant), 'w')) return not_ready();
-    *socket = socket_value;
-    *enchant = enchant_value;
-    return contracts::ok();
-}
-
-QolResult call_write_native_option_value(contracts::QolItemHandle handle,
-                                         uint32_t native_index, int32_t value) {
-    if (value < INT16_MIN || value > INT16_MAX) return invalid_argument();
-    void* item = nullptr;
-    const QolResult resolved = resolve_craft_game_item(handle, &item);
-    if (!contracts::succeeded(resolved)) return resolved;
-    auto* bytes = static_cast<uint8_t*>(item);
-    if (!game_memory_accessible(bytes + I_OPTION_LIST, sizeof(void*), 'r')) return not_ready();
-    auto* node = *reinterpret_cast<uint8_t* const*>(bytes + I_OPTION_LIST);
-    // 有界遍历：链表损坏时不得在此无限循环。原生词条数量远小于该上限。
-    constexpr uint32_t kMaxOptionNodes = 64;
-    uint32_t visited = 0;
-    uint32_t native_seen = 0;
-    while (node != nullptr && visited < kMaxOptionNodes) {
-        if (!game_memory_accessible(node, O_NEXT + sizeof(void*), 'r')) return not_ready();
-        ++visited;
-        const uint16_t index = *reinterpret_cast<const uint16_t*>(node + O_INDEX);
-        if (((index >> 13) & 0x7u) == 0u) {
-            if (native_seen == native_index) {
-                auto* slot = reinterpret_cast<int16_t*>(node + O_VALUE);
-                if (!game_memory_accessible(slot, sizeof(*slot), 'w')) return not_ready();
-                *slot = static_cast<int16_t>(value);
-                return contracts::ok();
-            }
-            ++native_seen;
-        }
-        node = *reinterpret_cast<uint8_t* const*>(node + O_NEXT);
-    }
-    return contracts::error(kQolErrNotFound, "native option not found", 30);
-}
-
 QolResult call_random_inclusive(int32_t lo, int32_t hi, int32_t* out) {
     if (out == nullptr) return invalid_argument();
     *out = 0;
@@ -451,10 +365,7 @@ const contracts::QolCustomRecipeWritePort kCustomRecipeWritePort{
     &call_set_stuff_item,
     &call_description_set_off,
     &call_read_jewel_word,
-    &call_write_jewel_word,
-    &call_set_max_socket_enchant,
     &call_random_inclusive,
-    &call_write_native_option_value,
 };
 
 QolResult craft_stuff_slot_index_impl(void* transient_control, int32_t* out_index) {

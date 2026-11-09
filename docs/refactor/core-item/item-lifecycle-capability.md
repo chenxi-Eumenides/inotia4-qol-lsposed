@@ -32,8 +32,9 @@
    - `InventoryActionApi` 3.2 → 3.3：+ `create` / `place` / `discard_handle`。
 2. **create 返回调用方拥有的 detached 句柄，不落位**。配置窗口内物品不进入背包；落位策略在 place
    时决定（auto 找槽+合并 / 精确槽 / 扩展袋导入）。
-3. **数据面定制不进 API**：宝石字、原生词条、打孔、数量继续走现有端口
-   （`write_jewel_word` / `write_native_option_value` / `QolItemCountApi`）；需要整物品保真时用
+3. **数据面定制经 `item.payload`**：宝石字、原生词条、打孔、数量由 core.item 的
+   `item.payload.update` 统一生成 payload 并原地写源对象；底层字段写入走
+   `QolItemInventoryStateWritePort::apply_payload_mutation`（2.5）。需要整物品保真时用
    `create` 的 payload 形态（`SAVE_LoadItem`）。
 4. **place 失败语义按落位介质区分**：原生空间显式写槽复用既有 `place_item` 的 Host 语义——失败时
    对象已由 Host 释放、句柄失效；原生空间自动落位（`ref.bag < 0` → `save_item`）与注册源（扩展袋）

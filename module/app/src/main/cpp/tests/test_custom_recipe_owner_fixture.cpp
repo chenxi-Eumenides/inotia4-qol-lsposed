@@ -116,7 +116,6 @@ int g_category_fail_after = -1;      // >0：该次数之后类别读取报错
 int g_create_calls = 0;
 int g_save_calls = 0;
 int g_random_calls = 0;
-int g_word_write_calls = 0;
 QolCraftPopupCallback g_popup_ok = nullptr;
 QolCraftPopupCallback g_popup_cancel = nullptr;
 
@@ -417,13 +416,6 @@ QolResult stub_word_read(QolItemHandle, uint32_t* out) {
     *out = 0;
     return qol::contracts::ok();
 }
-QolResult stub_word_write(QolItemHandle, uint32_t) {
-    ++g_word_write_calls;
-    return qol::contracts::ok();
-}
-QolResult stub_native_option_write(QolItemHandle, uint32_t, int32_t) {
-    return qol::contracts::ok();
-}
 QolResult stub_random(int32_t lo, int32_t, int32_t* out) {
     ++g_random_calls;
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
@@ -462,10 +454,7 @@ void install_ready_ports() {
     g_recipe_port.set_stuff_item = &stub_set_item;
     g_recipe_port.description_set_off = &stub_ok;
     g_recipe_port.read_jewel_word = &stub_word_read;
-    g_recipe_port.write_jewel_word = &stub_word_write;
-    g_recipe_port.set_max_socket_enchant = &stub_ok_handle;
     g_recipe_port.random_inclusive = &stub_random;
-    g_recipe_port.write_native_option_value = &stub_native_option_write;
 
     g_ui_port = make_ui_write_port();
     qol::gametest::set_custom_recipe_write_port_for_test(&g_recipe_port);
@@ -592,6 +581,42 @@ const CapabilityProvisionRef kInventoryActionProvides[] = {
 const CapabilityProvisionRef kInventorySlotProvides[] = {
     {kInventorySlotCapabilityId,
      {kInventorySlotVersion.major, kInventorySlotVersion.minor}, &kInventorySlotApi}};
+
+// 升阶所需的 payload 生成与原子替换：本 fixture 只验证装配，不执行写入。
+QolResult fake_payload_update(const QolItemPayloadUpdateSpec*, QolItemPayload*) {
+    return qol::contracts::error(kQolErrUnsupported, nullptr, 0);
+}
+QolResult fake_payload_validate(const uint8_t*, uint32_t, QolItemPayloadValidation*) {
+    return qol::contracts::error(kQolErrUnsupported, nullptr, 0);
+}
+const ItemPayloadApi kItemPayloadApi{
+    static_cast<uint32_t>(sizeof(ItemPayloadApi)), kItemPayloadVersionMajor,
+    kItemPayloadVersionMinor, &fake_payload_update, &fake_payload_validate};
+const CapabilityProvisionRef kItemPayloadProvides[] = {
+    {kItemPayloadCapabilityId,
+     {kItemPayloadVersionMajor, kItemPayloadVersionMinor}, &kItemPayloadApi}};
+
+QolResult fake_transfer_move(const QolBagRef*, int32_t, int32_t, const QolBagRef*, int32_t,
+                             QolBagMutationResult*) {
+    return qol::contracts::error(kQolErrUnsupported, nullptr, 0);
+}
+QolResult fake_transfer_serialize(QolItemHandle, int32_t, QolBagTransfer*) {
+    return qol::contracts::error(kQolErrUnsupported, nullptr, 0);
+}
+QolResult fake_transfer_locate(int32_t, QolItemHandle, QolBagRef*, int32_t*) {
+    return qol::contracts::error(kQolErrUnsupported, nullptr, 0);
+}
+QolResult fake_transfer_replace(QolItemHandle, const QolBagTransfer*,
+                                QolBagMutationResult*) {
+    return qol::contracts::error(kQolErrUnsupported, nullptr, 0);
+}
+const QolInventoryTransferApi kInventoryTransferApi{
+    static_cast<uint32_t>(sizeof(QolInventoryTransferApi)), &fake_transfer_move,
+    &fake_transfer_serialize, &fake_transfer_locate, &fake_transfer_replace};
+const CapabilityProvisionRef kInventoryTransferProvides[] = {
+    {kInventoryTransferCapabilityId,
+     {kInventoryTransferVersion.major, kInventoryTransferVersion.minor},
+     &kInventoryTransferApi}};
 QolResult fake_current_slot(int32_t* out) {
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
     *out = 0;
@@ -654,6 +679,12 @@ const FeatureDefinition kInventorySlotFeatures[] = {
 const FeatureDefinition kBagSourceFeatures[] = {
     {"bag_source.provider", 1, FeatureCategory::kHidden, FeatureType::kToggle,
      "inventory.bag_source", "", &provider_toggle, nullptr}};
+const FeatureDefinition kItemPayloadFeatures[] = {
+    {"item_payload.provider", 1, FeatureCategory::kHidden, FeatureType::kToggle,
+     "item.payload", "", &provider_toggle, nullptr}};
+const FeatureDefinition kInventoryTransferFeatures[] = {
+    {"inventory_transfer.provider", 1, FeatureCategory::kHidden, FeatureType::kToggle,
+     "inventory.transfer", "", &provider_toggle, nullptr}};
 
 PluginDescriptor provider_descriptor(const char* id, const CapabilityProvisionRef* provides,
                                      const FeatureDefinition* features) {
@@ -784,7 +815,7 @@ void seed_fixed_recipe_slots() {
     g_create_calls = 0;
     g_save_calls = 0;
     g_random_calls = 0;
-    g_word_write_calls = 0;
+
     g_set_stuff_item_fail = false;
     g_stuff_item_fail_index = -1;
     g_category_calls = 0;
@@ -1245,13 +1276,17 @@ int main(int argc, char** argv) {
         "inventory_slot", kInventorySlotProvides, kInventorySlotFeatures);
     PluginDescriptor bag_source = provider_descriptor(
         "bag_source", kBagSourceProvides, kBagSourceFeatures);
+    PluginDescriptor item_payload = provider_descriptor(
+        "item_payload", kItemPayloadProvides, kItemPayloadFeatures);
+    PluginDescriptor inventory_transfer = provider_descriptor(
+        "inventory_transfer", kInventoryTransferProvides, kInventoryTransferFeatures);
     const PluginDescriptor& custom_recipe = qol::features::custom_recipe::plugin_descriptor();
 
     // ---- 单 descriptor 形状 ----
     assert(std::strcmp(custom_recipe.id, "custom_recipe") == 0);
     assert(custom_recipe.provides_count == 0 && custom_recipe.provides == nullptr);
-    assert(custom_recipe.requires_count == 6);
-    assert(custom_recipe.optional_count == 3);
+    assert(custom_recipe.requires_count == 8);
+    assert(custom_recipe.optional_count == 2);
     assert(custom_recipe.jni_count == 0);
     assert(custom_recipe.port_count == 3);
     assert(custom_recipe.ports[0].id == QolPortId::QOL_PORT_CUSTOM_RECIPE_WRITE);
@@ -1280,7 +1315,8 @@ int main(int argc, char** argv) {
     for (const PluginDescriptor* provider : {&item_facts, &craft_facts, &text_layer,
                                              &attribute_quality, &save_facts,
                                              &inventory_action, &inventory_slot,
-                                             &bag_source}) {
+                                             &bag_source, &item_payload,
+                                             &inventory_transfer}) {
         assert(qol::host::register_plugin(*provider));
     }
     assert(qol::host::register_plugin(custom_recipe));
@@ -1290,7 +1326,8 @@ int main(int argc, char** argv) {
     for (const PluginDescriptor* provider : {&item_facts, &craft_facts, &text_layer,
                                              &attribute_quality, &save_facts,
                                              &inventory_action, &inventory_slot,
-                                             &bag_source}) {
+                                             &bag_source, &item_payload,
+                                             &inventory_transfer}) {
         assert(directory.add(*provider).ok());
     }
     assert(directory.add(custom_recipe).ok());

@@ -1389,4 +1389,137 @@ QolResult remove_item(int32_t category, contracts::QolItemInventoryStateWriteRes
     return contracts::ok();
 }
 
+QolResult apply_payload_mutation(contracts::QolItemHandle handle,
+                                 const contracts::QolItemPayloadMutation* mutation) {
+    if (mutation == nullptr ||
+        mutation->kind < static_cast<int32_t>(contracts::QolItemPayloadMutationKind::kJewelWord) ||
+        mutation->kind > static_cast<int32_t>(contracts::QolItemPayloadMutationKind::kMagicRate)) {
+        return transfer_error(kQolErrInvalidArgument, "invalid payload mutation");
+    }
+    void* item = nullptr;
+    QolResult result = resolve_loaded_item(handle, &item);
+    if (!contracts::succeeded(result)) return result;
+    if (!game_memory_accessible(item, I_OPTION_LIST + sizeof(void*), 'r')) {
+        return transfer_error(kQolErrNotFound, "stale item handle");
+    }
+    auto* bytes = static_cast<uint8_t*>(item);
+    const auto kind = static_cast<contracts::QolItemPayloadMutationKind>(mutation->kind);
+    switch (kind) {
+        case contracts::QolItemPayloadMutationKind::kJewelWord: {
+            if (mutation->value < 0 || mutation->value > UINT32_MAX) {
+                return transfer_error(kQolErrInvalidArgument, "jewel word out of range");
+            }
+            auto* word = reinterpret_cast<uint32_t*>(bytes + I_COUNT);
+            if (!game_memory_accessible(word, sizeof(*word), 'w')) {
+                return transfer_error(kQolErrNotReady, "jewel word not writable");
+            }
+            *word = static_cast<uint32_t>(mutation->value);
+            return contracts::ok();
+        }
+        case contracts::QolItemPayloadMutationKind::kNativeOptionValue: {
+            if (mutation->value < INT16_MIN || mutation->value > INT16_MAX) {
+                return transfer_error(kQolErrInvalidArgument, "native option value out of range");
+            }
+            auto* node = *reinterpret_cast<uint8_t* const*>(bytes + I_OPTION_LIST);
+            constexpr uint32_t kMaxOptionNodes = 64;
+            uint32_t visited = 0;
+            uint32_t native_seen = 0;
+            while (node != nullptr && visited < kMaxOptionNodes) {
+                if (!game_memory_accessible(node, O_NEXT + sizeof(void*), 'r')) {
+                    return transfer_error(kQolErrNotReady, "option list unavailable");
+                }
+                ++visited;
+                const uint16_t index = *reinterpret_cast<const uint16_t*>(node + O_INDEX);
+                if (((index >> 13) & 0x7u) == 0u) {
+                    if (native_seen == mutation->index) {
+                        auto* slot = reinterpret_cast<int16_t*>(node + O_VALUE);
+                        if (!game_memory_accessible(slot, sizeof(*slot), 'w')) {
+                            return transfer_error(kQolErrNotReady, "native option not writable");
+                        }
+                        *slot = static_cast<int16_t>(mutation->value);
+                        return contracts::ok();
+                    }
+                    ++native_seen;
+                }
+                node = *reinterpret_cast<uint8_t* const*>(node + O_NEXT);
+            }
+            return transfer_error(kQolErrNotFound, "native option not found");
+        }
+        case contracts::QolItemPayloadMutationKind::kCount: {
+            if (mutation->value <= 0 || mutation->value > UINT32_MAX) {
+                return transfer_error(kQolErrInvalidArgument, "item count out of range");
+            }
+            return write_item_canonical_count(item, static_cast<uint32_t>(mutation->value));
+        }
+        case contracts::QolItemPayloadMutationKind::kSocketLevel: {
+            if (mutation->value < 0 || mutation->value > 0x0F) {
+                return transfer_error(kQolErrInvalidArgument, "socket level out of range");
+            }
+            uint8_t* socket = bytes + I_SOCKET;
+            if (!game_memory_accessible(socket, sizeof(*socket), 'r') ||
+                !game_memory_accessible(socket, sizeof(*socket), 'w')) {
+                return transfer_error(kQolErrNotReady, "socket not writable");
+            }
+            *socket = static_cast<uint8_t>((*socket & 0x0Fu) |
+                                           ((static_cast<uint8_t>(mutation->value) & 0x0Fu) << 4));
+            return contracts::ok();
+        }
+        case contracts::QolItemPayloadMutationKind::kSocketFilled: {
+            if (mutation->value < 0 || mutation->value > 0x0F) {
+                return transfer_error(kQolErrInvalidArgument, "socket filled out of range");
+            }
+            uint8_t* socket = bytes + I_SOCKET;
+            if (!game_memory_accessible(socket, sizeof(*socket), 'r') ||
+                !game_memory_accessible(socket, sizeof(*socket), 'w')) {
+                return transfer_error(kQolErrNotReady, "socket not writable");
+            }
+            *socket = static_cast<uint8_t>((*socket & 0xF0u) |
+                                           (static_cast<uint8_t>(mutation->value) & 0x0Fu));
+            return contracts::ok();
+        }
+        case contracts::QolItemPayloadMutationKind::kEnchantLevel: {
+            if (mutation->value < 0 || mutation->value > 0x1F) {
+                return transfer_error(kQolErrInvalidArgument, "enchant level out of range");
+            }
+            auto* enchant = reinterpret_cast<uint16_t*>(bytes + I_ENCHANT);
+            if (!game_memory_accessible(enchant, sizeof(*enchant), 'r') ||
+                !game_memory_accessible(enchant, sizeof(*enchant), 'w')) {
+                return transfer_error(kQolErrNotReady, "enchant not writable");
+            }
+            const uint16_t mask = static_cast<uint16_t>(0x1Fu << 6);
+            *enchant = static_cast<uint16_t>((*enchant & ~mask) |
+                                             ((static_cast<uint16_t>(mutation->value) & 0x1Fu)
+                                              << 6));
+            return contracts::ok();
+        }
+        case contracts::QolItemPayloadMutationKind::kEnchantRemaining: {
+            if (mutation->value < 0 || mutation->value > 0x0F) {
+                return transfer_error(kQolErrInvalidArgument, "enchant remaining out of range");
+            }
+            auto* enchant = reinterpret_cast<uint16_t*>(bytes + I_ENCHANT);
+            if (!game_memory_accessible(enchant, sizeof(*enchant), 'r') ||
+                !game_memory_accessible(enchant, sizeof(*enchant), 'w')) {
+                return transfer_error(kQolErrNotReady, "enchant not writable");
+            }
+            const uint16_t mask = static_cast<uint16_t>(0x0Fu << 2);
+            *enchant = static_cast<uint16_t>((*enchant & ~mask) |
+                                             ((static_cast<uint16_t>(mutation->value) & 0x0Fu)
+                                              << 2));
+            return contracts::ok();
+        }
+        case contracts::QolItemPayloadMutationKind::kMagicRate: {
+            if (mutation->value < 0 || mutation->value > 0xFF) {
+                return transfer_error(kQolErrInvalidArgument, "magic rate out of range");
+            }
+            uint8_t* magic = bytes + I_MAGIC_RATE;
+            if (!game_memory_accessible(magic, sizeof(*magic), 'w')) {
+                return transfer_error(kQolErrNotReady, "magic rate not writable");
+            }
+            *magic = static_cast<uint8_t>(mutation->value);
+            return contracts::ok();
+        }
+    }
+    return transfer_error(kQolErrInvalidArgument, "unknown payload mutation");
+}
+
 }  // namespace qol::game::ops

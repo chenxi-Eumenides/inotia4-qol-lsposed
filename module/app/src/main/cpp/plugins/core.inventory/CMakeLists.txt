@@ -18,6 +18,7 @@ add_library(qol_plugin_core.inventory STATIC
     transfer/api.cpp
     transfer/move_item.cpp
     transfer/native_transport.cpp
+    transfer/replace_item.cpp
     transfer/source_transport.cpp
     usecases/item_helpers.cpp
     usecases/read_inventory.cpp

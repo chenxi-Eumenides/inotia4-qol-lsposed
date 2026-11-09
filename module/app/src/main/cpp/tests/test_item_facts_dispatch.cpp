@@ -883,9 +883,10 @@ const qol::contracts::QolItemInventoryStateWritePort kFakeItemStateWritePort{
     nullptr,
     nullptr,
     nullptr,
+    nullptr,
 };
-static_assert(sizeof(kFakeItemStateWritePort) == sizeof(void*) * 22,
-              "item inventory write port v2.4 ABI size changed");
+static_assert(sizeof(kFakeItemStateWritePort) == sizeof(void*) * 23,
+              "item inventory write port v2.5 ABI size changed");
 
 QolResult fake_merge_move(qol::contracts::QolItemHandle, int32_t, int32_t, int32_t, int32_t* out) {
     if (out != nullptr) *out = 0;
@@ -1147,6 +1148,12 @@ QolResult fake_registered_source_remove(qol::contracts::QolItemHandle item, int3
     return qol::contracts::ok();
 }
 
+QolResult fake_registered_source_replace(qol::contracts::QolItemHandle,
+                                         const qol::contracts::QolBagTransfer*,
+                                         qol::contracts::QolBagMutationResult*) {
+    return qol::contracts::error(kQolErrUnsupported, "not implemented", 14);
+}
+
 const qol::contracts::QolBagSource kFakeRegisteredBagSource{
     qol::contracts::kBagSourceVersion,
     qol::contracts::kQolBagSpaceFirstRegistered,
@@ -1159,6 +1166,7 @@ const qol::contracts::QolBagSource kFakeRegisteredBagSource{
     &fake_registered_source_remove,
     nullptr,
     nullptr,
+    &fake_registered_source_replace,
 };
 
 bool g_fake_registered_source_added = false;
@@ -1229,6 +1237,12 @@ QolResult state_test_source_remove(qol::contracts::QolItemHandle, int32_t,
     return qol::contracts::error(kQolErrUnsupported, "not implemented", 14);
 }
 
+QolResult state_test_source_replace(qol::contracts::QolItemHandle,
+                                    const qol::contracts::QolBagTransfer*,
+                                    qol::contracts::QolBagMutationResult*) {
+    return qol::contracts::error(kQolErrUnsupported, "not implemented", 14);
+}
+
 const qol::contracts::QolBagSource kStateTestBagSource{
     qol::contracts::kBagSourceVersion,
     qol::contracts::kQolBagSpaceFirstRegistered,
@@ -1241,6 +1255,7 @@ const qol::contracts::QolBagSource kStateTestBagSource{
     &state_test_source_remove,
     nullptr,
     nullptr,
+    &state_test_source_replace,
 };
 
 const qol::contracts::QolBagSourceRegistryApi* state_test_bag_source_registry() {
@@ -2765,6 +2780,12 @@ static QolResult golden_source_remove(qol::contracts::QolItemHandle item, int32_
     return qol::contracts::ok();
 }
 
+static QolResult golden_source_replace(qol::contracts::QolItemHandle,
+                                       const qol::contracts::QolBagTransfer*,
+                                       qol::contracts::QolBagMutationResult*) {
+    return qol::contracts::error(kQolErrUnsupported, "not implemented", 14);
+}
+
 static QolResult golden_source_for_each(qol::contracts::QolInventoryBagSlotFn callback,
                                         void* ctx) {
     if (callback == nullptr) {
@@ -2786,6 +2807,7 @@ static const qol::contracts::QolBagSource kGoldenBagSource{
     &golden_source_remove,
     nullptr,
     nullptr,
+    &golden_source_replace,
 };
 
 static bool g_golden_source_registered = false;

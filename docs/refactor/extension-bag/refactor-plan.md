@@ -1,7 +1,7 @@
 # extension_bag 插件重构方案
 
 状态：历史内部重构方案（P0–P6 已完成）；2026-10 扩展袋数据面迁移已完成：
-旧 provider、HTTP 路由/typed command 与全库存 move 已删除，当前仅注册 `QolBagSource` 1.1（space=2）。
+旧 provider、HTTP 路由/typed command 与全库存 move 已删除，当前仅注册 `QolBagSource` 1.3（space=2）。
 UI 物品操作迁移以 `core.item` 已提供的操作能力为准；EB 不恢复自有跨空间事务。
 当前数据契约见
 [`core.item`](../../reference/plugins/core.item.md) 的「`QolBagSource` 契约」。

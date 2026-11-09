@@ -93,8 +93,8 @@ bool core_backups_ready_impl() {
 
 // 物品类别 = `item + I_TYPE`(u16) 的 bits6-15；对用到的类别而言 == itemId。
 // out 槽物品指针来自目标格：原版袋物品为 Game-owned，扩展袋物品直写目标格后为
-// Provider-owned。两者都是合法游戏对象，升阶写入（read/write_jewel_word 经
-// resolve_craft_game_item）对两者语义一致，按同一口径放行 Provider owner。
+// Provider-owned。两者都是合法游戏对象，升阶写入（item.payload.update 的
+// apply_payload_mutation 经句柄解析）对两者语义一致，按同一口径放行 Provider owner。
 // lookup 未命中的指针按 Game 注册：扩展物品在入袋时已注册为 Provider，未命中的
 // 只可能是原版袋物品。
 bool new_game_item_handle(void* item, contracts::QolItemHandle* out) {

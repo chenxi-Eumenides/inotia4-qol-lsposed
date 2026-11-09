@@ -249,6 +249,12 @@ QolResult transfer_source_remove(qol::contracts::QolItemHandle, int32_t,
     return qol::contracts::ok();
 }
 
+QolResult transfer_source_replace(qol::contracts::QolItemHandle,
+                                  const qol::contracts::QolBagTransfer*,
+                                  qol::contracts::QolBagMutationResult*) {
+    return qol::contracts::error(kQolErrUnsupported, "not implemented", 14);
+}
+
 void test_transfer_move_count_precheck() {
     qol::contracts::QolBagSource source{};
     source.version = qol::contracts::kBagSourceVersion;
@@ -260,6 +266,7 @@ void test_transfer_move_count_precheck() {
     source.export_item = &transfer_source_export;
     source.import_item = &transfer_source_import;
     source.remove = &transfer_source_remove;
+    source.replace_item = &transfer_source_replace;
     assert_ok(qol::features::core_inventory::kBagSourceRegistryApi.register_source(&source));
 
     // 注册源 count=3、move count=4：导出前预检拒绝，源/目标槽不变。

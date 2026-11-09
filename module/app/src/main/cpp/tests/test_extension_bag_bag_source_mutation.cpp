@@ -1,8 +1,6 @@
 #include "contracts/bag.h"
-#include "contracts/inventory_item_writeback.h"
 #include "plugins/extension_bag/api/api_impl.h"
 #include "plugins/extension_bag/api/bag_source.h"
-#include "plugins/extension_bag/api/item_writeback.h"
 #include "plugins/extension_bag/core/geometry.h"
 #include "plugins/extension_bag/core/item_display_hook.h"
 #include "plugins/extension_bag/core/lifecycle.h"
@@ -26,6 +24,9 @@
 #include <cstring>
 #include <string>
 #include <thread>
+
+extern std::array<uint8_t, virtual_bag::kSerializedItemBuffer> g_serialized_payload;
+extern int g_serialized_payload_size;
 
 namespace {
 
@@ -447,6 +448,54 @@ void test_import_non_stackable_category_never_merges() {
     CHECK(g_materialize_calls == 0);
 }
 
+void test_replace_updates_descriptor_and_rematerializes() {
+    reset_fixture();
+    auto& bag = runtime_state().objects.bag;
+    auto& objects = qol::extension_bag::ui_state().objects;
+    constexpr int kBag = 0;
+    constexpr int kSlot = 2;
+    constexpr int kCategory = 77;
+    int old_object = 7;
+    bag.items[kBag][kSlot] = make_item(kCategory, 1);
+    objects.module_objects[kBag][kSlot] = &old_object;
+    objects.module_object_categories[kBag][kSlot] = kCategory;
+    objects.module_object_hashes[kBag][kSlot] =
+        virtual_bag::payload_hash(bag.items[kBag][kSlot]);
+    uint32_t internal_handle = 0;
+    CHECK(ownership::allocate(&objects.ownership_ledger, &internal_handle) ==
+          ownership::Outcome::kOk);
+    objects.module_object_handles[kBag][kSlot] = internal_handle;
+    g_handle_item = &old_object;
+
+    virtual_bag::Item replacement = make_item(kCategory, 1);
+    replacement.payload[3] ^= 0x5a;
+
+    qol::contracts::QolBagTransfer transfer{};
+    transfer.category = kCategory;
+    transfer.count = 1;
+    transfer.payload_size = replacement.payload_size;
+    std::memcpy(transfer.payload, replacement.payload.data(), replacement.payload_size);
+    qol::contracts::QolBagMutationResult mutation{};
+    const qol::contracts::QolBagSource* source =
+        qol::features::extension_bag::extension_bag_bag_source();
+    const QolResult result = source->replace_item(g_public_handle, &transfer, &mutation);
+
+    CHECK(qol::contracts::succeeded(result));
+    CHECK(same_item(bag.items[kBag][kSlot], replacement));
+    // 对象身份保留：craft UI/UseStuff 仍持有旧对象指针，不能换对象。
+    CHECK(objects.module_objects[kBag][kSlot] == &old_object);
+    CHECK(objects.module_object_categories[kBag][kSlot] == kCategory);
+    CHECK(objects.module_object_hashes[kBag][kSlot] ==
+          virtual_bag::payload_hash(replacement));
+    CHECK(objects.module_object_handles[kBag][kSlot] == internal_handle);
+    CHECK(mutation.ref.space_id == qol::features::extension_bag::kExtensionBagSpaceId);
+    CHECK(mutation.ref.bag == kBag && mutation.count == 1);
+    CHECK(mutation.item.slot == g_public_handle.slot);
+    CHECK(g_persist_calls >= 1);
+    CHECK(g_materialize_calls == 0);
+    CHECK(g_extension_free_calls == 0);
+}
+
 }  // namespace
 
 // Test-only host ports. The callbacks, module_item_locked, ownership checks, generation updates,
@@ -549,7 +598,9 @@ bool extension_bag_item_owned_by_game(void* item) {
 }
 
 void extension_bag_invalidate_item_handle(void* item) {
-    if (item == g_handle_item) g_handle_item = nullptr;
+    // Replace path frees the old object and immediately materializes the new one;
+    // keep the fixture's single-pointer identity aimed at the replacement.
+    if (item == g_handle_item) g_handle_item = g_materialize_result;
 }
 
 bool extension_bag_sale_item_matches(qol::contracts::QolItemHandle expected, void* item,
@@ -712,46 +763,24 @@ void test_deferred_free_skips_game_owned_and_clears_on_load() {
     CHECK(deferred_free_pending_count_locked() == 0);
 }
 
-void test_provider_item_writeback_syncs_descriptor_from_object() {
-    reset_fixture();
-    static int item_object = 0;
-    auto& bag = ::qol::extension_bag::access::bag();
-    bag.items[0][2] = make_item(65, 1);
-    auto& objects = qol::extension_bag::ui_state().objects;
-    objects.module_objects[0][2] = &item_object;
-    objects.module_object_categories[0][2] = 65;
-    objects.module_object_hashes[0][2] = virtual_bag::payload_hash(bag.items[0][2]);
-    g_handle_item = &item_object;
-    g_public_handle = qol::contracts::QolItemHandle{41, 19};
-
-    // 模拟游戏侧原地改写物化对象后，序列化结果与 descriptor 不同。
-    g_serialized_payload = bag.items[0][2].payload;
-    g_serialized_payload_size = bag.items[0][2].payload_size;
-    g_serialized_payload[3] ^= 0x5a;
-    runtime_state().persistence.dirty = false;
-
-    const QolResult committed =
-        qol::features::extension_bag::kInventoryItemWritebackApi.commit_item(g_public_handle);
-    CHECK(committed.ok == kQolOk);
-    CHECK(bag.items[0][2].payload == g_serialized_payload);
-    CHECK(bag.items[0][2].payload_size == g_serialized_payload_size);
-    CHECK(objects.module_object_hashes[0][2] ==
-          virtual_bag::payload_hash(bag.items[0][2]));
-    CHECK(runtime_state().persistence.dirty);
-
-    // 内容未变化时不制造新的 revision。
-    runtime_state().persistence.dirty = false;
-    const QolResult unchanged =
-        qol::features::extension_bag::kInventoryItemWritebackApi.commit_item(g_public_handle);
-    CHECK(unchanged.ok == kQolOk);
-    CHECK(!runtime_state().persistence.dirty);
-
-    // 非本 provider 的句柄：成功无操作。
-    g_handle_item = nullptr;
-    const QolResult foreign =
-        qol::features::extension_bag::kInventoryItemWritebackApi.commit_item({7, 3});
-    CHECK(foreign.ok == kQolOk);
-    CHECK(g_persist_calls == 0);
+// This target links bag_source.cpp without the production item access bridge; the
+// replace path validates payloads through these hooks. The round-trip bridge returns
+// the fixture payload so structural validation succeeds without a real loader.
+int extension_serialize_item_payload(uint8_t* payload, void*) {
+    if (payload == nullptr || g_serialized_payload_size <= 0) return 0;
+    std::memcpy(payload, g_serialized_payload.data(),
+                static_cast<size_t>(g_serialized_payload_size));
+    return g_serialized_payload_size;
+}
+int extension_load_item_payload(const uint8_t*, void** out_item, int* out_consumed) {
+    static int validation_item = 0;
+    if (out_item == nullptr || out_consumed == nullptr) return 0;
+    *out_item = &validation_item;
+    *out_consumed = g_serialized_payload_size;
+    return 1;
+}
+void extension_free_item_payload(void* item) {
+    if (item != nullptr) ++g_extension_free_calls;
 }
 
 int main() {
@@ -762,7 +791,7 @@ int main() {
     test_import_merges_same_identity_into_occupied_slot();
     test_import_different_payload_conflicts_without_write();
     test_import_non_stackable_category_never_merges();
-    test_provider_item_writeback_syncs_descriptor_from_object();
+    test_replace_updates_descriptor_and_rematerializes();
     std::printf("extension_bag_bag_source_mutation: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

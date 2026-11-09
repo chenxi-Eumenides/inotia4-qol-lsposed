@@ -24,6 +24,7 @@
 #include "contracts/inventory_refresh.h"
 #include "contracts/inventory_slot.h"
 #include "contracts/item_facts.h"
+#include "contracts/item_payload.h"
 #include "contracts/item_state.h"
 #include "contracts/world_facts.h"
 #include "usecases/item_slot.h"
@@ -34,6 +35,7 @@
 #include "bags/snapshot_sdk.h"
 
 #include "plugins/core.item/api/bag_source.h"
+#include "plugins/core.item/api/item_payload.h"
 #include "plugins/core.item/api/native_inventory.h"
 #include "plugins/core.item/api/projection.h"
 #include "plugins/core.item/runtime/core_item_internal.h"
@@ -47,6 +49,9 @@
 #endif
 #if !defined(QOL_CORE_ITEM_PROJECTION_SEPARATE)
 #include "plugins/core.item/api/projection.cpp"
+#endif
+#if !defined(QOL_CORE_ITEM_ITEM_PAYLOAD_SEPARATE)
+#include "plugins/core.item/api/item_payload.cpp"
 #endif
 
 namespace qol::features::core_item {
@@ -62,6 +67,9 @@ const contracts::CapabilityProvisionRef kProvides[] = {
     {contracts::kInventoryProjectionCapabilityId,
      {contracts::kInventoryProjectionVersionMajor, contracts::kInventoryProjectionVersionMinor},
      &kInventoryProjectionRegistryApi},
+    {contracts::kItemPayloadCapabilityId,
+     {contracts::kItemPayloadVersionMajor, contracts::kItemPayloadVersionMinor},
+     &item_payload_api()},
 };
 
 const contracts::QolPortRequirement kPorts[] = {

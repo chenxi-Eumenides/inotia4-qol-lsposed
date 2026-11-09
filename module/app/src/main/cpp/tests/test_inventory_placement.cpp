@@ -347,6 +347,12 @@ QolResult reg_identify(qol::contracts::QolItemHandle, QolBagRef*, int32_t*) {
     return not_found();
 }
 
+QolResult reg_replace(qol::contracts::QolItemHandle,
+                      const qol::contracts::QolBagTransfer*,
+                      qol::contracts::QolBagMutationResult*) {
+    return not_found();
+}
+
 void register_reg_source() {
     static QolBagSource source = [&] {
         QolBagSource s{};
@@ -360,6 +366,7 @@ void register_reg_source() {
         s.import_item = &reg_import;
         s.remove = &reg_remove;
         s.identify = &reg_identify;
+        s.replace_item = &reg_replace;
         return s;
     }();
     assert(qol::contracts::succeeded(

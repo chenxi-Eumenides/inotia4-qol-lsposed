@@ -407,10 +407,16 @@ QolResult source_identify(QolItemHandle item, qol::contracts::QolBagRef* out_ref
     return qol::contracts::ok();
 }
 
+QolResult source_replace(qol::contracts::QolItemHandle,
+                         const qol::contracts::QolBagTransfer*,
+                         qol::contracts::QolBagMutationResult*) {
+    return qol::contracts::error(kQolErrUnsupported, "not implemented", 14);
+}
+
 const qol::contracts::QolBagSource kTestBagSource{
     qol::contracts::kBagSourceVersion, kSourceSpace, &source_count, &source_info,
     &source_item_at, &source_for_each, &source_export, &source_import, &source_remove,
-    &source_identify, nullptr};
+    &source_identify, nullptr, &source_replace};
 
 QolResult ops_canonical_count(const void* item, uint32_t* out_count) {
     if (item != g_ops_item || out_count == nullptr) {

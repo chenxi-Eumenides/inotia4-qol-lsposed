@@ -7,7 +7,6 @@
 
 #include "contracts/bag.h"
 #include "contracts/craft_facts.h"
-#include "contracts/inventory_item_writeback.h"
 #include "contracts/inventory_projection.h"
 #include "contracts/ui_confirmation.h"
 #include "contracts/inventory_refresh.h"
@@ -20,7 +19,6 @@
 #include "contracts/item_facts.h"
 #include "contracts/save_facts.h"
 #include "plugins/extension_bag/api/bag_source.h"
-#include "plugins/extension_bag/api/item_writeback.h"
 #include "plugins/extension_bag/core/lifecycle.h"
 #include "plugins/extension_bag/core/move_merge_hook.h"
 #include "plugins/extension_bag/assembly/lifecycle_registration.h"
@@ -163,11 +161,6 @@ const qol::contracts::CapabilityProvisionRef kProvides[] = {
      {qol::contracts::kInventoryRefreshVersionMajor,
       qol::contracts::kInventoryRefreshVersionMinor},
      &kInventoryRefreshApi},
-    // 游戏侧原地改写 provider 物品后，把物化对象的新内容同步回 descriptor。
-    {qol::contracts::kInventoryItemWritebackCapabilityId,
-     {qol::contracts::kInventoryItemWritebackVersionMajor,
-      qol::contracts::kInventoryItemWritebackVersionMinor},
-     &kInventoryItemWritebackApi},
 };
 
 const qol::contracts::CapabilityRequirement kOptionalRequires[] = {

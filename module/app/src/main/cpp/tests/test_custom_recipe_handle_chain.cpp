@@ -465,7 +465,7 @@ QolResult provider_remove(QolItemHandle, int32_t, QolBagMutationResult*) {
 const QolBagSource kProviderSource{kBagSourceVersion, kProviderSpaceId, &provider_bag_count,
                                    &provider_info, &provider_item_at, &provider_for_each,
                                    &provider_export, &provider_import, &provider_remove,
-                                   nullptr, nullptr};
+                                   nullptr, nullptr, nullptr};
 QolResult bag_source_register(const QolBagSource*) { return fail(kQolErrUnsupported); }
 QolResult bag_source_unregister(int32_t) { return fail(kQolErrUnsupported); }
 uint32_t bag_source_count() { return 1; }
@@ -564,6 +564,68 @@ QolResult write_native_option_value(QolItemHandle item, uint32_t native_index, i
     g_native_option_written_index = native_index;
     g_native_option_written_value = value;
     if (g_native_option_write_result != kQolOk) return fail(g_native_option_write_result);
+    return ok();
+}
+
+QolResult fake_payload_update(const QolItemPayloadUpdateSpec* spec, QolItemPayload* out) {
+    if (spec == nullptr || out == nullptr) return fail(kQolErrInvalidArgument);
+    bool max_socket_done = false;
+    for (uint32_t index = 0; index < spec->mutation_count; ++index) {
+        const QolItemPayloadMutation& mutation = spec->mutations[index];
+        switch (static_cast<QolItemPayloadMutationKind>(mutation.kind)) {
+            case QolItemPayloadMutationKind::kJewelWord:
+                if (write_jewel_word(spec->source, static_cast<uint32_t>(mutation.value)).ok !=
+                    kQolOk) {
+                    return fail(kQolErrInternal);
+                }
+                break;
+            case QolItemPayloadMutationKind::kNativeOptionValue:
+                if (write_native_option_value(spec->source, mutation.index,
+                                              static_cast<int32_t>(mutation.value)).ok !=
+                    kQolOk) {
+                    return fail(kQolErrInternal);
+                }
+                break;
+            case QolItemPayloadMutationKind::kSocketLevel:
+            case QolItemPayloadMutationKind::kEnchantLevel:
+            case QolItemPayloadMutationKind::kEnchantRemaining:
+                if (!max_socket_done) {
+                    if (set_max_socket_enchant(spec->source).ok != kQolOk) {
+                        return fail(kQolErrInternal);
+                    }
+                    max_socket_done = true;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+    *out = {};
+    out->struct_size = sizeof(QolItemPayload);
+    const ItemFact* fact = find_fact(spec->source);
+    out->category = fact != nullptr ? static_cast<uint32_t>(fact->category) : 1u;
+    out->count = 1;
+    out->payload_size = 19;
+    out->payload[0] = 18;
+    return ok();
+}
+
+QolResult fake_payload_validate(const uint8_t*, uint32_t,
+                                QolItemPayloadValidation* out) {
+    if (out != nullptr) {
+        out->struct_size = sizeof(QolItemPayloadValidation);
+        out->consumed = 19;
+        out->option_count = 0;
+    }
+    return ok();
+}
+
+QolResult fake_replace_item(QolItemHandle expected, const QolBagTransfer* replacement,
+                            QolBagMutationResult* out) {
+    if (replacement == nullptr || out == nullptr) return fail(kQolErrInvalidArgument);
+    *out = {};
+    out->item = expected;
+    out->count = replacement->count;
     return ok();
 }
 
@@ -667,6 +729,8 @@ QolBagSourceRegistryApi g_bag_source_registry{};
 QolGameHost g_game{};
 QolHostSdk g_sdk{};
 QolCustomRecipeWritePort g_write_port{};
+ItemPayloadApi g_item_payload{};
+QolInventoryTransferApi g_inventory_transfer{};
 
 using qol::features::custom_recipe::result::CraftExecuteResult;
 using qol::features::custom_recipe::result::CraftGate;
@@ -776,16 +840,23 @@ void init_fixture() {
     g_quality_api.evaluate = &quality_evaluate;
     g_quality_capability_available = true;
 
+    g_item_payload = ItemPayloadApi{};
+    g_item_payload.struct_size = sizeof(ItemPayloadApi);
+    g_item_payload.version_major = kItemPayloadVersionMajor;
+    g_item_payload.version_minor = kItemPayloadVersionMinor;
+    g_item_payload.update = &fake_payload_update;
+    g_item_payload.validate = &fake_payload_validate;
+    g_inventory_transfer = QolInventoryTransferApi{};
+    g_inventory_transfer.struct_size = sizeof(QolInventoryTransferApi);
+    g_inventory_transfer.replace_item = &fake_replace_item;
+
     g_write_port = QolCustomRecipeWritePort{};
     g_write_port.abi_version = kQolPortCustomRecipeWriteVersion;
     g_write_port.write_stuff_need = &write_stuff_need;
     g_write_port.set_stuff_item = &set_stuff_item;
     g_write_port.description_set_off = &description_set_off;
     g_write_port.read_jewel_word = &read_jewel_word;
-    g_write_port.write_jewel_word = &write_jewel_word;
-    g_write_port.set_max_socket_enchant = &set_max_socket_enchant;
     g_write_port.random_inclusive = &port_random;
-    g_write_port.write_native_option_value = &write_native_option_value;
 
     PluginContext context{};
     context.game = &g_game;
@@ -796,6 +867,8 @@ void init_fixture() {
     qol::features::custom_recipe::set_write_port(&g_write_port);
     qol::features::custom_recipe::set_inventory_action(&g_inventory_action);
     qol::features::custom_recipe::set_inventory_slot(&g_inventory_slot);
+    qol::features::custom_recipe::set_item_payload(&g_item_payload);
+    qol::features::custom_recipe::set_inventory_transfer(&g_inventory_transfer);
     qol::features::custom_recipe::set_bag_source_registry(&g_bag_source_registry);
     qol::features::custom_recipe::set_enabled(true);
     custom_recipe::bind_base_record_count(69);

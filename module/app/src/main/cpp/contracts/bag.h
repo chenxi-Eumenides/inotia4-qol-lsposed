@@ -20,7 +20,8 @@
 namespace qol::contracts {
 
 constexpr const char* kBagSourceCapabilityId = "inventory.bag_source";
-constexpr QolVersion kBagSourceVersion{1, 2};
+// 1.3：尾部追加 replace_item（原子替换 provider 槽内物品）。
+constexpr QolVersion kBagSourceVersion{1, 3};
 
 // 跨介质物品转移记录：payload 格式由来源源定义，core.item 只透传。
 // 有效长度 <= kQolBagTransferPayloadMaxSize；缓冲区固定 256 字节，禁止动态分配。
@@ -81,6 +82,12 @@ struct QolBagSource {
     // 可选面：定位与使用。缺失时对应功能返回 kQolErrUnsupported。
     QolResult (*identify)(QolItemHandle item, QolBagRef* out, int32_t* out_slot);
     QolResult (*use)(QolBagRef ref, int32_t slot);
+
+    // 提交 provider 权威副本：item.payload.update 已把字段写到既有物化对象上，
+    // 来源只更新 descriptor/category/count/hash 并持久化/刷新。expected 必须仍是
+    // 当前槽物品；成功返回同一 handle（对象身份保留），失败 descriptor 不变。
+    QolResult (*replace_item)(QolItemHandle expected, const QolBagTransfer* replacement,
+                              QolBagMutationResult* out);
 };
 
 struct QolBagSourceRegistryApi {
@@ -105,7 +112,8 @@ inline bool qol_bag_source_valid(const QolBagSource* source) {
            source->space_id >= kQolBagSpaceFirstRegistered && source->count != nullptr &&
            source->info != nullptr && source->item_at != nullptr &&
            source->for_each_item != nullptr && source->export_item != nullptr &&
-           source->import_item != nullptr && source->remove != nullptr;
+           source->import_item != nullptr && source->remove != nullptr &&
+           source->replace_item != nullptr;
 }
 
 inline bool qol_bag_ref_is_task_bag(const QolBagRef& ref) {

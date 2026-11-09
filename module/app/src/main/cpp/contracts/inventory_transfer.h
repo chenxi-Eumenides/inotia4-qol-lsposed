@@ -29,7 +29,8 @@
 namespace qol::contracts {
 
 constexpr const char* kInventoryTransferCapabilityId = "inventory.transfer";
-constexpr QolVersion kInventoryTransferVersion{1, 0};
+// 1.1：尾部追加 replace_item（提交已原地更新的物品内容，返回同一句柄）。
+constexpr QolVersion kInventoryTransferVersion{1, 1};
 
 struct QolInventoryTransferApi {
     uint32_t struct_size;
@@ -38,15 +39,19 @@ struct QolInventoryTransferApi {
                            QolBagMutationResult* out_target);
     QolResult (*serialize_item)(QolItemHandle item, int32_t count, QolBagTransfer* out);
     QolResult (*locate)(int32_t space, QolItemHandle item, QolBagRef* out, int32_t* out_slot);
+    // expected 必须仍是当前槽/源物品。native 只确认；provider 提交 descriptor。
+    // 成功返回同一 handle（对象身份保留）；失败时原槽/descriptor 不变，replacement 不释放。
+    QolResult (*replace_item)(QolItemHandle expected, const QolBagTransfer* replacement,
+                              QolBagMutationResult* out);
 };
 
 inline bool qol_inventory_transfer_api_valid(const QolInventoryTransferApi* api) {
     constexpr uint32_t kRequiredSize =
-        static_cast<uint32_t>(offsetof(QolInventoryTransferApi, locate) +
-                              sizeof(decltype(QolInventoryTransferApi::locate)));
+        static_cast<uint32_t>(offsetof(QolInventoryTransferApi, replace_item) +
+                              sizeof(decltype(QolInventoryTransferApi::replace_item)));
     return api != nullptr && api->struct_size >= kRequiredSize &&
            api->move_item != nullptr && api->serialize_item != nullptr &&
-           api->locate != nullptr;
+           api->locate != nullptr && api->replace_item != nullptr;
 }
 
 static_assert(std::is_standard_layout<QolInventoryTransferApi>::value,

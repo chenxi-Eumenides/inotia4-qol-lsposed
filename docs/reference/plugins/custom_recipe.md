@@ -33,9 +33,9 @@
 | 面 | 当前声明 |
 |---|---|
 | `provides` | 无。结果 API `result::CraftResultApi` 只在插件内部由 UI 子层调用。 |
-| `requires` | `item.facts` v3.6、`craft.facts` v1.0、`save.facts` v1.1、`text_layer` v1.0、`inventory.action` v3.3、`inventory.slot` v1.0（`plugin.cpp:359-378`）。 |
-| `optional_requires` | `attribute.quality` v2.0、`inventory.bag_source` v1.2、`inventory.item_writeback` v1.0；缺失/失效只置 degraded，`attribute.quality` 只影响升阶路径，`inventory.bag_source` 使扩展袋物品的扣料回退原版类别入口，`inventory.item_writeback` 缺失时升阶写入只落在游戏对象上、provider 权威存储不同步（`plugin.cpp:349-359`）。 |
-| `ports` | 三条（`plugin.cpp:324-334`）：`QOL_PORT_CUSTOM_RECIPE_WRITE` v1.4、`QOL_PORT_CRAFT_UI_WRITE` v1.1、`QOL_PORT_RECIPE_TABLE` v1.0。 |
+| `requires` | `item.facts` v3.6、`craft.facts` v1.0、`save.facts` v1.1、`text_layer` v1.0、`inventory.action` v3.3、`inventory.slot` v1.0、`item.payload` v1.0、`inventory.transfer` v1.1（`plugin.cpp`）。 |
+| `optional_requires` | `attribute.quality` v2.0、`inventory.bag_source` v1.2；缺失/失效只置 degraded，`attribute.quality` 只影响升阶路径，`inventory.bag_source` 使扩展袋物品的扣料回退原版类别入口。 |
+| `ports` | 三条：`QOL_PORT_CUSTOM_RECIPE_WRITE` v1.5、`QOL_PORT_CRAFT_UI_WRITE` v1.1、`QOL_PORT_RECIPE_TABLE` v1.0。 |
 | `resources` | 13 条：5 条核心 UI hook（required/fail-closed）+ 7 条装饰 UI hook（optional/fail-soft）+ 1 条 `own:RECIPEBASE_MIXTUREBASE`（required/fail-soft）。顺序即释放逆序，ownership 最后声明、最先释放。 |
 | `jni` / HTTP | 均为 0（`plugin.cpp:359-377`）。 |
 | `features` | 仅 `custom_recipe.recipes`。 |
@@ -218,19 +218,21 @@ H-05 补扣承担。
   （`api_make_item`）从已查询的 `quality` / 候选词条取同一语义的输入，保证两边口径一致。
 - `api_make_item` 的提交顺序：
   - 宝石：quality 查询 → 与 item word 交叉核对 → 材料需求前置校验 → 计算候选（随机）→
-    **先提交 need 写入** → **最后写 jewel word**。
+    **先提交 need 写入** → `item.payload.update(source=item, kJewelWord)` 原地更新对象并生成 payload
+    → `inventory.transfer.replace_item` 提交 provider descriptor。
   - 装备：view 校验 → 候选随机 → 升阶计算 → int16 范围校验 → 材料需求前置校验 →
-    **先提交 need 写入** → **最后 `write_native_option_value(item, native_index, new_value)`**。
+    **先提交 need 写入** → `item.payload.update(source=item, kNativeOptionValue)` 原地更新对象并生成
+    payload → `inventory.transfer.replace_item` 提交 provider descriptor。
   - need 失败直接返回且不写数值；写值失败时 need 已写，不回滚；失败时已写入的展示值允许残留，
     不等价于强原子。
-- 随机源必须是真实游戏闭区间随机：UI 侧直接调用 write port ABI 1.3 的 `random_inclusive`，
+- 随机源必须是真实游戏闭区间随机：UI 侧直接调用 write port ABI 1.5 的 `random_inclusive`，
   不恒返回下界、不静默 clamp。
 - 装备写回只改第 `native_index` 条 type 0 节点的 int16 存储值，不重建 option 链表、不改
   宝石词条、不改附魔字段。
-- 写值成功后调用 `inventory.item_writeback.commit_item(item)`：若目标属于 provider（扩展背包），
-  provider 把物化对象的新内容同步回自己的权威存储；原版袋物品没有该 provider，调用是成功无操作。
-  能力缺失（旧 provider/独立部署）只降级为不通知；同步失败仅记录 `make item writeback failed`，
-  不回滚已完成的数值写入。
+- 三格产物配置同样走 `item.payload.update(source=product)`，直接原地配置 detached 产物，
+  不再 `create(payload)` + `discard_handle(old)`。
+- `inventory.transfer.replace_item` 对原版袋只确认物品仍在槽内；对扩展袋更新 descriptor/hash/
+  dirty/refresh。对象身份保持不变，craft UI/UseStuff 的原生指针继续有效。
 
 ## 8. 状态与线程
 

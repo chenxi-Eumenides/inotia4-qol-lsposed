@@ -44,6 +44,7 @@
 #include "game/adapter_ports/world_port.h"
 #include "game/clock.h"
 #include "host/adapters.h"
+#include "host/item_inventory_state_write_port.h"
 #include "infra/capabilities.h"
 #include "infra/command_queue.h"
 #include "infra/events.h"
@@ -1774,9 +1775,18 @@ int main() {
     assert(off_thread_result == kQolErrBlocked);
     assert(custom_recipe_write.read_jewel_word(product_handle, &u32_value).ok == kQolOk &&
            u32_value == 0x12345678u);
-    assert(custom_recipe_write.write_jewel_word(product_handle, 0x87654321u).ok == kQolOk &&
-           *product_count == 0x87654321u);
-    assert(custom_recipe_write.set_max_socket_enchant(product_handle).ok == kQolOk);
+    const auto& state_write = qol::host::item_inventory_state_write_port();
+    qol::contracts::QolItemPayloadMutation jewel_mutation{
+        static_cast<int32_t>(qol::contracts::QolItemPayloadMutationKind::kJewelWord), 0,
+        0x87654321u};
+    assert(state_write.apply_payload_mutation(product_handle, &jewel_mutation).ok == kQolOk);
+    assert(*product_count == 0x87654321u);
+    qol::contracts::QolItemPayloadMutation socket_mutation{
+        static_cast<int32_t>(qol::contracts::QolItemPayloadMutationKind::kSocketLevel), 0, 15};
+    qol::contracts::QolItemPayloadMutation enchant_mutation{
+        static_cast<int32_t>(qol::contracts::QolItemPayloadMutationKind::kEnchantLevel), 0, 15};
+    assert(state_write.apply_payload_mutation(product_handle, &socket_mutation).ok == kQolOk);
+    assert(state_write.apply_payload_mutation(product_handle, &enchant_mutation).ok == kQolOk);
     assert(*product_socket == 0xF3 && *product_enchant == 0x003Eu);
     uint8_t* provider_item = g_move_merge_fake_memory.data() + 0x300;
     uint32_t* provider_count = reinterpret_cast<uint32_t*>(provider_item + I_COUNT);
@@ -1788,15 +1798,15 @@ int main() {
     const auto provider_item_handle = qol::game::register_item(
         provider_item, qol::contracts::kQolItemHandleOwnerProvider);
     assert(provider_item_handle.slot != 0 && provider_item_handle.generation != 0);
-    // Provider 自管对象（扩展物品指针）是合法游戏对象：craft 写词条路径按同一语义写字段。
-    assert(custom_recipe_write.write_jewel_word(provider_item_handle, 0x01020304u).ok == kQolOk);
+    // Provider 自管对象与 detached 产物都是合法写入目标。
+    jewel_mutation.value = 0x01020304u;
+    assert(state_write.apply_payload_mutation(provider_item_handle, &jewel_mutation).ok == kQolOk);
     assert(*provider_count == 0x01020304u);
-    assert(custom_recipe_write.set_max_socket_enchant(provider_item_handle).ok == kQolOk);
+    assert(state_write.apply_payload_mutation(provider_item_handle, &socket_mutation).ok == kQolOk);
+    assert(state_write.apply_payload_mutation(provider_item_handle, &enchant_mutation).ok == kQolOk);
     assert(*provider_socket == 0xF5 && *provider_enchant == 0x123Cu);
     assert(qol::game::invalidate_item(provider_item_handle));
-    assert(custom_recipe_write.write_jewel_word(provider_item_handle, 0x01020304u).code ==
-           kQolErrNotFound);
-    assert(custom_recipe_write.set_max_socket_enchant(provider_item_handle).code ==
+    assert(state_write.apply_payload_mutation(provider_item_handle, &jewel_mutation).code ==
            kQolErrNotFound);
     assert(*provider_count == 0x01020304u && *provider_socket == 0xF5 &&
            *provider_enchant == 0x123Cu);
@@ -1804,7 +1814,8 @@ int main() {
     const auto detached_write_handle = qol::game::register_item(
         provider_item, qol::game::kQolLoadedItemHandleOwner);
     assert(detached_write_handle.slot != 0);
-    assert(custom_recipe_write.write_jewel_word(detached_write_handle, 0x0A0B0C0Du).ok ==
+    jewel_mutation.value = 0x0A0B0C0Du;
+    assert(state_write.apply_payload_mutation(detached_write_handle, &jewel_mutation).ok ==
            kQolOk);
     assert(*provider_count == 0x0A0B0C0Du);
     assert(qol::game::invalidate_item(detached_write_handle));

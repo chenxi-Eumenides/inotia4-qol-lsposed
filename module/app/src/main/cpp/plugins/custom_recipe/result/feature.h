@@ -8,6 +8,8 @@
 #include "../../../contracts/host_sdk.h"
 #include "../../../contracts/inventory_action.h"
 #include "../../../contracts/inventory_slot.h"
+#include "../../../contracts/inventory_transfer.h"
+#include "../../../contracts/item_payload.h"
 #include "../../../contracts/ownership.h"
 #include "../../../contracts/item_facts.h"
 #include "../../../contracts/save_facts.h"
@@ -36,6 +38,8 @@ void set_write_port(const contracts::QolCustomRecipeWritePort* port);
 // 前置阶段直接拒绝（原版入口只是回退口，不是缺失时的替代方案）。
 void set_inventory_action(const contracts::InventoryActionApi* api);
 void set_inventory_slot(const contracts::QolInventorySlotApi* api);
+void set_item_payload(const contracts::ItemPayloadApi* api);
+void set_inventory_transfer(const contracts::QolInventoryTransferApi* api);
 // 注册袋源（扩展背包）物品的 handle→袋引用定位面；缺失时该类物品回退原版类别入口。
 void set_bag_source_registry(const contracts::QolBagSourceRegistryApi* api);
 const contracts::QolHostSdk* host_sdk();

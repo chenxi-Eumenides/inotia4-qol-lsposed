@@ -39,6 +39,7 @@
 |---|---:|---|
 | `item.facts` | 4.0 | 物品类别、权威 `item_type`、库存 view/count/编码、禁售和报价等事实。 |
 | `item.state` | 1.1 | raw/enriched 库存状态 JSON 与尺寸查询。 |
+| `item.payload` | 1.0 | 从物品句柄/base payload 应用类型化字段修改，生成新 payload；有 source 时原地更新源对象。 |
 | `inventory.action` | 3.3 | 移动、使用、丢弃、出售、装备、卸下、镶嵌，以及 detached 生成/落位/释放。 |
 | `inventory.slot` | 1.0 | resolve/view/remove 槽位查询面。 |
 | `inventory.projection` | 1.3 | 注册/注销投影回调；投影显示和数据仍归注册方。尾部回调支持原版袋卸下、佣兵徽章、背包装备与角色装备。 |
@@ -76,7 +77,7 @@
 
 `move_merge.drag_merge`（「拖动合并」，BasicOptimization、默认开启）已迁往 `extension_bag` 注册；关闭时不执行拖动自动合并，其他库存动作不受该开关影响。
 
-## `QolBagSource` v1.2 公共契约
+## `QolBagSource` v1.3 公共契约
 
 `inventory.bag_source` 由 `core.inventory` 提供（`core.item` 不再持有该注册表）。每个来源占用独立 `space_id>=2`；袋索引从 0 开始。来源提供自己的数据和写入原语，注册方不接管其 sidecar 数据。
 
@@ -84,7 +85,7 @@
 
 | 字段 | 类型/要求 | 契约 |
 |---|---|---|
-| `version` | `QolVersion` | major 为 1，minor 至少为 1。 |
+| `version` | `QolVersion` | major 为 1，minor 至少为 3。 |
 | `space_id` | `int32_t` | 必须 `>=2`，且不能与已注册来源冲突。 |
 | `count` | `int32_t (*)()` | 必需；返回本空间当前袋数，不能为负。 |
 | `info` | `QolResult (*)(bag, QolBagInfo*)` | 必需；返回袋容量 `capacity` 与占用槽数 `occupied_slots`。 |
@@ -95,12 +96,13 @@
 | `remove` | `QolResult (*)(expected_handle, count, result*)` | 必需；按预期句柄扣减或移除。 |
 | `identify` | `QolResult (*)(handle, ref*, slot*)` | 可选；将来源句柄定位到袋与槽。 |
 | `use` | `QolResult (*)(ref, slot)` | 可选；执行来源自己的使用结算。 |
+| `replace_item` | `QolResult (*)(expected_handle, replacement, result*)` | 必需；`item.payload.update` 已原地更新对象，来源只提交 descriptor/hash/category/dirty/refresh 并返回同一句柄。 |
 
 | 注册约束 | 语义 |
 |---|---|
-| API | `QolBagSourceRegistryApi { struct_size, register_source, unregister_source }` 随 `inventory.bag_source` 1.1 提供。 |
+| API | `QolBagSourceRegistryApi { struct_size, register_source, unregister_source }` 随 `inventory.bag_source` 1.3 提供。 |
 | 时机与线程 | 注册/注销只在游戏主线程调用；来源激活时注册，停用时注销。所有来源回调也只在游戏主线程调用。 |
-| 校验 | 七个必需回调均须存在；`identify`、`use` 可缺省。版本不匹配、空间号小于 2、重复空间或缺少必需回调均拒绝，不覆盖已注册来源。 |
+| 校验 | 八个必需回调（含 `replace_item`）均须存在；`identify`、`use` 可缺省。版本不匹配、空间号小于 2、重复空间或缺少必需回调均拒绝，不覆盖已注册来源。 |
 | 生命周期 | 注册期间来源结构与函数表必须有效；注销后不再调用来源回调。 |
 | 快照可见性 | 注册/注销改变来源集合；后续库存读取应反映变化。 |
 
@@ -133,6 +135,15 @@ struct QolBagTransfer {
 ```
 
 payload 固定容量 256 字节，有效长度为 `1..255`，不得动态扩容。payload 是来源定义的序列化状态；`core.item` 只透传、不解释或改写。部分堆叠时 `count` 表示本次数量，目标须将 payload 中数量规范化为该值；接收端应在回调期间复制需保留的数据。
+
+## `item.payload` 1.0
+
+`update` 从 `source` 句柄或 `base_payload` 取基准 payload，装载临时对象、按 mutation 写字段、
+重新序列化并做结构校验；有 `source` 时再把同一组 mutation 原地写到源对象，保留对象身份与句柄。
+支持的 mutation 见 `contracts/item_payload.h`（jewel word、原生词条、数量、socket、enchant、magic rate）。
+`validate` 只保证长度前缀、loader 接受、`consumed == payload_size` 和重序列化结构等价，不校验
+词条/数值/品质/UID 语义。provider 的权威 payload 由调用方随后经
+`inventory.transfer.replace_item` 分派 `QolBagSource::replace_item` 提交；native 物品无需额外写槽。
 
 ## `inventory.action` v3.3
 

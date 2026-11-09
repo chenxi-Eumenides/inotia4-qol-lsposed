@@ -19,7 +19,6 @@
 
 #include "../../../contracts/attribute_quality.h"
 #include "../../../contracts/events.h"
-#include "../../../contracts/inventory_item_writeback.h"
 #include "../../../contracts/plugin.h"
 #include "../model/catalog.h"
 #include "../model/rules.h"
@@ -43,6 +42,8 @@ const contracts::QolCustomRecipeWritePort* g_write_port = nullptr;
 const contracts::InventoryActionApi* g_inventory_action = nullptr;
 const contracts::QolInventorySlotApi* g_inventory_slot = nullptr;
 const contracts::QolBagSourceRegistryApi* g_bag_source_registry = nullptr;
+const contracts::ItemPayloadApi* g_item_payload = nullptr;
+const contracts::QolInventoryTransferApi* g_inventory_transfer = nullptr;
 uint64_t g_save_ready_subscription = 0;
 bool valid_craft_item(qol::contracts::QolItemHandle item) {
     return item.slot != 0 && item.generation != 0;
@@ -117,6 +118,45 @@ void set_inventory_slot(const contracts::QolInventorySlotApi* api) { g_inventory
 void set_bag_source_registry(const contracts::QolBagSourceRegistryApi* api) {
     g_bag_source_registry = api;
 }
+
+void set_item_payload(const contracts::ItemPayloadApi* api) { g_item_payload = api; }
+
+void set_inventory_transfer(const contracts::QolInventoryTransferApi* api) {
+    g_inventory_transfer = api;
+}
+
+namespace {
+
+QolResult update_item_payload(qol::contracts::QolItemHandle source,
+                              const contracts::QolItemPayloadMutation* mutations,
+                              uint32_t mutation_count, contracts::QolItemPayload* out) {
+    if (g_item_payload == nullptr || g_item_payload->update == nullptr) {
+        return recipe_error(kQolErrUnsupported, "item.payload capability unavailable");
+    }
+    contracts::QolItemPayloadUpdateSpec spec{};
+    spec.struct_size = sizeof(spec);
+    spec.source = source;
+    spec.mutations = mutations;
+    spec.mutation_count = mutation_count;
+    spec.flags = contracts::kItemPayloadUpdateValidateStructure;
+    return g_item_payload->update(&spec, out);
+}
+
+QolResult replace_item_from_payload(qol::contracts::QolItemHandle expected,
+                                    const contracts::QolItemPayload& payload,
+                                    contracts::QolBagMutationResult* out) {
+    if (g_inventory_transfer == nullptr || g_inventory_transfer->replace_item == nullptr) {
+        return recipe_error(kQolErrUnsupported, "inventory.transfer capability unavailable");
+    }
+    contracts::QolBagTransfer transfer{};
+    transfer.category = static_cast<int32_t>(payload.category);
+    transfer.count = static_cast<int32_t>(payload.count);
+    transfer.payload_size = payload.payload_size;
+    std::memcpy(transfer.payload, payload.payload, payload.payload_size);
+    return g_inventory_transfer->replace_item(expected, &transfer, out);
+}
+
+}  // namespace
 
 void log_message(int32_t level, const char* format, ...) {
     if (g_sdk == nullptr || g_sdk->log.write == nullptr || format == nullptr) return;
@@ -275,25 +315,6 @@ QolResult require_attribute_quality_api(const contracts::AttributeQualityApi** o
     }
     *out_api = api;
     return contracts::ok();
-}
-
-// provider（扩展背包）物品在游戏侧被原地改写后，把新内容同步回 provider 的权威存储。
-// 能力缺失（纯原版物品/EB 未启用）即无操作；同步失败只记录，不回滚已完成的写入。
-void commit_provider_item_writeback(qol::contracts::QolItemHandle item) {
-    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return;
-    const void* iface = nullptr;
-    const QolResult required = g_sdk->capabilities.require(
-        contracts::kInventoryItemWritebackCapabilityId,
-        {contracts::kInventoryItemWritebackVersionMajor,
-         contracts::kInventoryItemWritebackVersionMinor},
-        &iface);
-    if (required.ok != kQolOk || iface == nullptr) return;
-    const auto* api = static_cast<const contracts::InventoryItemWritebackApi*>(iface);
-    if (api->commit_item == nullptr) return;
-    const QolResult committed = api->commit_item(item);
-    if (committed.ok != kQolOk) {
-        log_message(3, "make item writeback failed code=%d", committed.code);
-    }
 }
 
 QolResult query_jewel_quality(qol::contracts::QolItemHandle item,
@@ -1388,10 +1409,9 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
     if (g_write_port == nullptr || g_inventory_action == nullptr ||
         g_inventory_action->create == nullptr || g_inventory_action->place == nullptr ||
         g_inventory_action->discard_handle == nullptr ||
-        (recipe.product_mode == ProductMode::kScaleFirstItem &&
-         g_write_port->write_jewel_word == nullptr) ||
-        (recipe.product_mode == ProductMode::kMaxSocketEnchantFirstItem &&
-         g_write_port->set_max_socket_enchant == nullptr)) {
+        ((recipe.product_mode == ProductMode::kScaleFirstItem ||
+          recipe.product_mode == ProductMode::kMaxSocketEnchantFirstItem) &&
+         (g_item_payload == nullptr || g_item_payload->update == nullptr))) {
         log_execute_stage(2, "precheck_product_ready", 0, kQolErrNotReady, 0, 0);
         return CraftExecuteResult::kPrecheckFailed;
     }
@@ -1434,7 +1454,11 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
             static_cast<int>(source_jewel_word & kJewelValueMask), recipe.scale_permille);
         const uint32_t product_word = (source_jewel_word & ~kJewelValueMask) |
                                       (static_cast<uint32_t>(new_value) & kJewelValueMask);
-        const QolResult configured = g_write_port->write_jewel_word(product, product_word);
+        const contracts::QolItemPayloadMutation mutation{
+            static_cast<int32_t>(contracts::QolItemPayloadMutationKind::kJewelWord), 0,
+            static_cast<int64_t>(product_word)};
+        contracts::QolItemPayload payload{};
+        const QolResult configured = update_item_payload(product, &mutation, 1, &payload);
         log_execute_stage(configured.ok == kQolOk ? 0 : 2, "product_scale", 0,
                           configured.code, static_cast<int32_t>(source_jewel_word & kJewelValueMask),
                           new_value);
@@ -1444,7 +1468,12 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
         }
     }
     if (recipe.product_mode == ProductMode::kMaxSocketEnchantFirstItem) {
-        const QolResult configured = g_write_port->set_max_socket_enchant(product);
+        const contracts::QolItemPayloadMutation mutations[2] = {
+            {static_cast<int32_t>(contracts::QolItemPayloadMutationKind::kSocketLevel), 0, 15},
+            {static_cast<int32_t>(contracts::QolItemPayloadMutationKind::kEnchantRemaining), 0, 15},
+        };
+        contracts::QolItemPayload payload{};
+        const QolResult configured = update_item_payload(product, mutations, 2, &payload);
         log_execute_stage(configured.ok == kQolOk ? 0 : 2, "product_max_socket", 0,
                           configured.code, 0, 1);
         if (configured.ok != kQolOk) {
@@ -1605,8 +1634,9 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
             return 1;
         }
 
-        if (g_write_port == nullptr || g_write_port->write_jewel_word == nullptr) {
-            log_message(2, "make item aborted: jewel writer unavailable");
+        if (g_item_payload == nullptr || g_item_payload->update == nullptr ||
+            g_inventory_transfer == nullptr || g_inventory_transfer->replace_item == nullptr) {
+            log_message(2, "make item aborted: item payload/replace unavailable");
             return 1;
         }
         const int quality_tier =
@@ -1647,13 +1677,22 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
         // jewel write 是最后一个提交步骤；前序 quality/evaluate 错误不会改 stuffList 或宝石。
         const uint32_t updated_word =
             (word & ~kJewelValueMask) | (static_cast<uint32_t>(new_value) & kJewelValueMask);
-        const QolResult jewel_written = g_write_port->write_jewel_word(in->item, updated_word);
+        const contracts::QolItemPayloadMutation mutation{
+            static_cast<int32_t>(contracts::QolItemPayloadMutationKind::kJewelWord), 0,
+            static_cast<int64_t>(updated_word)};
+        contracts::QolItemPayload payload{};
+        const QolResult updated = update_item_payload(in->item, &mutation, 1, &payload);
+        if (updated.ok != kQolOk) {
+            log_message(2, "make item failed stage=payload_update result=%d", updated.code);
+            return 1;
+        }
+        contracts::QolBagMutationResult replaced{};
+        const QolResult jewel_written = replace_item_from_payload(in->item, payload, &replaced);
         if (jewel_written.ok != kQolOk) {
-            log_message(2, "make item failed stage=jewel_write result=%d needs=already_written",
+            log_message(2, "make item failed stage=jewel_replace result=%d needs=already_written",
                         jewel_written.code);
             return 1;
         }
-        commit_provider_item_writeback(in->item);
         if (g_verify_log_budget.fetch_sub(1) > 0) {
             log_message(0, "make item tier-up type=%d value=%d->%d range=[%d,%d] target=%d", type,
                         value, new_value, range.min, range.max, tier_ordinal(target));
@@ -1742,8 +1781,9 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
     }
     const int attribute_tier = ::custom_recipe::attribute_tier_from_quality_level(min_level);
     if (quality_tier < 0 || attribute_tier < 0) return 1;
-    if (g_write_port == nullptr || g_write_port->write_native_option_value == nullptr) {
-        log_message(2, "make item aborted: native option writer unavailable");
+    if (g_item_payload == nullptr || g_item_payload->update == nullptr ||
+        g_inventory_transfer == nullptr || g_inventory_transfer->replace_item == nullptr) {
+        log_message(2, "make item aborted: item payload/replace unavailable");
         return 1;
     }
     MaterialNeedPlan material_plan{};
@@ -1757,14 +1797,22 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
     const QolResult needs_written = write_material_needs(def, material_plan);
     if (needs_written.ok != kQolOk) return 1;
 
-    const QolResult option_written = g_write_port->write_native_option_value(
-        in->item, candidate.native_index, new_value);
+    const contracts::QolItemPayloadMutation mutation{
+        static_cast<int32_t>(contracts::QolItemPayloadMutationKind::kNativeOptionValue),
+        candidate.native_index, static_cast<int64_t>(new_value)};
+    contracts::QolItemPayload payload{};
+    const QolResult updated = update_item_payload(in->item, &mutation, 1, &payload);
+    if (updated.ok != kQolOk) {
+        log_message(2, "make item failed stage=payload_update result=%d", updated.code);
+        return 1;
+    }
+    contracts::QolBagMutationResult replaced{};
+    const QolResult option_written = replace_item_from_payload(in->item, payload, &replaced);
     if (option_written.ok != kQolOk) {
-        log_message(2, "make item failed stage=native_option_write result=%d needs=already_written",
+        log_message(2, "make item failed stage=native_option_replace result=%d needs=already_written",
                     option_written.code);
         return 1;
     }
-    commit_provider_item_writeback(in->item);
     if (g_verify_log_budget.fetch_sub(1) > 0) {
         log_message(0,
                     "make item equipment tier-up option_index=%u option_id=%d value=%d->%d "

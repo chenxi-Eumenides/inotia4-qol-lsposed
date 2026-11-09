@@ -226,9 +226,9 @@ namespace {
 const qol::contracts::QolItemInventoryStateWritePort kItemInventoryStateWritePort{
     qol::contracts::kQolPortItemInventoryStateWriteVersion, nullptr, nullptr, nullptr, nullptr,
     nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
-static_assert(sizeof(kItemInventoryStateWritePort) == sizeof(void*) * 22,
-              "item inventory write port v2.4 ABI size changed");
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+static_assert(sizeof(kItemInventoryStateWritePort) == sizeof(void*) * 23,
+              "item inventory write port v2.5 ABI size changed");
 
 }  // namespace
 

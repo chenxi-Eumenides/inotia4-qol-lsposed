@@ -982,7 +982,6 @@ add_executable(extension_bag_bag_source_mutation_tests
     test_extension_bag_bag_source_mutation.cpp
     stubs/extension_bag_catalog_stub.cpp
     ${CPP_DIR}/plugins/extension_bag/api/bag_source.cpp
-    ${CPP_DIR}/plugins/extension_bag/api/item_writeback.cpp
     ${CPP_DIR}/plugins/extension_bag/core/item_descriptor_sync.cpp
     ${CPP_DIR}/plugins/extension_bag/core/projection.cpp
     ${CPP_DIR}/plugins/extension_bag/core/ownership.cpp

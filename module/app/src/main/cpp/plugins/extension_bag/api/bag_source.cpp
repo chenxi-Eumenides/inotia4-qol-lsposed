@@ -507,6 +507,83 @@ QolResult source_remove(contracts::QolItemHandle expected, int32_t count,
     return contracts::ok();
 }
 
+QolResult source_replace_item(contracts::QolItemHandle expected,
+                              const contracts::QolBagTransfer* replacement,
+                              contracts::QolBagMutationResult* out) {
+    if (out == nullptr || replacement == nullptr || replacement->category <= 0 ||
+        replacement->count <= 0 || replacement->payload_size == 0 ||
+        replacement->payload_size > contracts::kQolBagTransferPayloadMaxSize) {
+        return source_error(kQolErrInvalidArgument, "invalid replacement request");
+    }
+    *out = {};
+    if (!source_ready()) return source_error(kQolErrNotReady, "extension bag not ready");
+    if (virtual_bag::validate_serialized_payload_buffer(
+            replacement->payload, sizeof(replacement->payload),
+            static_cast<int>(replacement->payload_size)) != virtual_bag::PayloadValidation::kOk) {
+        return source_error(kQolErrInvalidArgument, "invalid replacement payload");
+    }
+    const bool stackable =
+        encoded_category(replacement->category) ==
+        static_cast<int>(qol::contracts::QolItemCountEncoding::kEncoded);
+    if (stackable &&
+        static_cast<uint32_t>(replacement->count) > virtual_bag_count_limit(true)) {
+        return source_error(kQolErrInvalidArgument, "replacement count exceeds stack limit");
+    }
+
+    ::qol::extension_bag::ReentryLock lock;
+    void* item = nullptr;
+    if (!extension_bag_private_item_for_handle(expected, &item) || item == nullptr) {
+        return source_error(kQolErrNotFound, "extension item not found");
+    }
+    int bag = -1;
+    int slot = -1;
+    if (!module_slot_of_item_locked(item, &bag, &slot) || !valid_slot(bag, slot) ||
+        qol::extension_bag::ui_state().objects.module_objects[bag][slot] != item) {
+        return source_error(kQolErrNotFound, "extension item not found");
+    }
+    if (descriptor_empty(::qol::extension_bag::access::bag().items[bag][slot])) {
+        return source_error(kQolErrNotFound, "extension slot empty");
+    }
+    // item.payload.update 已把字段写到既有物化对象上；这里只提交 provider 的权威
+    // descriptor。保留同一对象/句柄：craft UI 与 UseStuff 仍持有该对象指针。
+    const virtual_bag::Item previous = ::qol::extension_bag::access::bag().items[bag][slot];
+    const uint32_t previous_hash =
+        qol::extension_bag::ui_state().objects.module_object_hashes[bag][slot];
+    const int32_t previous_category =
+        qol::extension_bag::ui_state().objects.module_object_categories[bag][slot];
+
+    virtual_bag::Item candidate{};
+    candidate.category = replacement->category;
+    candidate.count = replacement->count;
+    candidate.payload_size = replacement->payload_size;
+    std::memcpy(candidate.payload.data(), replacement->payload, replacement->payload_size);
+    if (!virtual_bag::valid_payload(candidate)) {
+        return source_error(kQolErrInvalidArgument, "invalid replacement payload");
+    }
+
+    ::qol::extension_bag::access::bag().items[bag][slot] = candidate;
+    qol::extension_bag::ui_state().objects.module_object_hashes[bag][slot] =
+        virtual_bag::payload_hash(candidate);
+    qol::extension_bag::ui_state().objects.module_object_categories[bag][slot] =
+        candidate.category;
+    extension_bag_mark_dirty_locked();
+    if (!persist_state_locked()) {
+        ::qol::extension_bag::access::bag().items[bag][slot] = previous;
+        qol::extension_bag::ui_state().objects.module_object_hashes[bag][slot] = previous_hash;
+        qol::extension_bag::ui_state().objects.module_object_categories[bag][slot] =
+            previous_category;
+        return source_error(kQolErrInternal, "extension item persist failed");
+    }
+    if (qol::extension_bag::ui_state().objects.module_view_installed &&
+        qol::extension_bag::ui_state().objects.module_view_index == bag) {
+        refresh_module_item_area_locked(bag);
+    }
+    out->ref = contracts::QolBagRef{kExtensionBagSpaceId, bag};
+    out->item = expected;
+    out->count = replacement->count;
+    return contracts::ok();
+}
+
 QolResult source_identify(contracts::QolItemHandle item_handle, contracts::QolBagRef* out,
                           int32_t* out_slot) {
     if (out == nullptr || out_slot == nullptr) {
@@ -592,6 +669,7 @@ const contracts::QolBagSource kBagSource{
     &source_remove,
     &source_identify,
     &source_use,
+    &source_replace_item,
 };
 
 }  // namespace

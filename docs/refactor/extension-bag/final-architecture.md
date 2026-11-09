@@ -1,6 +1,6 @@
 # extension_bag 实际架构（2026-10）
 
-> 2026-10 数据源迁移已完成、操作策略迁移未完成：EB 向 `core.item` 注册 `QolBagSource` 1.1
+> 2026-10 数据源迁移已完成、操作策略迁移未完成：EB 向 `core.item` 注册 `QolBagSource` 1.3
 >（space=2，`api/bag_source.cpp`），`core.item` 已拥有跨空间 journal/move 与部分原生动作。
 > 但 EB 仍在 `transaction/ext_ext.cpp` 实现扩展袋间合并/交换及本地 pending/回滚，
 > `api/bag_source.cpp` 仍实现 provider import/remove/use 与 use lease；商店接纳和扩展袋卸下
@@ -17,7 +17,7 @@
 core.item
   库存查询、跨空间 journal/move、部分原生库存动作
        │                         ▲
-        │ QolBagSource 1.1         │ 已迁移 UI 操作请求
+        │ QolBagSource 1.3         │ 已迁移 UI 操作请求
        ▼                         │
 extension_bag                    │
   api/bag_source.cpp ────────────┘
@@ -47,7 +47,7 @@ extension_bag                    │
 ### 3.1 扩展袋数据与显示读取
 
 ```
-core.item inventory query ──▶ QolBagSource 1.1 ──▶ 扩展袋 sidecar/state
+core.item inventory query ──▶ QolBagSource 1.3 ──▶ 扩展袋 sidecar/state
 UI refresh ──▶ ControlItem_SetItem/GetItem + INVEN_GetBagSize ──▶ 显示投影
 ```
 
@@ -109,7 +109,7 @@ UI 适配包含事件翻译与显示生命周期，但并非全部只做 UI：
 
 | 项 | 状态 |
 |---|---|
-| `QolBagSource` 1.1（space=2） | 已注册；提供 count/info/item_at/for_each_item/export/import/remove/identify/use |
+| `QolBagSource` 1.3（space=2） | 已注册；提供 count/info/item_at/for_each_item/export/import/remove/identify/use/replace_item |
 | 旧 provider、能力、HTTP、typed command、旧式全库存 move | 已删除 |
 | 装备页/商店/合成显示虚拟化 | 已使用 `ControlItem_SetItem/GetItem` 与 `INVEN_GetBagSize`；不写槽表或容量字 |
 | 扩展袋状态与 sidecar | 保留；bagCount 只由设置页修改 |
