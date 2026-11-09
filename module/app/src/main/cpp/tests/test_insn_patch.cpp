@@ -7,12 +7,186 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <limits>
 #include <sys/mman.h>
+#include <unordered_map>
 
 namespace {
 int failures = 0;
 void check(bool condition, const char* message) {
     if (!condition) { std::fprintf(stderr, "FAIL: %s\n", message); ++failures; }
+}
+
+// kind4 区域 thunk 的最小 AArch64 子集解释器。只接受生成器实际发出的编码与
+// insn_sites 中实机 replay 用到的形态；遇到未知编码直接失败，避免“看起来通过”
+// 却静默跳过新指令。用于在 x86 host 上按机器码验证算术与寄存器恢复顺序。
+struct Sim {
+    uint64_t x[31]{};
+    bool n = false, z = false, c = false, v = false;
+    uint64_t sp = 0x100000;
+    std::unordered_map<uint64_t, uint64_t> mem;
+
+    uint64_t get(uint32_t reg) const { return reg == 31 ? 0 : x[reg & 31]; }
+    void set(uint32_t reg, uint64_t value) { if ((reg & 31) != 31) x[reg & 31] = value; }
+    void set_w(uint32_t reg, uint64_t value) { set(reg, static_cast<uint32_t>(value)); }
+
+    void flags_sub64(uint64_t a, uint64_t b) {
+        const uint64_t r = a - b;
+        n = (r >> 63) != 0;
+        z = r == 0;
+        c = a >= b;
+        v = (((a ^ b) & (a ^ r)) >> 63) != 0;
+    }
+    void flags_sub32(uint32_t a, uint32_t b) {
+        const uint32_t r = a - b;
+        n = (r >> 31) != 0;
+        z = r == 0;
+        c = a >= b;
+        v = (((a ^ b) & (a ^ r)) >> 31) != 0;
+    }
+    bool cond(uint32_t cc) const {
+        switch (cc & 0xf) {
+            case 0x0: return z;
+            case 0x1: return !z;
+            case 0x2: return c;
+            case 0x3: return !c;
+            case 0x8: return c && !z;
+            case 0x9: return !c || z;
+            case 0xa: return n == v;
+            case 0xb: return n != v;
+            case 0xc: return !z && n == v;
+            case 0xd: return z || n != v;
+            default: return false;
+        }
+    }
+};
+
+uint32_t rd_field(uint32_t w) { return w & 0x1f; }
+uint32_t rn_field(uint32_t w) { return (w >> 5) & 0x1f; }
+uint32_t rm_field(uint32_t w) { return (w >> 16) & 0x1f; }
+uint32_t ra_field(uint32_t w) { return (w >> 10) & 0x1f; }
+
+bool exec_word(Sim& s, uint32_t w) {
+    // 保存/恢复块由生成器固定发出，精确匹配即可；若编码变化，测试应失败并强制复审。
+    if (w == 0xa9bd47f0u) { s.sp -= 48; s.mem[s.sp] = s.get(16); s.mem[s.sp + 8] = s.get(17); return true; }
+    if (w == 0xa9014ff2u) { s.mem[s.sp + 16] = s.get(18); s.mem[s.sp + 24] = s.get(19); return true; }
+    if (w == 0xa90257f4u) { s.mem[s.sp + 32] = s.get(20); s.mem[s.sp + 40] = s.get(21); return true; }
+    if (w == 0xa94257f4u) { s.set(20, s.mem[s.sp + 32]); s.set(21, s.mem[s.sp + 40]); return true; }
+    if (w == 0xa9414ff2u) { s.set(18, s.mem[s.sp + 16]); s.set(19, s.mem[s.sp + 24]); return true; }
+    if (w == 0xa8c347f0u) { s.set(16, s.mem[s.sp]); s.set(17, s.mem[s.sp + 8]); s.sp += 48; return true; }
+    if ((w & 0xfc000000u) == 0x14000000u) return true;   // b（安装期重定位后的返回分支同属 B）
+    if ((w & 0xfc000000u) == 0x94000000u) return false;  // BL 未建模：不得静默跳过
+    if ((w & 0x7f800000u) == 0x52800000u) {              // MOVZ
+        const uint32_t hw = (w >> 21) & 3;
+        const uint64_t imm = static_cast<uint64_t>((w >> 5) & 0xffff) << (16 * hw);
+        if ((w >> 31) != 0) s.set(rd_field(w), imm); else s.set_w(rd_field(w), imm);
+        return true;
+    }
+    if ((w & 0x7f800000u) == 0x72800000u) {              // MOVK
+        const uint32_t hw = (w >> 21) & 3;
+        const uint64_t imm = static_cast<uint64_t>((w >> 5) & 0xffff) << (16 * hw);
+        const uint32_t r = rd_field(w);
+        const uint64_t mask = uint64_t{0xffff} << (16 * hw);
+        s.set(r, (s.get(r) & ~mask) | imm);
+        return true;
+    }
+    if ((w & 0xfffffc00u) == 0x93407c00u) {              // SXTW
+        s.set(rd_field(w), static_cast<uint64_t>(
+            static_cast<int64_t>(static_cast<int32_t>(s.get(rn_field(w))))));
+        return true;
+    }
+    if ((w & 0xffe0fc00u) == 0x9ac00c00u) {              // SDIV 64
+        const int64_t a = static_cast<int64_t>(s.get(rn_field(w)));
+        const int64_t b = static_cast<int64_t>(s.get(rm_field(w)));
+        if (b == 0 || (a == std::numeric_limits<int64_t>::min() && b == -1)) return false;
+        s.set(rd_field(w), static_cast<uint64_t>(a / b));
+        return true;
+    }
+    if ((w & 0xffe08000u) == 0x9b008000u) {              // MSUB 64：Ra - Rn*Rm
+        s.set(rd_field(w), s.get(ra_field(w)) -
+                               s.get(rn_field(w)) * s.get(rm_field(w)));
+        return true;
+    }
+    if ((w & 0xffe08000u) == 0x9b000000u && ra_field(w) == 31) {  // MUL 64
+        s.set(rd_field(w), s.get(rn_field(w)) * s.get(rm_field(w)));
+        return true;
+    }
+    if ((w & 0xffe0fc00u) == 0x9b207c00u) {              // SMULL
+        const int64_t a = static_cast<int32_t>(s.get(rn_field(w)));
+        const int64_t b = static_cast<int32_t>(s.get(rm_field(w)));
+        s.set(rd_field(w), static_cast<uint64_t>(a * b));
+        return true;
+    }
+    if ((w & 0xffe08000u) == 0x1b000000u && ra_field(w) == 31) {  // MUL 32
+        const uint32_t a = static_cast<uint32_t>(s.get(rn_field(w)));
+        const uint32_t b = static_cast<uint32_t>(s.get(rm_field(w)));
+        s.set_w(rd_field(w), static_cast<uint64_t>(a * b));
+        return true;
+    }
+    if ((w & 0xffe0fc00u) == 0x8b000000u) {              // ADD 64
+        s.set(rd_field(w), s.get(rn_field(w)) + s.get(rm_field(w)));
+        return true;
+    }
+    if ((w & 0xffe0ffe0u) == 0xaa0003e0u) {              // MOV 64
+        s.set(rd_field(w), s.get(rm_field(w)));
+        return true;
+    }
+    if ((w & 0xffe0ffe0u) == 0x2a0003e0u) {              // MOV 32
+        s.set_w(rd_field(w), s.get(rm_field(w)));
+        return true;
+    }
+    if ((w & 0xffe0fc00u) == 0xeb000000u) {              // SUBS 64 / CMP
+        const uint64_t a = s.get(rn_field(w));
+        const uint64_t b = s.get(rm_field(w));
+        s.flags_sub64(a, b);
+        if (rd_field(w) != 31) s.set(rd_field(w), a - b);
+        return true;
+    }
+    if ((w & 0xffe00c00u) == 0x9a800000u) {              // CSEL 64
+        s.set(rd_field(w), s.cond((w >> 12) & 0xf) ? s.get(rn_field(w))
+                                                   : s.get(rm_field(w)));
+        return true;
+    }
+    if ((w & 0xffc00000u) == 0x39400000u) {              // LDRB (unsigned offset)
+        const uint64_t addr = s.get(rn_field(w)) + ((w >> 10) & 0xfff);
+        const auto it = s.mem.find(addr);
+        s.set_w(rd_field(w), it == s.mem.end() ? 0 : (it->second & 0xff));
+        return true;
+    }
+    if ((w & 0xffc00000u) == 0xf9400000u) {              // LDR 64 (unsigned offset)
+        const uint64_t addr = s.get(rn_field(w)) + static_cast<uint64_t>((w >> 10) & 0xfff) * 8;
+        const auto it = s.mem.find(addr);
+        s.set(rd_field(w), it == s.mem.end() ? 0 : it->second);
+        return true;
+    }
+    if ((w & 0xffe0fc00u) == 0x4b000000u) {              // SUB 32 (register)
+        const uint32_t a = static_cast<uint32_t>(s.get(rn_field(w)));
+        const uint32_t b = static_cast<uint32_t>(s.get(rm_field(w)));
+        s.set_w(rd_field(w), static_cast<uint64_t>(a - b));
+        return true;
+    }
+    if ((w & 0xff800000u) == 0x51000000u) {              // SUB 32 (imm)
+        const uint32_t imm = (w >> 10) & 0xfff;
+        s.set_w(rd_field(w), static_cast<uint64_t>(
+            static_cast<uint32_t>(s.get(rn_field(w))) - imm));
+        return true;
+    }
+    if ((w & 0xff800000u) == 0x71000000u) {              // SUBS 32 (imm) / CMP
+        const uint32_t a = static_cast<uint32_t>(s.get(rn_field(w)));
+        const uint32_t b = (w >> 10) & 0xfff;
+        s.flags_sub32(a, b);
+        if (rd_field(w) != 31) s.set_w(rd_field(w), static_cast<uint64_t>(a - b));
+        return true;
+    }
+    return false;
+}
+
+bool run_thunk(const uint32_t* words, uint32_t count, Sim& sim) {
+    for (uint32_t i = 0; i < count; ++i) {
+        if (!exec_word(sim, words[i])) return false;
+        if ((words[i] & 0xfc000000u) == 0x14000000u) return true;
+    }
+    return false;  // 必须命中尾部 B，否则结构不符
 }
 
 }
@@ -130,6 +304,95 @@ int main(int argc, char** argv) {
     InsnPatchSpec bad_d_scratch{4, 27, 22, 18, 1000, 0x123450, 0, {}, 0, 18};
     check(!insn_patch_test_generate(&bad_d_scratch, words, 40, &count),
           "reject region d_reg in scratch x16-x21");
+    // 参考实现：safe_scale 与精确向零截断一致（覆盖 int32 边界与负值）。
+    {
+        const int32_t xs[] = {0, 1, 19, 141, 999, 1000, 1001, 2147483647,
+                              -1, -999, -1000, -2147483647};
+        const int32_t ns[] = {0, 1, 700, 1000, -1, 2147483647, -2147483647};
+        for (int32_t xv : xs) {
+            for (int32_t nv : ns) {
+                const __int128 expected = static_cast<__int128>(xv) * nv / 1000;
+                char message[128];
+                std::snprintf(message, sizeof(message),
+                              "safe_scale matches trunc(X*N/1000): X=%d N=%d", xv, nv);
+                check(qol::features::damage_widen::safe_scale(xv, nv) ==
+                          static_cast<int64_t>(expected), message);
+            }
+        }
+    }
+    // 机器码级：按生成器实际产出的指令执行分解式，与精确参考比较（含钳制）。
+    {
+        const int32_t xs[] = {0, 1, 19, 141, 999, 1000, 1001, 1999, 2000,
+                              123456, 2147483647, -1, -999, -1000, -1001, -2147483647};
+        const int32_t ns[] = {0, 1, 700, 1000, -1, 2147483647, -2147483647};
+        for (uint32_t divisor : {1000u, 100u}) {
+            for (int32_t xv : xs) {
+                for (int32_t nv : ns) {
+                    InsnPatchSpec spec{4, 2, 3, 4, divisor, 0x123450, 0, {}, 0, 4};
+                    uint32_t generated = 0;
+                    if (!insn_patch_test_generate(&spec, words, 40, &generated)) {
+                        check(false, "semantic matrix generation");
+                        continue;
+                    }
+                    Sim sim;
+                    sim.set(2, static_cast<uint32_t>(xv));
+                    sim.set(3, static_cast<uint32_t>(nv));
+                    check(run_thunk(words, generated, sim), "semantic matrix executes");
+                    int64_t expected = static_cast<int64_t>(
+                        static_cast<__int128>(xv) * nv / divisor);
+                    if (expected < 0) expected = 0;
+                    if (expected > std::numeric_limits<int32_t>::max())
+                        expected = std::numeric_limits<int32_t>::max();
+                    char message[160];
+                    std::snprintf(message, sizeof(message),
+                                  "kind4 machine code matches trunc(X*N/%u) and clamp: X=%d N=%d",
+                                  divisor, xv, nv);
+                    check(static_cast<int32_t>(sim.get(4)) ==
+                              static_cast<int32_t>(expected), message);
+                }
+            }
+        }
+    }
+    // EF20C 实机组合：w27=19, w22=1000 必须产出 19；replay 的 ldrb/ldr/mul/sxtw 保序。
+    {
+        InsnPatchSpec spec{4, 27, 22, 22, 1000, 0xef234, 4,
+                           {0x39400000u, 0xf9400042u, 0x1b007ee0u, 0x93407c00u}, 0, 22};
+        uint32_t generated = 0;
+        check(insn_patch_test_generate(&spec, words, 40, &generated),
+              "EF20C semantic generation");
+        Sim sim;
+        sim.set_w(27, 19);
+        sim.set_w(22, 1000);
+        sim.set_w(23, 5);
+        const uint64_t byte_addr = 0x200000;
+        sim.mem[byte_addr] = 0;
+        sim.set(0, byte_addr);
+        const uint64_t table_addr = 0x210000;
+        sim.mem[table_addr] = byte_addr;
+        sim.set(2, table_addr);
+        check(run_thunk(words, generated, sim), "EF20C semantic execution");
+        check(static_cast<int32_t>(sim.get(22)) == 19,
+              "EF20C machine code yields 19 for X=19,N=1000");
+        check(sim.get(2) == byte_addr,
+              "EF20C replay preserves ldr x2,[x2] semantics");
+    }
+    // EF5D8 实机组合：replay mov x1,x19 必须读到恢复后的 victim，而不是 safe_scale 余数。
+    {
+        InsnPatchSpec spec{4, 22, 1, 22, 1000, 0xef5f0, 1, {0xaa1303e1u}, 0, 22};
+        uint32_t generated = 0;
+        check(insn_patch_test_generate(&spec, words, 40, &generated),
+              "EF5D8 semantic generation");
+        Sim sim;
+        sim.set(19, 0x1000);  // victim pointer
+        sim.set_w(22, 141);   // Act_DD 伤害
+        sim.set_w(1, 700);    // 千分比因子
+        check(run_thunk(words, generated, sim), "EF5D8 semantic execution");
+        check(sim.get(1) == 0x1000,
+              "EF5D8 replay reads original x19 (restore precedes replay)");
+        check(static_cast<int32_t>(sim.get(22)) == 98,
+              "EF5D8 machine code yields 141*700/1000=98");
+        check(sim.get(19) == 0x1000, "EF5D8 restores original x19");
+    }
     InsnPatchSpec bad_replay{4, 27, 22, 22, 1000, 0x123450, 5, {}, 0};
     check(!insn_patch_test_generate(&bad_replay, words, 24, &count),
           "reject oversized region replay");
