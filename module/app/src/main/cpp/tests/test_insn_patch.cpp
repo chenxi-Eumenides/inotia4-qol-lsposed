@@ -65,7 +65,7 @@ int main(int argc, char** argv) {
               words[6] == 0xf100021fu && words[15] == 0x71000202u &&
               words[16] == 0xa8c147f0u && words[17] == 0x14000000u,
            "BC thunk instruction words");
-    // 区域级：safe_scale 分解式（高位先除后乘 + 低位先乘后除），重放按原序排在分解式之后。
+    // 区域级：safe_scale 分解式（高位先除后乘 + 低位先乘后除），恢复 x16-x21 后再按原序重放。
     InsnPatchSpec region_spec{4, 27, 22, 22, 1000, 0x123450, 3,
                          {0x39400000u, 0xf9400042u, 0x1b007ee0u, 0}, 0, 22};
     check(insn_patch_test_generate(&region_spec, words, 40, &count) && count == 27,
@@ -74,10 +74,11 @@ int main(int argc, char** argv) {
               words[5] == 0x9ad10e12u && words[6] == 0x9b11c253u &&
               words[8] == 0x9b157e54u && words[9] == 0x9b367e75u &&
               words[19] == 0x2a1003f6u &&
-              words[20] == 0x39400000u && words[21] == 0xf9400042u &&
-              words[22] == 0x1b007ee0u &&
-              words[23] == 0xa94257f4u && words[25] == 0xa8c347f0u,
-          "region decomposition then original-order replay");
+              words[20] == 0xa94257f4u && words[21] == 0xa9414ff2u &&
+              words[22] == 0xa8c347f0u &&
+              words[23] == 0x39400000u && words[24] == 0xf9400042u &&
+              words[25] == 0x1b007ee0u && words[26] == 0x14000000u,
+          "region decomposition, restore, then original-order replay");
     // EF20C 的实际操作数：A=w27, B/D=w22；逐指令断言防止读未初始化 x0/x20。
     InsnPatchSpec ef20c_spec{4, 27, 22, 22, 1000, 0xef234, 4,
                              {0x39400000u, 0xf9400042u, 0x1b007ee0u, 0x93407c00u}, 0, 22};
@@ -87,24 +88,48 @@ int main(int argc, char** argv) {
               words[8] == 0x9b157e54u &&  // mul x20,x18,x21
               words[9] == 0x9b367e75u,     // smull x21,w19,w22
           "EF20C safe_scale operands use initialized quotient/remainder/input registers");
-    // ÷100 与 ÷1000 同构分解式（除数参数化）；置标志 replay 位于非标志 replay 之后、恢复之前。
+    // ÷100 与 ÷1000 同构分解式（除数参数化）；先恢复 x16-x21，再按原序重放：
+    // 非标志 replay 在前，置标志 replay 最后（区域外分支消费最终标志）。
     InsnPatchSpec region_div100{4, 3, 1, 26, 100, 0x123450, 2,
                                 {0x51005842u, 0x7100145fu}, 0, 1};
     check(insn_patch_test_generate(&region_div100, words, 40, &count) && count == 26,
           "div-100 region uses same decomposition");
     check(words[3] == 0x93407c70u && words[4] == 0xd2800c91u &&
-              words[20] == 0x51005842u && words[21] == 0x7100145fu &&
-              words[22] == 0xa94257f4u,
-          "divisor parameterized; flag replay ordered after non-flag replay, before restore");
-    // BL 重放保持原序：分解式结束后先 BL 占位，再执行 BL 之后的原始指令。
+              words[20] == 0xa94257f4u && words[21] == 0xa9414ff2u &&
+              words[22] == 0xa8c347f0u &&
+              words[23] == 0x51005842u && words[24] == 0x7100145fu &&
+              words[25] == 0x14000000u,
+          "divisor parameterized; restore precedes flag replay at tail");
+    // BL 重放保持原序：恢复暂存寄存器后，先 BL 占位，再执行 BL 之后的原始指令。
     InsnPatchSpec region_bl{4, 22, 2, 22, 1000, 0x123450, 3,
                             {0xffffffffu, 0x52807d03u, 0x4b000060u}, 0xdfd18u, 22};
     check(insn_patch_test_generate(&region_bl, words, 40, &count) && count == 27,
-          "bl replay placed after decomposition in original order");
+          "bl replay placed after restore in original order");
     check(words[3] == 0x93407ed0u && words[19] == 0x2a1003f6u &&
-              words[20] == 0xffffffffu && words[21] == 0x52807d03u &&
-              words[22] == 0x4b000060u && words[23] == 0xa94257f4u,
+              words[20] == 0xa94257f4u && words[21] == 0xa9414ff2u &&
+              words[22] == 0xa8c347f0u &&
+              words[23] == 0xffffffffu && words[24] == 0x52807d03u &&
+              words[25] == 0x4b000060u && words[26] == 0x14000000u,
           "bl placeholder and post-BL replay ordering");
+    // EF5D8：重放 mov x1,x19 必须读到原始 x19（victim），不能读到 safe_scale 余数。
+    InsnPatchSpec ef5d8_spec{4, 22, 1, 22, 1000, 0xef5f0, 1,
+                             {0xaa1303e1u}, 0, 22};
+    check(insn_patch_test_generate(&ef5d8_spec, words, 40, &count) && count == 25,
+          "EF5D8 thunk generation with x19 replay");
+    check(words[19] == 0x2a1003f6u && words[20] == 0xa94257f4u &&
+              words[21] == 0xa9414ff2u && words[22] == 0xa8c347f0u &&
+              words[23] == 0xaa1303e1u,
+          "EF5D8 replay observes restored x19 (restore precedes replay)");
+    // 暂存区约束：分解式读写 x16-x21，a/b/d 落入其中会读入余数或被恢复覆盖。
+    InsnPatchSpec bad_a_scratch{4, 19, 22, 22, 1000, 0x123450, 0, {}, 0, 22};
+    check(!insn_patch_test_generate(&bad_a_scratch, words, 40, &count),
+          "reject region a_reg in scratch x16-x21");
+    InsnPatchSpec bad_b_scratch{4, 27, 20, 22, 1000, 0x123450, 0, {}, 0, 22};
+    check(!insn_patch_test_generate(&bad_b_scratch, words, 40, &count),
+          "reject region b_reg in scratch x16-x21");
+    InsnPatchSpec bad_d_scratch{4, 27, 22, 18, 1000, 0x123450, 0, {}, 0, 18};
+    check(!insn_patch_test_generate(&bad_d_scratch, words, 40, &count),
+          "reject region d_reg in scratch x16-x21");
     InsnPatchSpec bad_replay{4, 27, 22, 22, 1000, 0x123450, 5, {}, 0};
     check(!insn_patch_test_generate(&bad_replay, words, 24, &count),
           "reject oversized region replay");

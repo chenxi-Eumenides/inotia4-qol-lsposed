@@ -99,11 +99,17 @@ bool generate(const InsnPatchSpec& s, uint32_t* out, uint32_t cap, uint32_t* cou
     } else if (s.kind == 4) {
         // 区域替换：千分比运算一律走 safe_scale 分解式（X÷D×N + (X mod D)×N÷D，除法向零截断），
         // 与 trunc(X×N÷D) 整数恒等；中间积 ≤ ~(X÷D)×N，不可能超 int64（用户裁决的硬性形态）。
-        // 重放排在分解式之后并按原顺序执行：分解式已消费 a_reg/b_reg，重放可以安全改写它们；
+        // 分解式之后先恢复 x16-x21 再重放：重放是原区域指令，可能读取被分解式占用的
+        // callee-saved 寄存器（EF5D8 的 mov x1,x19 必须读到原始 x19，而不是余数）。
+        // 写回 d 在恢复之前，上述暂存区约束保证恢复不会覆盖结果。
         // BL 保留占位，安装期按实际词位重定位；置标志指令延后到最后（区域外分支消费最终标志）。
         if (s.a_reg > 30 || s.b_reg > 30 || s.d_reg > 30 || s.divisor == 0 ||
             s.divisor > 0xffff || s.ret_addr == 0 || s.replay_count > 4 || cap < 29)
             return false;
+        // x16-x21 是分解式暂存：重放前必须恢复原值，而写回 d 在恢复之前。a/b 需在分解式
+        // 中保持原值，d 不得被随后的恢复覆盖，故三者均不得落入暂存区。
+        const auto in_scratch = [](uint32_t reg) { return reg >= 16 && reg <= 21; };
+        if (in_scratch(s.a_reg) || in_scratch(s.b_reg) || in_scratch(s.d_reg)) return false;
         uint32_t relocated_bl_count = 0;
         for (uint32_t i = 0; i < s.replay_count; ++i) {
             if (!replay_word_supported(s.replay_words[i])) return false;
@@ -128,7 +134,8 @@ bool generate(const InsnPatchSpec& s, uint32_t* out, uint32_t cap, uint32_t* cou
             !emit(movz_x(17, 0xffff)) || !emit(0xf2affff1u) ||
             !emit(0xeb11021fu) || !emit(csel_x(16, 17, 16, 0xc)) ||
             !emit(0x2a1003e0u | s.d_reg)) return false;
-        // 重放按原顺序排在写回之后：BL 保留占位（安装期重定位），非标志词原序执行；
+        if (!emit(0xa94257f4u) || !emit(0xa9414ff2u) || !emit(0xa8c347f0u)) return false;
+        // 重放按原顺序执行：BL 保留占位（安装期重定位），非标志词原序执行；
         // 置标志指令统一延后到最后。
         for (uint32_t i = 0; i < s.replay_count; ++i) {
             if (replay_sets_flags(s.replay_words[i])) continue;
@@ -137,8 +144,7 @@ bool generate(const InsnPatchSpec& s, uint32_t* out, uint32_t cap, uint32_t* cou
         // 重放组三：置标志指令最后重放（区域外分支消费最终标志）。
         for (uint32_t i = 0; i < s.replay_count; ++i)
             if (replay_sets_flags(s.replay_words[i]) && !emit(s.replay_words[i])) return false;
-        if (!emit(0xa94257f4u) || !emit(0xa9414ff2u) || !emit(0xa8c347f0u) ||
-            !emit(0x14000000u)) return false;
+        if (!emit(0x14000000u)) return false;
     } else if (s.kind == 3) {
         // 语义：wD = clamp32(x21 ÷ divisor × (sxtw wB) ÷ divisor)；x21 = 64 位乘积（点 B 写入）。
         // 替换 monster v29 Act_M_DD 0xee1c4..0xee1eb 九条（smull/lsr/asr/sub ×2 + mul）。
