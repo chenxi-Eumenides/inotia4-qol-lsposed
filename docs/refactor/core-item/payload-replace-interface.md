@@ -212,10 +212,11 @@ QolResult (*replace_item)(QolItemHandle expected,
 - 有槽 replace：返回同一 handle，保持对象身份；craft UI/UseStuff 的指针继续有效。
 - 三格产物：对象来源由 `ThreeSlotRecipe::product_origin` 逐条配方声明，不由 `ProductMode` 推断。
   - `kNewItem`：初始产物纯 `item.payload.update` 生成 payload → `create(payload)` → 丢弃旧 detached 产物；
-  - `kUpdateFirstItem`：第 1 格原物品即产物，纯 `item.payload.update(source=items[0])` +
-    `inventory.transfer.replace_item`（replace 原地写回），该格不扣料、不 place。
-  - 当前第 7 条（宝石 + 混沌卷轴）为 `kUpdateFirstItem`，其余 7 条与动态配方为 `kNewItem`；
-    堆叠宝石走 `kNewItem` 回退，避免一次升级整堆。
+  - `kUpdateExistingItem`：`update_slot` 指定的原物品即产物，纯
+    `item.payload.update(source=items[update_slot])` + `inventory.transfer.replace_item`
+    （replace 原地写回），该格不扣料、不 place；`update_slot >= 3` 回退 `kNewItem`。
+  - 当前第 7 条（宝石 + 混沌卷轴）为 `kUpdateExistingItem`、`update_slot=0`，其余 7 条与动态配方
+    为 `kNewItem`；堆叠宝石走 `kNewItem` 回退，避免一次升级整堆。
 - UID：
   - `source` 路径自动保留原 UID；
   - `base_payload` 路径默认由调用方保证；`kPreserveUid` 仅作意图声明；
@@ -265,15 +266,16 @@ Host（已执行）：
 - 装备升阶（多词条/改版自定义词条）替换后仍可正常显示、移动、存档；
 - 材料只扣一次；craft UI 输入物品在升阶后不出现悬空指针/崩溃。
 
-Debug APK：`output/inotia4_qol_lsposed_debug_2611091818_8b16b0cf32df.apk`，
-SHA-256 `8b16b0cf32df284d3492464fa2c8c7a7b44205d4129543ba3c7b72acfef3b092`。
+Debug APK：`output/inotia4_qol_lsposed_debug_2611091844_0fad18eecbed.apk`，
+SHA-256 `0fad18eecbed9183c52b142f3ef1a0d963ac81f90c758df9756f87b944722cf8`。
 
 ## 11. 已确认决策（实现口径）
 
 - replace 内容结构由 `item.payload.update` 的 validate 保证；replace 再把 payload 原地写回对象。
 - 对象身份保留：小改动由 replace 原地应用 payload，保留对象地址/handle；provider 再提交 descriptor。
 - native/provider replace 都返回同一 handle；结构变化需要整体替换时由 replace 后续分支返回新 handle。
-- `kNewItem` 产物：纯 update → `create(payload)` → 丢弃旧 detached 产物；`kUpdateFirstItem` 走 replace。
+- `kNewItem` 产物：纯 update → `create(payload)` → 丢弃旧 detached 产物；`kUpdateExistingItem` 走 replace，
+  `update_slot` 越界或堆叠时回退新建。
 - source 与 base_payload 同时提供时拒绝。
 - `update` 返回 `QolResult`，结果结构不重复放 status。
 

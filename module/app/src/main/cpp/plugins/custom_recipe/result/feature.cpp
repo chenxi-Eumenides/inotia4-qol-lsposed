@@ -1200,9 +1200,13 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
     if (in == nullptr) return CraftExecuteResult::kAborted;
 
     const ThreeSlotRecipe recipe = g_pending_three_slot;
-    const bool update_first = recipe.product_origin == ProductOrigin::kUpdateFirstItem;
-    // 堆叠物品无法只升级其中一件；单件时才原地更新，堆叠时回退为新建产物。
-    const bool update_in_place = update_first && in != nullptr && in->held_counts[0] == 1;
+    const bool update_origin = recipe.product_origin == ProductOrigin::kUpdateExistingItem;
+    const bool update_slot_valid = recipe.update_slot < kThreeSlotStuffCount;
+    const uint8_t update_slot = update_slot_valid ? recipe.update_slot : 0;
+    // 堆叠物品无法只升级其中一件；单件时才原地更新，堆叠/越界时回退为新建产物。
+    const bool update_in_place =
+        update_origin && update_slot_valid && in != nullptr &&
+        in->held_counts[update_slot] == 1;
     qol::contracts::QolItemHandle pending_items[kThreeSlotStuffCount] = {
         g_pending_three_slot_items[0], g_pending_three_slot_items[1],
         g_pending_three_slot_items[2]};
@@ -1389,29 +1393,31 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
     } else if (recipe.product_mode == ProductMode::kScaleFirstItem) {
         uint16_t jewel_category = 0;
         bool is_jewel = false;
-        const QolResult jewel_fact = query_jewel_fact(items[0], &jewel_category, &is_jewel);
-        if (jewel_fact.ok != kQolOk || !is_jewel || jewel_category != categories[0] ||
-            !read_jewel_word(items[0], &source_jewel_word)) {
+        const QolResult jewel_fact =
+            query_jewel_fact(items[update_slot], &jewel_category, &is_jewel);
+        if (jewel_fact.ok != kQolOk || !is_jewel ||
+            jewel_category != categories[update_slot] ||
+            !read_jewel_word(items[update_slot], &source_jewel_word)) {
             log_execute_stage(2, "precheck_source_jewel", 0,
                               jewel_fact.ok == kQolOk ? kQolErrNotReady : jewel_fact.code,
                               0, 0);
             return CraftExecuteResult::kPrecheckFailed;
         }
-        product_category = categories[0];
+        product_category = categories[update_slot];
     } else if (recipe.product_mode == ProductMode::kMaxSocketEnchantFirstItem) {
         if (!valid_craft_item(items[0]) || !valid_craft_item(items[2]) ||
             same_item_handle(items[0], items[2]) || categories[0] != categories[2]) {
             log_execute_stage(1, "precheck_product_identity", 0, kQolErrConflict, 0, 0);
             return CraftExecuteResult::kStaleSlots;
         }
-        product_category = categories[0];
+        product_category = categories[update_slot];
     } else {
         log_execute_stage(2, "precheck_product_mode", 0, kQolErrUnsupported, 0, 0);
         return CraftExecuteResult::kPrecheckFailed;
     }
 
-    if (update_first && recipe.product_mode == ProductMode::kFixedCategory) {
-        log_execute_stage(2, "precheck_update_first", 0, kQolErrInvalidArgument, 0, 0);
+    if (update_origin && recipe.product_mode == ProductMode::kFixedCategory) {
+        log_execute_stage(2, "precheck_update_existing", 0, kQolErrInvalidArgument, 0, 0);
         return CraftExecuteResult::kPrecheckFailed;
     }
 
@@ -1433,10 +1439,10 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
 
     // 产物对象来源由配方声明：
     // - kNewItem：先创建尚未保存的 detached 产物，再按 ProductMode 配置；
-    // - kUpdateFirstItem：产物就是第 1 格原物品，原地配置，不创建/不 place。
+    // - kUpdateExistingItem：产物是 update_slot 指定的原物品，原地配置，不创建/不 place。
     qol::contracts::QolItemHandle product = qol::contracts::kInvalidItemHandle;
     if (update_in_place) {
-        product = items[0];
+        product = items[update_slot];
         log_execute_stage(valid_craft_item(product) ? 0 : 2, "product_in_place", 0,
                           valid_craft_item(product) ? kQolOk : kQolErrNotFound, 0,
                           valid_craft_item(product) ? 1 : 0);
@@ -1484,7 +1490,8 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
             static_cast<int32_t>(contracts::QolItemPayloadMutationKind::kJewelWord), 0,
             static_cast<int64_t>(product_word)};
         contracts::QolItemPayload payload{};
-        const qol::contracts::QolItemHandle config_target = update_in_place ? items[0] : product;
+        const qol::contracts::QolItemHandle config_target =
+            update_in_place ? items[update_slot] : product;
         const QolResult configured = update_item_payload(config_target, &mutation, 1, &payload);
         log_execute_stage(configured.ok == kQolOk ? 0 : 2, "product_scale", 0,
                           configured.code, static_cast<int32_t>(source_jewel_word & kJewelValueMask),
@@ -1525,7 +1532,8 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
             {static_cast<int32_t>(contracts::QolItemPayloadMutationKind::kEnchantRemaining), 0, 15},
         };
         contracts::QolItemPayload payload{};
-        const qol::contracts::QolItemHandle config_target = update_in_place ? items[0] : product;
+        const qol::contracts::QolItemHandle config_target =
+            update_in_place ? items[update_slot] : product;
         const QolResult configured = update_item_payload(config_target, mutations, 2, &payload);
         log_execute_stage(configured.ok == kQolOk ? 0 : 2, "product_max_socket", 0,
                           configured.code, 0, 1);
@@ -1567,7 +1575,7 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
     // 用枚举+discard 重写），不可堆叠走按句柄删除——句柄失效即失败，绝不按类别扣同类。
     for (size_t i = 0; i < kThreeSlotStuffCount; ++i) {
         // 更新原物品的配方：第 1 格是产物本体，只消耗其余材料。
-        if (update_in_place && i == 0) continue;
+        if (update_in_place && i == update_slot) continue;
         if (!valid_craft_item(items[i])) continue;
         CategoryPlan& category_plan = category_plans[category_for_slot[i]];
         const int32_t before = category_plan.current_count;
@@ -1663,8 +1671,9 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
     if (g_verify_log_budget.fetch_sub(1) > 0) {
         log_message(0, "three slot crafted product=%u consumed=%d",
                     static_cast<uint32_t>(product_category),
-                    valid_craft_item(items[1]) + valid_craft_item(items[2]) +
-                        (update_in_place ? 0 : valid_craft_item(items[0])));
+                    valid_craft_item(items[0]) + valid_craft_item(items[1]) +
+                        valid_craft_item(items[2]) -
+                        (update_in_place ? valid_craft_item(items[update_slot]) : 0));
     }
     return CraftExecuteResult::kOk;
 }

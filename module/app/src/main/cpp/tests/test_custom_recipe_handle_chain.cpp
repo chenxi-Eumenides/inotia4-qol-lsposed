@@ -1005,7 +1005,7 @@ void test_product_prepare_failure_no_consumption() {
 // ---------------------------------------------------------------------------
 // CR01：扣料失败/计数不符/读取失败 → 立即停止，不 save，已扣状态准确
 // ---------------------------------------------------------------------------
-// 单件宝石：kUpdateFirstItem 配方原地更新第 1 格，不创建/不 place/不扣该格。
+// 单件宝石：kUpdateExistingItem 配方原地更新 update_slot，不创建/不 place/不扣该格。
 void test_scale_recipe_updates_first_item_in_place() {
     init_fixture();
     add_held(28, -(held_of(28) - 1));  // 单件宝石

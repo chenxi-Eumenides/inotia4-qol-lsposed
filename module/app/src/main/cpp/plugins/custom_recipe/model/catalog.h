@@ -98,8 +98,8 @@ enum class ProductMode : uint8_t {
 
 // 产物对象来源：随配方声明，不能由 ProductMode 推断。
 enum class ProductOrigin : uint8_t {
-    kNewItem,         // 新建产物；输入物品按材料消耗
-    kUpdateFirstItem, // 更新第 1 格原物品；该格不消耗，只消耗其余材料
+    kNewItem,          // 新建产物；输入物品按材料消耗
+    kUpdateExistingItem, // 更新 update_slot 指定的原物品；该格不消耗，只消耗其余材料
 };
 
 struct ThreeSlotRecipe {
@@ -111,8 +111,10 @@ struct ThreeSlotRecipe {
     // 槽 0 与槽 2 必须为同一类别（「两件相同的 X」类配方）。放在末尾并带默认值，
     // 既有条目无需改动。仅在 ordered 行有意义。
     bool same_first_last = false;
-    // 产物对象来源必须逐条声明；默认新建，更新原物品的配方必须显式写 kUpdateFirstItem。
+    // 产物对象来源必须逐条声明；默认新建，更新原物品的配方必须显式写 kUpdateExistingItem。
     ProductOrigin product_origin = ProductOrigin::kNewItem;
+    // kUpdateExistingItem 要更新的槽位（0..2）；超出范围时回退为新建产物。
+    uint8_t update_slot = 0;
 };
 
 // 3 格配方表（唯一真源）；out_count 回传条目数。表序即匹配优先级（首个命中者胜出）。

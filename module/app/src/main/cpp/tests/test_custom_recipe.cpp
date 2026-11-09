@@ -624,7 +624,8 @@ static void test_chaos_scroll_recipe() {
             CHECK(hit->product_mode == cr::ProductMode::kScaleFirstItem);
             CHECK(hit->scale_permille == 1200);
             // 产物来源是配方字段，不由 ProductMode 推断；该条原地更新第 1 格宝石。
-            CHECK(hit->product_origin == cr::ProductOrigin::kUpdateFirstItem);
+            CHECK(hit->product_origin == cr::ProductOrigin::kUpdateExistingItem);
+            CHECK(hit->update_slot == 0);
         }
     }
     // 顺序严格：换位 / 缺格 / 两格同料 一律不命中（也不得落到其它配方）。
