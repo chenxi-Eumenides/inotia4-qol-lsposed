@@ -89,28 +89,28 @@ constexpr uint16_t kCategoryVitalityPotion = 14;  // 元气恢复药水（ITEMDA
 const ThreeSlotRecipe kThreeSlotRecipes[] = {
     // 皮革 + 空槽 + 魔法衣料 → 背包（大）：槽位严格匹配（第 2 格必须空）。
     {{kCategoryLeather, 0, kCategoryMagicCloth}, true, kCategoryBackpackLarge,
-     ProductMode::kFixedCategory, 0},
+     ProductMode::kFixedCategory, 0, false, ProductOrigin::kNewItem},
     // 恢复药水（小）×2 + 低级武器强化卷轴 → 顶级宝石：顺序无关。
     {{kCategoryMinorHealingPotion, kCategoryMinorHealingPotion, kCategoryLowWeaponScroll}, false,
-     kCategoryTopJewel, ProductMode::kFixedCategory, 0},
+     kCategoryTopJewel, ProductMode::kFixedCategory, 0, false, ProductOrigin::kNewItem},
     // 3 颗同级宝石 → 高一级（含顶级 → 混沌）。
     {{kCategoryLowJewel, kCategoryLowJewel, kCategoryLowJewel}, false, kCategoryMidJewel,
-     ProductMode::kFixedCategory, 0},
+     ProductMode::kFixedCategory, 0, false, ProductOrigin::kNewItem},
     {{kCategoryMidJewel, kCategoryMidJewel, kCategoryMidJewel}, false, kCategoryHighJewel,
-     ProductMode::kFixedCategory, 0},
+     ProductMode::kFixedCategory, 0, false, ProductOrigin::kNewItem},
     {{kCategoryHighJewel, kCategoryHighJewel, kCategoryHighJewel}, false, kCategoryTopJewel,
-     ProductMode::kFixedCategory, 0},
+     ProductMode::kFixedCategory, 0, false, ProductOrigin::kNewItem},
     {{kCategoryTopJewel, kCategoryTopJewel, kCategoryTopJewel}, false, kCategoryChaosJewel,
-     ProductMode::kFixedCategory, 0},
+     ProductMode::kFixedCategory, 0, false, ProductOrigin::kNewItem},
     // 宝石 + 混沌武器强化卷轴(20) + 混沌防具强化卷轴(25) → **该宝石自身**，数值 ×1.2 向上取整（槽位严格顺序）。
     // 第 1 格接受任意宝石（28..32），产物沿用源宝石的类别、随机等级与属性类型，只缩放数值位。
     {{kAnyJewelSlot, kCategoryChaosWeaponScroll, kCategoryChaosArmorScroll}, true, 0,
-     ProductMode::kScaleFirstItem, 1200},
+     ProductMode::kScaleFirstItem, 1200, false, ProductOrigin::kNewItem},
     // 两件**相同**的特殊装备（槽 0/2，各一件）+ 元气恢复药水(14) → 同类别特殊装备新建，
     // 宝石孔总数与剩余强化次数拉满（槽位严格顺序；两件装备必须同类别，见 same_first_last）。
     // 「特殊装备」= ITEMCLASSBASE 记录 +7 bit4 置位的那 26 条，判定由调用方注入谓词。
     {{kAnySpecialEquipSlot, kCategoryVitalityPotion, kAnySpecialEquipSlot}, true, 0,
-     ProductMode::kMaxSocketEnchantFirstItem, 0, true},
+     ProductMode::kMaxSocketEnchantFirstItem, 0, true, ProductOrigin::kNewItem},
 };
 
 constexpr size_t kThreeSlotRecipeLen = sizeof(kThreeSlotRecipes) / sizeof(kThreeSlotRecipes[0]);
@@ -254,6 +254,7 @@ void make_seeded_candidate(uint64_t* state, uint16_t product,
     out->product_mode = ProductMode::kFixedCategory;
     out->scale_permille = 0;
     out->same_first_last = false;
+    out->product_origin = ProductOrigin::kNewItem;
 }
 
 }  // namespace

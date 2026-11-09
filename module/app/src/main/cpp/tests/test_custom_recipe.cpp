@@ -623,6 +623,8 @@ static void test_chaos_scroll_recipe() {
             CHECK(hit->ordered);
             CHECK(hit->product_mode == cr::ProductMode::kScaleFirstItem);
             CHECK(hit->scale_permille == 1200);
+            // 产物来源是配方字段，不由 ProductMode 推断；当前条目为新建。
+            CHECK(hit->product_origin == cr::ProductOrigin::kNewItem);
         }
     }
     // 顺序严格：换位 / 缺格 / 两格同料 一律不命中（也不得落到其它配方）。
@@ -696,6 +698,7 @@ static void test_max_socket_enchant_recipe() {
     CHECK(r->ordered);
     CHECK(r->same_first_last);
     CHECK(r->product_mode == cr::ProductMode::kMaxSocketEnchantFirstItem);
+    CHECK(r->product_origin == cr::ProductOrigin::kNewItem);
     CHECK(r->slots[0] == cr::kAnySpecialEquipSlot);
     CHECK(r->slots[1] == 14);  // 元气恢复药水
     CHECK(r->slots[2] == cr::kAnySpecialEquipSlot);
@@ -754,7 +757,8 @@ static bool same_dynamic_recipe(const cr::ThreeSlotRecipe& left,
            left.slots[2] == right.slots[2] && left.ordered == right.ordered &&
            left.product == right.product && left.product_mode == right.product_mode &&
            left.scale_permille == right.scale_permille &&
-           left.same_first_last == right.same_first_last;
+           left.same_first_last == right.same_first_last &&
+           left.product_origin == right.product_origin;
 }
 
 struct DynamicCacheGeneratorState {

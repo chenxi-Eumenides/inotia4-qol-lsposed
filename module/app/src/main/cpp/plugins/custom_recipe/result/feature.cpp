@@ -1194,11 +1194,13 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
                                        uint32_t* delegated_mix_type) {
     note_thread_contract("execute");
     using ::custom_recipe::ProductMode;
+    using ::custom_recipe::ProductOrigin;
     using ::custom_recipe::ThreeSlotRecipe;
     using result::CraftExecuteResult;
     if (in == nullptr) return CraftExecuteResult::kAborted;
 
     const ThreeSlotRecipe recipe = g_pending_three_slot;
+    const bool update_first = recipe.product_origin == ProductOrigin::kUpdateFirstItem;
     qol::contracts::QolItemHandle pending_items[kThreeSlotStuffCount] = {
         g_pending_three_slot_items[0], g_pending_three_slot_items[1],
         g_pending_three_slot_items[2]};
@@ -1406,12 +1408,23 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
         return CraftExecuteResult::kPrecheckFailed;
     }
 
+    // 更新原物品的配方只对“单件第 1 格物品”成立：堆叠物品原地升级会一次改完整堆。
+    if (update_first && (recipe.product_mode == ProductMode::kFixedCategory ||
+                         in->held_counts[0] != 1)) {
+        log_execute_stage(2, "precheck_update_first", 0, kQolErrInvalidArgument, 0,
+                          in->held_counts[0]);
+        return CraftExecuteResult::kPrecheckFailed;
+    }
+
     if (g_write_port == nullptr || g_inventory_action == nullptr ||
-        g_inventory_action->create == nullptr || g_inventory_action->place == nullptr ||
-        g_inventory_action->discard_handle == nullptr ||
+        (!update_first && (g_inventory_action->create == nullptr ||
+                           g_inventory_action->place == nullptr ||
+                           g_inventory_action->discard_handle == nullptr)) ||
         ((recipe.product_mode == ProductMode::kScaleFirstItem ||
           recipe.product_mode == ProductMode::kMaxSocketEnchantFirstItem) &&
-         (g_item_payload == nullptr || g_item_payload->update == nullptr))) {
+         (g_item_payload == nullptr || g_item_payload->update == nullptr)) ||
+        (update_first &&
+         (g_inventory_transfer == nullptr || g_inventory_transfer->replace_item == nullptr))) {
         log_execute_stage(2, "precheck_product_ready", 0, kQolErrNotReady, 0, 0);
         return CraftExecuteResult::kPrecheckFailed;
     }
@@ -1419,34 +1432,48 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
     log_execute_stage(0, "precheck", 0, kQolOk, static_cast<int32_t>(category_count),
                       static_cast<int32_t>(kThreeSlotStuffCount));
 
-    // 先准备并配置尚未保存的产物；此时输入 handle 尚未被扣料销毁。
-    // perfect 不可用时回退普通创建，与迁移前的「perfect 端口缺失则 create_item」一致。
+    // 产物对象来源由配方声明：
+    // - kNewItem：先创建尚未保存的 detached 产物，再按 ProductMode 配置；
+    // - kUpdateFirstItem：产物就是第 1 格原物品，原地配置，不创建/不 place。
     qol::contracts::QolItemHandle product = qol::contracts::kInvalidItemHandle;
-    qol::contracts::QolItemCreateSpec create_spec{
-        sizeof(qol::contracts::QolItemCreateSpec), static_cast<int32_t>(product_category), 0,
-        qol::contracts::kQolItemCreateFlagPerfect, nullptr, 0};
-    qol::contracts::QolItemCreateOutcome created = g_inventory_action->create(&create_spec);
-    if (created.status == qol::contracts::InventoryActionStatus::kUnsupported) {
-        create_spec.flags = 0;
-        created = g_inventory_action->create(&create_spec);
-    }
-    QolResult product_result = contracts::ok();
-    if (created.status != qol::contracts::InventoryActionStatus::kOk) {
-        static constexpr char kMessage[] = "product create failed";
-        product_result = contracts::error(inventory_action_status_code(created.status), kMessage,
-                                          static_cast<uint32_t>(sizeof(kMessage) - 1));
+    if (update_first) {
+        product = items[0];
+        log_execute_stage(valid_craft_item(product) ? 0 : 2, "product_in_place", 0,
+                          valid_craft_item(product) ? kQolOk : kQolErrNotFound, 0,
+                          valid_craft_item(product) ? 1 : 0);
+        if (!valid_craft_item(product)) {
+            return CraftExecuteResult::kProductPrepareFailed;
+        }
     } else {
-        product = created.item;
-    }
-    log_execute_stage(product_result.ok == kQolOk && valid_craft_item(product) ? 0 : 2,
-                      "product_create", 0,
-                      product_result.ok == kQolOk && valid_craft_item(product)
-                          ? kQolOk
-                          : (product_result.ok == kQolOk ? kQolErrInternal : product_result.code),
-                      0, valid_craft_item(product) ? 1 : 0);
-    if (product_result.ok != kQolOk || !valid_craft_item(product)) {
-        discard_uncommitted_product(product, "product_create", 0);
-        return CraftExecuteResult::kProductPrepareFailed;
+        // perfect 不可用时回退普通创建，与迁移前的「perfect 端口缺失则 create_item」一致。
+        qol::contracts::QolItemCreateSpec create_spec{
+            sizeof(qol::contracts::QolItemCreateSpec), static_cast<int32_t>(product_category), 0,
+            qol::contracts::kQolItemCreateFlagPerfect, nullptr, 0};
+        qol::contracts::QolItemCreateOutcome created = g_inventory_action->create(&create_spec);
+        if (created.status == qol::contracts::InventoryActionStatus::kUnsupported) {
+            create_spec.flags = 0;
+            created = g_inventory_action->create(&create_spec);
+        }
+        QolResult product_result = contracts::ok();
+        if (created.status != qol::contracts::InventoryActionStatus::kOk) {
+            static constexpr char kMessage[] = "product create failed";
+            product_result = contracts::error(inventory_action_status_code(created.status),
+                                              kMessage,
+                                              static_cast<uint32_t>(sizeof(kMessage) - 1));
+        } else {
+            product = created.item;
+        }
+        log_execute_stage(product_result.ok == kQolOk && valid_craft_item(product) ? 0 : 2,
+                          "product_create", 0,
+                          product_result.ok == kQolOk && valid_craft_item(product)
+                              ? kQolOk
+                              : (product_result.ok == kQolOk ? kQolErrInternal
+                                                             : product_result.code),
+                          0, valid_craft_item(product) ? 1 : 0);
+        if (product_result.ok != kQolOk || !valid_craft_item(product)) {
+            discard_uncommitted_product(product, "product_create", 0);
+            return CraftExecuteResult::kProductPrepareFailed;
+        }
     }
 
     if (recipe.product_mode == ProductMode::kScaleFirstItem) {
@@ -1458,13 +1485,22 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
             static_cast<int32_t>(contracts::QolItemPayloadMutationKind::kJewelWord), 0,
             static_cast<int64_t>(product_word)};
         contracts::QolItemPayload payload{};
-        const QolResult configured = update_item_payload(product, &mutation, 1, &payload);
+        const qol::contracts::QolItemHandle config_target = update_first ? items[0] : product;
+        const QolResult configured = update_item_payload(config_target, &mutation, 1, &payload);
         log_execute_stage(configured.ok == kQolOk ? 0 : 2, "product_scale", 0,
                           configured.code, static_cast<int32_t>(source_jewel_word & kJewelValueMask),
                           new_value);
         if (configured.ok != kQolOk) {
-            discard_uncommitted_product(product, "product_scale", 0);
+            if (!update_first) discard_uncommitted_product(product, "product_scale", 0);
             return CraftExecuteResult::kProductPrepareFailed;
+        }
+        if (update_first) {
+            contracts::QolBagMutationResult replaced{};
+            const QolResult committed =
+                replace_item_from_payload(config_target, payload, &replaced);
+            log_execute_stage(committed.ok == kQolOk ? 0 : 2, "product_scale_commit", 0,
+                              committed.code, 0, 1);
+            if (committed.ok != kQolOk) return CraftExecuteResult::kProductPrepareFailed;
         }
     }
     if (recipe.product_mode == ProductMode::kMaxSocketEnchantFirstItem) {
@@ -1473,12 +1509,21 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
             {static_cast<int32_t>(contracts::QolItemPayloadMutationKind::kEnchantRemaining), 0, 15},
         };
         contracts::QolItemPayload payload{};
-        const QolResult configured = update_item_payload(product, mutations, 2, &payload);
+        const qol::contracts::QolItemHandle config_target = update_first ? items[0] : product;
+        const QolResult configured = update_item_payload(config_target, mutations, 2, &payload);
         log_execute_stage(configured.ok == kQolOk ? 0 : 2, "product_max_socket", 0,
                           configured.code, 0, 1);
         if (configured.ok != kQolOk) {
-            discard_uncommitted_product(product, "product_max_socket", 0);
+            if (!update_first) discard_uncommitted_product(product, "product_max_socket", 0);
             return CraftExecuteResult::kProductPrepareFailed;
+        }
+        if (update_first) {
+            contracts::QolBagMutationResult replaced{};
+            const QolResult committed =
+                replace_item_from_payload(config_target, payload, &replaced);
+            log_execute_stage(committed.ok == kQolOk ? 0 : 2, "product_max_socket_commit", 0,
+                              committed.code, 0, 1);
+            if (committed.ok != kQolOk) return CraftExecuteResult::kProductPrepareFailed;
         }
     }
 
@@ -1488,6 +1533,8 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
     // 可表示的空间时回退原版入口：可堆叠走类别删除（扩展袋补扣 H-21/R-56 只在那里，不能
     // 用枚举+discard 重写），不可堆叠走按句柄删除——句柄失效即失败，绝不按类别扣同类。
     for (size_t i = 0; i < kThreeSlotStuffCount; ++i) {
+        // 更新原物品的配方：第 1 格是产物本体，只消耗其余材料。
+        if (update_first && i == 0) continue;
         if (!valid_craft_item(items[i])) continue;
         CategoryPlan& category_plan = category_plans[category_for_slot[i]];
         const int32_t before = category_plan.current_count;
@@ -1524,19 +1571,28 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
                 log_execute_stage(2, "material_observation", static_cast<uint32_t>(i),
                                   observed.code, before, after);
             }
-            discard_uncommitted_product(product, "material_remove", static_cast<uint32_t>(i));
+            if (!update_first) {
+                discard_uncommitted_product(product, "material_remove",
+                                            static_cast<uint32_t>(i));
+            }
             return CraftExecuteResult::kMaterialRemoveFailed;
         }
         if (observed.ok != kQolOk) {
             log_execute_stage(2, "material_observation", static_cast<uint32_t>(i),
                               observed.code, before, after);
-            discard_uncommitted_product(product, "material_observation", static_cast<uint32_t>(i));
+            if (!update_first) {
+                discard_uncommitted_product(product, "material_observation",
+                                            static_cast<uint32_t>(i));
+            }
             return CraftExecuteResult::kMaterialObservationFailed;
         }
         if (after != before - 1) {
             log_execute_stage(2, "material_observation", static_cast<uint32_t>(i),
                               kQolErrConflict, before, after);
-            discard_uncommitted_product(product, "material_observation", static_cast<uint32_t>(i));
+            if (!update_first) {
+                discard_uncommitted_product(product, "material_observation",
+                                            static_cast<uint32_t>(i));
+            }
             return CraftExecuteResult::kMaterialObservationFailed;
         }
         category_plan.current_count = after;
@@ -1549,28 +1605,33 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
     // place 自动落位等价于原 INVEN_SaveItem（FindSaveSlot + 同类别堆合并/adopt，H-13）。
     // 成功即把 handle 交给原生库存；失败保持 detached，但此处仍按迁移前的保守策略不再
     // 探测/释放该 handle，ownership 以 action 状态为准。
-    qol::contracts::QolItemPlaceTarget place_target{};
-    place_target.struct_size = sizeof(qol::contracts::QolItemPlaceTarget);
-    place_target.ref = {qol::contracts::kQolBagSpaceOriginal, -1};
-    place_target.slot = -1;
-    const qol::contracts::QolItemPlaceOutcome placed =
-        g_inventory_action->place(product, &place_target);
-    const bool product_saved = placed.status == qol::contracts::InventoryActionStatus::kOk;
-    log_execute_stage(product_saved ? 0 : 2, "product_save", 0,
-                      product_saved ? kQolOk : inventory_action_status_code(placed.status),
-                      0, placed.count);
-    if (!product_saved) {
-        // 自动保存失败时对象仍归调用方；此处不得释放，保持与迁移前一致的失败路径。
-        log_message(2, "three slot execute stage=product_save index=0 result=%d "
-                       "after=ownership_detached",
-                    inventory_action_status_code(placed.status));
-        return CraftExecuteResult::kProductSaveFailed;
+    if (update_first) {
+        // 产物就是第 1 格原物品，已在槽内；仅记录提交完成。
+        log_execute_stage(0, "product_save_in_place", 0, kQolOk, 0, 1);
+    } else {
+        qol::contracts::QolItemPlaceTarget place_target{};
+        place_target.struct_size = sizeof(qol::contracts::QolItemPlaceTarget);
+        place_target.ref = {qol::contracts::kQolBagSpaceOriginal, -1};
+        place_target.slot = -1;
+        const qol::contracts::QolItemPlaceOutcome placed =
+            g_inventory_action->place(product, &place_target);
+        const bool product_saved = placed.status == qol::contracts::InventoryActionStatus::kOk;
+        log_execute_stage(product_saved ? 0 : 2, "product_save", 0,
+                          product_saved ? kQolOk : inventory_action_status_code(placed.status),
+                          0, placed.count);
+        if (!product_saved) {
+            // 自动保存失败时对象仍归调用方；此处不得释放，保持与迁移前一致的失败路径。
+            log_message(2, "three slot execute stage=product_save index=0 result=%d "
+                           "after=ownership_detached",
+                        inventory_action_status_code(placed.status));
+            return CraftExecuteResult::kProductSaveFailed;
+        }
     }
     if (g_verify_log_budget.fetch_sub(1) > 0) {
         log_message(0, "three slot crafted product=%u consumed=%d",
                     static_cast<uint32_t>(product_category),
-                    valid_craft_item(items[0]) + valid_craft_item(items[1]) +
-                        valid_craft_item(items[2]));
+                    valid_craft_item(items[1]) + valid_craft_item(items[2]) +
+                        (update_first ? 0 : valid_craft_item(items[0])));
     }
     return CraftExecuteResult::kOk;
 }

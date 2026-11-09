@@ -85,26 +85,34 @@ constexpr uint16_t kAnyJewelSlot = 0xFFFF;
 // 不引入游戏内存访问）；谓词为 nullptr 时该通配符永不命中（fail-closed）。
 constexpr uint16_t kAnySpecialEquipSlot = 0xFFFE;
 
-// 产物生成方式。
+// 产物数据来源（如何计算新值）。
 enum class ProductMode : uint8_t {
-    kFixedCategory,   // 产物 = `product` 类别新建（原版掷值），放料/合成语义不变
-    kScaleFirstItem,  // 产物 = **第 1 格物品自身**（同类别），宝石数值 × `scale_permille/1000`，
+    kFixedCategory,   // 按 `product` 类别新建（原版掷值），放料/合成语义不变
+    kScaleFirstItem,  // 数据取自第 1 格物品（同类别）：宝石数值 × `scale_permille/1000`，
                       // 并保留源物品的随机等级与属性类型（bits11-23 原样搬用）
-    kMaxSocketEnchantFirstItem,  // 产物 = **第 1 格物品自身**（同类别）新建，并把两段位域写到最大值：
+    kMaxSocketEnchantFirstItem,  // 数据取自第 1 格物品（同类别），把两段位域写到最大值：
                                  //   宝石孔总数 = `I_SOCKET` bits4-7 = 0xF（15，该段 4 位）
                                  //   剩余强化次数 = `I_ENCHANT` bits2-5 = 0xF（15，该段 4 位）
                                  // 只动这两段，其余位（已镶数 / 已强化次数 / 强化 ID）保持产物原值不写
+};
+
+// 产物对象来源：随配方声明，不能由 ProductMode 推断。
+enum class ProductOrigin : uint8_t {
+    kNewItem,         // 新建产物；输入物品按材料消耗
+    kUpdateFirstItem, // 更新第 1 格原物品；该格不消耗，只消耗其余材料
 };
 
 struct ThreeSlotRecipe {
     uint16_t slots[3];
     bool ordered;      // true=按槽位严格匹配；false=按多重集（顺序无关）
     uint16_t product;  // kFixedCategory 的产物类别（kScaleFirstItem 时不使用，填 0）
-    ProductMode product_mode;   // 产物生成方式
+    ProductMode product_mode;   // 产物数据来源/计算方式
     uint16_t scale_permille;    // kScaleFirstItem 的数值缩放（千分比：1200 = ×1.2 向上取整；其它模式填 0）
     // 槽 0 与槽 2 必须为同一类别（「两件相同的 X」类配方）。放在末尾并带默认值，
     // 既有条目无需改动。仅在 ordered 行有意义。
     bool same_first_last = false;
+    // 产物对象来源必须逐条声明；默认新建，更新原物品的配方必须显式写 kUpdateFirstItem。
+    ProductOrigin product_origin = ProductOrigin::kNewItem;
 };
 
 // 3 格配方表（唯一真源）；out_count 回传条目数。表序即匹配优先级（首个命中者胜出）。
