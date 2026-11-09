@@ -23,12 +23,22 @@ constexpr uint32_t kRateCount = static_cast<uint32_t>(RateId::kCount);
 static_assert(kRateCount == 7, "rates table size");
 
 std::atomic<bool> g_gate{false};
+std::atomic<uint32_t> g_add_damage_trace_count{0};
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
 const contracts::QolCharacterExtrasPort* g_extras = nullptr;
 const contracts::CharacterFactsApi* g_facts = nullptr;
 contracts::QolOwnerToken g_owner{};
 const char* g_plugin_id = nullptr;
+
+bool add_damage_trace_available() {
+    uint32_t current = g_add_damage_trace_count.load(std::memory_order_relaxed);
+    while (current < 12) {
+        if (g_add_damage_trace_count.compare_exchange_weak(
+                current, current + 1, std::memory_order_relaxed)) return true;
+    }
+    return false;
+}
 
 std::atomic<int32_t> g_rates[kRateCount] = {
     kRateDefault, kRateDefault, kRateDefault, kRateDefault, kRateDefault,
@@ -197,6 +207,7 @@ int32_t rate_value(RateId id) {
 
 void char_add_damage_wrapper(void* attacker, void* victim, int32_t damage, int32_t damage_flag,
                              int32_t magic_flag) {
+    const void* caller = __builtin_return_address(0);
     const auto* sdk = g_sdk;
     const contracts::InFlightGuard guard(
         sdk == nullptr ? nullptr : &sdk->in_flight, {kResourceIdAddDamage});
@@ -205,16 +216,47 @@ void char_add_damage_wrapper(void* attacker, void* victim, int32_t damage, int32
     if (backup == nullptr) return;
 
     int32_t out_damage = damage;
+    int32_t percent = kRateDefault;
+    Side victim_side = Side::kNeutral;
+    Side attacker_side = Side::kNeutral;
     if (g_gate.load(std::memory_order_relaxed) && damage > 0 && g_extras != nullptr &&
         g_facts != nullptr) {
-        const Side victim_side = classify(victim);
-        int32_t percent = kRateDefault;
+        victim_side = classify(victim);
         if (victim_side == Side::kPlayer) {
             percent = rate_value(RateId::kDamageIn);
-        } else if (victim_side == Side::kMonster && classify(attacker) == Side::kPlayer) {
-            percent = rate_value(RateId::kDamageOut);
+        } else if (victim_side == Side::kMonster) {
+            attacker_side = classify(attacker);
+            if (attacker_side == Side::kPlayer) percent = rate_value(RateId::kDamageOut);
         }
         if (percent != kRateDefault) out_damage = scale_by_percent(damage, percent);
+    }
+    if (add_damage_trace_available()) {
+        int32_t attr5 = 0, attr71 = 0, attr81 = 0, attr106 = 0, attr109 = 0;
+        uint32_t attr_mask = 0;
+        const auto* game = g_game;
+        const bool can_read_attr =
+            game != nullptr && game->abi.major == contracts::kGameHostMajor &&
+            game->abi.minor >= contracts::kGameHostCharacterReadMinor &&
+            game->abi.size >= offsetof(contracts::QolGameHost, character_read) +
+                                  sizeof(contracts::QolCharacterReadApi) &&
+            game->character_read.attr != nullptr && attacker != nullptr;
+        if (can_read_attr) {
+            const auto read_trace_attr = [&](int32_t id, int32_t* value, uint32_t bit) {
+                if (contracts::succeeded(game->character_read.attr(attacker, id, value)))
+                    attr_mask |= bit;
+            };
+            read_trace_attr(5, &attr5, 1u << 0);
+            read_trace_attr(71, &attr71, 1u << 1);
+            read_trace_attr(81, &attr81, 1u << 2);
+            read_trace_attr(106, &attr106, 1u << 3);
+            read_trace_attr(109, &attr109, 1u << 4);
+        }
+        log_info("[damage_trace] stage=world_tuning_add_damage attacker=%p victim=%p caller=%p damage_in=%d damage_out=%d damage_flag=%d magic_flag=%d percent=%d victim_side=%d attacker_side=%d deps=%d gate=%d attrs_mask=%u attr5=%d attr71=%d attr81=%d attr106=%d attr109=%d",
+                 attacker, victim, caller, damage, out_damage, damage_flag, magic_flag, percent,
+                 static_cast<int>(victim_side), static_cast<int>(attacker_side),
+                 (g_extras != nullptr && g_facts != nullptr) ? 1 : 0,
+                 g_gate.load(std::memory_order_relaxed) ? 1 : 0, attr_mask, attr5, attr71, attr81,
+                 attr106, attr109);
     }
     backup(attacker, victim, out_damage, damage_flag, magic_flag);
 }
