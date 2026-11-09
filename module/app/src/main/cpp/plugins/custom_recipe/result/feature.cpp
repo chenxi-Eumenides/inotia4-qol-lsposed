@@ -1749,8 +1749,11 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
         contracts::QolBagMutationResult replaced{};
         const QolResult jewel_written = replace_item_from_payload(in->item, payload, &replaced);
         if (jewel_written.ok != kQolOk) {
-            log_message(2, "make item failed stage=jewel_replace result=%d needs=already_written",
-                        jewel_written.code);
+            log_message(2,
+                        "make item failed stage=jewel_replace result=%d needs=already_written "
+                        "category=%u count=%u payload=%u",
+                        jewel_written.code, payload.category, payload.count,
+                        payload.payload_size);
             return 1;
         }
         if (g_verify_log_budget.fetch_sub(1) > 0) {
@@ -1869,8 +1872,10 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
     contracts::QolBagMutationResult replaced{};
     const QolResult option_written = replace_item_from_payload(in->item, payload, &replaced);
     if (option_written.ok != kQolOk) {
-        log_message(2, "make item failed stage=native_option_replace result=%d needs=already_written",
-                    option_written.code);
+        log_message(2,
+                    "make item failed stage=native_option_replace result=%d needs=already_written "
+                    "category=%u count=%u payload=%u",
+                    option_written.code, payload.category, payload.count, payload.payload_size);
         return 1;
     }
     if (g_verify_log_budget.fetch_sub(1) > 0) {

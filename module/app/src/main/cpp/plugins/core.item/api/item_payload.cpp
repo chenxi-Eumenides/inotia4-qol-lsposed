@@ -174,9 +174,12 @@ QolResult update_payload(const contracts::QolItemPayloadUpdateSpec* spec,
         return payload_error(kQolErrInternal, "updated payload size changed");
     }
 
+    // 有 source 时以源对象为权威读取 category/count：临时对象只用于生成 payload，
+    // 其元数据在部分变体/加载路径上可能未完全回填。
+    const contracts::QolItemHandle metadata_source = has_source ? spec->source : temp;
     int32_t category = 0;
     if (g_port->read.category != nullptr) {
-        result = g_port->read.category(temp, &category);
+        result = g_port->read.category(metadata_source, &category);
         if (!contracts::succeeded(result)) {
             (void)g_item_state_write->free_item(temp);
             return result;
@@ -184,10 +187,11 @@ QolResult update_payload(const contracts::QolItemPayloadUpdateSpec* spec,
     }
     int32_t count = 1;
     if (g_port->read.effective_cumulate_count != nullptr) {
-        const QolResult read_count = g_port->read.effective_cumulate_count(temp, &count);
+        const QolResult read_count =
+            g_port->read.effective_cumulate_count(metadata_source, &count);
         if (!contracts::succeeded(read_count)) count = 1;
     } else if (g_port->read.cumulate_count != nullptr) {
-        const QolResult read_count = g_port->read.cumulate_count(temp, &count);
+        const QolResult read_count = g_port->read.cumulate_count(metadata_source, &count);
         if (!contracts::succeeded(read_count)) count = 1;
     }
     if (count <= 0) count = 1;

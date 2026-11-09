@@ -513,6 +513,11 @@ QolResult source_replace_item(contracts::QolItemHandle expected,
     if (out == nullptr || replacement == nullptr || replacement->category <= 0 ||
         replacement->count <= 0 || replacement->payload_size == 0 ||
         replacement->payload_size > contracts::kQolBagTransferPayloadMaxSize) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "bag source replace rejected reason=request category=%d count=%d payload=%u",
+                     replacement != nullptr ? replacement->category : -1,
+                     replacement != nullptr ? replacement->count : -1,
+                     replacement != nullptr ? replacement->payload_size : 0u);
         return source_error(kQolErrInvalidArgument, "invalid replacement request");
     }
     *out = {};
@@ -520,6 +525,9 @@ QolResult source_replace_item(contracts::QolItemHandle expected,
     if (virtual_bag::validate_serialized_payload_buffer(
             replacement->payload, sizeof(replacement->payload),
             static_cast<int>(replacement->payload_size)) != virtual_bag::PayloadValidation::kOk) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "bag source replace rejected reason=payload category=%d count=%d size=%u",
+                     replacement->category, replacement->count, replacement->payload_size);
         return source_error(kQolErrInvalidArgument, "invalid replacement payload");
     }
     const bool stackable =
@@ -533,15 +541,22 @@ QolResult source_replace_item(contracts::QolItemHandle expected,
     ::qol::extension_bag::ReentryLock lock;
     void* item = nullptr;
     if (!extension_bag_private_item_for_handle(expected, &item) || item == nullptr) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "bag source replace rejected reason=handle slot=%u generation=%u",
+                     expected.slot, expected.generation);
         return source_error(kQolErrNotFound, "extension item not found");
     }
     int bag = -1;
     int slot = -1;
     if (!module_slot_of_item_locked(item, &bag, &slot) || !valid_slot(bag, slot) ||
         qol::extension_bag::ui_state().objects.module_objects[bag][slot] != item) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "bag source replace rejected reason=slot bag=%d slot=%d", bag, slot);
         return source_error(kQolErrNotFound, "extension item not found");
     }
     if (descriptor_empty(::qol::extension_bag::access::bag().items[bag][slot])) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "bag source replace rejected reason=empty bag=%d slot=%d", bag, slot);
         return source_error(kQolErrNotFound, "extension slot empty");
     }
     // item.payload.update 已把字段写到既有物化对象上；这里只提交 provider 的权威
@@ -558,6 +573,9 @@ QolResult source_replace_item(contracts::QolItemHandle expected,
     candidate.payload_size = replacement->payload_size;
     std::memcpy(candidate.payload.data(), replacement->payload, replacement->payload_size);
     if (!virtual_bag::valid_payload(candidate)) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "bag source replace rejected reason=valid_payload bag=%d slot=%d size=%u",
+                     bag, slot, candidate.payload_size);
         return source_error(kQolErrInvalidArgument, "invalid replacement payload");
     }
 
@@ -578,6 +596,9 @@ QolResult source_replace_item(contracts::QolItemHandle expected,
         qol::extension_bag::ui_state().objects.module_view_index == bag) {
         refresh_module_item_area_locked(bag);
     }
+    QOL_LOG_INFO(QolDomain::kExtensionBag,
+                 "bag source replace bag=%d slot=%d category=%d count=%d",
+                 bag, slot, candidate.category, candidate.count);
     out->ref = contracts::QolBagRef{kExtensionBagSpaceId, bag};
     out->item = expected;
     out->count = replacement->count;

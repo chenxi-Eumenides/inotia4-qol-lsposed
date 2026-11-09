@@ -154,7 +154,7 @@ QolResult (*replace_item)(QolItemHandle expected,
 ```
 
 - `expected` 必须仍是当前槽/源物品；否则 `kQolErrConflict`/`kQolErrNotFound`。
-- native：只确认 `expected` 仍在原生袋内并返回同一 handle；详情面板正在展示时返回 conflict。
+- native：只确认 `expected` 仍在原生袋内并返回同一 handle；对象身份不变，详情/拖拽控件指针仍有效，不额外拒绝。
   对象字段已由 `item.payload.update` 写好，不 load/swap/free。
 - provider：按空间分派到 `QolBagSource::replace_item`。
 - 成功返回同一 handle；不失效旧 handle（对象身份保留）。
@@ -191,9 +191,9 @@ QolResult (*replace_item)(QolItemHandle expected,
 
 1. `inventory.transfer.replace_item` 按 space 0/1 定位 `expected`；找不到再尝试注册源。
 2. 任务袋拒绝。
-3. 详情面板正在展示 `expected` → `kQolErrConflict`。
-4. 返回 `expected` 作为结果 handle，`count = replacement->count`，请求库存刷新。
-5. 对象字段已在第 4 步由 `item.payload.update` 写入；不写槽、不释放对象。
+3. 返回 `expected` 作为结果 handle，`count = replacement->count`，请求库存刷新。
+4. 对象字段已在第 3 步由 `item.payload.update` 写入；不写槽、不释放对象，因此详情/拖拽引用
+   不需要拒绝或重指。
 
 ## 6. provider replace 流程（extension_bag）
 
@@ -262,8 +262,8 @@ Host（已执行）：
 - 装备升阶（多词条/改版自定义词条）替换后仍可正常显示、移动、存档；
 - 材料只扣一次；craft UI 输入物品在升阶后不出现悬空指针/崩溃。
 
-Debug APK：`output/inotia4_qol_lsposed_debug_2611091720_dd59922e2b18.apk`，
-SHA-256 `dd59922e2b18fa43a26b8805c73dff6bbb9a401952b857a83bf9da164b0db45e`。
+Debug APK：`output/inotia4_qol_lsposed_debug_2611091727_de3dc70e28af.apk`，
+SHA-256 `de3dc70e28afcf7449bc11f196f91871034bb4327327128ad4f6202932be08fb`。
 
 ## 11. 已确认决策（实现口径）
 
