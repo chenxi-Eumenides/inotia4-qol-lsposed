@@ -1005,8 +1005,27 @@ void test_product_prepare_failure_no_consumption() {
 // ---------------------------------------------------------------------------
 // CR01：扣料失败/计数不符/读取失败 → 立即停止，不 save，已扣状态准确
 // ---------------------------------------------------------------------------
+// 单件宝石：kUpdateFirstItem 配方原地更新第 1 格，不创建/不 place/不扣该格。
+void test_scale_recipe_updates_first_item_in_place() {
+    init_fixture();
+    add_held(28, -(held_of(28) - 1));  // 单件宝石
+    assert(prepare_three_slots(kScaleRecipe));
+    const uint32_t source_word = g_jewel_word;
+    const int32_t gem_before = held_of(28);
+    const int32_t weapon_scroll_before = held_of(20);
+    const int32_t armor_scroll_before = held_of(25);
+    assert(execute_three_slots(kScaleRecipe) == CraftExecuteResult::kOk);
+    assert(g_create_calls == 0 && g_save_calls == 0 && g_free_calls == 0);
+    assert(g_remove_item_data_calls == 2);  // 只扣两张卷轴
+    assert(held_of(28) == gem_before);      // 宝石本体不扣
+    assert(held_of(20) == weapon_scroll_before - 1);
+    assert(held_of(25) == armor_scroll_before - 1);
+    const uint32_t scaled = (source_word & ~2047u) | 24u;  // 20 × 1.2 向上取整
+    assert(g_jewel_word == scaled);
+}
+
 void test_material_remove_failures() {
-    // 第 1/2/3 次 remove 失败：停止后续扣料与 save。
+    // 第 1/2/3 次 remove 失败：停止后续扣料与 save（堆叠宝石回退为新建产物，三格均扣）。
     for (int failing_call = 0; failing_call < 3; ++failing_call) {
         init_fixture();
         assert(prepare_three_slots(kScaleRecipe));
@@ -1687,6 +1706,7 @@ int main() {
     test_place_and_execute_success();
     test_precheck_failures_do_not_consume();
     test_product_prepare_failure_no_consumption();
+    test_scale_recipe_updates_first_item_in_place();
     test_material_remove_failures();
     test_stackable_material_discards_filled_stack();
     test_three_jewel_delegates_to_original_mix();

@@ -105,7 +105,7 @@ const ThreeSlotRecipe kThreeSlotRecipes[] = {
     // 宝石 + 混沌武器强化卷轴(20) + 混沌防具强化卷轴(25) → **该宝石自身**，数值 ×1.2 向上取整（槽位严格顺序）。
     // 第 1 格接受任意宝石（28..32），产物沿用源宝石的类别、随机等级与属性类型，只缩放数值位。
     {{kAnyJewelSlot, kCategoryChaosWeaponScroll, kCategoryChaosArmorScroll}, true, 0,
-     ProductMode::kScaleFirstItem, 1200, false, ProductOrigin::kNewItem},
+     ProductMode::kScaleFirstItem, 1200, false, ProductOrigin::kUpdateFirstItem},
     // 两件**相同**的特殊装备（槽 0/2，各一件）+ 元气恢复药水(14) → 同类别特殊装备新建，
     // 宝石孔总数与剩余强化次数拉满（槽位严格顺序；两件装备必须同类别，见 same_first_last）。
     // 「特殊装备」= ITEMCLASSBASE 记录 +7 bit4 置位的那 26 条，判定由调用方注入谓词。

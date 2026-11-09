@@ -211,7 +211,8 @@ QolResult (*replace_item)(QolItemHandle expected,
   - `kNewItem`：`create` 新产物后 `item.payload.update(source=product)` 原地配置；
   - `kUpdateFirstItem`：第 1 格原物品即产物，`item.payload.update(source=items[0])` +
     `inventory.transfer.replace_item`，该格不扣料、不 place。
-  - 当前 8 条配方全部显式 `kNewItem`；不再 `create(payload)` + `discard_handle(old)`。
+  - 当前第 7 条（宝石 + 混沌卷轴）为 `kUpdateFirstItem`，其余 7 条与动态配方为 `kNewItem`；
+    堆叠宝石走 `kNewItem` 回退，避免一次升级整堆。不再 `create(payload)` + `discard_handle(old)`。
 - UID：
   - `source` 路径自动保留原 UID；
   - `base_payload` 路径默认由调用方保证；`kPreserveUid` 仅作意图声明；
@@ -261,8 +262,8 @@ Host（已执行）：
 - 装备升阶（多词条/改版自定义词条）替换后仍可正常显示、移动、存档；
 - 材料只扣一次；craft UI 输入物品在升阶后不出现悬空指针/崩溃。
 
-Debug APK：`output/inotia4_qol_lsposed_debug_2611091707_4827531e669b.apk`，
-SHA-256 `4827531e669b8af014ee55dde8db27af574265a2d06a4a41327e57f6c8ed6feb`。
+Debug APK：`output/inotia4_qol_lsposed_debug_2611091720_dd59922e2b18.apk`，
+SHA-256 `dd59922e2b18fa43a26b8805c73dff6bbb9a401952b857a83bf9da164b0db45e`。
 
 ## 11. 已确认决策（实现口径）
 

@@ -1201,6 +1201,8 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
 
     const ThreeSlotRecipe recipe = g_pending_three_slot;
     const bool update_first = recipe.product_origin == ProductOrigin::kUpdateFirstItem;
+    // 堆叠物品无法只升级其中一件；单件时才原地更新，堆叠时回退为新建产物。
+    const bool update_in_place = update_first && in != nullptr && in->held_counts[0] == 1;
     qol::contracts::QolItemHandle pending_items[kThreeSlotStuffCount] = {
         g_pending_three_slot_items[0], g_pending_three_slot_items[1],
         g_pending_three_slot_items[2]};
@@ -1408,22 +1410,19 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
         return CraftExecuteResult::kPrecheckFailed;
     }
 
-    // 更新原物品的配方只对“单件第 1 格物品”成立：堆叠物品原地升级会一次改完整堆。
-    if (update_first && (recipe.product_mode == ProductMode::kFixedCategory ||
-                         in->held_counts[0] != 1)) {
-        log_execute_stage(2, "precheck_update_first", 0, kQolErrInvalidArgument, 0,
-                          in->held_counts[0]);
+    if (update_first && recipe.product_mode == ProductMode::kFixedCategory) {
+        log_execute_stage(2, "precheck_update_first", 0, kQolErrInvalidArgument, 0, 0);
         return CraftExecuteResult::kPrecheckFailed;
     }
 
     if (g_write_port == nullptr || g_inventory_action == nullptr ||
-        (!update_first && (g_inventory_action->create == nullptr ||
-                           g_inventory_action->place == nullptr ||
-                           g_inventory_action->discard_handle == nullptr)) ||
+        (!update_in_place && (g_inventory_action->create == nullptr ||
+                              g_inventory_action->place == nullptr ||
+                              g_inventory_action->discard_handle == nullptr)) ||
         ((recipe.product_mode == ProductMode::kScaleFirstItem ||
           recipe.product_mode == ProductMode::kMaxSocketEnchantFirstItem) &&
          (g_item_payload == nullptr || g_item_payload->update == nullptr)) ||
-        (update_first &&
+        (update_in_place &&
          (g_inventory_transfer == nullptr || g_inventory_transfer->replace_item == nullptr))) {
         log_execute_stage(2, "precheck_product_ready", 0, kQolErrNotReady, 0, 0);
         return CraftExecuteResult::kPrecheckFailed;
@@ -1436,7 +1435,7 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
     // - kNewItem：先创建尚未保存的 detached 产物，再按 ProductMode 配置；
     // - kUpdateFirstItem：产物就是第 1 格原物品，原地配置，不创建/不 place。
     qol::contracts::QolItemHandle product = qol::contracts::kInvalidItemHandle;
-    if (update_first) {
+    if (update_in_place) {
         product = items[0];
         log_execute_stage(valid_craft_item(product) ? 0 : 2, "product_in_place", 0,
                           valid_craft_item(product) ? kQolOk : kQolErrNotFound, 0,
@@ -1485,16 +1484,16 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
             static_cast<int32_t>(contracts::QolItemPayloadMutationKind::kJewelWord), 0,
             static_cast<int64_t>(product_word)};
         contracts::QolItemPayload payload{};
-        const qol::contracts::QolItemHandle config_target = update_first ? items[0] : product;
+        const qol::contracts::QolItemHandle config_target = update_in_place ? items[0] : product;
         const QolResult configured = update_item_payload(config_target, &mutation, 1, &payload);
         log_execute_stage(configured.ok == kQolOk ? 0 : 2, "product_scale", 0,
                           configured.code, static_cast<int32_t>(source_jewel_word & kJewelValueMask),
                           new_value);
         if (configured.ok != kQolOk) {
-            if (!update_first) discard_uncommitted_product(product, "product_scale", 0);
+            if (!update_in_place) discard_uncommitted_product(product, "product_scale", 0);
             return CraftExecuteResult::kProductPrepareFailed;
         }
-        if (update_first) {
+        if (update_in_place) {
             contracts::QolBagMutationResult replaced{};
             const QolResult committed =
                 replace_item_from_payload(config_target, payload, &replaced);
@@ -1509,15 +1508,15 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
             {static_cast<int32_t>(contracts::QolItemPayloadMutationKind::kEnchantRemaining), 0, 15},
         };
         contracts::QolItemPayload payload{};
-        const qol::contracts::QolItemHandle config_target = update_first ? items[0] : product;
+        const qol::contracts::QolItemHandle config_target = update_in_place ? items[0] : product;
         const QolResult configured = update_item_payload(config_target, mutations, 2, &payload);
         log_execute_stage(configured.ok == kQolOk ? 0 : 2, "product_max_socket", 0,
                           configured.code, 0, 1);
         if (configured.ok != kQolOk) {
-            if (!update_first) discard_uncommitted_product(product, "product_max_socket", 0);
+            if (!update_in_place) discard_uncommitted_product(product, "product_max_socket", 0);
             return CraftExecuteResult::kProductPrepareFailed;
         }
-        if (update_first) {
+        if (update_in_place) {
             contracts::QolBagMutationResult replaced{};
             const QolResult committed =
                 replace_item_from_payload(config_target, payload, &replaced);
@@ -1534,7 +1533,7 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
     // 用枚举+discard 重写），不可堆叠走按句柄删除——句柄失效即失败，绝不按类别扣同类。
     for (size_t i = 0; i < kThreeSlotStuffCount; ++i) {
         // 更新原物品的配方：第 1 格是产物本体，只消耗其余材料。
-        if (update_first && i == 0) continue;
+        if (update_in_place && i == 0) continue;
         if (!valid_craft_item(items[i])) continue;
         CategoryPlan& category_plan = category_plans[category_for_slot[i]];
         const int32_t before = category_plan.current_count;
@@ -1571,7 +1570,7 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
                 log_execute_stage(2, "material_observation", static_cast<uint32_t>(i),
                                   observed.code, before, after);
             }
-            if (!update_first) {
+            if (!update_in_place) {
                 discard_uncommitted_product(product, "material_remove",
                                             static_cast<uint32_t>(i));
             }
@@ -1580,7 +1579,7 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
         if (observed.ok != kQolOk) {
             log_execute_stage(2, "material_observation", static_cast<uint32_t>(i),
                               observed.code, before, after);
-            if (!update_first) {
+            if (!update_in_place) {
                 discard_uncommitted_product(product, "material_observation",
                                             static_cast<uint32_t>(i));
             }
@@ -1589,7 +1588,7 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
         if (after != before - 1) {
             log_execute_stage(2, "material_observation", static_cast<uint32_t>(i),
                               kQolErrConflict, before, after);
-            if (!update_first) {
+            if (!update_in_place) {
                 discard_uncommitted_product(product, "material_observation",
                                             static_cast<uint32_t>(i));
             }
@@ -1605,7 +1604,7 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
     // place 自动落位等价于原 INVEN_SaveItem（FindSaveSlot + 同类别堆合并/adopt，H-13）。
     // 成功即把 handle 交给原生库存；失败保持 detached，但此处仍按迁移前的保守策略不再
     // 探测/释放该 handle，ownership 以 action 状态为准。
-    if (update_first) {
+    if (update_in_place) {
         // 产物就是第 1 格原物品，已在槽内；仅记录提交完成。
         log_execute_stage(0, "product_save_in_place", 0, kQolOk, 0, 1);
     } else {
@@ -1631,7 +1630,7 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
         log_message(0, "three slot crafted product=%u consumed=%d",
                     static_cast<uint32_t>(product_category),
                     valid_craft_item(items[1]) + valid_craft_item(items[2]) +
-                        (update_first ? 0 : valid_craft_item(items[0])));
+                        (update_in_place ? 0 : valid_craft_item(items[0])));
     }
     return CraftExecuteResult::kOk;
 }

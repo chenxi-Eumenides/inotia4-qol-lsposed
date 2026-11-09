@@ -623,8 +623,8 @@ static void test_chaos_scroll_recipe() {
             CHECK(hit->ordered);
             CHECK(hit->product_mode == cr::ProductMode::kScaleFirstItem);
             CHECK(hit->scale_permille == 1200);
-            // 产物来源是配方字段，不由 ProductMode 推断；当前条目为新建。
-            CHECK(hit->product_origin == cr::ProductOrigin::kNewItem);
+            // 产物来源是配方字段，不由 ProductMode 推断；该条原地更新第 1 格宝石。
+            CHECK(hit->product_origin == cr::ProductOrigin::kUpdateFirstItem);
         }
     }
     // 顺序严格：换位 / 缺格 / 两格同料 一律不命中（也不得落到其它配方）。
