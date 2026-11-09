@@ -25,7 +25,7 @@ constexpr SiteDef kSites[] = {
      0, {}, 0, 0},
     {"INSN_ACT_DD_EF530", 0xef530, 4, 22, 2, 22, 1000, 0xef560,
      3, {0xffffffffu, 0x52807d03u, 0x4b000060u}, F_GET_ATTR_VMA, 22},
-    {"INSN_ACT_DD_EF560", 0xef560, 4, 22, 0, 22, 1000, 0xef574,
+    {"INSN_ACT_DD_EF560", 0xef560, 4, 22, 0, 2, 1000, 0xef574,
      0, {}, 0, 22},
     {"INSN_ACT_DD_EF5D8", 0xef5d8, 4, 22, 1, 2, 1000, 0xef5f0,
      1, {0xaa1303e1u}, 0, 22},

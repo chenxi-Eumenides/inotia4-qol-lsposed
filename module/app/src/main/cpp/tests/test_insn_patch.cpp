@@ -428,6 +428,20 @@ int main(int argc, char** argv) {
               "EF5D8 machine code writes w2=141*700/1000=98");
         check(sim.get(19) == 0x1000, "EF5D8 restores original x19");
     }
+    // EF560 实机组合：区域输出是 w2（ef574 返回后 Success 读取 w2），不是 w22。
+    {
+        InsnPatchSpec spec{4, 22, 0, 2, 1000, 0xef574, 0, {}, 0, 22};
+        uint32_t generated = 0;
+        check(insn_patch_test_generate(&spec, words, 40, &generated) && generated == 24,
+              "EF560 semantic generation");
+        check(words[19] == 0x2a1003e2u, "EF560 writes w2 region output");
+        Sim sim;
+        sim.set_w(22, 5000);
+        sim.set_w(0, 500);
+        check(run_thunk(words, generated, sim), "EF560 semantic execution");
+        check(static_cast<int32_t>(sim.get(2)) == 2500,
+              "EF560 machine code writes w2=5000*500/1000=2500");
+    }
     InsnPatchSpec bad_replay{4, 27, 22, 22, 1000, 0x123450, 5, {}, 0};
     check(!insn_patch_test_generate(&bad_replay, words, 24, &count),
           "reject oversized region replay");

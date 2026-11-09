@@ -16,7 +16,7 @@ set(expected
     "{\"INSN_ACT_DD_EF20C\", 0xef20c, 4, 27, 22, 22, 1000, 0xef234,"
     "{\"INSN_ACT_DD_EF4D0\", 0xef4d0, 4, 27, 0, 0, 1000, 0xef4e8,"
     "{\"INSN_ACT_DD_EF530\", 0xef530, 4, 22, 2, 22, 1000, 0xef560,"
-    "{\"INSN_ACT_DD_EF560\", 0xef560, 4, 22, 0, 22, 1000, 0xef574,"
+    "{\"INSN_ACT_DD_EF560\", 0xef560, 4, 22, 0, 2, 1000, 0xef574,"
     "{\"INSN_ACT_DD_EF5D8\", 0xef5d8, 4, 22, 1, 2, 1000, 0xef5f0,"
     "{\"INSN_ATTR_ATTACK_EB1B4\", 0xeb1b4, 4, 3, 1, 26, 100, 0xeb1d0,")
 
