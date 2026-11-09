@@ -1,5 +1,6 @@
 #include "game/access/symbols.h"
 
+#include <atomic>
 #include <cstring>
 
 #include "game/access/qol_log_seam.h"
@@ -161,7 +162,77 @@ uintptr_t hookable_entry(uintptr_t symbol_entry, bool* out_followed) {
     return symbol_entry;
 }
 
+// b 的 imm26 符号扩展后按 4 字节缩放为相对偏移。
+uintptr_t decode_b_target(uintptr_t from, uint32_t word) {
+    int64_t imm = static_cast<int64_t>(word & 0x03FFFFFFu);
+    if ((imm & 0x02000000) != 0) imm -= 0x04000000;
+    return from + static_cast<uintptr_t>(imm * 4);
+}
+
+// 首条指令属于短桩/控制流转时拒绝跟随：这类目标的 +8 附近常是「桩返回入口+8」的落点，
+// Dobby 的 12/16 字节补丁会把它一起覆盖（DropItem 事故形态）。正常函数序言（stp/mov/sub 等）
+// 不在本判定内。
+bool is_control_flow_first_instruction(uint32_t word) {
+    if ((word & 0xFC000000u) == 0x14000000u) return true;  // b
+    if ((word & 0xFC000000u) == 0x94000000u) return true;  // bl
+    if ((word & 0xFF000010u) == 0x54000000u) return true;  // b.cond
+    if ((word & 0x7E000000u) == 0x34000000u) return true;  // cbz/cbnz
+    if ((word & 0x7E000000u) == 0x36000000u) return true;  // tbz/tbnz
+    constexpr uint32_t kBrMask = 0xFFFFFC1Fu;
+    if ((word & kBrMask) == 0xD61F0000u) return true;      // br
+    if ((word & kBrMask) == 0xD63F0000u) return true;      // blr
+    if ((word & kBrMask) == 0xD65F0000u) return true;      // ret
+    return false;
+}
+
+std::atomic<bool> g_follow_refused_logged{false};
+
 }  // namespace
+
+uintptr_t resolve_hook_entry_follow(const char* symbol_name, bool* out_followed) {
+    bool is_trampoline = false;
+    const uintptr_t entry = resolve_hook_entry(symbol_name, &is_trampoline);
+    if (out_followed != nullptr) *out_followed = false;
+    if (entry == 0 || !is_trampoline) return entry;
+
+    const uint32_t word = *reinterpret_cast<const uint32_t*>(entry);
+    const uintptr_t target = decode_b_target(entry, word);
+    const intptr_t delta = static_cast<intptr_t>(target) - static_cast<intptr_t>(entry);
+    const bool distinct = delta > 16 || delta < -16;
+    const bool aligned = (target & 0x3u) == 0;
+    const bool executable =
+        distinct && aligned &&
+        game_memory_accessible(reinterpret_cast<void*>(target), 4, 'r') &&
+        game_memory_accessible(reinterpret_cast<void*>(target), 4, 'x');
+    if (!executable) {
+        if (!g_follow_refused_logged.exchange(true)) {
+            QOL_LOG_SEAM_WARN(kQolLogDomainCore,
+                              "hook entry follow refused symbol=%s entry=0x%llx target=0x%llx "
+                              "reason=target not distinct/executable",
+                              symbol_name, static_cast<unsigned long long>(entry),
+                              static_cast<unsigned long long>(target));
+        }
+        return entry;
+    }
+
+    if (is_control_flow_first_instruction(*reinterpret_cast<const uint32_t*>(target))) {
+        if (!g_follow_refused_logged.exchange(true)) {
+            QOL_LOG_SEAM_WARN(kQolLogDomainCore,
+                              "hook entry follow refused symbol=%s entry=0x%llx target=0x%llx "
+                              "reason=stub first instruction",
+                              symbol_name, static_cast<unsigned long long>(entry),
+                              static_cast<unsigned long long>(target));
+        }
+        return entry;
+    }
+
+    if (out_followed != nullptr) *out_followed = true;
+    QOL_LOG_SEAM_INFO(kQolLogDomainCore,
+                      "hook entry followed symbol=%s entry=0x%llx target=0x%llx",
+                      symbol_name, static_cast<unsigned long long>(entry),
+                      static_cast<unsigned long long>(target));
+    return target;
+}
 
 uintptr_t resolve_hook_entry(const char* symbol_name, bool* out_followed) {
     // hookable_entry 始终解引用 out_followed；调用方允许传 nullptr 时用局部量承接。

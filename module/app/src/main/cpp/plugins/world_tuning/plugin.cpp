@@ -56,10 +56,12 @@ const contracts::ResourceClaim kResources[] = {
         contracts::ResourceFailure::kFailSoft,
         true,
         kPluginId,
-        "无函数指针槽，15 个静态调用点经此单点汇合",
+        "无函数指针槽，15 个静态调用点经此单点汇合；monster 变体入口被外部周期性还原，跟随入口 b 的隐藏段目标",
         nullptr,
         120,
         reinterpret_cast<void*>(&char_add_damage_wrapper),
+        false,
+        true,
     },
     {
         kResourceIdUpdateAttrFromMonster,

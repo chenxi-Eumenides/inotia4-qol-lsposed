@@ -88,6 +88,8 @@ struct FakeBackend {
     const char* last_symbol = nullptr;
     const char* resolved_symbols[128] = {};
     uint32_t resolved_symbol_count = 0;
+    uintptr_t follow_target = 0;  // 非 0 = follow 解析器返回的目标地址
+    int follow_calls = 0;
     void* last_target = nullptr;
     void* last_replacement = nullptr;
 };
@@ -118,6 +120,16 @@ uintptr_t fake_resolve(const char* symbol, bool* out_followed) {
     return g_backend.resolve_rc + static_cast<uintptr_t>(slot) * 0x100;
 }
 
+// fake follow 解析：follow_target 非 0 时返回它；否则回退普通解析。
+uintptr_t fake_resolve_follow(const char* symbol, bool* out_followed) {
+    ++g_backend.follow_calls;
+    if (g_backend.follow_target != 0) {
+        if (out_followed != nullptr) *out_followed = true;
+        return g_backend.follow_target;
+    }
+    return fake_resolve(symbol, out_followed);
+}
+
 int fake_hook(void* target, void* replacement, void** backup) {
     ++g_backend.hook_calls;
     g_backend.last_target = target;
@@ -140,6 +152,10 @@ int fake_unhook(void* target) {
 
 HostDeps make_deps() {
     return HostDeps{&fake_resolve, &fake_hook, &fake_unhook};
+}
+
+HostDeps make_deps_with_follow() {
+    return HostDeps{&fake_resolve, &fake_hook, &fake_unhook, &fake_resolve_follow};
 }
 
 // ---------------------------------------------------------------------------
@@ -456,6 +472,12 @@ void arm_tx_deps() {
                            &tx_release_other});
 }
 
+void arm_tx_deps_with_follow() {
+    qol::hooks::tx_set_deps(
+        qol::hooks::TxDeps{&fake_resolve, &fake_hook, &fake_unhook, nullptr, &tx_install_other,
+                           &tx_release_other, &fake_resolve_follow});
+}
+
 void reset_feature_mode(const char* id, const ResourceClaim* resources, uint32_t count) {
     reset_all();
     arm_tx_deps();
@@ -495,6 +517,29 @@ void test_feature_mode_core_hook_failure_rolls_back() {
     CHECK(g_backend.unhook_calls == 1);  // 逆序回滚第 1 条
     CHECK(g_probe.enabled_calls == 0);
     CHECK(!feature_degraded("fm_core"));  // 失败态不得误报 partial degraded
+}
+
+ResourceClaim follow_hook_resource() {
+    ResourceClaim c = claim("hook:follow:a", "follow_plugin", nullptr);
+    c.follow_trampoline = true;
+    return c;
+}
+
+// follow_trampoline opt-in：preflight 与安装都走 follow 解析，hook 落在跟随目标而非符号入口。
+void test_follow_trampoline_uses_followed_entry() {
+    ResourceClaim resources[] = {follow_hook_resource()};
+    reset_all();
+    arm_tx_deps_with_follow();
+    g_backend.follow_target = 0xC000;
+    CHECK(register_plugin(make_feature_descriptor("follow_plugin", resources, 1)));
+    CHECK(qol::host::feature_registry_prepare(make_deps_with_follow()));
+    qol::host::feature_registry_set_wanted("follow_plugin", true);
+    CHECK(qol::host::feature_registry_transition("follow_plugin", true));
+    drive_feature_steps();
+    CHECK(feature_state_is("follow_plugin", FeatureState::kEnabled));
+    CHECK(g_backend.follow_calls >= 1);
+    CHECK(g_backend.last_target == reinterpret_cast<void*>(static_cast<uintptr_t>(0xC000)));
+    CHECK(qol::hooks::state_of("hook:follow:a") == ResourceState::kLive);
 }
 
 ResourceClaim fm_soft_hooks[] = {
@@ -954,6 +999,7 @@ int main() {
     test_reset_is_clean();
     test_elf_export_prefix_rejected_for_other_mechanisms();
     test_feature_mode_core_hook_failure_rolls_back();
+    test_follow_trampoline_uses_followed_entry();
     test_feature_mode_soft_middle_keeps_degraded_reason();
     test_feature_mode_soft_last_keeps_degraded_reason();
     test_feature_mode_soft_then_hard_failure();

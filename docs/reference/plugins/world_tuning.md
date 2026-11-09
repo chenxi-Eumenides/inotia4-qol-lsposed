@@ -23,7 +23,7 @@
 - `optional_requires` 2 项：`ui_panels` v1.3、`ui_components` v2.23；界面工具被停用时倍率仍生效，仅面板不可用。
 - `ports` 1 项：`QOL_PORT_CHARACTER_EXTRAS` v1.2。
 - `provides` 0；JNI 0、HTTP route/endpoint 0。
-- `resources` 7 个入口 hook（伤害、怪物最大生命、加经验、加金币、掉落结算、MakeItem、MakeEquipDetail），均为 `kOptional` + `kFailSoft`：单个落点不可用只影响对应倍率，不会把插件置 `failed`。
+- `resources` 7 个入口 hook（伤害、怪物最大生命、加经验、加金币、掉落结算、MakeItem、MakeEquipDetail），均为 `kOptional` + `kFailSoft`：单个落点不可用只影响对应倍率，不会把插件置 `failed`。其中 `hook:CHAR_AddDamage` 声明 `follow_trampoline=true`：monster v29 的 mod 会在短补丁安装后数秒内把入口写回自己的 `b`，因此伤害落点改为该 `b` 指向的隐藏段目标（见下）。
 - `validate_config` = `validate_rates_config`，只接受 `rates` 键。
 - 唯一 feature 为 entry（`plugins/world_tuning/plugin.cpp`）：
 
@@ -69,7 +69,7 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 
 | 资源 id | 符号 | 用途 |
 |---|---|---|
-| `hook:CHAR_AddDamage` | `F_CHAR_ADD_DAMAGE_VMA` | 伤害唯一汇合点，改写 `w2` 入参 |
+| `hook:CHAR_AddDamage` | `F_CHAR_ADD_DAMAGE_VMA` | 伤害唯一汇合点；入口是 `b` 时跟随到隐藏段目标再改写 `w2` 入参 |
 | `hook:CHAR_UpdateAttrFromMonster` | `F_CHAR_UPDATE_ATTR_FROM_MONSTER_VMA` | 怪物最大生命重算层，`attr==0x1e` |
 | `hook:CHAR_AddExperience` | `F_ADD_EXP_VMA` | 加经验统一入口 `int(void* ch, int32 amount, uint8 flag)` |
 | `hook:INVEN_AddMoney` | `F_ADD_MONEY_VMA` | 加金币增量入口 `int(int64 amount)` |
@@ -92,6 +92,8 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 | 其余 | 100 |
 
 `scale_by_percent`：`value<=0` 或倍率 100 原样返回；倍率 0 返回 0；其他正倍率以 int64 计算并钳到 `[1, INT32_MAX]`。
+
+monster v29 的 `CHAR_AddDamage` 入口是 `b <隐藏段目标>`，且 mod 会在 hook 安装后约 5 秒内把入口字写回同一个 `b`。本插件对该资源声明 `follow_trampoline=true`：安装时解码入口 `b` 的 imm26，把 hook 落在隐藏段目标上，入口被还原不影响已落在目标上的 hook。目标首条是短桩类控制流（`b`/`bl`/`b.cond`/`cbz`/`tbz`/`br`/`blr`/`ret`）时解析层拒绝跟随并回退入口短补丁（DropItem 形态），避免覆盖「桩返回入口+8」的落点。
 
 敌怪最大生命：
 

@@ -683,6 +683,7 @@ bool assembly_init() {
         &qol::game::resolve_hook_entry,
         hook_fn,
         unhook_fn,
+        &qol::game::resolve_hook_entry_follow,
     };
 
     // 指令 patch 原语注入：过渡期指向 patch/call_patch；P5 原语迁入 patch/ 后本处改指 patch 层。
@@ -711,6 +712,7 @@ bool assembly_init() {
         &gate_on,
         &dispatch_install,
         &dispatch_release,
+        &qol::game::resolve_hook_entry_follow,
     });
     infra::commands_set_lifecycle_handler(&lifecycle_apply);
 

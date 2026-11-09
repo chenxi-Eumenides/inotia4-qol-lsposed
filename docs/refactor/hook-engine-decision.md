@@ -43,6 +43,12 @@ LSPosed 注入的 Dobby 在目标与替换入口超出 ±128MB 时写 12 字节 
 - `hooks/install`：通过宿主注入的 `ShortHookOps` 使用短补丁；`hooks/` 不依赖 `patch/`
   （ARCHITECTURE §3.2 依赖矩阵）。
 - `hooks/transaction`：入口安装统一委托 `install_claim_entry_hook`，不再绕开短补丁路径。
+- **opt-in 跟随（`ResourceClaim.follow_trampoline`）**：仅当入口是 `b` 且目标首条不是短桩类
+  控制流（`b`/`bl`/`b.cond`/`cbz`/`tbz`/`br`/`blr`/`ret`）、目标可读可执行且与入口相距
+  16 字节以上时，安装到 `b` 的目标而不是入口。用于「入口被外部周期性还原、目标稳定」的
+  变体（当前只有 `world_tuning.hook:CHAR_AddDamage`）。其余入口保持 4 字节短补丁。
+  `game::resolve_hook_entry_follow` 由 `HostDeps`/`TxDeps` 注入；未注入或条件不满足时
+  回退 `resolve_hook_entry`，语义与既有路径一致。
 
 失败语义：短补丁分配不到近址槽或写入失败时安装失败（fail-closed），不回落到 12/16 字节。
 

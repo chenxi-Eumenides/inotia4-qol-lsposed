@@ -105,6 +105,9 @@ struct ResourceClaim {
     uint32_t step_budget;
     void* handler;
     bool atomic = false;
+    // opt-in：入口是无条件 b 跳板时，安装到 b 的目标而不是入口本身。
+    // 只适用于「入口被外部周期性还原」的变体；目标首条是短桩控制流时解析层会回退到入口。
+    bool follow_trampoline = false;
 };
 
 // JNI 绑定元数据（§7.2）：三向校验（Kotlin external ↔ native 导出 ↔ 本表）

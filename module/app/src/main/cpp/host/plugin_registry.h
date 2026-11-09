@@ -18,6 +18,8 @@ struct HostDeps {
     uintptr_t (*resolve_entry)(const char* symbol, bool* out_followed);
     qol::hooks::NativeHookFn hook_fn;
     int (*unhook_fn)(void* func);
+    // opt-in：claim.follow_trampoline 为真时使用；nullptr 表示不支持跟随（按普通入口安装）。
+    uintptr_t (*resolve_entry_follow)(const char* symbol, bool* out_followed) = nullptr;
 };
 
 // 注册插件描述符（描述符、字符串与数组须为静态存储，生命周期 ≥ 进程）。

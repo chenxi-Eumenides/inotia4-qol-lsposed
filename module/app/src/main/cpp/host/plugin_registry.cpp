@@ -97,6 +97,17 @@ constexpr uint32_t kMaxPortsPerPlugin = 8;
 constexpr uint32_t kMaxErrorText = 96;
 constexpr uint32_t kNoPlugin = kMaxPlugins;
 
+// 入口解析分派：follow_trampoline 是逐 claim 的 opt-in；未注入跟随解析器时回退普通入口，
+// 保持既有 fail-soft/短补丁语义。
+uintptr_t resolve_claim_entry(const contracts::ResourceClaim& claim, const HostDeps& deps,
+                              bool* out_followed) {
+    if (out_followed != nullptr) *out_followed = false;
+    if (claim.follow_trampoline && deps.resolve_entry_follow != nullptr) {
+        return deps.resolve_entry_follow(claim.symbol, out_followed);
+    }
+    return deps.resolve_entry != nullptr ? deps.resolve_entry(claim.symbol, out_followed) : 0;
+}
+
 struct PluginEntry {
     contracts::PluginDescriptor descriptor{};
 };
@@ -978,8 +989,7 @@ const char* preflight_plugin_resources(const contracts::PluginDescriptor& plugin
             claim.failure != contracts::ResourceFailure::kFailClosed) continue;
         if (claim.mechanism == contracts::ResourceMechanism::kEntryHook) {
             bool followed = false;
-            const uintptr_t entry =
-                deps.resolve_entry != nullptr ? deps.resolve_entry(claim.symbol, &followed) : 0;
+            const uintptr_t entry = resolve_claim_entry(claim, deps, &followed);
             if (entry == 0) return fail(claim, "symbol unresolved");
             if (hooks::entry_target_conflicts(entry, claim.id)) {
                 return fail(claim, "entry target already occupied");
@@ -1296,9 +1306,7 @@ bool install_atomic_group(const contracts::PluginDescriptor& plugin,
 
         if (claim.mechanism == contracts::ResourceMechanism::kEntryHook) {
             bool followed = false;
-            const uintptr_t entry = deps.resolve_entry != nullptr
-                                        ? deps.resolve_entry(claim.symbol, &followed)
-                                        : 0;
+            const uintptr_t entry = resolve_claim_entry(claim, deps, &followed);
             if (entry == 0) {
                 failed = true;
                 failed_id = claim.id;
@@ -1392,8 +1400,7 @@ const char* retry_resident_claim(const contracts::PluginDescriptor& plugin,
     }
     if (claim.mechanism == contracts::ResourceMechanism::kEntryHook) {
         bool followed = false;
-        const uintptr_t entry =
-            deps.resolve_entry != nullptr ? deps.resolve_entry(claim.symbol, &followed) : 0;
+        const uintptr_t entry = resolve_claim_entry(claim, deps, &followed);
         if (entry == 0) return "symbol unresolved";
         if (hooks::entry_target_conflicts(entry, claim.id)) return "entry target already occupied";
         const hooks::InstallOutcome outcome =
@@ -1910,8 +1917,7 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
         }
 
         bool followed = false;
-        const uintptr_t entry =
-            deps.resolve_entry != nullptr ? deps.resolve_entry(claim.symbol, &followed) : 0;
+        const uintptr_t entry = resolve_claim_entry(claim, deps, &followed);
         if (entry == 0) {
             if (handle_claim_failure(claim, "symbol unresolved")) break;
             continue;

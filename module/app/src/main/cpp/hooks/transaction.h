@@ -37,6 +37,9 @@ struct TxDeps {
         nullptr;
     MechanismOutcome (*release_other)(const contracts::ResourceClaim& claim, uintptr_t target) =
         nullptr;
+
+    // opt-in 跟随解析；claim.follow_trampoline 为真时优先使用。nullptr = 不支持跟随。
+    uintptr_t (*resolve_entry_follow)(const char* symbol, bool* out_followed) = nullptr;
 };
 void tx_set_deps(const TxDeps& deps);   // 装配期一次；未设置时 tx_begin 返回 0
 

@@ -56,6 +56,16 @@ TxDeps g_deps{};
 bool g_deps_set = false;
 uint64_t g_next_id = 1;  // 0 保留为「无效事务 id」
 
+// 入口解析分派（与 host 侧同语义）：follow_trampoline 为逐 claim opt-in；
+// 未注入跟随解析器时回退普通入口。
+uintptr_t resolve_claim_entry(const contracts::ResourceClaim& claim, bool* out_followed) {
+    if (out_followed != nullptr) *out_followed = false;
+    if (claim.follow_trampoline && g_deps.resolve_entry_follow != nullptr) {
+        return g_deps.resolve_entry_follow(claim.symbol, out_followed);
+    }
+    return g_deps.resolve_entry(claim.symbol, out_followed);
+}
+
 bool is_empty(const char* text) {
     return text == nullptr || text[0] == '\0';
 }
@@ -335,7 +345,7 @@ bool install_step(Tx& tx, TxStep* out) {
     }
 
     bool followed = false;
-    const uintptr_t entry = g_deps.resolve_entry(claim.symbol, &followed);
+    const uintptr_t entry = resolve_claim_entry(claim, &followed);
     if (entry == 0) {
         return fail_install_resource(tx, claim, 1, "symbol not resolved", out);
     }
@@ -542,7 +552,7 @@ uint64_t tx_begin(const char* plugin_id, TxKind kind) {
                 claim.failure != contracts::ResourceFailure::kFailClosed ||
                 claim.mechanism != contracts::ResourceMechanism::kEntryHook) continue;
             bool followed = false;
-            const uintptr_t resolved = g_deps.resolve_entry(claim.symbol, &followed);
+            const uintptr_t resolved = resolve_claim_entry(claim, &followed);
             if (resolved == 0) {
                 tx.preflight_failed_resource_id = claim.id;
                 tx.preflight_error = "symbol not resolved";
