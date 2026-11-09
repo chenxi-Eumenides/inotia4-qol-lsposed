@@ -166,7 +166,7 @@ UIMix 控件。
 |---|---|---|
 | 1 precheck：pending/token/generation、live handle/类别/可堆叠/持有数、扣料入口就绪 | `kStaleSlots` / `kPrecheckFailed` / `kNotEnoughHeld` | 否 |
 | 1.5 委托判定（在三同类档位宝石命中规则 3-6 时，位于端口就绪检查之前）：`delegate_mix_type_for` 推导原版配方 `mixType = product − 17`（RECIPEBASE 12..15）→ 返回 `kOkDelegated`，UI 层经 `craft_ui_write_port` v1.2 `delegate_start_mix` 调 `MIXSYSTEM_GetCost` 校验配方合法并按原版口径重算 `[g_uimix+0xf8]` 费用，写 `[g_uimix+0x48]` 后调原版 `UIMix_StartMix`；委托期间 `MIXSYSTEM_MakeItem` hook 旁路到原版函数（原版 type1 传入的 out 槽是未初始化栈内存，垃圾非空指针会误入升阶分支）。产物词条（含大修 20260810 定向合成、c18 补掷、原版随机）、扣料、清格、刷新、音效、弹窗全部按该变体原版行为执行；费用按各变体口径——变体不扣钱则重算的费用不会被扣。StartMix 全程只读 `[+0x48]` 且不还原，委托返回后恢复调用前的模块「合成」记录并重算 stuffList/费用，面板保持可继续放料；否则会停在原版宝石配方（12..15），后续放料按原版校验、无法填入其他宝石。端口缺失或配方非法时提示不可用、材料未扣 | `kOkDelegated`（委托失败在 UI 层收尾） | 否（原版链自行扣料） |
-| 2 产物准备：按配方 `product_origin` 分支——`kNewItem` 走 `inventory.action.create`（perfect 不可用时以 flags=0 回退普通创建）并改写；`kUpdateFirstItem` 在单件时把第 1 格原物品作为产物，原地 `item.payload.update` 并提交 descriptor，不创建/不 place/不消耗第 1 格；堆叠时回退为 `kNewItem` 执行 | `kProductPrepareFailed` | 否 |
+| 2 产物准备：按配方 `product_origin` 分支——`kNewItem` 初始 create 后纯 update 生成 payload，再 `create(payload)` 并丢弃旧 detached 产物；`kUpdateFirstItem` 在单件时对第 1 格原物品纯 update 生成 payload 并由 replace 原地写回，不创建/不 place/不消耗第 1 格；堆叠时回退为 `kNewItem` 执行 | `kProductPrepareFailed` | 否 |
 | 3 扣料：按填入槽 `inventory.action.discard` 扣该槽物品 1 个单位（句柄经 `inventory.slot.view` 定位，扩展袋物品经 `inventory.bag_source` 定位）；不可定位时可堆叠回退原版 `remove_item_data`（R-56 扩展袋补扣）、不可堆叠回退按句柄 `remove_item` + 数量前后差观察 | `kMaterialRemoveFailed` / `kMaterialObservationFailed` | **是，可能** |
 | 4 保存：`inventory.action.place`（`ref={原生空间,-1}`、`slot=-1`）走 `INVEN_SaveItem` 自动找槽与合并（H-13），返回 `kOk` 即保存成功 | `kProductSaveFailed` | 是 |
 
@@ -218,11 +218,11 @@ H-05 补扣承担。
   （`api_make_item`）从已查询的 `quality` / 候选词条取同一语义的输入，保证两边口径一致。
 - `api_make_item` 的提交顺序：
   - 宝石：quality 查询 → 与 item word 交叉核对 → 材料需求前置校验 → 计算候选（随机）→
-    **先提交 need 写入** → `item.payload.update(source=item, kJewelWord)` 原地更新对象并生成 payload
-    → `inventory.transfer.replace_item` 提交 provider descriptor。
+    **先提交 need 写入** → `item.payload.update(source=item, kJewelWord)` 生成 payload →
+    `inventory.transfer.replace_item` 由 replace 把 payload 原地写回对象并提交 provider descriptor。
   - 装备：view 校验 → 候选随机 → 升阶计算 → int16 范围校验 → 材料需求前置校验 →
-    **先提交 need 写入** → `item.payload.update(source=item, kNativeOptionValue)` 原地更新对象并生成
-    payload → `inventory.transfer.replace_item` 提交 provider descriptor。
+    **先提交 need 写入** → `item.payload.update(source=item, kNativeOptionValue)` 生成 payload →
+    `inventory.transfer.replace_item` 由 replace 原地写回对象并提交 provider descriptor。
   - need 失败直接返回且不写数值；写值失败时 need 已写，不回滚；失败时已写入的展示值允许残留，
     不等价于强原子。
 - 随机源必须是真实游戏闭区间随机：UI 侧直接调用 write port ABI 1.5 的 `random_inclusive`，
@@ -230,14 +230,15 @@ H-05 补扣承担。
 - 装备写回只改第 `native_index` 条 type 0 节点的 int16 存储值，不重建 option 链表、不改
   宝石词条、不改附魔字段。
 - 三格产物的对象来源由 `ThreeSlotRecipe::product_origin` **逐条配方声明**，不由 `ProductMode` 推断：
-  - `kNewItem`：先 `inventory.action.create` 新产物，再 `item.payload.update(source=product)` 原地配置；
-  - `kUpdateFirstItem`：产物就是第 1 格原物品，原地 `item.payload.update(source=items[0])` +
-    `inventory.transfer.replace_item`；单件时该格不扣料、不 place；堆叠时回退为 `kNewItem` 执行
-    （扣 1 件、创建新产物），避免一次升级整堆。
+  - `kNewItem`：纯 `item.payload.update(source=product)` 生成 payload → `inventory.action.create(payload)`
+    → 丢弃旧 detached 产物；
+  - `kUpdateFirstItem`：纯 `item.payload.update(source=items[0])` 生成 payload +
+    `inventory.transfer.replace_item`（replace 原地写回）；单件时该格不扣料、不 place；堆叠时回退为
+    `kNewItem` 执行（扣 1 件、创建新产物），避免一次升级整堆。
   - 当前第 7 条（宝石 + 混沌卷轴）声明为 `kUpdateFirstItem`；其余 7 条与动态配方为 `kNewItem`。
     新增/修改配方时必须显式选择来源。
-- `inventory.transfer.replace_item` 对原版袋只确认物品仍在槽内；对扩展袋更新 descriptor/hash/
-  dirty/refresh。对象身份保持不变，craft UI/UseStuff 的原生指针继续有效。
+- `inventory.transfer.replace_item` 负责把 payload 原地写回既有对象；对扩展袋再更新
+  descriptor/hash/category/dirty/refresh。对象地址/handle 保持不变，craft UI/UseStuff 的原生指针继续有效。
 
 ## 8. 状态与线程
 

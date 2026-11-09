@@ -29,7 +29,8 @@
 namespace qol::contracts {
 
 constexpr const char* kInventoryTransferCapabilityId = "inventory.transfer";
-// 1.1：尾部追加 replace_item（提交已原地更新的物品内容，返回同一句柄）。
+// 1.1：尾部追加 replace_item。调用方只传 payload；replace 内部选择原地写回
+// 既有对象（小改动，保留 handle）或整体替换（结构变化）。
 constexpr QolVersion kInventoryTransferVersion{1, 1};
 
 struct QolInventoryTransferApi {
@@ -39,8 +40,9 @@ struct QolInventoryTransferApi {
                            QolBagMutationResult* out_target);
     QolResult (*serialize_item)(QolItemHandle item, int32_t count, QolBagTransfer* out);
     QolResult (*locate)(int32_t space, QolItemHandle item, QolBagRef* out, int32_t* out_slot);
-    // expected 必须仍是当前槽/源物品。native 只确认；provider 提交 descriptor。
-    // 成功返回同一 handle（对象身份保留）；失败时原槽/descriptor 不变，replacement 不释放。
+    // expected 必须仍是当前槽/源物品。replace 内部按 payload 更新对象并提交
+    // native/provider；小改动保留对象/handle，结构变化可整体替换。
+    // 失败时对象/原槽/descriptor 不变。
     QolResult (*replace_item)(QolItemHandle expected, const QolBagTransfer* replacement,
                               QolBagMutationResult* out);
 };

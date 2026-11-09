@@ -202,15 +202,6 @@ QolResult update_payload(const contracts::QolItemPayloadUpdateSpec* spec,
         const QolResult validated = validate_payload(out->payload, out->payload_size, nullptr);
         if (!contracts::succeeded(validated)) return validated;
     }
-    // 有 source 时把同一组 mutation 应用到源对象：craft UI/UseStuff 仍持有原对象指针，
-    // 必须保留对象身份；provider 的权威 payload 由后续 inventory.transfer.replace_item 提交。
-    if (has_source) {
-        for (uint32_t index = 0; index < spec->mutation_count; ++index) {
-            result = g_item_state_write->apply_payload_mutation(spec->source,
-                                                                &spec->mutations[index]);
-            if (!contracts::succeeded(result)) return result;
-        }
-    }
     out->category = static_cast<uint32_t>(category);
     out->count = static_cast<uint32_t>(count);
     return contracts::ok();

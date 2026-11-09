@@ -3,8 +3,8 @@
 // 物品 payload 纯数据契约（core.item 提供）。
 //
 // 约束：
-// - 不写任何库存槽、不释放库存对象；有 source 时 update 会把 mutation 原地写到
-//   源对象字段上，以保留 craft UI/UseStuff 持有的对象身份。
+// - 纯 payload 操作：不写库存槽、不修改源对象、不释放库存对象。对象/槽更新由
+//   inventory.transfer.replace_item 负责。
 // - 所有回调只在游戏主线程调用。
 // - 结构校验只保证 loader/serializer 可接受且往返结构等价；不校验词条 ID、
 //   数值、品质、UID 唯一性或堆叠上限，这些语义由调用方负责。

@@ -1033,7 +1033,7 @@ void test_material_remove_failures() {
         assert(execute_three_slots(kScaleRecipe) == CraftExecuteResult::kMaterialRemoveFailed);
         assert(g_save_calls == 0);
         assert(g_remove_item_data_calls == failing_call + 1);  // 后续槽位不再扣
-        assert(g_free_calls == 1);                             // 未入包产物被清理
+        assert(g_free_calls == 2);  // 旧产物重建时丢弃一次；失败清理新产物一次
     }
 
     // 不可堆叠槽位的 remove_item 失败（特殊装备配方第 0 格）：句柄失效即失败，绝不按类别扣同类。
@@ -1228,20 +1228,20 @@ void test_save_failure_no_double_free() {
     g_save_result = kQolErrNotReady;
     assert(execute_three_slots(kScaleRecipe) == CraftExecuteResult::kProductSaveFailed);
     assert(g_save_calls == 1);
-    assert(g_free_calls == 0);  // save 之后绝不按 handle 释放
+    assert(g_free_calls == 1);  // 旧 detached 产物在 create(payload) 后已丢弃
 
-    // saved 计数为 0 → 仍算保存失败，且不 free。
+    // saved 计数为 0 → 仍算保存失败，且不再按 handle 释放新产物。
     init_fixture();
     assert(prepare_three_slots(kScaleRecipe));
     g_save_saved = 0;
     assert(execute_three_slots(kScaleRecipe) == CraftExecuteResult::kProductSaveFailed);
-    assert(g_free_calls == 0);
+    assert(g_free_calls == 1);
 
-    // 成功后也不 free。
+    // 成功后也只丢弃旧产物一次。
     init_fixture();
     assert(prepare_three_slots(kScaleRecipe));
     assert(execute_three_slots(kScaleRecipe) == CraftExecuteResult::kOk);
-    assert(g_free_calls == 0 && g_save_calls == 1);
+    assert(g_free_calls == 1 && g_save_calls == 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -1483,8 +1483,8 @@ void test_wrapper_equivalent_execute_success() {
     const int32_t held_28 = held_of(28);
     assert(api().execute(&in, nullptr) == CraftExecuteResult::kOk);
     assert(g_remove_item_data_calls == 3);   // 三格各扣 1（真实扣料）
-    assert(g_create_calls == 1 && g_save_calls == 1);
-    assert(g_free_calls == 0);               // 成功后不释放产物
+    assert(g_create_calls == 2 && g_save_calls == 1);  // 初始产物 + create(payload)
+    assert(g_free_calls == 1);               // 旧 detached 产物丢弃
     assert(g_random_calls == 0);             // 三格配方不需要随机
     assert(held_of(28) == held_28 - 1);
 }

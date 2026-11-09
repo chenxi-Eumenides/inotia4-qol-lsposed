@@ -588,6 +588,8 @@ int make_item_execute(int32_t mix_type, void** out_item) {
         if (!new_game_item_handle(*out_item, &in.item)) return 1;
         in.rand_inclusive = &craft_rand_inclusive;
         result = api->make_item(&in);
+        // 模块受理但失败：取消填入状态，恢复为可再次填入；成功由原版 UseStuff 清理。
+        if (result == 1) craft_reset_stuff_item_control();
     }
     if (result >= 0) return result;
     return (g_backup_make_item != nullptr) ? g_backup_make_item(mix_type, out_item) : 1;

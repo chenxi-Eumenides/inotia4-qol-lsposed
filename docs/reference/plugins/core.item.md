@@ -96,7 +96,7 @@
 | `remove` | `QolResult (*)(expected_handle, count, result*)` | 必需；按预期句柄扣减或移除。 |
 | `identify` | `QolResult (*)(handle, ref*, slot*)` | 可选；将来源句柄定位到袋与槽。 |
 | `use` | `QolResult (*)(ref, slot)` | 可选；执行来源自己的使用结算。 |
-| `replace_item` | `QolResult (*)(expected_handle, replacement, result*)` | 必需；`item.payload.update` 已原地更新对象，来源只提交 descriptor/hash/category/dirty/refresh 并返回同一句柄。 |
+| `replace_item` | `QolResult (*)(expected_handle, replacement, result*)` | 必需；`item.payload.update` 只生成 payload；replace 内部把 payload 原地写回既有对象，来源只提交 descriptor/hash/category/dirty/refresh 并返回同一句柄。 |
 
 | 注册约束 | 语义 |
 |---|---|

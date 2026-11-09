@@ -30,14 +30,24 @@ bool replacement_valid(const contracts::QolBagTransfer* replacement) {
            replacement->payload_size <= contracts::kQolBagTransferPayloadMaxSize;
 }
 
+QolResult apply_replacement(contracts::QolItemHandle expected,
+                            const contracts::QolBagTransfer* replacement) {
+    if (g_item_state_write == nullptr || g_item_state_write->apply_payload == nullptr) {
+        return error(kQolErrUnsupported, "payload application unavailable");
+    }
+    return g_item_state_write->apply_payload(expected, replacement->payload,
+                                             replacement->payload_size);
+}
+
 QolResult replace_native(const contracts::QolBagRef& ref, int32_t slot,
                          contracts::QolItemHandle expected,
                          const contracts::QolBagTransfer* replacement,
                          contracts::QolBagMutationResult* out) {
     (void)slot;
-    // 原生物品没有 provider 权威副本：item.payload.update 已把字段写到原对象上，
-    // 这里只确认 expected 仍是槽内物品并返回同一句柄。对象身份不变，详情/拖拽
-    // 控件持有的指针仍然有效，因此不需要拒绝。
+    // 升阶是字段级小改动：原地把 payload 写回既有对象，保留对象地址/句柄，
+    // craft UI 与 UseStuff 持有的指针继续有效。
+    const QolResult applied = apply_replacement(expected, replacement);
+    if (!contracts::succeeded(applied)) return applied;
     out->ref = ref;
     out->item = expected;
     out->count = replacement->count;
@@ -48,16 +58,38 @@ QolResult replace_native(const contracts::QolBagRef& ref, int32_t slot,
 QolResult replace_provider(contracts::QolItemHandle expected,
                            const contracts::QolBagTransfer* replacement,
                            contracts::QolBagMutationResult* out) {
+    uint8_t old_payload[contracts::kQolBagTransferPayloadCapacity]{};
+    uint32_t old_size = 0;
+    const bool have_old =
+        g_port != nullptr && g_port->read.serialize_item != nullptr &&
+        contracts::succeeded(g_port->read.serialize_item(
+            expected, old_payload, static_cast<uint32_t>(sizeof(old_payload)), &old_size));
+    if (!have_old) return error(kQolErrInternal, "cannot snapshot item payload");
+    // 先原地更新对象；provider 只负责把同一 payload 提交为权威 descriptor。
+    const QolResult applied = apply_replacement(expected, replacement);
+    if (!contracts::succeeded(applied)) return applied;
+    auto rollback = [&]() {
+        if (!have_old) return;
+        contracts::QolBagTransfer old_transfer{};
+        old_transfer.category = replacement->category;
+        old_transfer.count = replacement->count;
+        old_transfer.payload_size = old_size;
+        std::memcpy(old_transfer.payload, old_payload, old_size);
+        (void)apply_replacement(expected, &old_transfer);
+    };
     const uint32_t count = registered_bag_source_count();
     for (uint32_t index = 0; index < count; ++index) {
         const contracts::QolBagSource* source = registered_bag_source_at(index);
         if (source == nullptr || source->replace_item == nullptr) continue;
-        // 直接交给来源校验 expected；不要先用 identify 做门禁，避免 identify 的
-        // 次要失败（例如会话状态）把真正的 replace 错误吞成 NotFound。
         const QolResult replaced = source->replace_item(expected, replacement, out);
         if (replaced.code == kQolErrNotFound) continue;
-        return replaced;
+        if (!contracts::succeeded(replaced)) {
+            rollback();
+            return replaced;
+        }
+        return contracts::ok();
     }
+    rollback();
     return error(kQolErrNotFound, "replacement item not found");
 }
 

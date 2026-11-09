@@ -1500,6 +1500,23 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
             log_execute_stage(committed.ok == kQolOk ? 0 : 2, "product_scale_commit", 0,
                               committed.code, 0, 1);
             if (committed.ok != kQolOk) return CraftExecuteResult::kProductPrepareFailed;
+        } else {
+            contracts::QolItemCreateSpec payload_spec{
+                sizeof(contracts::QolItemCreateSpec), static_cast<int32_t>(payload.category),
+                static_cast<int32_t>(payload.count), 0, payload.payload, payload.payload_size};
+            const contracts::QolItemCreateOutcome recreated =
+                g_inventory_action->create(&payload_spec);
+            if (recreated.status != contracts::InventoryActionStatus::kOk) {
+                discard_uncommitted_product(product, "product_scale_recreate", 0);
+                return CraftExecuteResult::kProductPrepareFailed;
+            }
+            const contracts::InventoryUseOutcome discarded =
+                g_inventory_action->discard_handle(product, 1);
+            if (discarded.status != contracts::InventoryActionStatus::kOk) {
+                (void)g_inventory_action->discard_handle(recreated.item, 1);
+                return CraftExecuteResult::kProductPrepareFailed;
+            }
+            product = recreated.item;
         }
     }
     if (recipe.product_mode == ProductMode::kMaxSocketEnchantFirstItem) {
@@ -1523,6 +1540,23 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
             log_execute_stage(committed.ok == kQolOk ? 0 : 2, "product_max_socket_commit", 0,
                               committed.code, 0, 1);
             if (committed.ok != kQolOk) return CraftExecuteResult::kProductPrepareFailed;
+        } else {
+            contracts::QolItemCreateSpec payload_spec{
+                sizeof(contracts::QolItemCreateSpec), static_cast<int32_t>(payload.category),
+                static_cast<int32_t>(payload.count), 0, payload.payload, payload.payload_size};
+            const contracts::QolItemCreateOutcome recreated =
+                g_inventory_action->create(&payload_spec);
+            if (recreated.status != contracts::InventoryActionStatus::kOk) {
+                discard_uncommitted_product(product, "product_max_socket_recreate", 0);
+                return CraftExecuteResult::kProductPrepareFailed;
+            }
+            const contracts::InventoryUseOutcome discarded =
+                g_inventory_action->discard_handle(product, 1);
+            if (discarded.status != contracts::InventoryActionStatus::kOk) {
+                (void)g_inventory_action->discard_handle(recreated.item, 1);
+                return CraftExecuteResult::kProductPrepareFailed;
+            }
+            product = recreated.item;
         }
     }
 

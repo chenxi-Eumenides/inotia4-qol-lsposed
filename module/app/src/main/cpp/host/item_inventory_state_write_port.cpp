@@ -225,6 +225,11 @@ QolResult apply_payload_mutation(contracts::QolItemHandle item,
     return qol::game::ops::apply_payload_mutation(item, mutation);
 }
 
+QolResult apply_payload(contracts::QolItemHandle item, const uint8_t* payload,
+                        uint32_t payload_size) {
+    return qol::game::ops::apply_payload_to_item(item, payload, payload_size);
+}
+
 const contracts::QolItemInventoryStateWritePort kPort{
     contracts::kQolPortItemInventoryStateWriteVersion,
     &use_item,
@@ -249,6 +254,7 @@ const contracts::QolItemInventoryStateWritePort kPort{
     &free_item,
     &save_item,
     &apply_payload_mutation,
+    &apply_payload,
 };
 
 }  // namespace

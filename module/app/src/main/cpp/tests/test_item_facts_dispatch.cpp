@@ -884,9 +884,10 @@ const qol::contracts::QolItemInventoryStateWritePort kFakeItemStateWritePort{
     nullptr,
     nullptr,
     nullptr,
+    nullptr,
 };
-static_assert(sizeof(kFakeItemStateWritePort) == sizeof(void*) * 23,
-              "item inventory write port v2.5 ABI size changed");
+static_assert(sizeof(kFakeItemStateWritePort) == sizeof(void*) * 24,
+              "item inventory write port v2.6 ABI size changed");
 
 QolResult fake_merge_move(qol::contracts::QolItemHandle, int32_t, int32_t, int32_t, int32_t* out) {
     if (out != nullptr) *out = 0;

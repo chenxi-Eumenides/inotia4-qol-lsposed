@@ -12,15 +12,16 @@
 1. **`core.item` 负责 payload 与对象字段**：从物品句柄或已有 payload 出发，应用类型化字段修改，
    生成**新 payload**；有 `source` 时把同一组 mutation 应用到源对象，保留对象身份与句柄。
    只保证结构合法，不保证内容合法；不写槽、不改 provider 存储。
-2. **`core.inventory` 负责 replace**：确认 `expected` 仍是当前物品，native 路径只做确认，
-   provider 路径分派 `QolBagSource::replace_item` 提交 descriptor/hash/dirty/刷新。
+2. **`core.inventory` 负责 replace**：确认 `expected` 仍是当前物品，把 payload 原地写回
+   既有对象（小改动，保留 handle）；provider 再分派 `QolBagSource::replace_item` 提交
+   descriptor/hash/dirty/刷新。结构变化需要整体替换时由 replace 后续分支处理。
    内容不校验；不换对象、不释放旧对象。
 
 调用方（如 `custom_recipe`）负责读数据、计算新值、串联两段。
 
 **为什么保留对象身份**：craft UI 的 stuff 控件与 `UseStuff` 在 `api_make_item` 返回后仍持有
-输入物品的原生指针。换对象并释放旧对象会造成悬空引用。因此 `update` 在源对象上原地写字段，
-`replace_item` 只提交 provider 的权威副本；native 物品无需额外写槽。
+输入物品的原生指针。因此升阶这类小改动的对象更新放在 `replace_item` 内部完成：按 payload
+原地写回既有对象，保留对象地址和 handle；`update` 仍只生成 payload。provider 随后提交权威副本。
 
 ## 1. 职责边界
 
@@ -39,11 +40,10 @@ custom_recipe
   1. 取得目标 handle（craft UI 已有）
   2. 读取 item.facts / attribute.quality
   3. 计算新值
-  4. item.payload.update(source=handle, mutations) -> payload
-     （源对象已按同一组 mutation 原地更新）
+  4. item.payload.update(source=handle, mutations) -> payload（纯 payload，不改对象）
   5. 写材料 need（现有 stuff need）
   6. inventory.transfer.replace_item(expected=handle, replacement) -> 同一 handle
-     （native：确认；provider：提交 descriptor/hash/dirty/refresh）
+     （replace 内部把 payload 原地写回对象；provider 再提交 descriptor/hash/dirty/refresh）
 ```
 
 顺序约束：
@@ -191,28 +191,31 @@ QolResult (*replace_item)(QolItemHandle expected,
 
 1. `inventory.transfer.replace_item` 按 space 0/1 定位 `expected`；找不到再尝试注册源。
 2. 任务袋拒绝。
-3. 返回 `expected` 作为结果 handle，`count = replacement->count`，请求库存刷新。
-4. 对象字段已在第 3 步由 `item.payload.update` 写入；不写槽、不释放对象，因此详情/拖拽引用
-   不需要拒绝或重指。
+3. `apply_payload_to_item` 把 replacement payload 原地写回既有对象：标量字段 + 现有 option
+   节点的值；option 结构必须一致。
+4. 返回 `expected` 作为结果 handle，`count = replacement->count`，请求库存刷新。对象地址和
+   handle 不变，详情/拖拽引用不需要拒绝或重指。
 
 ## 6. provider replace 流程（extension_bag）
 
-1. 用 handle 定位槽，确认 `expected` 与 `module_objects[bag][slot]` 一致。
-2. 校验 replacement 的长度前缀、category/count、堆叠上限和 `valid_payload`。
-3. 写新 descriptor（category/count/payload）与 `payload_hash`、category 缓存。
-4. `extension_bag_mark_dirty_locked()`，`persist_state_locked()`；失败恢复旧 descriptor/hash/category。
-5. 若当前显示该袋：`refresh_module_item_area_locked(bag)`。
-6. 返回同一 handle（对象已在 `update` 中原地更新）。
+1. core.inventory 先按 payload 原地更新既有对象（见 §5）。
+2. 用 handle 定位槽，确认 `expected` 与 `module_objects[bag][slot]` 一致。
+3. 校验 replacement 的长度前缀、category/count、堆叠上限和 `valid_payload`。
+4. 写新 descriptor（category/count/payload）与 `payload_hash`、category 缓存。
+5. `extension_bag_mark_dirty_locked()`，`persist_state_locked()`；失败恢复旧 descriptor/hash/category，
+   core.inventory 再用旧 payload 回滚对象。
+6. 若当前显示该袋：`refresh_module_item_area_locked(bag)`。
+7. 返回同一 handle（对象地址不变）。
 
 ## 7. handle 与 UID
 
 - 有槽 replace：返回同一 handle，保持对象身份；craft UI/UseStuff 的指针继续有效。
 - 三格产物：对象来源由 `ThreeSlotRecipe::product_origin` 逐条配方声明，不由 `ProductMode` 推断。
-  - `kNewItem`：`create` 新产物后 `item.payload.update(source=product)` 原地配置；
-  - `kUpdateFirstItem`：第 1 格原物品即产物，`item.payload.update(source=items[0])` +
-    `inventory.transfer.replace_item`，该格不扣料、不 place。
+  - `kNewItem`：初始产物纯 `item.payload.update` 生成 payload → `create(payload)` → 丢弃旧 detached 产物；
+  - `kUpdateFirstItem`：第 1 格原物品即产物，纯 `item.payload.update(source=items[0])` +
+    `inventory.transfer.replace_item`（replace 原地写回），该格不扣料、不 place。
   - 当前第 7 条（宝石 + 混沌卷轴）为 `kUpdateFirstItem`，其余 7 条与动态配方为 `kNewItem`；
-    堆叠宝石走 `kNewItem` 回退，避免一次升级整堆。不再 `create(payload)` + `discard_handle(old)`。
+    堆叠宝石走 `kNewItem` 回退，避免一次升级整堆。
 - UID：
   - `source` 路径自动保留原 UID；
   - `base_payload` 路径默认由调用方保证；`kPreserveUid` 仅作意图声明；
@@ -262,15 +265,15 @@ Host（已执行）：
 - 装备升阶（多词条/改版自定义词条）替换后仍可正常显示、移动、存档；
 - 材料只扣一次；craft UI 输入物品在升阶后不出现悬空指针/崩溃。
 
-Debug APK：`output/inotia4_qol_lsposed_debug_2611091727_de3dc70e28af.apk`，
-SHA-256 `de3dc70e28afcf7449bc11f196f91871034bb4327327128ad4f6202932be08fb`。
+Debug APK：`output/inotia4_qol_lsposed_debug_2611091818_8b16b0cf32df.apk`，
+SHA-256 `8b16b0cf32df284d3492464fa2c8c7a7b44205d4129543ba3c7b72acfef3b092`。
 
 ## 11. 已确认决策（实现口径）
 
-- replace 内容不校验；结构由 `item.payload.update` 的 validate 保证。
-- 对象身份保留：`update` 原地写源对象，replace 只提交 provider 元数据。
-- provider replace 返回同一 handle；native replace 只确认。
-- detached 产物直接 `update(source=product)`，不 create/discard。
+- replace 内容结构由 `item.payload.update` 的 validate 保证；replace 再把 payload 原地写回对象。
+- 对象身份保留：小改动由 replace 原地应用 payload，保留对象地址/handle；provider 再提交 descriptor。
+- native/provider replace 都返回同一 handle；结构变化需要整体替换时由 replace 后续分支返回新 handle。
+- `kNewItem` 产物：纯 update → `create(payload)` → 丢弃旧 detached 产物；`kUpdateFirstItem` 走 replace。
 - source 与 base_payload 同时提供时拒绝。
 - `update` 返回 `QolResult`，结果结构不重复放 status。
 

@@ -1522,4 +1522,57 @@ QolResult apply_payload_mutation(contracts::QolItemHandle handle,
     return transfer_error(kQolErrInvalidArgument, "unknown payload mutation");
 }
 
+QolResult apply_payload_to_item(contracts::QolItemHandle item, const uint8_t* payload,
+                                uint32_t payload_size) {
+    if (payload == nullptr || payload_size == 0) {
+        return transfer_error(kQolErrInvalidArgument, "invalid payload");
+    }
+    void* target = nullptr;
+    QolResult result = resolve_loaded_item(item, &target);
+    if (!contracts::succeeded(result)) return result;
+    if (target == nullptr) return transfer_error(kQolErrNotFound, "item not found");
+
+    contracts::QolItemHandle temp_handle{};
+    result = load_item(payload, payload_size, &temp_handle);
+    if (!contracts::succeeded(result)) return result;
+    void* temp = nullptr;
+    result = resolve_loaded_item(temp_handle, &temp);
+    if (!contracts::succeeded(result) || temp == nullptr) {
+        (void)free_loaded_item(temp_handle);
+        return contracts::succeeded(result) ? transfer_error(kQolErrNotFound, "temp not found")
+                                            : result;
+    }
+
+    size_t target_options = 0;
+    size_t temp_options = 0;
+    for (void* node = *reinterpret_cast<void**>(static_cast<uint8_t*>(target) + I_OPTION_LIST);
+         node != nullptr;
+         node = *reinterpret_cast<void**>(static_cast<uint8_t*>(node) + O_NEXT)) {
+        ++target_options;
+    }
+    for (void* node = *reinterpret_cast<void**>(static_cast<uint8_t*>(temp) + I_OPTION_LIST);
+         node != nullptr;
+         node = *reinterpret_cast<void**>(static_cast<uint8_t*>(node) + O_NEXT)) {
+        ++temp_options;
+    }
+    if (target_options != temp_options) {
+        (void)free_loaded_item(temp_handle);
+        return transfer_error(kQolErrUnsupported, "payload option structure changed");
+    }
+
+    std::memcpy(target, temp, I_OPTION_LIST);
+    void* target_node =
+        *reinterpret_cast<void**>(static_cast<uint8_t*>(target) + I_OPTION_LIST);
+    void* temp_node = *reinterpret_cast<void**>(static_cast<uint8_t*>(temp) + I_OPTION_LIST);
+    while (target_node != nullptr && temp_node != nullptr) {
+        std::memcpy(static_cast<uint8_t*>(target_node) + O_INDEX,
+                    static_cast<uint8_t*>(temp_node) + O_INDEX, 4);
+        target_node = *reinterpret_cast<void**>(static_cast<uint8_t*>(target_node) + O_NEXT);
+        temp_node = *reinterpret_cast<void**>(static_cast<uint8_t*>(temp_node) + O_NEXT);
+    }
+    const QolResult freed = free_loaded_item(temp_handle);
+    if (!contracts::succeeded(freed) && freed.code != kQolErrNotFound) return freed;
+    return contracts::ok();
+}
+
 }  // namespace qol::game::ops

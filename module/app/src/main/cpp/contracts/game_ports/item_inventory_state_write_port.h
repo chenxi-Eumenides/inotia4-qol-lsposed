@@ -76,6 +76,10 @@ using QolItemInventoryStateSaveItemFn = QolResult (*)(QolItemHandle item, int32_
 // 对句柄指向的对象应用一次 payload 字段写入；只改对象，不改槽位与 provider 存储。
 using QolItemInventoryStateApplyPayloadMutationFn = QolResult (*)(
     QolItemHandle item, const QolItemPayloadMutation* mutation);
+// 把完整 payload 原地应用到既有对象：标量字段 + 现有 option 节点的值；
+// option 结构必须一致；不改对象地址、不改槽位、不改 provider 存储。
+using QolItemInventoryStateApplyPayloadFn = QolResult (*)(
+    QolItemHandle item, const uint8_t* payload, uint32_t payload_size);
 
 struct QolItemInventoryStateWritePort {
     QolVersion abi_version;
@@ -101,6 +105,7 @@ struct QolItemInventoryStateWritePort {
     QolItemInventoryStateFreeItemFn free_item;
     QolItemInventoryStateSaveItemFn save_item;
     QolItemInventoryStateApplyPayloadMutationFn apply_payload_mutation;
+    QolItemInventoryStateApplyPayloadFn apply_payload;
 };
 
 // 1.2：尾部追加 SAVE_LoadItem、原生精确写槽与按句柄移除原语。
@@ -122,7 +127,9 @@ struct QolItemInventoryStateWritePort {
 // 成功即把 detached 对象交给原生库存（句柄转 game-owned），否则 rebind 回 detached 且不释放，
 // 调用方仍可 free_item。
 // 2.5：尾部追加 payload 字段写入。apply_payload_mutation 只改对象字段，供 core.item
-// 的 item.payload 在临时对象上生成新 payload，并保留源对象身份（craft UI 持有其指针）。
+// 的 item.payload 在临时对象上生成新 payload。
+// 2.6：尾部追加 apply_payload。inventory.transfer.replace_item 用它把升阶 payload
+// 原地写回现有对象，保留对象地址/handle。
 constexpr uint32_t kQolItemInventoryStateWritePortSize = sizeof(QolItemInventoryStateWritePort);
 
 static_assert(std::is_standard_layout<QolItemInventoryStateGainedItem>::value,

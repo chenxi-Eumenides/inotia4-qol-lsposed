@@ -50,5 +50,7 @@ QolResult remove_item(int32_t category, contracts::QolItemInventoryStateWriteRes
 // v2.5 payload 字段写入。
 QolResult apply_payload_mutation(contracts::QolItemHandle item,
                                  const contracts::QolItemPayloadMutation* mutation);
+QolResult apply_payload_to_item(contracts::QolItemHandle item, const uint8_t* payload,
+                                uint32_t payload_size);
 
 }  // namespace qol::game::ops
