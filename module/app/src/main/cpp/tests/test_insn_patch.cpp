@@ -286,14 +286,14 @@ int main(int argc, char** argv) {
               words[25] == 0x4b000060u && words[26] == 0x14000000u,
           "bl placeholder and post-BL replay ordering");
     // EF5D8：重放 mov x1,x19 必须读到原始 x19（victim），不能读到 safe_scale 余数。
-    InsnPatchSpec ef5d8_spec{4, 22, 1, 22, 1000, 0xef5f0, 1,
+    InsnPatchSpec ef5d8_spec{4, 22, 1, 2, 1000, 0xef5f0, 1,
                              {0xaa1303e1u}, 0, 22};
     check(insn_patch_test_generate(&ef5d8_spec, words, 40, &count) && count == 25,
           "EF5D8 thunk generation with x19 replay");
-    check(words[19] == 0x2a1003f6u && words[20] == 0xa94257f4u &&
+    check(words[19] == 0x2a1003e2u && words[20] == 0xa94257f4u &&
               words[21] == 0xa9414ff2u && words[22] == 0xa8c347f0u &&
               words[23] == 0xaa1303e1u,
-          "EF5D8 replay observes restored x19 (restore precedes replay)");
+          "EF5D8 writes w2 region output and replay observes restored x19");
     // 暂存区约束：分解式读写 x16-x21，a/b/d 落入其中会读入余数或被恢复覆盖。
     InsnPatchSpec bad_a_scratch{4, 19, 22, 22, 1000, 0x123450, 0, {}, 0, 22};
     check(!insn_patch_test_generate(&bad_a_scratch, words, 40, &count),
@@ -410,9 +410,10 @@ int main(int argc, char** argv) {
         check(sim.get(2) == byte_addr,
               "EF20C replay preserves ldr x2,[x2] semantics");
     }
-    // EF5D8 实机组合：replay mov x1,x19 必须读到恢复后的 victim，而不是 safe_scale 余数。
+    // EF5D8 实机组合：区域输出是 w2（随后 w2 作为物防第三参数），
+    // replay mov x1,x19 必须读到恢复后的 victim，而不是 safe_scale 余数。
     {
-        InsnPatchSpec spec{4, 22, 1, 22, 1000, 0xef5f0, 1, {0xaa1303e1u}, 0, 22};
+        InsnPatchSpec spec{4, 22, 1, 2, 1000, 0xef5f0, 1, {0xaa1303e1u}, 0, 22};
         uint32_t generated = 0;
         check(insn_patch_test_generate(&spec, words, 40, &generated),
               "EF5D8 semantic generation");
@@ -423,8 +424,8 @@ int main(int argc, char** argv) {
         check(run_thunk(words, generated, sim), "EF5D8 semantic execution");
         check(sim.get(1) == 0x1000,
               "EF5D8 replay reads original x19 (restore precedes replay)");
-        check(static_cast<int32_t>(sim.get(22)) == 98,
-              "EF5D8 machine code yields 141*700/1000=98");
+        check(static_cast<int32_t>(sim.get(2)) == 98,
+              "EF5D8 machine code writes w2=141*700/1000=98");
         check(sim.get(19) == 0x1000, "EF5D8 restores original x19");
     }
     InsnPatchSpec bad_replay{4, 27, 22, 22, 1000, 0x123450, 5, {}, 0};

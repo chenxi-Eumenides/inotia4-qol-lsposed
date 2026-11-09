@@ -758,6 +758,11 @@ target_compile_definitions(insn_patch_tests PRIVATE QOL_INSN_PATCH_TEST_SEAMS=1
                                                     QOL_CALL_PATCH_TEST_SEAMS=1)
 add_test(NAME insn_patch_tests COMMAND insn_patch_tests)
 
+# kind4 区域输出寄存器契约：d_reg 必须等于 ret 后实际消费的寄存器。
+add_test(NAME insn_sites_output_register_contract
+    COMMAND ${CMAKE_COMMAND} -DCPP_DIR=${CPP_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_insn_sites.cmake)
+
 # damage_widen 暴击 wrapper：attr2 来自 defender、attr3 来自 attacker，防止再次混用同一角色。
 add_executable(damage_widen_critical_tests
     test_damage_widen_critical.cpp
