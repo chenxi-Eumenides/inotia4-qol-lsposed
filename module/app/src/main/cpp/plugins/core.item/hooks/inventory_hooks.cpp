@@ -1,5 +1,6 @@
 #include "inventory_hooks.h"
 #include "plugins/core.item/api/native_inventory.h"
+#include "plugins/core.item/api/item_use.h"
 #include "../api/projection.h"
 #include "../usecases/consume_item.h"
 #include "../bags/native_bag_limit.h"
@@ -1418,6 +1419,13 @@ int char_use_item_ex_wrapper(void* character, void* item, int flag) {
         return 0;
     }
     const int result = g_backup_char_use_item_ex(character, item, flag);
+    qol::contracts::QolItemUseEvent item_use_event{};
+    item_use_event.struct_size = sizeof(item_use_event);
+    item_use_event.character = character;
+    item_use_event.item = item;
+    item_use_event.flag = flag;
+    item_use_event.result = result;
+    qol::features::core_item::item_use_dispatch(item_use_event);
     const uint64_t trace_id = g_active_shortcut_trace;
     if (trace_id != 0 && inventory_log_debug_enabled()) {
         inventory_log_write(0, __FILE__, __LINE__,

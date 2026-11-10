@@ -25,7 +25,7 @@
 |---|---|
 | descriptor | id `core.item`，version `0.1.0`，`deactivate_allowed=false`。 |
 | required capabilities | 0 项。 |
-| provides | 5 项：`item.facts`、`item.state`、`inventory.action`、`inventory.slot`、`inventory.projection`；能力名称、版本与用途见[对外契约](core.item.md)的“对外能力”。`inventory_refresh`、`inventory.bag_source`、`move_merge.control` 不再由本插件提供。 |
+| provides | 7 项：`item.facts`、`item.state`、`inventory.action`、`inventory.slot`、`inventory.projection`、`item.payload`、`item.use`；能力名称、版本与用途见[对外契约](core.item.md)的“对外能力”。`inventory_refresh`、`inventory.bag_source`、`move_merge.control` 不再由本插件提供。 |
 | Game ports | 5 项：`QOL_PORT_ITEM` 5.0（单点低层原语；空间化袋读经 `inventory.access` 1.1）、`QOL_PORT_ITEM_MONEY_WRITE` 1.0、`QOL_PORT_ITEM_DICE_WRITE` 1.1、`QOL_PORT_ITEM_INVENTORY_STATE_WRITE` 2.4、`QOL_PORT_CHARACTER_EXTRAS` 1.2。`QOL_PORT_MOVE_MERGE` 已迁 `extension_bag`。 |
 | optional requires | 7 项：`character.state` 1.0、`http.registry` 1.1、`http.dispatch` 1.1、`world.facts` 2.0、`inventory.bag_source`（由 `core.inventory` 提供）、`inventory.access` 1.1（原生空间袋读）、`inventory_refresh`（由 `extension_bag` 提供）。 |
 
@@ -40,6 +40,23 @@
 | 总资源 | 11 项；生命周期将库存 hooks 的 claim 合并进 descriptor。 |
 
 hook 入口覆盖库存动作和诊断绑定；快捷栏三个 optional hook 仅提供诊断观察，不作为必需写入口。资源绑定由 `on_resource_ready` 分发到库存 backup 绑定。
+
+### `item.use` 使用后通知
+
+`CHAR_UseItemEx` 入口由本插件独占；其他插件不重复 claim，也不直接调用原函数。本插件在调用原函数后发出 `item.use` 通知。
+
+| 项目 | 契约 |
+|---|---|
+| capability | `item.use` 1.0（`contracts/item_use.h`） |
+| 事件 | `QolItemUseEvent{struct_size, character, item, flag, result}` |
+| 语义 | 只读快照；回调不得写事件字段 |
+| 指针生命周期 | `character` 仅回调期间可读；`item` 可能已被消耗/释放，禁止解引用 |
+| 线程 | 分派在游戏主线程、`CHAR_UseItemEx` wrapper 返回前 |
+| 重入 | 回调内再次触发物品使用不会递归分派 |
+| 订阅 | 最多 8 个；注册/注销可在任意线程 |
+| 生命周期 | provider 停用/禁用时清空订阅 |
+
+消费者需要修改游戏状态时，用自己的 game 访问层直接读写（例如读取 `CHECKTIME_nPotionTick` 与 `g_nGlobalCoolTimeCount` 后改写前者）；本接口不提供写回字段。
 
 ### 生命周期门控
 

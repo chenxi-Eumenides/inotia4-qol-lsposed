@@ -40,6 +40,7 @@
 | `item.facts` | 4.0 | 物品类别、权威 `item_type`、库存 view/count/编码、禁售和报价等事实。 |
 | `item.state` | 1.1 | raw/enriched 库存状态 JSON 与尺寸查询。 |
 | `item.payload` | 1.0 | 从物品句柄/base payload 应用类型化字段修改，生成新 payload；有 source 时原地更新源对象。 |
+| `item.use` | 1.0 | `CHAR_UseItemEx` 使用后通知：订阅/注销回调，事件只含角色、物品、flag、result。 |
 | `inventory.action` | 3.3 | 移动、使用、丢弃、出售、装备、卸下、镶嵌，以及 detached 生成/落位/释放。 |
 | `inventory.slot` | 1.0 | resolve/view/remove 槽位查询面。 |
 | `inventory.projection` | 1.3 | 注册/注销投影回调；投影显示和数据仍归注册方。尾部回调支持原版袋卸下、佣兵徽章、背包装备与角色装备。 |
@@ -145,8 +146,15 @@ payload 固定容量 256 字节，有效长度为 `1..255`，不得动态扩容�
 （jewel word、原生词条、数量、socket、enchant、magic rate）。`validate` 只保证长度前缀、
 loader 接受、`consumed == payload_size` 和重序列化结构等价，不校验词条/数值/品质/UID 语义。
 
-## `inventory.action` v3.3
+## `item.use` 1.0
 
+`CHAR_UseItemEx` 的入口 hook 由 `core.item` 独占。其他插件通过 `item.use` 订阅使用后通知，不重复 claim 同一资源，也不直接调用原函数。
+
+事件 `QolItemUseEvent` 只包含 `character`、`item`、`flag`、`result`：没有冷却、倍率或其他用途专用字段。`item` 可能已被原函数消耗/释放，只能作为标识，禁止解引用。需要修改游戏状态的消费者应使用自己的 game 访问层直接读写；本能力不提供写回字段。
+
+订阅上限 8 个，注册/注销可在任意线程；分派在游戏主线程、`CHAR_UseItemEx` 返回前执行。回调内再次触发物品使用不会递归分派。provider 停用/禁用时清空订阅。
+
+## `inventory.action` v3.3
 3.2 删除了 `find_empty_slots`：扩展袋装备不再需要原生暂存空槽，`equip` 直接把 `QolBagRef` 交给 `CHAR_EquipItemFromInvenToSlot`，由 core.item 完成扩展袋交换、双手武器处理与回滚。
 
 3.3 在表尾追加 `create`、`place`、`discard_handle`：生成返回调用方拥有的 detached 句柄（不落位），落位成功才把所有权转给库存，失败或放弃由调用方走 `discard_handle`。旧调用方按自身 `struct_size` 读取前缀，新增字段只在覆盖到时校验。

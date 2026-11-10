@@ -1,5 +1,6 @@
 #include "plugins/core.item/runtime/core_item_internal.h"
 #include "plugins/core.item/api/native_inventory.h"
+#include "plugins/core.item/api/item_use.h"
 
 #include <cstring>
 
@@ -195,6 +196,7 @@ int plugin_install(contracts::PluginContext& ctx) {
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     inventory_hooks::detach();
+    item_use_reset();
     stop_frame_task(ctx.sdk);
     shop::destroy_snapshot();
     g_snapshot.destroy();
@@ -242,6 +244,7 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     stop_frame_task(ctx.sdk);
+    item_use_reset();
     shop::destroy_snapshot();
     g_snapshot.destroy();
     bags::inventory_snapshot_store().clear();

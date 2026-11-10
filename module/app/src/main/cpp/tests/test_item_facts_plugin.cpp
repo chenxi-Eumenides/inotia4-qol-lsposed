@@ -7,6 +7,8 @@
 #include "contracts/inventory_projection.h"
 #include "contracts/character_state.h"
 #include "contracts/item_state.h"
+#include "contracts/item_use.h"
+#include "contracts/item_payload.h"
 #include "contracts/world_facts.h"
 #include "contracts/game_ports/ports.h"
 #include "contracts/game_ports/character_extras_port.h"
@@ -127,8 +129,8 @@ static_assert(qol::contracts::kQolItemInventoryHasOptionCompleteness == (1u << 7
 static_assert(qol::contracts::kAttributeQualityVersionMajor == 2 &&
                   qol::contracts::kAttributeQualityVersionMinor == 0,
               "attribute.quality contract must be v2.0");
-static_assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 10,
-              "Game Host contract must be v2.10");
+static_assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 13,
+              "Game Host contract must be v2.13");
 static_assert(sizeof(qol::contracts::QolItemHandleApi) == sizeof(void*) * 6,
               "Host SDK handle table must not expose resolve_item");
 static_assert(sizeof(qol::contracts::QolInventoryItemRef) ==
@@ -262,7 +264,7 @@ int main() {
         CHECK(descriptor.http_route_metadata[i].op_required == 1);
         CHECK(descriptor.http_route_metadata[i].lease_required == 1);
     }
-    CHECK(descriptor.provides_count == 5 && descriptor.provides != nullptr);
+    CHECK(descriptor.provides_count == 7 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 4 && descriptor.provides[0].version.minor == 0);
     CHECK(descriptor.provides[0].iface != nullptr);
@@ -284,6 +286,14 @@ int main() {
     CHECK(std::strcmp(descriptor.provides[4].id,
                       qol::contracts::kInventoryProjectionCapabilityId) == 0);
     CHECK(descriptor.provides[4].iface != nullptr);
+    CHECK(std::strcmp(descriptor.provides[5].id,
+                      qol::contracts::kItemPayloadCapabilityId) == 0);
+    CHECK(descriptor.provides[5].iface != nullptr);
+    CHECK(std::strcmp(descriptor.provides[6].id,
+                      qol::contracts::kItemUseCapabilityId) == 0);
+    CHECK(descriptor.provides[6].iface != nullptr);
+    CHECK(qol::contracts::item_use_api_size_valid(
+        static_cast<const qol::contracts::ItemUseApi*>(descriptor.provides[6].iface)));
     // move_merge.control 提供面随 feature 迁往 extension_bag 后撤除。
     CHECK(descriptor.port_count == 5 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);

@@ -26,6 +26,7 @@
 #include "contracts/item_facts.h"
 #include "contracts/item_payload.h"
 #include "contracts/item_state.h"
+#include "contracts/item_use.h"
 #include "contracts/world_facts.h"
 #include "usecases/item_slot.h"
 #include "usecases/item_action.h"
@@ -36,6 +37,7 @@
 
 #include "plugins/core.item/api/bag_source.h"
 #include "plugins/core.item/api/item_payload.h"
+#include "plugins/core.item/api/item_use.h"
 #include "plugins/core.item/api/native_inventory.h"
 #include "plugins/core.item/api/projection.h"
 #include "plugins/core.item/runtime/core_item_internal.h"
@@ -70,6 +72,9 @@ const contracts::CapabilityProvisionRef kProvides[] = {
     {contracts::kItemPayloadCapabilityId,
      {contracts::kItemPayloadVersionMajor, contracts::kItemPayloadVersionMinor},
      &item_payload_api()},
+    // CHAR_UseItemEx 入口由本插件独占；其他插件经 item.use 订阅使用后通知，
+    // 不重复 claim 同一资源，也不直接调用原函数。
+    {contracts::kItemUseCapabilityId, contracts::kItemUseVersion, &kItemUseApi},
 };
 
 const contracts::QolPortRequirement kPorts[] = {

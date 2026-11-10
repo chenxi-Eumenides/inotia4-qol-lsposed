@@ -14,6 +14,7 @@ add_library(qol_plugin_core.item STATIC
     api/projection.cpp
     api/facts.cpp
     api/state.cpp
+    api/item_use.cpp
     http/query_handler.cpp
     http/write_handler.cpp
     http/write_results.cpp
