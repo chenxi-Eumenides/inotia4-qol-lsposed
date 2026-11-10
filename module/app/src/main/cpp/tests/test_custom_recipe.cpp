@@ -608,16 +608,31 @@ static void test_three_slot_stack_rules() {
 //                     → 该宝石自身（同类别），数值 ×1.2 向上取整
 // 第 1 格为通配宝石槽（任意 28..32），且**槽位严格顺序**。
 // ---------------------------------------------------------------------------
+// 测试替身：模拟调用方按 item.facts.item_type 得到的逐槽宝石标志；生产侧不从类别推导。
+static void fake_jewel_flags(const uint16_t slots[3], bool flags[3]) {
+    for (int i = 0; i < 3; ++i) flags[i] = slots[i] >= 28 && slots[i] <= 32;
+}
+
+static const cr::ThreeSlotRecipe* match_with_fake_jewel(const uint16_t slots[3]) {
+    bool jewel[3] = {false, false, false};
+    fake_jewel_flags(slots, jewel);
+    return cr::match_three_slot(slots, nullptr, jewel);
+}
+
 static void test_chaos_scroll_recipe() {
     size_t n = 0;
     const cr::ThreeSlotRecipe* recipes = cr::three_slot_recipes(&n);
     CHECK(recipes != nullptr);
     CHECK(n == 8);  // 6 条既有 + 混沌卷轴 + 特殊装备拉满
 
-    // 任意宝石类别都能填第 1 格（通配槽 28..32）。
+    // 任意宝石类别都能填第 1 格（通配槽 28..32）；逐槽宝石标志由调用方按 item_type 注入。
     for (uint16_t gem = 28; gem <= 32; ++gem) {
         const uint16_t slots[3] = {gem, 20, 25};
-        const cr::ThreeSlotRecipe* hit = cr::match_three_slot(slots);
+        bool jewel[3] = {false, false, false};
+        fake_jewel_flags(slots, jewel);
+        // 未提供宝石标志时必须 fail-closed，不得回退到类别推导。
+        CHECK(cr::match_three_slot(slots) == nullptr);
+        const cr::ThreeSlotRecipe* hit = cr::match_three_slot(slots, nullptr, jewel);
         CHECK(hit == &recipes[6]);
         if (hit == &recipes[6]) {
             CHECK(hit->ordered);
@@ -630,16 +645,16 @@ static void test_chaos_scroll_recipe() {
     }
     // 顺序严格：换位 / 缺格 / 两格同料 一律不命中（也不得落到其它配方）。
     const uint16_t wrong_order[3] = {20, 28, 25};
-    CHECK(cr::match_three_slot(wrong_order) == nullptr);
+    CHECK(match_with_fake_jewel(wrong_order) == nullptr);
     const uint16_t wrong_order2[3] = {28, 25, 20};
-    CHECK(cr::match_three_slot(wrong_order2) == nullptr);
+    CHECK(match_with_fake_jewel(wrong_order2) == nullptr);
     const uint16_t missing_armor[3] = {28, 20, 0};
-    CHECK(cr::match_three_slot(missing_armor) == nullptr);
+    CHECK(match_with_fake_jewel(missing_armor) == nullptr);
     const uint16_t two_scrolls[3] = {20, 20, 25};
-    CHECK(cr::match_three_slot(two_scrolls) == nullptr);
+    CHECK(match_with_fake_jewel(two_scrolls) == nullptr);
     // 第 1 格必须是宝石：塞卷轴不命中。
     const uint16_t non_jewel[3] = {16, 20, 25};
-    CHECK(cr::match_three_slot(non_jewel) == nullptr);
+    CHECK(match_with_fake_jewel(non_jewel) == nullptr);
 
     // 既有 6 条配方保持「固定类别产物」语义（本次扩展不得改动它们）。
     for (size_t i = 0; i < 6; ++i) {
