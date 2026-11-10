@@ -63,6 +63,8 @@ uint32_t g_page_count = 1;  // enter 前也安全（绘制不会发生）
 struct Snapshot {
     int32_t value[kSectionCount][kMaxSectionRows];
     uint8_t ok[kSectionCount][kMaxSectionRows];
+    // kGroupSkill 行的已学标志（1=已学）；其它行恒 0。
+    uint8_t learned[kSectionCount][kMaxSectionRows];
 };
 Snapshot g_snapshot{};
 
@@ -118,6 +120,13 @@ bool read_row_value(void* character, const RowSpec& row, int32_t* out) {
     switch (row.kind) {
         case RowKind::kText:
             return true;  // 说明行不读游戏数据
+        case RowKind::kGroupSkill:
+            // 佣兵团技能（全队生效）：act 119..142，返回 1=已学/0=未学。
+            if (g_game == nullptr || g_game->character_read.group_skill_learned == nullptr) {
+                return false;
+            }
+            return contracts::succeeded(
+                g_game->character_read.group_skill_learned(row.arg, out));
         case RowKind::kMainStat:
             return read_main_stat(character, row.arg, out);
         case RowKind::kAttrInt:
@@ -200,6 +209,8 @@ void read_snapshot() {
             g_snapshot.ok[section][row] = spec.rows[row].kind == RowKind::kText
                                               ? 1
                                               : (ok ? 1 : 0);
+            g_snapshot.learned[section][row] =
+                spec.rows[row].kind == RowKind::kGroupSkill && ok && value != 0 ? 1 : 0;
             if (spec.rows[row].kind == RowKind::kText) continue;
             if (!ok) g_snapshot.value[section][row] = 0;
         }
@@ -270,9 +281,10 @@ bool create_controls() {
         return false;
     }
     g_root = root;
-    // 局部坐标 {8,8}：绝对位置 = root 原点(inset) + 8，与 settings 页口径一致。
+    // 导航盒固定在整屏左上角 (8,8)；root 原点在屏幕 inset，局部坐标需减去 root 原点。
     const contracts::UiNavButtonDesc nav_desc{
-        {contracts::ui_theme::kNavBoxAbsX, contracts::ui_theme::kNavBoxAbsY,
+        {contracts::ui_theme::kNavBoxAbsX - root_x,
+         contracts::ui_theme::kNavBoxAbsY - root_y,
          contracts::ui_theme::kNavBoxW, contracts::ui_theme::kNavBoxH},
         contracts::kUiNavButtonAuto, nullptr, nullptr};
     if (!contracts::succeeded(components->nav_button_create(&nav_desc, root, &g_nav)) ||
@@ -307,14 +319,16 @@ void draw_column(const ColumnSpec& column, int64_t label_x, int64_t value_right_
         const RowSpec& row = section.rows[row_index];
         const int32_t y = static_cast<int32_t>(kRowsTopY + static_cast<int64_t>(i) * kRowPitch);
         if (row.kind == RowKind::kText) {
-            // 说明行没有数值列：整行左对齐，逐行带上「不是角色属性」注记。
+            // 说明行没有数值列：整行左对齐，逐行带注记（行可自定义 note）。
             char line[128];
-            (void)std::snprintf(line, sizeof(line), "%s：%s", row.label, kGlobalNote);
+            (void)std::snprintf(line, sizeof(line), "%s：%s", row.label,
+                                row.note != nullptr ? row.note : kGlobalNote);
             draw_text(line, label_x, y, contracts::ui_theme::kTextNormal, 0, kBodyFont);
             continue;
         }
         char value[kValueBufferSize];
         format_value(row, g_snapshot.ok[column.section][row_index] != 0,
+                     g_snapshot.learned[column.section][row_index] != 0,
                      g_snapshot.value[column.section][row_index], value, sizeof(value));
         draw_text(row.label, label_x, y, contracts::ui_theme::kTextNormal, 0, kBodyFont);
         draw_text(value, value_right_x, y, contracts::ui_theme::kTextBody, 1, kBodyFont);

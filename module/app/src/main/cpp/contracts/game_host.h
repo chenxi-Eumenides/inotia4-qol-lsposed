@@ -80,6 +80,9 @@ struct QolCharacterReadApi {
     QolResult (*evasion_rate_1000)(void* character, int32_t* out_value);
     // 使用 CAL 全局计算器栈，只能游戏主线程串行调用。
     QolResult (*display_damage_reduce_rate)(void* character, int32_t* out_value);
+    // 佣兵团技能（全队生效）是否已学：act_id 119..142；out_value 1=已学、0=未学。
+    // 越界返回 InvalidArgument。底层为只读叶函数、无副作用，不限制线程。
+    QolResult (*group_skill_learned)(int32_t act_id, int32_t* out_value);
 };
 struct QolReadApi {
     QolAttrRangeReadApi attr_range;
@@ -310,7 +313,8 @@ constexpr uint16_t kGameHostC18JewelRangeMinor = 9;
 // 2.10 appended the raw-item category tail used by world_tuning drop quality reroll.
 constexpr uint16_t kGameHostItemCategoryMinor = 10;
 // 2.13 appended main-stat and panel-derived getters used by the character overview panel.
-constexpr uint16_t kGameHostCharacterReadMinor = 13;
+// 2.14 appended the mercenary group-skill learned query (13 already assigned).
+constexpr uint16_t kGameHostCharacterReadMinor = 14;
 constexpr uint16_t kGameHostMinor = kGameHostCharacterReadMinor;
 
 }  // namespace qol::contracts

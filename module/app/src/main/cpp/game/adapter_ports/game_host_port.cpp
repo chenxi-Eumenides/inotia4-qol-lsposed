@@ -1059,6 +1059,24 @@ QolResult read_character_hit_rate_1000(void* character, int32_t* out_value) {
     return contracts::ok();
 }
 
+// 佣兵团技能是否已学（actId 119..142）。叶函数、只读、无副作用，与原函数同线程域：
+// 不限制线程，失败只用 InvalidArgument/NotReady 表达参数与符号解析问题。
+QolResult read_group_skill_learned(int32_t act_id, int32_t* out_value) {
+    if (out_value == nullptr || act_id < 119 || act_id > 142) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    static int32_t (*getter)(int32_t, void*) = nullptr;
+    if (getter == nullptr) {
+        if (g_base == 0) return not_ready();
+        getter = reinterpret_cast<int32_t (*)(int32_t, void*)>(
+            g_base + fn_resolve("F_MERCENARYGROUPSKILL_CHECK_CONDITION_VMA",
+                                F_MERCENARYGROUPSKILL_CHECK_CONDITION_VMA));
+    }
+    if (getter == nullptr) return not_ready();
+    *out_value = getter(act_id, nullptr) != 0 ? 1 : 0;
+    return contracts::ok();
+}
+
 contracts::QolGameHost make_game_host() {
     contracts::QolGameHost host{};
     host.abi = {sizeof(contracts::QolGameHost), contracts::kGameHostMajor,
@@ -1109,7 +1127,8 @@ contracts::QolGameHost make_game_host() {
                            &read_character_normal_magic_damage,
                            &read_character_hit_rate_1000,
                            &read_character_evasion_rate_1000,
-                           &read_character_display_damage_reduce_rate};
+                           &read_character_display_damage_reduce_rate,
+                           &read_group_skill_learned};
     return host;
 }
 

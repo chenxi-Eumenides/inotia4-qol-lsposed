@@ -1279,7 +1279,7 @@ int main() {
     assert(variant.id == static_cast<uint32_t>(qol::GameSeries::kOriginal));
     assert(variant.capabilities == qol::kCapWarehouse);
     assert(game.abi.minor == qol::contracts::kGameHostMinor);
-    assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 13);
+    assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 14);
     // 人物属性面板/总览使用的只读面：主属性、面板派生 getter 与属性读取全部就绪。
     assert(game.character_read.attr != nullptr);
     assert(game.character_read.physical_defense_calculate != nullptr);
@@ -1289,6 +1289,7 @@ int main() {
     assert(game.character_read.hit_rate_1000 != nullptr);
     assert(game.character_read.evasion_rate_1000 != nullptr);
     assert(game.character_read.display_damage_reduce_rate != nullptr);
+    assert(game.character_read.group_skill_learned != nullptr);
     assert(game.attr_range_c18.jewel_generation_range != nullptr);
     static_assert(std::is_standard_layout<qol::contracts::QolReadOnlyApi>::value,
                   "read-only face must remain standard layout");

@@ -301,14 +301,14 @@ void test_manifest_ids() {
     CHECK(d.features[1].default_enabled == 1);
 }
 
-// 分区行数 + 分页映射：61 行 → 4 页双列（每列最多 11 行），校验左右列与行覆盖。
+// 分区行数 + 分页映射：70 行 → 4 页双列（每列最多 11 行），校验左右列与行覆盖。
 void test_overview_row_model() {
     CHECK(i18n::kSectionCount == 4);
     CHECK(i18n::kPanelRowCount == 16);
     CHECK(i18n::kHiddenRowCount == 22);
     CHECK(i18n::kElementRowCount == 19);
-    CHECK(i18n::kGlobalRowCount == 4);
-    CHECK(i18n::kTotalRowCount == 61);
+    CHECK(i18n::kGlobalRowCount == 13);
+    CHECK(i18n::kTotalRowCount == 70);
     CHECK(i18n::kMaxRowsPerColumn == 11);
     CHECK(i18n::kPageCount == 4);
 
@@ -326,7 +326,7 @@ void test_overview_row_model() {
         {{0, 0, 5}, {0, 5, 11}},    // P1 左 5 维 / 右面板属性 11 行
         {{1, 0, 11}, {1, 11, 11}},  // P2 隐藏属性左右各 11
         {{2, 0, 10}, {2, 10, 9}},   // P3 元素左 10 / 右 9
-        {{3, 0, 4}, {3, 0, 0}},     // P4 全局加成仅左列
+        {{3, 0, 7}, {3, 7, 6}},     // P4 全局加成左 7 / 右 6
     };
     uint32_t covered_rows = 0;
     for (uint32_t page = 0; page < i18n::kPageCount; ++page) {
@@ -349,9 +349,12 @@ void test_overview_row_model() {
             covered_rows += actual.row_count;
         }
     }
-    // 4 页双列覆盖全部 61 行，且全局加成页只有左列。
+    // 4 页双列覆盖全部 70 行；全局加成页左 7 / 右 6。
     CHECK(covered_rows == i18n::kTotalRowCount);
-    CHECK(i18n::kPages[3].right.row_count == 0);
+    CHECK(i18n::kPages[3].left.row_count == 7);
+    CHECK(i18n::kPages[3].right.first_row == i18n::kPages[3].left.row_count);
+    CHECK(i18n::kPages[3].right.first_row + i18n::kPages[3].right.row_count ==
+          i18n::kGlobalRowCount);
     // 主属性与面板属性页：左列恰好 5 维、右列接续到分区末尾。
     CHECK(i18n::kPages[0].left.row_count == 5);
     CHECK(i18n::kPages[0].right.first_row == i18n::kPages[0].left.row_count);
@@ -368,42 +371,62 @@ void test_overview_row_model() {
     CHECK(reinterpret_cast<uintptr_t>(untouched) == 0x1234);
 }
 
-// 格式化：千分比 raw/10 保留 1 位小数 + %；整数；失败 `--`；说明行带注记。
+// 格式化：千分比 raw/10 保留 1 位小数 + %；整数；失败 `--`；佣兵团技能已学/未学；说明行注记。
 void test_overview_format_value() {
     char buffer[40];
     const i18n::RowSpec& crit = i18n::kPanelRows[8];      // 暴击率（attr 千分比）
     const i18n::RowSpec& hit = i18n::kPanelRows[9];       // 命中率（hit_rate_1000）
     const i18n::RowSpec& defense = i18n::kPanelRows[7];   // 防御力（整数）
     const i18n::RowSpec& hidden = i18n::kHiddenRows[0];   // HP吸收（attr 原值）
-    const i18n::RowSpec& global = i18n::kGlobalRows[0];   // 全局加成说明行
+    const i18n::RowSpec& scroll_drop = i18n::kGlobalRows[0];   // 卷轴掉率 act 130
+    const i18n::RowSpec& legendary = i18n::kGlobalRows[3];     // 传说装备率 act 122
+    const i18n::RowSpec& potion_cooldown = i18n::kGlobalRows[10];  // 药水冷却 act 141
+    const i18n::RowSpec& gold_note = i18n::kGlobalRows[11];    // 金币获得（说明行）
+    const i18n::RowSpec& luck_note = i18n::kGlobalRows[12];    // 幸运（说明行）
 
-    i18n::format_value(crit, true, 1234, buffer, sizeof(buffer));
+    i18n::format_value(crit, true, false, 1234, buffer, sizeof(buffer));
     CHECK(std::strcmp(buffer, "123.4%") == 0);
-    i18n::format_value(crit, true, 0, buffer, sizeof(buffer));
+    i18n::format_value(crit, true, false, 0, buffer, sizeof(buffer));
     CHECK(std::strcmp(buffer, "0.0%") == 0);
-    i18n::format_value(crit, true, 5, buffer, sizeof(buffer));
+    i18n::format_value(crit, true, false, 5, buffer, sizeof(buffer));
     CHECK(std::strcmp(buffer, "0.5%") == 0);
-    i18n::format_value(hit, true, 999, buffer, sizeof(buffer));
+    i18n::format_value(hit, true, false, 999, buffer, sizeof(buffer));
     CHECK(std::strcmp(buffer, "99.9%") == 0);
-    i18n::format_value(crit, true, -5, buffer, sizeof(buffer));
+    i18n::format_value(crit, true, false, -5, buffer, sizeof(buffer));
     CHECK(std::strcmp(buffer, "-0.5%") == 0);
 
-    i18n::format_value(defense, true, 4321, buffer, sizeof(buffer));
+    i18n::format_value(defense, true, false, 4321, buffer, sizeof(buffer));
     CHECK(std::strcmp(buffer, "4321") == 0);
-    i18n::format_value(hidden, true, -7, buffer, sizeof(buffer));
+    i18n::format_value(hidden, true, false, -7, buffer, sizeof(buffer));
     CHECK(std::strcmp(buffer, "-7") == 0);
 
-    i18n::format_value(crit, false, 1234, buffer, sizeof(buffer));
+    i18n::format_value(crit, false, false, 1234, buffer, sizeof(buffer));
     CHECK(std::strcmp(buffer, "--") == 0);
-    i18n::format_value(defense, false, 0, buffer, sizeof(buffer));
+    i18n::format_value(defense, false, false, 0, buffer, sizeof(buffer));
+    CHECK(std::strcmp(buffer, "--") == 0);
+
+    // kGroupSkill：已学 → learned_text；未学 → missing_text；读取失败 → `--`。
+    i18n::format_value(scroll_drop, true, true, 1, buffer, sizeof(buffer));
+    CHECK(std::strcmp(buffer, "+0.2pp") == 0);
+    i18n::format_value(scroll_drop, true, false, 0, buffer, sizeof(buffer));
+    CHECK(std::strcmp(buffer, "未获得") == 0);
+    i18n::format_value(legendary, true, true, 1, buffer, sizeof(buffer));
+    CHECK(std::strcmp(buffer, "+3%") == 0);
+    i18n::format_value(potion_cooldown, true, true, 1, buffer, sizeof(buffer));
+    CHECK(std::strcmp(buffer, "-3秒") == 0);
+    i18n::format_value(scroll_drop, false, false, 0, buffer, sizeof(buffer));
+    CHECK(std::strcmp(buffer, "--") == 0);
+    i18n::format_value(scroll_drop, false, true, 1, buffer, sizeof(buffer));
     CHECK(std::strcmp(buffer, "--") == 0);
 
     char note_buffer[128];
-    i18n::format_value(global, false, 0, note_buffer, sizeof(note_buffer));
-    CHECK(std::strcmp(note_buffer, i18n::kGlobalNote) == 0);
+    i18n::format_value(gold_note, true, false, 0, note_buffer, sizeof(note_buffer));
+    CHECK(std::strcmp(note_buffer, "无此加成（仅买卖价修正）") == 0);
+    i18n::format_value(luck_note, true, false, 0, note_buffer, sizeof(note_buffer));
+    CHECK(std::strcmp(note_buffer, "无此属性（物品等级门槛）") == 0);
     // 缓冲不足时不得越界写：只校验首字符被写入且仍是 NUL 结尾片段的合法前缀。
     char tiny[4] = {'x', 'x', 'x', 'x'};
-    i18n::format_value(crit, true, 1234, tiny, sizeof(tiny));
+    i18n::format_value(crit, true, false, 1234, tiny, sizeof(tiny));
     CHECK(tiny[sizeof(tiny) - 1] == '\0');
 }
 

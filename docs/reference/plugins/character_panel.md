@@ -5,7 +5,7 @@
 功能插件：把原版人物属性面板（`POPUP_SC_CHARACTER_INFO`）改造成属性总览入口。
 
 - **面板汉化**：把面板战斗属性行标签（游戏 text id `35185..35196`，共 12 个）替换为中文。不提供能力、无 HTTP 路由、不自己挂全局文本钩子、不写游戏内存。
-- **属性总览**：占用原版面板的 PopupState（enter 透传 + event 点击检测）；点击**右侧战斗属性框内部文本区**后延迟一帧经 `ui_panels` 打开自定义面板 `character_panel.overview`，展示 4 个分区、共 61 行属性（4 页双列，每列最多 11 行）。
+- **属性总览**：占用原版面板的 PopupState（enter 透传 + event 点击检测）；点击**右侧战斗属性框内部文本区**后延迟一帧经 `ui_panels` 打开自定义面板 `character_panel.overview`，展示 4 个分区、共 70 行属性（4 页双列，每列最多 11 行）。
 
 插件源码只 include `contracts/` 与自身目录：不 include `game/`/`infra/`/`hooks/`/`patch/`/`host/`，不持有裸 VMA，也不直接调用游戏函数。
 
@@ -93,26 +93,28 @@
 - 打开条件：`ui_components` 能力就绪且 `character_panel.overview` 开启；`block_reason` 返回 `ui components unavailable` / `character overview disabled`。
 - 布局：根面板 rect 为 `{inset_x, inset_y, 960, 640}`（屏幕 inset 原点 + 设计区尺寸），所有子控件与文本一律使用 960×640 **设计区局部坐标**。双列：左列标签 `x=90`、数值右对齐 `x=430`；右列标签 `x=500`、数值右对齐 `x=840`；行区 `y=190..534`（11 行 × 32），标题/分区标题在 `y=100/148`。
 - 分页行：左箭头、页码、右箭头同一行（箭头 rect `y=556`、56×56，中心 `x=480±120`；页码 `y=572` 居中），不再单独占一行。
-- 导航盒：局部坐标 `{kNavBoxAbsX, kNavBoxAbsY, kNavBoxW, kNavBoxH}`，绝对位置 `inset+8`，与 settings 页口径一致；横屏/平板黑边不会把按钮或文本挤出可视区。
+- 导航盒：局部坐标 `{kNavBoxAbsX - root_x, kNavBoxAbsY - root_y, kNavBoxW, kNavBoxH}`，绝对位置为整屏左上角 `(8,8)`，与 settings 页口径一致；横屏/平板黑边不会把按钮或文本挤出可视区。
 - 返回语义：`kUiNavButtonAuto` 在 `ui_panels_depth() > 1` **或** PopupHost 存在原生面板基线时显示返回箭头；本面板从原版人物面板之上打开（模块栈深 1 + 原生基线），因此显示返回箭头，点击走 `ui_panels_request_back`；无原生基线时才显示关闭 X。
 - 页面：`panel_create` 根 + 标准导航盒（`ui_theme::kNavBox*`）+ 左右箭头按钮 + `draw_control_text` 文本；关闭走导航按钮，插件不直接 `provider.close()`、不调 `set_process_info`。
 - 翻页：`arrow_button_set_enabled` 按边界置灰（第一页禁用左、最后一页禁用右），点击回调只改 `g_page` 并重绘，**不重建控件树**。
 - 原版人物属性面板在总览打开期间不绘制、不接收事件，属预期行为。
 
-#### 分页结构（61 行 → 4 页双列）
+#### 分页结构（70 行 → 4 页双列）
 
-每列最多 11 行；固定 4 页。分区行数：主属性与面板属性 16、隐藏属性 22、元素与抗性 19、全局加成 4。
+每列最多 11 行；固定 4 页。分区行数：主属性与面板属性 16、隐藏属性 22、元素与抗性 19、全局加成 13。
 
 | 页 | 左列 | 右列 |
 |---|---|---|
 | 1 主属性与面板属性 | 5 行：力量、敏捷、体力、智力、精力 | 11 行：物攻、法攻、防御力、暴击率、命中率、爆伤、物抗、法抗、闪避率、武器格挡、盾牌格挡 |
 | 2 隐藏属性 | 11 行：HP吸收(千分比)、固定吸血、治疗增幅、双倍攻击概率、重击概率、增伤阶段、命中嘲讽、反伤、移动速度、武器攻击帧、仇恨系数 | 11 行：嘲讽概率、蓝耗增减、命中回蓝、命中固定回蓝、额外普攻开关、额外普攻增幅、命中沉默、反击减益、HP上限、MP上限、MP恢复 |
 | 3 元素与抗性 | 10 行：火、风、寒气、神圣、黑暗、毒、重力摆、冰霜、治愈气息、狂战士 | 9 行：瞬间恢复、魔力专家、减少敌意值、失明抗性、睡眠抗性、眩晕抗性、恐惧抗性、沉默抗性、减速抗性 |
-| 4 全局加成 | 4 行：掉落率、经验加成、金币获得、幸运（纯说明行，无数值） | — |
+| 4 全局加成 | 7 行：卷轴掉率(130,+0.2pp)、材料掉率(138,+0.2pp)、装备掉率(142,+0.1pp)、传说装备率(122,+3%)、开箱好道具(126)、稀有佣兵(134)、经验获得(133,+2%) | 6 行：出售价格(123,+3%)、购买价格(131,-2%)、药水效果(135,+10%)、药水冷却(141,-3秒)、金币获得（无此加成，仅买卖价修正）、幸运（无此属性，物品等级门槛） |
+
+第 4 页前 11 行是佣兵团技能（全队生效）的实际结果：已学显示括号中的增量/状态，未学显示「未获得」，读取失败显示 `--`；最后两行（金币获得、幸运）是固定说明行，整行左对齐。技能行不是角色属性，也不落在角色 attr 数组里。
 
 隐藏分区已删除「蓝耗减免(83)」重复行；`attr 83` 以装备词缀表 `ITEMOPTINFOBASE` 的编码为权威记为「魔力专家」（元素分区），`81` 为「狂战士」。该 id 在旧逆向注释与词缀表之间存在命名冲突，**冲突本身尚未真机确认**。
 
-行表、分页映射与格式化是纯逻辑，位于 `plugins/character_panel/overview_model.h`；`overview.cpp` 只负责读取与绘制。全局加成每行都带注记「不是角色属性（佣兵团技能 / 掉落表 / 怪物表）」。
+行表、分页映射与格式化是纯逻辑，位于 `plugins/character_panel/overview_model.h`；`overview.cpp` 只负责读取与绘制。
 
 #### 数据来源
 
@@ -129,9 +131,12 @@
 | HP 上限 | `QolCharacterExtrasPort::read.max_hp(ch,&v)`；**不回退** `CHAR_GetAttr(30)` |
 | MP 上限 | `attr(31)` 原值（宿主暂无对应 getter；代码内有注释说明） |
 | 元素与抗性 | `attr(id)` 原值：22..27、78..90 |
-| 全局加成 | 不读取游戏数据 |
+| 全局加成前 11 行 | `QolCharacterReadApi::group_skill_learned(act_id,&v)`（契约 2.14；act 119..142，1=已学/0=未学） |
+| 全局加成末 2 行 | 不读取游戏数据（固定说明） |
 
 `attr 30` 不能走 `CHAR_GetAttr`：它在 HP > maxHP 时会把 HP 夹回上限并写回角色，读属性产生副作用。`max_hp` 取不到时该行显示 `--`，不做 attr 回退。
+
+全局加成页的佣兵团技能在 `overview_panel_enter` 的 snapshot 装配里每行一次调用 `group_skill_learned(act_id)`（全队生效、与角色指针无关）；已学→固定增量文案，未学→「未获得」，调用失败→`--`。`process` 只使用快照，不逐帧读取。
 
 #### 数值格式
 
@@ -178,7 +183,7 @@
 | `plugins/character_panel/feature.h` / `feature.cpp` | 12 条标签表、区间 `static_assert`、查表、SDK 绑定、`owner_table_modify`、消费者注册/注销、汉化门禁。 |
 | `plugins/character_panel/charinfo_scope.h` / `.cpp` | 绘制窗口作用域 wrapper（push→转发→pop）与 backup 交付。 |
 | `plugins/character_panel/charinfo_watch.h` / `.cpp` | PopupState 所有权（enter 透传 + event 点击检测）、`character_info_tap_inside`、按下点/`pending` 状态、常驻帧任务 `character_info_open_tick`、测试用 `character_info_test_reset`。 |
-| `plugins/character_panel/overview_model.h` | 分区行表、`kTotalRowCount=61`、4 页双列表（`kPages`/`kPageCount`/`kMaxRowsPerColumn=11`/`page_at`）、`format_value`（纯逻辑，host 可测）。 |
+| `plugins/character_panel/overview_model.h` | 分区行表、`kTotalRowCount=70`、4 页双列表（`kPages`/`kPageCount`/`kMaxRowsPerColumn=11`/`page_at`）、`format_value`（含 `kGroupSkill`/`kText` 注记；纯逻辑，host 可测）。 |
 | `plugins/character_panel/overview.h` / `.cpp` | provider（open/close/active/block_reason）、callbacks、数据读取（enter 一次）、控件创建与分页绘制、`set_overview_enabled`。 |
 | `plugins/character_panel/CMakeLists.txt` | 静态库 target（feature/plugin/charinfo_scope/charinfo_watch/overview）。 |
 | `host/assembly.cpp` | include 与插件注册。 |
@@ -194,7 +199,7 @@ Host/构建：
 - `character_panel_tests` 通过，覆盖：
   - descriptor：requires（text_layer/ui_components/ui_panels）、ports（CHARACTER_EXTRAS 1.2）、resources 含 `own:popup.character_info`、两个 feature id 与默认值；
   - 汉化：标签表连续性/35188 占位、backup 交付与作用域 push/pop、注册失败可观测；
-  - 属性总览纯逻辑：行数/分页（61 行 → 4 页双列、每列 ≤11 行、左右列覆盖 61 行、P4 仅左列）、千分比/整数/`--` 格式化、命中判定（含边界）；
+  - 属性总览纯逻辑：行数/分页（70 行 → 4 页双列、每列 ≤11 行、左右列覆盖 70 行、P4 左右 7/6）、千分比/整数/`--` 格式化、`kGroupSkill` 已学/未学/失败、说明行自定义 note、命中判定（含边界）；
   - PopupState 装配：acquire 传入的 hooks `enter`/`event` 非空（`process/f3/f4` 为空 = 部分 wrap）、enter wrapper 转发原 enter、重复 acquire 幂等、release 调 `popup_restore` 并清空缓存入口；
   - 点击流程：按下/抬起同区打开一次、按点在外不打开、`0x19` 清除按下点后不打开、开关关闭不置 pending、event 始终返回原值、tick 连续两次返回非 0（scheduler keep）且只打开一次。
 - `module_text_tests` 通过（两张文本表完整性）。
@@ -207,6 +212,7 @@ Host/构建：
 2. 总览打开/关闭链路：点击 → 下一帧打开 → 导航按钮（返回箭头）→ 回到原版面板；关闭期间原版面板不绘制、不接收事件。
 3. 4 页双列翻页与首尾箭头置灰；每页左右各最多 11 行渲染完整，右列数值右对齐（430/840）不溢出、不与边框或彼此重叠；翻页不重建控件。
 4. 队伍角色与菜单角色两条取值路径、各 attr id 数值、防御公式、千分比格式化与单行 `--` 降级；HP 上限走 `max_hp`、MP 上限直读 attr31。
-5. ownership 资源 live/释放、插件停用后 entry hook 与 PopupState 条目归还、`overview` 开关关闭后不再打开。
-6. 汉化文案与总览面板共存时互不影响（作用域只在绘制窗口内）。
-7. 快速「关闭面板后立刻再点」时，pending 已被上一帧消费/丢弃的行为符合预期（不出现延迟误开）。
+5. 第 4 页实际值：11 个 act（130/138/142/122/126/134/133/123/131/135/141）与技能已学/未学状态一一对应、未学显示「未获得」、读取失败显示 `--`；末两行固定说明文案正确；双列 7/6 渲染与右对齐不溢出。
+6. ownership 资源 live/释放、插件停用后 entry hook 与 PopupState 条目归还、`overview` 开关关闭后不再打开。
+7. 汉化文案与总览面板共存时互不影响（作用域只在绘制窗口内）。
+8. 快速「关闭面板后立刻再点」时，pending 已被上一帧消费/丢弃的行为符合预期（不出现延迟误开）。

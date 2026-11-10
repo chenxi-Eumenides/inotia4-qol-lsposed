@@ -911,6 +911,9 @@ constexpr uintptr_t F_UIEQUIP_BUTTON_ROLL_DICE_EXE_VMA = 0xb631c; // void (void*
 constexpr uintptr_t F_ITEMSYSTEM_IS_MERCENARY_SEAL_VMA = 0x10be70; // int (int32 category) category∈42..50 或 928..933 为佣兵徽章
 constexpr uintptr_t F_MERCENARYSYSTEM_IS_EMPTY_MANAGER_SLOT_VMA = 0x118b30; // int (void) 佣兵管理器是否有空槽（0x118b30 反汇编：无参，读 G_MERC_MAX_GOT/G_MERC_SLOTLIST_GOT）
 constexpr uintptr_t F_MERCENARYSYSTEM_MAKE_MERCENARY_VMA = 0x119658; // void* (void* item) 生成佣兵（唯一调用点 0xb818c；内部 INVEN_RemoveItem 消耗，返回 null=失败）
+// int (int32_t actId, void* unused)：佣兵团技能条件查询（actId 119..142），返回 1=已学/0=未学。
+// 叶函数、只读、无副作用；与原函数同线程域（任意线程可调用，建议游戏线程）。
+constexpr uintptr_t F_MERCENARYGROUPSKILL_CHECK_CONDITION_VMA = 0x118918;
 constexpr uintptr_t F_SOUNDSYSTEM_PLAY_VMA = 0x1377f0;   // void(int16 id) 原版 UI 音效（袋切换=0x11，反汇编 b8c34）
 constexpr uintptr_t G_SND_FX_VMA = 0x307850;             // g_sndFx 音效句柄表（判空防崩）
 constexpr uintptr_t F_CONTROL_ITEM_SET_ITEM_VMA = 0xaad60;      // (ctrl, item) 控件物品指针（RefreshItemArea b7a64）

@@ -157,6 +157,8 @@
 
 **右侧战斗属性框内部文本区**的屏幕绝对矩形由 `QolUiAdapter::character_info_content_rect`（Adapter minor 36）给出：`{inset_x+741, inset_y+153, 205×411}`，已含屏幕 inset。几何链：`M = B + (0,133)`、`A = M + (496,0)`、右框外框 `A + (226,0,224,431)`、内部文本起点 `A + (245,20)`。该矩形避开左侧 5 维属性框、队伍页签、关闭 X、属性分配入口与 +/−/重置；消费方不得自建布局常量。
 
+佣兵团技能（全队生效、不占角色属性数组）是否已学由 `MERCENARYGROUPSKILLSYSTEM_CheckCondition(actId, NULL)` 查询（VMA `0x118918`，actId 119..142，返回 1=已学/0=未学）。该函数是叶函数、只读、无副作用；v2.14 起经 `QolCharacterReadApi::group_skill_learned(act_id, &v)` 暴露，越界返回 InvalidArgument。
+
 ## 6. 装备词缀表 `ITEMOPTINFOBASE`
 
 `apk/static-data/json/tables/ITEMOPTINFOBASE.json` 是唯一显式有序命名的属性表，37 条；记录 `+2` 的 u16 编码为「高字节 attr id + 低字节操作类型」，数值公式取 `apk/static-data/json/text/formula-e.json` 的 `+4` 索引（139-174）。名称文本为 `zh-Hans.json` 的 text id 1114-1150。
@@ -178,6 +180,18 @@
 
 原版中这些加成的唯一持有者是**佣兵团技能**（全队生效、不占角色属性数组）：卷轴掉率 +3%、材料掉率 +2%、装备掉落 +1%、开箱好道具概率提升、稀有佣兵概率提升、经验 +2%、出售价 +3%、购买价 −2% 等。模块侧的倍率通过 hook `CHARSYSTEM_DropItem`、`CHAR_AddExperience`、`INVEN_AddMoney` 实现，见 `docs/reference/plugins/world_tuning.md`。
 
+### 7.1 佣兵团掉落加成的数值语义
+
+`CHARSYSTEM_DropItem` 的掉落判定是阈值比较，而不是把面板文案的百分比直接加到概率上：
+
+- 阈值 `w28 = base × (1000 + party) / 1000`（`party` 为技能加值），`roll = MATH_GetRandom(1, 9999)`，`roll < w28` 时该槽位掉一件。
+- 技能加值在乘法之后叠加：`130`（卷轴）与 `138`（材料）为 `+20`，`142`（装备）为 `+10`。
+- 原版骰子 1..9999：约 `+0.2pp` / `+0.2pp` / `+0.1pp`；monster/overhaul 骰子上限为 2999/5999，约 `+0.67pp` / `+0.67pp` / `+0.17pp`。
+- 加值只控制该槽位**本次是否掉落**，不影响掉落数量与物品类别；每次击杀跑 1 或 3 轮，多个技能之间不叠加。
+- 技能文案写 2%/3%/1%，与实现的实际增量不自洽；面板按实际增量（`+0.2pp` / `+0.2pp` / `+0.1pp`）显示，不采用文案百分比。
+
+证据：`CHARSYSTEM_DropItem` 的三条技能分支地址 `0xf50c4`（130）/`0xf510c`（138）/`0xf517c`（142），随机数入口 `MATH_GetRandom`（`0xa8bcc`），技能是否已学查询 `MERCENARYGROUPSKILLSYSTEM_CheckCondition`（`0x118918`）。
+
 ## 8. 未确认项
 
 1. attr 1/2/5/6/7/9/10/16/21/29 的名称来自旧版逆向注释或词缀表对照，未在 v588 真机逐项验证。
@@ -195,7 +209,9 @@
 | id → 名称实测映射 | `docs/reference/api-reference.md:415-445` |
 | 面板标签与 35188 占位 | `docs/reference/plugins/character_panel.md`、`plugins/character_panel/feature.h:30-39` |
 | 命中/闪避/物抗 getter VMA | `module/app/src/main/cpp/game/symbols/game_symbols.h:501-503`（`F_CHAR_GET_HIT_RATE_1000_VMA`、`F_CHAR_GET_NORMAL_EVASION_RATE_1000_VMA`、`F_CHAR_GET_DISPLAY_DAMAGE_REDUCE_RATE_VMA`）；按名解析登记 `game/symbols/symbol_registry.h:72-74` |
-| 面板派生只读面（v2.13） | `contracts/game_host.h:67-83`（`QolCharacterReadApi::main_stat`/`normal_damage`/`normal_magic_damage`/`hit_rate_1000`/`evasion_rate_1000`/`display_damage_reduce_rate`）、`contracts/game_host.h:312-314`（`kGameHostCharacterReadMinor=13`）、`game/adapter_ports/game_host_port.cpp:996-1112` |
+| 面板派生只读面（v2.13 起） | `contracts/game_host.h:67-86`（`QolCharacterReadApi::main_stat`/`normal_damage`/`normal_magic_damage`/`hit_rate_1000`/`evasion_rate_1000`/`display_damage_reduce_rate`）、`contracts/game_host.h:317-318`（`kGameHostCharacterReadMinor=14`）、`game/adapter_ports/game_host_port.cpp:996-1112` |
+| 佣兵团技能已学查询（v2.14） | `game/symbols/game_symbols.h:914-916`（`F_MERCENARYGROUPSKILL_CHECK_CONDITION_VMA=0x118918`）、`game/symbols/symbol_registry.h:430`（→ `MERCENARYGROUPSKILLSYSTEM_CheckCondition`）、`contracts/game_host.h:83-85`（`group_skill_learned`）、`game/adapter_ports/game_host_port.cpp:1063-1078` |
+| 佣兵团掉落加值（130/138/142） | `CHARSYSTEM_DropItem` 分支 `0xf50c4`/`0xf510c`/`0xf517c`（`game/symbols/game_symbols.h:815` 为函数入口 `0xf4d30`）；随机数 `MATH_GetRandom`（`game/symbols/game_symbols.h:661`、`game/symbols/symbol_registry.h:130`） |
 | 右侧战斗属性框内部文本区矩形 | `contracts/ui.h:831-833`（`character_info_content_rect`）、`contracts/ui.h:17`（`kUiAdapterMinor=36`）、`host/ui_adapter.cpp:613-628`（`inset+(741,153)`、`205×411`） |
 | 属性贡献与格挡结论 | `docs/reference/game/game-systems.md` §6.1 |
 | 词缀表与公式 | `apk/static-data/json/tables/ITEMOPTINFOBASE.json`、`apk/static-data/json/text/formula-e.json` |

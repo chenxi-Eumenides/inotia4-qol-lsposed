@@ -13,7 +13,7 @@
 //   P1 主属性与面板属性：左列 5 维属性、右列面板属性 11 行；
 //   P2 隐藏属性：左 11、右 11；
 //   P3 元素与抗性：左 10、右 9；
-//   P4 全局加成：左列 4 行说明。
+//   P4 全局加成：左列 7 行（佣兵团技能）、右列 6 行（技能 + 2 行固定说明）。
 
 namespace qol::features::character_panel {
 
@@ -28,13 +28,18 @@ enum class RowKind : uint8_t {
     kHitRate,          // hit_rate_1000（千分比）
     kEvasion,          // evasion_rate_1000（千分比）
     kDamageReduce,     // display_damage_reduce_rate（千分比）
+    kGroupSkill,       // 佣兵团技能是否已学：learned_text / missing_text
     kText,             // 纯说明行，无数值
 };
 
 struct RowSpec {
     const char* label;
     RowKind kind;
-    int32_t arg;  // kAttrInt/kAttrMilli → attr id；kMainStat → index；其它不用
+    int32_t arg;  // kAttrInt/kAttrMilli → attr id；kMainStat → index；kGroupSkill → act id
+    // kGroupSkill：已学/未学文案；kText：自定义说明（nullptr 时用 kGlobalNote）。
+    const char* learned_text = nullptr;
+    const char* missing_text = nullptr;
+    const char* note = nullptr;
 };
 
 inline constexpr RowSpec kPanelRows[] = {
@@ -104,11 +109,21 @@ inline constexpr RowSpec kElementRows[] = {
     {"减速抗性", RowKind::kAttrInt, 90},
 };
 
+// 全局加成页：前 11 行是佣兵团技能（act 119..142，全队生效），最后 2 行是固定说明。
 inline constexpr RowSpec kGlobalRows[] = {
-    {"掉落率", RowKind::kText, 0},
-    {"经验加成", RowKind::kText, 0},
-    {"金币获得", RowKind::kText, 0},
-    {"幸运", RowKind::kText, 0},
+    {"卷轴掉率", RowKind::kGroupSkill, 130, "+0.2pp", "未获得"},
+    {"材料掉率", RowKind::kGroupSkill, 138, "+0.2pp", "未获得"},
+    {"装备掉率", RowKind::kGroupSkill, 142, "+0.1pp", "未获得"},
+    {"传说装备率", RowKind::kGroupSkill, 122, "+3%", "未获得"},
+    {"开箱好道具", RowKind::kGroupSkill, 126, "已获得", "未获得"},
+    {"稀有佣兵", RowKind::kGroupSkill, 134, "已获得", "未获得"},
+    {"经验获得", RowKind::kGroupSkill, 133, "+2%", "未获得"},
+    {"出售价格", RowKind::kGroupSkill, 123, "+3%", "未获得"},
+    {"购买价格", RowKind::kGroupSkill, 131, "-2%", "未获得"},
+    {"药水效果", RowKind::kGroupSkill, 135, "+10%", "未获得"},
+    {"药水冷却", RowKind::kGroupSkill, 141, "-3秒", "未获得"},
+    {"金币获得", RowKind::kText, 0, nullptr, nullptr, "无此加成（仅买卖价修正）"},
+    {"幸运", RowKind::kText, 0, nullptr, nullptr, "无此属性（物品等级门槛）"},
 };
 
 struct SectionSpec {
@@ -167,12 +182,12 @@ struct PageSpec {
     ColumnSpec right;  // row_count == 0 表示本页只有左列
 };
 
-// 4 页固定布局；行数与分区顺序一一对应（61 行全覆盖）。
+// 4 页固定布局；行数与分区顺序一一对应（70 行全覆盖）。
 inline constexpr PageSpec kPages[] = {
     {"主属性与面板属性", {0, 0, 5}, {0, 5, 11}},
     {"隐藏属性", {1, 0, 11}, {1, 11, 11}},
     {"元素与抗性", {2, 0, 10}, {2, 10, 9}},
-    {"全局加成", {3, 0, 4}, {3, 0, 0}},
+    {"全局加成", {3, 0, 7}, {3, 7, 6}},
 };
 inline constexpr uint32_t kPageCount =
     static_cast<uint32_t>(sizeof(kPages) / sizeof(kPages[0]));
@@ -184,8 +199,11 @@ static_assert(kPages[0].left.row_count <= kMaxRowsPerColumn &&
                   kPages[1].right.row_count <= kMaxRowsPerColumn &&
                   kPages[2].left.row_count <= kMaxRowsPerColumn &&
                   kPages[2].right.row_count <= kMaxRowsPerColumn &&
-                  kPages[3].left.row_count <= kMaxRowsPerColumn,
+                  kPages[3].left.row_count <= kMaxRowsPerColumn &&
+                  kPages[3].right.row_count <= kMaxRowsPerColumn,
               "每列最多 11 行");
+static_assert(kPages[3].left.row_count + kPages[3].right.row_count == kGlobalRowCount,
+              "全局加成页必须覆盖全部分区行");
 
 // 页码越界返回 false（不写 out）。
 inline bool page_at(uint32_t index, const PageSpec** out) {
@@ -197,22 +215,28 @@ inline bool page_at(uint32_t index, const PageSpec** out) {
 // 单行数值格式化（固定缓冲，无动态分配）：
 //   - 千分比类（kAttrMilli/kHitRate/kEvasion/kDamageReduce）：raw/10，保留 1 位小数 + %
 //   - 其它数值：整数
-//   - kText：全局加成注记
-//   - 读取失败：`--`（kText 行不受失败标志影响）
+//   - kGroupSkill：!ok → `--`；已学 → learned_text；未学 → missing_text
+//   - kText：行自定义 note（缺省用 kGlobalNote）
 inline bool row_is_milli(RowKind kind) {
     return kind == RowKind::kAttrMilli || kind == RowKind::kHitRate ||
            kind == RowKind::kEvasion || kind == RowKind::kDamageReduce;
 }
 
-inline void format_value(const RowSpec& row, bool ok, int32_t value, char* out,
+inline void format_value(const RowSpec& row, bool ok, bool learned, int32_t value, char* out,
                          size_t capacity) {
     if (out == nullptr || capacity == 0) return;
     if (row.kind == RowKind::kText) {
-        (void)std::snprintf(out, capacity, "%s", kGlobalNote);
+        (void)std::snprintf(out, capacity, "%s",
+                            row.note != nullptr ? row.note : kGlobalNote);
         return;
     }
     if (!ok) {
         (void)std::snprintf(out, capacity, "%s", kUnknownValue);
+        return;
+    }
+    if (row.kind == RowKind::kGroupSkill) {
+        const char* text = learned ? row.learned_text : row.missing_text;
+        (void)std::snprintf(out, capacity, "%s", text != nullptr ? text : kUnknownValue);
         return;
     }
     if (!row_is_milli(row.kind)) {
