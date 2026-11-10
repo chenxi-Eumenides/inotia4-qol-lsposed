@@ -26,7 +26,8 @@ const contracts::QolCharacterExtrasPort* g_character_extras = nullptr;
 const contracts::CharacterFactsApi* g_character_facts = nullptr;
 const char* g_install_error = nullptr;
 bool g_panel_registered = false;
-// item.use 是可选能力：由宿主在能力注册/撤销时广播变更，插件据此重新 require 或解绑。
+// item.use 与面板 UI 能力均为可选：由宿主在能力注册/撤销时广播变更，
+// 插件据此重新 require、注册 provider 或解绑/注销。
 uint64_t g_capability_event_subscription = 0;
 
 const contracts::CapabilityRequirement kRequires[] = {
@@ -187,6 +188,15 @@ const contracts::ResourceClaim kResources[] = {
     },
 };
 
+// 面板 provider 注销与绑定缓存失效；deactivate 与能力撤销共用。
+void unregister_panel() {
+    if (g_sdk != nullptr && g_panel_registered && g_sdk->panels.unregister_owner != nullptr) {
+        (void)g_sdk->panels.unregister_owner(kPluginId);
+    }
+    panel_unbind();
+    g_panel_registered = false;
+}
+
 void clear_install_state() {
     // install 失败路径也要撤销事件订阅，避免订阅表残留指向已清空状态的处理器。
     if (g_sdk != nullptr && g_sdk->events.unsubscribe != nullptr &&
@@ -194,7 +204,8 @@ void clear_install_state() {
         (void)g_sdk->events.unsubscribe(g_capability_event_subscription);
     }
     g_capability_event_subscription = 0;
-    panel_unbind();
+    // 先于 g_sdk 清空调用：注销依赖当前 sdk 的 panels 接口。
+    unregister_panel();
     clear_runtime();
     g_sdk = nullptr;
     g_game = nullptr;
@@ -202,31 +213,30 @@ void clear_install_state() {
     g_character_facts = nullptr;
 }
 
-// 面板为可选能力：install 阶段 UI 能力可能仍在 resolving，enable 与 entry 时各重试一次。
+// 面板为可选能力：install 阶段 UI 能力可能仍在 resolving，enable、entry 与能力变更时重试。
 // 只有 ui_panels + ui_components 同时可用才注册 provider；失败不影响倍率接线。
-void ensure_panel(contracts::PluginContext& ctx) {
-    if (g_panel_registered || ctx.sdk == nullptr || ctx.sdk->capabilities.require == nullptr ||
-        ctx.sdk->panels.register_provider == nullptr || ctx.sdk->ui == nullptr) {
+void ensure_panel() {
+    if (g_panel_registered || g_sdk == nullptr || g_sdk->capabilities.require == nullptr ||
+        g_sdk->panels.register_provider == nullptr || g_sdk->ui == nullptr) {
         return;
     }
     const void* panels_iface = nullptr;
     const void* components_iface = nullptr;
-    if (!contracts::succeeded(ctx.sdk->capabilities.require(
+    if (!contracts::succeeded(g_sdk->capabilities.require(
             contracts::kUiPanelsCapabilityId,
             {static_cast<uint16_t>(contracts::kUiPanelsVersionMajor),
              static_cast<uint16_t>(contracts::kUiPanelsVersionMinor)},
             &panels_iface)) ||
         panels_iface == nullptr ||
-        !contracts::succeeded(ctx.sdk->capabilities.require(
+        !contracts::succeeded(g_sdk->capabilities.require(
             contracts::kUiComponentsCapabilityId,
             {contracts::kUiContractMajor, contracts::kUiContractMinor},
             &components_iface)) ||
         components_iface == nullptr) {
         return;
     }
-    if (!contracts::succeeded(ctx.sdk->panels.register_provider(&panel_provider()))) return;
-    panel_bind(ctx.sdk, static_cast<const contracts::QolUiComponents*>(components_iface),
-               ctx.sdk->ui);
+    if (!contracts::succeeded(g_sdk->panels.register_provider(&panel_provider()))) return;
+    panel_bind(g_sdk, static_cast<const contracts::QolUiComponents*>(components_iface), g_sdk->ui);
     g_panel_registered = true;
 }
 
@@ -244,14 +254,26 @@ void ensure_item_use() {
     }
 }
 
-// 能力注册表变更：只有 item.use 影响本插件的订阅；其余能力由面板路径自行重试。
+// 能力注册表变更：item.use 重绑订阅；ui_panels/ui_components 注册时补注册面板，
+// 任一撤销时注销 provider 并失效绑定缓存。重复事件保持幂等。
 void on_capability_changed(void*, const void* payload) {
     if (payload == nullptr) return;
     const auto* event = static_cast<const contracts::CapabilityChangedEvent*>(payload);
     if (event->id == nullptr) return;
-    if (std::strcmp(event->id, contracts::kItemUseCapabilityId) != 0) return;
-    // ensure_item_use 已实现「能 require 就 bind，否则 unbind」，重复事件保持幂等。
-    ensure_item_use();
+    if (std::strcmp(event->id, contracts::kItemUseCapabilityId) == 0) {
+        // ensure_item_use 已实现「能 require 就 bind，否则 unbind」。
+        ensure_item_use();
+        return;
+    }
+    if (std::strcmp(event->id, contracts::kUiPanelsCapabilityId) != 0 &&
+        std::strcmp(event->id, contracts::kUiComponentsCapabilityId) != 0) {
+        return;
+    }
+    if (event->available != 0) {
+        ensure_panel();
+    } else {
+        unregister_panel();
+    }
 }
 
 void subscribe_capability_changes() {
@@ -275,8 +297,9 @@ void unsubscribe_capability_changes() {
 
 int plugin_install(contracts::PluginContext& ctx) {
     set_gate(false);
-    // 重新 install 可能未经过 deactivate；先撤销旧订阅再覆盖 sdk，避免订阅泄漏。
+    // 重新 install 可能未经过 deactivate；先撤销旧订阅与面板注册再覆盖 sdk，避免泄漏。
     unsubscribe_capability_changes();
+    unregister_panel();
     g_sdk = nullptr;
     g_game = nullptr;
     g_character_extras = nullptr;
@@ -310,7 +333,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_character_facts = static_cast<const contracts::CharacterFactsApi*>(iface);
     bind_runtime(g_sdk, g_game, g_character_extras, g_character_facts, ctx.owner_token, kPluginId);
 
-    ensure_panel(ctx);
+    ensure_panel();
     // 先订阅再探测：避免订阅落地前 item.use 恰好注册完成而错过通知。
     subscribe_capability_changes();
     ensure_item_use();
@@ -319,13 +342,11 @@ int plugin_install(contracts::PluginContext& ctx) {
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
+    (void)ctx;
     set_gate(false);
     unsubscribe_capability_changes();
     unbind_item_use();
-    if (ctx.sdk != nullptr && ctx.sdk->panels.unregister_owner != nullptr)
-        (void)ctx.sdk->panels.unregister_owner(kPluginId);
-    panel_unbind();
-    g_panel_registered = false;
+    unregister_panel();
     // 保留 sdk/game：残留 wrapper 仍需要 in-flight 记账与原函数 backup。
     bind_runtime(g_sdk, g_game, nullptr, nullptr, {}, kPluginId);
     g_character_extras = nullptr;
@@ -333,8 +354,9 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
+    (void)ctx;
     set_gate(true);
-    ensure_panel(ctx);
+    ensure_panel();
     ensure_item_use();
     reload_rates_from_config();
 }
@@ -354,7 +376,7 @@ QolResult open_panel_feature(contracts::PluginContext& ctx) {
     if (!gate_enabled()) {
         return contracts::error(kQolErrNotReady, "world tuning is not enabled", 29);
     }
-    ensure_panel(ctx);
+    ensure_panel();
     if (!panel_available()) {
         return contracts::error(kQolErrNotReady, "ui tools unavailable", 19);
     }

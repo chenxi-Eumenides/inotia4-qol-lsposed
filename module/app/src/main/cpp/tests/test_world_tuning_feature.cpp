@@ -86,6 +86,52 @@ int g_item_use_subscribe_calls = 0;
 int g_item_use_unsubscribe_calls = 0;
 uint64_t g_item_use_subscription = 0;
 
+// ---- ui_panels / ui_components fake ----
+UiPanelsApi g_ui_panels_api{};
+QolUiComponents g_ui_components_api{};
+QolUiAdapter g_ui_adapter{};
+bool g_ui_available = false;
+int g_panel_register_calls = 0;
+int g_panel_unregister_calls = 0;
+const PanelProviderSpec* g_registered_panel = nullptr;
+
+QolResult fake_panels_register_provider(const PanelProviderSpec* provider) {
+    ++g_panel_register_calls;
+    g_registered_panel = provider;
+    return ok();
+}
+
+QolResult fake_panels_unregister_owner(const char* owner) {
+    ++g_panel_unregister_calls;
+    if (owner != nullptr && std::strcmp(owner, "world_tuning") == 0) {
+        g_registered_panel = nullptr;
+    }
+    return ok();
+}
+
+QolResult fake_ui_panel_create(const UiPanelDesc*, QolUiHandle, QolUiHandle*) { return ok(); }
+QolResult fake_ui_arrow_button_create(const UiArrowButtonDesc*, QolUiHandle, QolUiHandle*) {
+    return ok();
+}
+QolResult fake_ui_nav_button_create(const UiNavButtonDesc*, QolUiHandle, QolUiHandle*) {
+    return ok();
+}
+QolResult fake_ui_handle_ok(QolUiHandle) { return ok(); }
+QolResult fake_ui_handle_enabled(QolUiHandle, uint8_t) { return ok(); }
+QolResult fake_ui_draw_text(QolUiHandle, const char*, int32_t, int32_t, uint32_t, int32_t,
+                            int32_t) {
+    return ok();
+}
+QolResult fake_ui_container_styled(const UiContainerStyleDesc*) { return ok(); }
+QolResult fake_ui_dispatch_native_event(QolUiHandle, uint64_t, uint64_t, uint64_t, uint32_t*) {
+    return ok();
+}
+QolResult fake_ui_ok() { return ok(); }
+QolResult fake_ui_origin(QolUiHandle, int64_t*, int64_t*) { return ok(); }
+QolResult fake_ui_fill_rect(UiRect, uint32_t) { return ok(); }
+QolResult fake_ui_touch_coordinates(uint64_t, int64_t*, int64_t*) { return ok(); }
+int32_t fake_ui_hit_test(QolUiHandle, int64_t, int64_t, UiRect) { return 1; }
+
 QolResult fake_require(const char* id, QolVersionRange, const void** out_iface) {
     ++g_require_calls;
     assert(id != nullptr && out_iface != nullptr);
@@ -99,6 +145,17 @@ QolResult fake_require(const char* id, QolVersionRange, const void** out_iface) 
             return fake_failure();
         }
         *out_iface = &g_item_use_api;
+        return ok();
+    }
+    if (std::strcmp(id, kUiPanelsCapabilityId) == 0 ||
+        std::strcmp(id, kUiComponentsCapabilityId) == 0) {
+        if (!g_ui_available) {
+            *out_iface = nullptr;
+            return fake_failure();
+        }
+        *out_iface = std::strcmp(id, kUiPanelsCapabilityId) == 0
+                         ? static_cast<const void*>(&g_ui_panels_api)
+                         : static_cast<const void*>(&g_ui_components_api);
         return ok();
     }
     *out_iface = g_require_returns_null ? nullptr : &g_facts;
@@ -442,6 +499,10 @@ void reset_counters() {
     g_item_use_subscribe_calls = 0;
     g_item_use_unsubscribe_calls = 0;
     g_item_use_subscription = 0;
+    g_ui_available = false;
+    g_panel_register_calls = 0;
+    g_panel_unregister_calls = 0;
+    g_registered_panel = nullptr;
 }
 
 void setup_fake_interfaces() {
@@ -470,6 +531,31 @@ void setup_fake_interfaces() {
     g_sdk.events.unsubscribe = &fake_event_unsubscribe;
     g_sdk.in_flight.enter = &fake_enter;
     g_sdk.in_flight.leave = &fake_leave;
+
+    g_ui_panels_api = {};
+    g_ui_components_api = {};
+    g_ui_adapter = {};
+    g_ui_components_api.panel_create = &fake_ui_panel_create;
+    g_ui_components_api.arrow_button_create = &fake_ui_arrow_button_create;
+    g_ui_components_api.arrow_button_draw = &fake_ui_handle_ok;
+    g_ui_components_api.arrow_button_set_enabled = &fake_ui_handle_enabled;
+    g_ui_components_api.nav_button_create = &fake_ui_nav_button_create;
+    g_ui_components_api.nav_button_draw = &fake_ui_handle_ok;
+    g_ui_components_api.destroy = &fake_ui_handle_ok;
+    g_ui_components_api.draw_control_text = &fake_ui_draw_text;
+    g_ui_components_api.draw_container_styled = &fake_ui_container_styled;
+    g_ui_components_api.dispatch_native_event = &fake_ui_dispatch_native_event;
+    g_ui_adapter.begin_frame = &fake_ui_ok;
+    g_ui_adapter.end_frame = &fake_ui_ok;
+    g_ui_adapter.delete_control = &fake_ui_handle_ok;
+    g_ui_adapter.control_absolute_origin = &fake_ui_origin;
+    g_ui_adapter.fill_rect = &fake_ui_fill_rect;
+    g_ui_adapter.touch_coordinates = &fake_ui_touch_coordinates;
+    g_ui_adapter.hit_test = &fake_ui_hit_test;
+
+    g_sdk.panels.register_provider = &fake_panels_register_provider;
+    g_sdk.panels.unregister_owner = &fake_panels_unregister_owner;
+    g_sdk.ui = &g_ui_adapter;
 
     g_item_use_api = {};
     g_item_use_api.struct_size = sizeof(ItemUseApi);
@@ -1241,11 +1327,68 @@ void test_capability_event_subscription() {
     assert(g_item_use_unsubscribe_calls == 1);
     assert(!item_use_bound());
 
-    // deactivate 取消事件订阅。
+    // d. ui 能力晚到：available=1 时补注册面板 provider。
+    g_ui_available = true;
+    const CapabilityChangedEvent panels_available{
+        kUiPanelsCapabilityId, static_cast<uint16_t>(kUiPanelsVersionMajor),
+        static_cast<uint16_t>(kUiPanelsVersionMinor), 1, {}};
+    publish_fake_event(kEventCapabilityChanged, &panels_available);
+    assert(g_panel_register_calls == 1);
+    assert(g_registered_panel != nullptr);
+    assert(panel_available());
+
+    // 另一个 UI 能力也注册时保持幂等：已注册则不再重复注册。
+    const CapabilityChangedEvent components_available{kUiComponentsCapabilityId, kUiContractMajor,
+                                                      kUiContractMinor, 1, {}};
+    publish_fake_event(kEventCapabilityChanged, &components_available);
+    assert(g_panel_register_calls == 1);
+    assert(panel_available());
+
+    // e. 任一 UI 能力撤销：注销 provider 且绑定失效。
+    const CapabilityChangedEvent components_unavailable{kUiComponentsCapabilityId, kUiContractMajor,
+                                                        kUiContractMinor, 0, {}};
+    publish_fake_event(kEventCapabilityChanged, &components_unavailable);
+    assert(g_panel_unregister_calls == 1);
+    assert(g_registered_panel == nullptr);
+    assert(!panel_available());
+
+    // f. 再次注册后重新注册 provider（ui.panels 分支）。
+    publish_fake_event(kEventCapabilityChanged, &panels_available);
+    assert(g_panel_register_calls == 2);
+    assert(panel_available());
+
+    // ui.panels 撤销同样注销。
+    const CapabilityChangedEvent panels_unavailable{
+        kUiPanelsCapabilityId, static_cast<uint16_t>(kUiPanelsVersionMajor),
+        static_cast<uint16_t>(kUiPanelsVersionMinor), 0, {}};
+    publish_fake_event(kEventCapabilityChanged, &panels_unavailable);
+    assert(g_panel_unregister_calls == 2);
+    assert(!panel_available());
+
+    // ui.components 分支也可单独触发重新注册。
+    publish_fake_event(kEventCapabilityChanged, &components_available);
+    assert(g_panel_register_calls == 3);
+    assert(panel_available());
+
+    // g. 无关能力与空 payload/空 id 不影响面板注册状态。
+    const int register_before_unrelated = g_panel_register_calls;
+    const int unregister_before_unrelated = g_panel_unregister_calls;
+    const CapabilityChangedEvent unrelated_event{"character.facts", 1, 0, 1, {}};
+    publish_fake_event(kEventCapabilityChanged, &unrelated_event);
+    publish_fake_event(kEventCapabilityChanged, nullptr);
+    const CapabilityChangedEvent null_ui_event{nullptr, 1, 0, 1, {}};
+    publish_fake_event(kEventCapabilityChanged, &null_ui_event);
+    assert(g_panel_register_calls == register_before_unrelated);
+    assert(g_panel_unregister_calls == unregister_before_unrelated);
+    assert(panel_available());
+
+    // deactivate 取消事件订阅并注销面板。
     const int unsubscribes_before_deactivate = g_event_unsubscribe_calls;
     descriptor.deactivate(g_context);
     assert(g_event_unsubscribe_calls == unsubscribes_before_deactivate + 1);
     assert(g_event_subscriptions.empty());
+    assert(g_panel_unregister_calls == unregister_before_unrelated + 1);
+    assert(!panel_available());
 }
 
 void test_panel_contract() {
