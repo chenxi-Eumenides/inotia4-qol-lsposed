@@ -25,6 +25,7 @@
 #include "game/symbols/game_symbols.h"
 #include "game/adapter_ports/character_port.h"
 #include "game/state/game_state.h"
+#include "core/native/game_cache.h"
 #include "game/adapter_ports/character_extras_port.h"
 #include "game/adapter_ports/craft_port.h"
 #include "game/adapter_ports/craft_ui_write_port.h"
@@ -59,6 +60,14 @@
 
 // game_host_port 的 main_stat 走 game/state 的 char_stat_total；本 target 不链接 game_state.cpp。
 int32_t char_stat_total(const void*, int) { return 0; }
+
+// item_inventory_state_write.cpp 只在未执行到的背包操作里引用 game_state / game_cache 符号；
+// 本 target 不链接 game_state.cpp、game_cache.cpp，这些路径在 host_adapter_tests 中不执行。
+bool find_inventory_item_ref(int, InventoryItemRef*) { return false; }
+void* inventory_item_at(int, int) { return nullptr; }
+void* member_or_null(int) { return nullptr; }
+const char* ui_blocked() { return nullptr; }
+void frame_cache_force_refresh() {}
 
 extern int g_host_ui_step_calls;
 extern int g_host_ui_cancel_calls;
@@ -158,6 +167,18 @@ void fake_craft_free_item(void* item) {
 }
 void fake_control_item_set_item(void*, void*) {}
 decltype(fn_equip_item_from_inven_to_slot) fn_equip_item_from_inven_to_slot = nullptr;
+// item_inventory_state_write.cpp 引用这些 game_access 符号槽；host_adapter_tests 用桩替代
+// game_access.cpp，且只执行 apply_payload_mutation，故其余符号槽保持空。
+decltype(fn_can_unequip) fn_can_unequip = nullptr;
+decltype(fn_dealsystem_clear_item) fn_dealsystem_clear_item = nullptr;
+decltype(fn_enchant_item) fn_enchant_item = nullptr;
+decltype(fn_equip_item) fn_equip_item = nullptr;
+decltype(fn_get_money) fn_get_money = nullptr;
+decltype(fn_get_stat_base) fn_get_stat_base = nullptr;
+decltype(fn_is_jewel) fn_is_jewel = nullptr;
+decltype(fn_release_sealed) fn_release_sealed = nullptr;
+decltype(fn_status_dice_roll) fn_status_dice_roll = nullptr;
+decltype(fn_unequip) fn_unequip = nullptr;
 decltype(fn_ui_equip_apply_stuff) fn_ui_equip_apply_stuff = nullptr;
 decltype(fn_char_use_item_ex) fn_char_use_item_ex = nullptr;
 decltype(fn_mercenary_make_mercenary) fn_mercenary_make_mercenary = nullptr;
@@ -1825,8 +1846,11 @@ int main() {
     assert(*product_count == 0x87654321u);
     qol::contracts::QolItemPayloadMutation socket_mutation{
         static_cast<int32_t>(qol::contracts::QolItemPayloadMutationKind::kSocketLevel), 0, 15};
+    // 旧 set_max_socket_enchant 把 I_ENCHANT bit2-5 写满（剩余附魔），对应 kEnchantRemaining；
+    // 下面的 0x003E / 0x123C 期望值即该位域。kEnchantLevel 位于 bit6-10，语义不同。
     qol::contracts::QolItemPayloadMutation enchant_mutation{
-        static_cast<int32_t>(qol::contracts::QolItemPayloadMutationKind::kEnchantLevel), 0, 15};
+        static_cast<int32_t>(qol::contracts::QolItemPayloadMutationKind::kEnchantRemaining), 0,
+        15};
     assert(state_write.apply_payload_mutation(product_handle, &socket_mutation).ok == kQolOk);
     assert(state_write.apply_payload_mutation(product_handle, &enchant_mutation).ok == kQolOk);
     assert(*product_socket == 0xF3 && *product_enchant == 0x003Eu);

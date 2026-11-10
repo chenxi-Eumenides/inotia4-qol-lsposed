@@ -1446,6 +1446,9 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/host/core_settings_config_service.cpp
     ${CPP_DIR}/host/config_namespace.cpp
     ${CPP_DIR}/host/owner_identity.cpp
+    ${CPP_DIR}/host/item_inventory_state_write_port.cpp
+    ${CPP_DIR}/game/ops/item_inventory_state_write.cpp
+    ${CPP_DIR}/core/native/inventory_trade.cpp
     ${CPP_DIR}/host/save_route.cpp
     ${CPP_DIR}/infra/status.cpp
     ${CPP_DIR}/infra/snapshot_handle.cpp
