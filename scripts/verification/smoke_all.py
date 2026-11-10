@@ -193,7 +193,7 @@ ROUTES = [
     {"m": "GET", "p": "/api/character/party/{slot}/name"},
     {"m": "GET", "p": "/api/character/party/{slot}/level"},
     {"m": "GET", "p": "/api/character/party/{slot}/status"},
-    {"m": "GET", "p": "/api/character/party/{slot}/stats"},
+    {"m": "GET", "p": "/api/character/party/{slot}/attributes"},
     {"m": "GET", "p": "/api/character/party/{slot}/equipment"},
     {"m": "GET", "p": "/api/character/party/{slot}/equipment/{equip_slot}"},
     {"m": "GET", "p": "/api/character/party/{slot}/skills"},

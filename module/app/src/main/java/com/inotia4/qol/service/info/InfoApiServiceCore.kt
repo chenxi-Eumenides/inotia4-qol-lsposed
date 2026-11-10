@@ -45,7 +45,8 @@ class InfoApiServiceCore : InfoApiService {
 
     override fun partyMemberStatus(slot: Int): String = InfoCharacterQueries.partyMemberStatus(slot)
 
-    override fun partyMemberStats(slot: Int): String = InfoCharacterQueries.partyMemberStats(slot)
+    override fun partyMemberAttributes(slot: Int): String =
+        InfoCharacterQueries.partyMemberAttributes(slot)
 
     override fun partyMemberEquipment(slot: Int): String =
         InfoCharacterQueries.partyMemberEquipment(slot)

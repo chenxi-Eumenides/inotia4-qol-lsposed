@@ -18,7 +18,8 @@ internal object InfoCharacterQueries {
     fun partyMemberName(slot: Int): String = NativeHttpQuery.get("/api/character/party/$slot/name")
     fun partyMemberLevel(slot: Int): String = NativeHttpQuery.get("/api/character/party/$slot/level")
     fun partyMemberStatus(slot: Int): String = NativeHttpQuery.get("/api/character/party/$slot/status")
-    fun partyMemberStats(slot: Int): String = NativeHttpQuery.get("/api/character/party/$slot/stats")
+    fun partyMemberAttributes(slot: Int): String =
+        NativeHttpQuery.get("/api/character/party/$slot/attributes")
     fun partyMemberEquipment(slot: Int): String =
         NativeHttpQuery.get("/api/character/party/$slot/equipment")
 

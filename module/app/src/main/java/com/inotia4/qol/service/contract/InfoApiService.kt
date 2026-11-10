@@ -17,7 +17,7 @@ interface InfoApiService {
     fun partyMemberName(slot: Int): String
     fun partyMemberLevel(slot: Int): String
     fun partyMemberStatus(slot: Int): String
-    fun partyMemberStats(slot: Int): String
+    fun partyMemberAttributes(slot: Int): String
     fun partyMemberEquipment(slot: Int): String
     fun partyMemberEquip(slot: Int, equipSlot: Int): String
     fun partyMemberSkills(slot: Int): String

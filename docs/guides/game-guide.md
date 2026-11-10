@@ -589,7 +589,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 | GET | `/api/character/party/{slot}/name` | 角色名 | `{"name":"凯恩"}` |
 | GET | `/api/character/party/{slot}/level` | 等级 | `{"level":27}` |
 | GET | `/api/character/party/{slot}/status` | 状态聚合 | `{"status":{hp,max_hp,mp,max_mp,exp,exp_next,attribute_points,skill_points}}` |
-| GET | `/api/character/party/{slot}/stats` | 全部战斗属性 | `{"stats":{...}}` |
+| GET | `/api/character/party/{slot}/attributes` | 全部战斗属性 | `{"attributes":{role,present,main_stats,attrs,attr_valid}}` |
 | GET | `/api/character/party/{slot}/equipment` | 全部装备（含名称） | `{"equipment":[...]}` |
 | GET | `/api/character/party/{slot}/equipment/{equip_slot}` | 单装备槽 | `<Item>` 或 `{"error":"not found"}` |
 | GET | `/api/character/party/{slot}/skills` | 技能（含名称） | `<Skills>` |
