@@ -536,6 +536,8 @@ void test_feature_mode_installs_all_resources_in_one_step() {
     CHECK(qol::hooks::state_of("hook:fm:three:b") == ResourceState::kLive);
     CHECK(qol::hooks::state_of("hook:fm:three:c") == ResourceState::kLive);
     CHECK(g_probe.enabled_calls == 1);
+    // 成功终态不得留下瞬态重试标记。
+    CHECK(!qol::host::feature_registry_pop_transient_failure("fm_three"));
 }
 
 ResourceClaim follow_hook_resource() {
@@ -1049,6 +1051,10 @@ void test_last_failure_code_keeps_notready_on_failed_terminal() {
     CHECK(feature_state_is("fm_code_req", FeatureState::kFailed));
     CHECK(qol::hooks::state_of("own:fm:code:req") == ResourceState::kFree);
     CHECK(qol::host::feature_registry_last_failure_code("fm_code_req") == kQolErrNotReady);
+    // NotReady 失败发生在 step 内部：一次性标记供 Reconciler 在 step 后消费。
+    CHECK(qol::host::feature_registry_pop_transient_failure("fm_code_req"));
+    CHECK(!qol::host::feature_registry_pop_transient_failure("fm_code_req"));
+    CHECK(!qol::host::feature_registry_pop_transient_failure("not.registered"));
 }
 
 ResourceClaim fm_code_permanent[] = {claim("hook:fm:code:perm:a", "fm_code_perm", nullptr)};
@@ -1062,6 +1068,67 @@ void test_last_failure_code_permanent_error_is_generic() {
     CHECK(feature_state_is("fm_code_perm", FeatureState::kFailed));
     CHECK(qol::host::feature_registry_last_failure_code("fm_code_perm") == 1);
     CHECK(qol::host::feature_registry_last_failure_code("fm_code_perm") != kQolErrNotReady);
+}
+
+static int g_dup_iface_a = 0;
+static int g_dup_iface_b = 0;
+const qol::contracts::CapabilityProvisionRef g_dup_provides_a[] = {
+    {"test.dup.cap", {1, 0}, &g_dup_iface_a}};
+const qol::contracts::CapabilityProvisionRef g_dup_provides_b[] = {
+    {"test.dup.cap", {1, 0}, &g_dup_iface_b}};
+const qol::contracts::CapabilityRequirement g_dup_requires[] = {{"test.dup.cap", {1, 0}}};
+
+// 插件 handler 抛异常：能力变更事件在 provider 事务终态同步派发，必须被隔离，
+// 不能穿透生命周期引擎。
+void throwing_capability_handler(void*, const void*) { throw 7; }
+
+// 两个插件声明同一能力 id：第二个注册失败不得进入 kRegistered，也不得在停用时
+// 注销第一个 provider 的真实能力。
+void test_duplicate_capability_provider_ownership() {
+    reset_all();
+    g_log_capture.clear();
+    arm_tx_deps();
+    PluginDescriptor first = make_feature_descriptor("fm_dup_a", nullptr, 0);
+    first.provides = g_dup_provides_a;
+    first.provides_count = 1;
+    PluginDescriptor second = make_feature_descriptor("fm_dup_b", nullptr, 0);
+    second.provides = g_dup_provides_b;
+    second.provides_count = 1;
+    PluginDescriptor consumer = make_feature_descriptor("fm_dup_consumer", nullptr, 0);
+    consumer.requires = g_dup_requires;
+    consumer.requires_count = 1;
+    CHECK(register_plugin(first));
+    CHECK(register_plugin(second));
+    CHECK(register_plugin(consumer));
+    CHECK(qol::host::feature_registry_prepare(make_deps()));
+    qol::host::feature_registry_set_wanted("fm_dup_a", true);
+    qol::host::feature_registry_set_wanted("fm_dup_b", true);
+    const auto sub = qol::infra::subscribe(qol::contracts::kEventCapabilityChanged,
+                                           &throwing_capability_handler, nullptr);
+    CHECK(sub != 0);
+
+    CHECK(qol::host::feature_registry_transition("fm_dup_a", true));
+    drive_feature_steps();
+    CHECK(feature_state_is("fm_dup_a", FeatureState::kEnabled));
+    CHECK(qol::infra::require_capability("test.dup.cap", {1, 0}) ==
+          static_cast<const void*>(&g_dup_iface_a));
+    CHECK(g_log_capture.find("capability event handler threw") != std::string::npos);
+
+    CHECK(qol::host::feature_registry_transition("fm_dup_b", true));
+    drive_feature_steps();
+    CHECK(feature_state_is("fm_dup_b", FeatureState::kEnabled));
+    // 第二个 provider 同名能力注册失败：不劫持 require，并允许下次 enable 重试。
+    CHECK(qol::infra::require_capability("test.dup.cap", {1, 0}) ==
+          static_cast<const void*>(&g_dup_iface_a));
+    CHECK(g_log_capture.find("capability registration failed") != std::string::npos);
+
+    // 注销第二个 provider 不删除第一个的能力；消费者仍可 require。
+    CHECK(qol::host::feature_registry_transition("fm_dup_b", false));
+    drive_feature_steps();
+    CHECK(feature_state_is("fm_dup_b", FeatureState::kInactive));
+    CHECK(qol::infra::require_capability("test.dup.cap", {1, 0}) ==
+          static_cast<const void*>(&g_dup_iface_a));
+    CHECK(qol::infra::unsubscribe(sub));
 }
 
 }  // namespace
@@ -1095,6 +1162,7 @@ int main() {
     test_last_failure_code_tracks_notready_until_success();
     test_last_failure_code_keeps_notready_on_failed_terminal();
     test_last_failure_code_permanent_error_is_generic();
+    test_duplicate_capability_provider_ownership();
     std::printf("plugin_registry: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

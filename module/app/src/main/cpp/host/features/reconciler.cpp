@@ -285,6 +285,16 @@ uint32_t FeatureReconciler::step() {
     // including the last false toggle; the following stop then revokes its admission.
     notify_toggles();
     uint32_t advanced = feature_registry_step();
+    // 安装事务在 step 内部以 NotReady 失败终态时，激活循环本帧已经去重；消费 registry
+    // 带出的一次性标记，按有界预算安排在后续帧重试。已有预算不重置。
+    for (uint32_t i = 0; i < count; ++i) {
+        if (!feature_registry_pop_transient_failure(order[i])) continue;
+        const auto inserted = retry_.try_emplace(order[i]);
+        if (inserted.second) {
+            inserted.first->second.remaining = 3;
+            inserted.first->second.next_step = step_clock_ + 5;
+        }
+    }
     // A full reverse-topological stop barrier prevents provider cleanup before consumers
     // have finished owner/resource drain. Installs that become unwanted finish into teardown.
     for (uint32_t i = count; i > 0; --i) {
@@ -371,7 +381,6 @@ uint32_t FeatureReconciler::step() {
         std::lock_guard<std::mutex> lock(mutex_);
         // 本轮已投递；若 step 期间又来了新 revision，保留 dirty 供下一帧处理。
         toggles_dirty_ = pending_revision_ > revision_;
-        last_capability_revision_ = infra::capability_revision();
         if (activation_retry_ > 0) --activation_retry_;
     }
     return advanced;

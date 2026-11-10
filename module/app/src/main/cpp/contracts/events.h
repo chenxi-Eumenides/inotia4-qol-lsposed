@@ -27,6 +27,12 @@ struct SaveExitEvent {
 
 // 能力注册表变更通知（§3.4.4）。只描述能力身份与可用性，
 // 不携带接口指针：消费者收到后须重新 require，避免缓存越过撤销点的指针。
+//
+// 派发时机：provider 生命周期事务的同步终态（注册成功立即 available，注销立即
+// unavailable），handler 运行在事务推进的同一调用栈内。因此 handler 只允许
+// require 能力或释放自持引用；禁止依赖 provider 的 active 状态，也禁止调用需要
+// owner admission（业务 lease/namespace 调用窗口）的 API：此时事务尚未完成，
+// 消费方可能仍处于停用或安装中。
 struct CapabilityChangedEvent {
     const char* id;       // 静态字符串，回调期间有效
     uint16_t major;

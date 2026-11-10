@@ -122,6 +122,9 @@ bool g_feature_wanted[kMaxPlugins]{};
 // 最近一次生命周期事务步骤的失败码：非 0 保留到该插件下一次事务成功终态。
 // Reconciler 据此区分瞬态（NotReady）与永久失败，决定是否做有界重试。
 int32_t g_last_failure_code[kMaxPlugins]{};
+// 安装事务因 kQolErrNotReady 失败终态时置位，供 Reconciler 在 step 后消费一次。
+// 失败发生在 step 内部，此时激活循环已按 attempted_ 去重，只能跨函数把事件带出。
+bool g_transient_retry_pending[kMaxPlugins]{};
 FeatureDesiredRequest g_desired_request = nullptr;
 void* g_desired_request_context = nullptr;
 const void* g_plugin_ports[kMaxPlugins][kMaxPortsPerPlugin] = {};
@@ -1574,6 +1577,11 @@ bool plugin_all_gates_want(const contracts::PluginDescriptor& plugin) {
 
 enum class CapRegistration : uint8_t { kNone = 0, kRegistered = 1, kRevoking = 2 };
 CapRegistration g_cap_registration[kMaxPlugins];
+// 本插件真正写入注册表的能力位（按 provides 下标），撤销时只处理这些位，
+// 避免重复 id 的另一 provider 的真实能力被误删。
+uint64_t g_cap_registered_mask[kMaxPlugins]{};
+// 与 infra::capabilities 的槽位上限一致：provides_count 超过该值时无法逐位追踪归属。
+constexpr uint32_t kMaxRecordedProvides = 64;
 bool g_http_stop_pending[kMaxPlugins]{};
 bool g_http_disabled_pending[kMaxPlugins]{};
 bool g_http_caps_pending[kMaxPlugins]{};
@@ -1613,11 +1621,44 @@ void refresh_http_provider_availability() {
     set_http_provider_available(registry && dispatch);
 }
 
+// 能力变更事件在 provider 事务的同步终态派发：handler 抛出的异常必须被隔离，
+// 不能让插件回调穿透生命周期引擎中断事务推进。
+void publish_capability_changed(const char* plugin_id,
+                                const contracts::CapabilityProvisionRef& ref,
+                                uint8_t available) {
+    const contracts::CapabilityChangedEvent event{
+        ref.id, ref.version.major, ref.version.minor, available, {}};
+    try {
+        infra::publish(contracts::kEventCapabilityChanged, &event);
+    } catch (...) {
+        QOL_LOG_ERROR(QolDomain::kCore,
+                      "plugin %s capability event handler threw id=%s available=%u",
+                      plugin_id != nullptr ? plugin_id : "?",
+                      ref.id != nullptr ? ref.id : "?", static_cast<unsigned>(available));
+    }
+}
+
+bool capability_registered_at(uint32_t index, uint32_t position) {
+    if (position >= kMaxRecordedProvides) return false;
+    return (g_cap_registered_mask[index] & (uint64_t{1} << position)) != 0;
+}
+
 // 进入 enabled 时注册（§3.4.4；幂等：已注册跳过）。
 void register_provided_capabilities(uint32_t index) {
     const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
     if (!plugin_provides_capability(plugin)) return;
     if (g_cap_registration[index] == CapRegistration::kRegistered) return;
+    if (plugin.provides_count > kMaxRecordedProvides) {
+        // 无法逐位追踪归属就不能声明注册成功：否则停用时可能误删其他 provider 的能力。
+        QOL_LOG_ERROR(QolDomain::kCore,
+                      "plugin %s declares %u provided capabilities; limit is %u", plugin.id,
+                      static_cast<unsigned>(plugin.provides_count),
+                      static_cast<unsigned>(kMaxRecordedProvides));
+        g_cap_registered_mask[index] = 0;
+        g_cap_registration[index] = CapRegistration::kNone;
+        return;
+    }
+    uint64_t registered = 0;
     for (uint32_t i = 0; i < plugin.provides_count; ++i) {
         const contracts::CapabilityProvisionRef& ref = plugin.provides[i];
         if (ref.id == nullptr || ref.iface == nullptr) continue;
@@ -1625,13 +1666,24 @@ void register_provided_capabilities(uint32_t index) {
         // 只有真正写入注册表才广播，订阅方据此重新 require。
         if (infra::register_capability(
                 infra::CapabilityProvision{ref.id, ref.version, ref.iface})) {
-            const contracts::CapabilityChangedEvent event{
-                ref.id, ref.version.major, ref.version.minor, 1, {}};
-            infra::publish(contracts::kEventCapabilityChanged, &event);
+            registered |= uint64_t{1} << i;
+            // 事务阶段：能力在 provider 安装事务成功终态同步发布，handler 只能做
+            // require 或释放自持引用，不得依赖 provider 的 active 状态。
+            publish_capability_changed(plugin.id, ref, 1);
         }
         clear_cascade_degraded_for_capability(ref.id);
     }
-    g_cap_registration[index] = CapRegistration::kRegistered;
+    if (registered != 0 || plugin.provides_count == 0) {
+        g_cap_registered_mask[index] = registered;
+        g_cap_registration[index] = CapRegistration::kRegistered;
+    } else {
+        // 一个都没写入：保持未注册，允许下次 enable 重试；不得谎报 available 事件。
+        g_cap_registered_mask[index] = 0;
+        g_cap_registration[index] = CapRegistration::kNone;
+        QOL_LOG_WARN(QolDomain::kCore,
+                     "plugin %s capability registration failed; retrying on next enable",
+                     plugin.id);
+    }
     refresh_http_provider_availability();
 }
 
@@ -1641,16 +1693,16 @@ void unregister_provided_capabilities(uint32_t index) {
     if (plugin_provides_http_transport(plugin))
         set_http_provider_available(false);
     for (uint32_t i = 0; i < plugin.provides_count; ++i) {
-        if (plugin.provides[i].id != nullptr) {
-            const contracts::CapabilityProvisionRef& ref = plugin.provides[i];
-            // 撤销后无论注册表状态如何都广播：消费者重新 require 会失败，
-            // 正是撤销后应有的降级语义。
-            infra::unregister_capability(ref.id);
-            const contracts::CapabilityChangedEvent event{
-                ref.id, ref.version.major, ref.version.minor, 0, {}};
-            infra::publish(contracts::kEventCapabilityChanged, &event);
-        }
+        if (!capability_registered_at(index, i)) continue;
+        const contracts::CapabilityProvisionRef& ref = plugin.provides[i];
+        if (ref.id == nullptr) continue;
+        // 撤销后无论注册表状态如何都广播：消费者重新 require 会失败，
+        // 正是撤销后应有的降级语义。只撤销本插件真正注册的位。
+        infra::unregister_capability(ref.id);
+        // 事务阶段：注销与 unavailable 同样在停用事务的同步阶段发布。
+        publish_capability_changed(plugin.id, ref, 0);
     }
+    g_cap_registered_mask[index] = 0;
     g_cap_registration[index] = CapRegistration::kNone;
 }
 
@@ -1748,10 +1800,12 @@ void cascade_stop_plugin(uint32_t index, CascadeContext& context) {
         infra::status_update(plugin.id, infra::FeatureState::kDeactivating, false, nullptr);
     }
     publish_runtime_actual(plugin.id, false);
-    // 消费者自身提供的能力：注销并继续级联（递归即逆拓扑序）。
+    // 消费者自身提供的能力：注销并继续级联（递归即逆拓扑序）。只级联本插件
+    // 真正注册成功的位，避免重复 id 的失败注册引发的误停用。
     if (revoke_caps) {
         g_cap_registration[index] = CapRegistration::kRevoking;
         for (uint32_t i = 0; i < plugin.provides_count; ++i) {
+            if (!capability_registered_at(index, i)) continue;
             cascade_dependents(plugin.provides[i].id, context);
         }
     }
@@ -1806,6 +1860,7 @@ void begin_revoke_provider(uint32_t index) {
     CascadeContext context{};
     context.visited[index] = true;
     for (uint32_t i = 0; i < plugin.provides_count; ++i) {
+        if (!capability_registered_at(index, i)) continue;
         cascade_dependents(plugin.provides[i].id, context);
     }
 }
@@ -2474,6 +2529,12 @@ int32_t feature_registry_last_failure_code(const char* id) {
     const auto index = plugin_index_of(id);
     return index == kNoPlugin ? 0 : g_last_failure_code[index];
 }
+bool feature_registry_pop_transient_failure(const char* id) {
+    const auto index = plugin_index_of(id);
+    if (index == kNoPlugin || !g_transient_retry_pending[index]) return false;
+    g_transient_retry_pending[index] = false;
+    return true;
+}
 void feature_registry_set_wanted(const char* id, bool wanted) {
     const auto index = plugin_index_of(id);
     if (index != kNoPlugin) g_feature_wanted[index] = wanted;
@@ -2813,6 +2874,12 @@ static uint32_t lifecycle_step_engine() {
                     const auto index = slot.plugin_index;
                     const auto kind = slot.kind;
                     if (kind == hooks::TxKind::kInstall) {
+                        // 失败发生在 step 内部；激活循环本帧已按 attempted_ 去重，
+                        // 必须在 feature_stop/清理之前把一次性瞬态标记带出，供
+                        // Reconciler 在本次 step 后武装有界重试。
+                        if (g_last_failure_code[index] == kQolErrNotReady) {
+                            g_transient_retry_pending[index] = true;
+                        }
                         // 安装事务失败：插件置 Failed，清逐资源 degraded 记录避免残留误报。
                         QOL_LOG_ERROR(QolDomain::kCore, "plugin %s activation failed: %s",
                                       plugin.id,
@@ -3109,6 +3176,7 @@ void plugin_registry_reset_for_test() {
     g_management_sdk_bound = false;
     std::memset(g_feature_wanted, 0, sizeof(g_feature_wanted));
     std::memset(g_last_failure_code, 0, sizeof(g_last_failure_code));
+    std::memset(g_transient_retry_pending, 0, sizeof(g_transient_retry_pending));
     g_desired_request = nullptr;
     g_desired_request_context = nullptr;
     qol::game::item_count_set_extended_mode(qol::game::ItemCountExtendedMode::kOff);
@@ -3118,6 +3186,7 @@ void plugin_registry_reset_for_test() {
     g_install_step_cursor = 0;
     for (uint32_t i = 0; i < kMaxPlugins; ++i) {
         g_cap_registration[i] = CapRegistration::kNone;
+        g_cap_registered_mask[i] = 0;
         g_http_stop_pending[i] = false;
         g_http_disabled_pending[i] = false;
         g_http_caps_pending[i] = false;
