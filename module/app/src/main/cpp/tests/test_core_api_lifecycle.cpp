@@ -141,7 +141,7 @@ void test_api_feature_and_listener_config() {
     CHECK(descriptor.features[0].category == qol::contracts::FeatureCategory::kGeneral);
     CHECK(descriptor.features[0].type == qol::contracts::FeatureType::kToggle);
     CHECK(std::strcmp(descriptor.features[0].id, "api.enabled") == 0);
-    CHECK(std::strcmp(descriptor.features[0].description, "") == 0);
+    CHECK(std::strcmp(descriptor.features[0].description, "允许外部程序控制游戏") == 0);
     CHECK(descriptor.validate_config != nullptr);
     CHECK(descriptor.http_endpoint_count == 0);
     CHECK(descriptor.http_query_count == 0);
@@ -166,7 +166,7 @@ void test_api_feature_and_listener_config() {
         CHECK(feature.category == qol::contracts::FeatureCategory::kGeneral);
         CHECK(feature.type == qol::contracts::FeatureType::kToggle);
         CHECK(std::strcmp(feature.name, "API服务") == 0);
-        CHECK(std::strcmp(feature.description, "") == 0);
+        CHECK(std::strcmp(feature.description, "允许外部程序控制游戏") == 0);
     }
 
     CHECK(qol::contracts::succeeded(validate_config("listen_address", "\"0.0.0.0\"")));
