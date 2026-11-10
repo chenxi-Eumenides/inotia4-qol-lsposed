@@ -1,6 +1,6 @@
 # 冷却机制（技能 / 药水 / 道具）
 
-> 日期：2026-11-08 ｜ 适用版本：`c18-v520` ｜ 样本：`apk/decoded/c18-v520/lib/arm64-v8a/libgame.so`
+> 日期：2026-11-08（2026-11-10 补充复活卷轴与 monster v29 变体） ｜ 适用版本：`c18-v520`、`c18-v603`（冷却符号同址） ｜ 样本：`apk/decoded/c18-v520/lib/arm64-v8a/libgame.so`
 > 来源：`readelf` 动态符号 + `aarch64-linux-gnu-objdump` 反汇编 + `apk/static-data/json/tables/ACTDATABASE.json`
 
 ## 1. 结论摘要
@@ -135,16 +135,13 @@ Buff 类同理，写入 `+15`。
 
 额外修正：`MERCENARYGROUPSKILLSYSTEM_CheckCondition(0x8D)` 成立时，写入后再减去 `0x2D`（45 tick），即实际为 `now + 120` / `now - 30`。
 
-`CHAR_UseItemEx` 返回 `0` 表示未使用（冷却中或其他失败），插件已将其映射为错误：
+`CHAR_UseItemEx` 返回 `0` 表示未使用（冷却中或其他失败），非 `0` 表示使用成功。
 
-```cpp
-// module/app/src/main/cpp/game/ops/item_inventory_state_write.cpp:617-623
-const int used = fn_char_use_item_ex(leader, item, 0);
-if (used != 0) { /* ok */ }
-return item_error(out, kQolErrBlocked, "on cooldown");
-```
+### 4.3 复活卷轴
 
-## 5. 符号与地址（c18-v520 arm64）
+`ITEMDATABASE` 记录下标 26/27 分别是「复活卷轴」和「优质的复活卷轴」（`apk/static-data/json/tables/ITEMDATABASE.json`）。这两类物品直接走复活卷轴处理路径（`CHAR_ProcessReviveScroll`，`0x0de3d8`），反汇编中不引用 `CHECKTIME_nPotionTick` 或 `CHECKTIME_nBuffItemTick`，因此**没有全局药水/Buff 冷却**，连续使用只受物品数量和复活目标状态限制。
+
+## 5. 符号与地址（c18-v520 / c18-v603 arm64）
 
 | 符号 | VMA | 作用 |
 |---|---|---|
@@ -155,6 +152,7 @@ return item_error(out, kQolErrBlocked, "on cooldown");
 | `CHAR_GetActionState` | `0x0e3228` | 冷却/魔法/条件判定 |
 | `CHAR_SetAction` | `0x0e7630` | 技能行动入口 |
 | `CHAR_UseItemEx` | `0x0eb670` | 物品使用与药水冷却 |
+| `CHAR_ProcessReviveScroll` | `0x0de3d8` | 复活卷轴使用处理；不读取 `CHECKTIME_*` 冷却 |
 | `SHORTCUT_DrawCoolTime` | `0x121e8c` | 快捷栏冷却饼 |
 | `g_nGlobalCoolTimeCount` | `0x3099b0` | 全局 tick |
 | `CHECKTIME_nPotionTick` | `0x307568` | 药水冷却结束 tick |
@@ -162,12 +160,10 @@ return item_error(out, kQolErrBlocked, "on cooldown");
 | `ACTDATABASE_pData` | `0x301990` | 动作表数据指针 |
 | `ACTDATABASE_nRecordSize` | `0x301998` | 动作表记录大小（32） |
 
-以上均为动态导出符号（`.dynsym`），插件符号解析器可按名称解析；VMA 仅供无符号场景回退。
+以上均为动态导出符号（`.dynsym`），可按名称解析；VMA 仅供无符号场景回退。
 
-## 6. 对插件的含义
+## 6. 字段的通用含义
 
-- `world_tuning` 当前没有任何冷却逻辑，只有伤害/属性/经验/金币/掉落倍率。
-- `core.item` 已 hook `CHAR_UseItemEx` 与快捷栏，但仅做诊断转发，没有冷却拦截或修改（`module/app/src/main/cpp/plugins/core.item/hooks/inventory_hooks.cpp:1412-1470`）。
 - 缩短技能冷却：改写对应节点 `+0x10`（单技能独立）。
 - 缩短药水冷却：改写 `CHECKTIME_nPotionTick`（会影响所有恢复类药水，因为共享）。
 - 取消冷却：把结束 tick 写成当前 tick 或更小。
@@ -214,21 +210,34 @@ UI 判定与绘制：`SHORTCUT_GetState`（`0x121c68`、`0x121d14`）、`SHORTCU
 
 `CHECKTIME_nLifeTick`、`CHECKTIME_nUnitTick`、`CHECKTIME_nSiegeItemTick`、`CHECKTIME_nFreeWillTick` 等是独立系统的计时器，不参与物品/技能冷却；`CHECKTIME_Initialize` 只负责统一初始化。
 
-## 8. 未确认项
+## 8. 变体差异（monster v29）
+
+样本：`apk/decoded/monster-v29/lib/arm64-v8a/libgame.so`（旧 `apk/decoded/monster` 是 v23）。c18-v520 / c18-v603 / 大修 / 原版的 `CHAR_GetActionCoolTime` 与 `CHAR_SetActionNextTime` 是正常函数；monster v29 把两者改成入口 `b` 跳板：
+
+- `CHAR_GetActionCoolTime`：入口 `b 0x747400`，真实逻辑在额外可执行段 `0x740000`。该段分派链存在固定返回 `150 / 300 / 60 / 100 / 200` tick 的分支，说明部分动作的冷却不经过 `ACTDATABASE +0x0F × attr95` 公式。
+- `CHAR_SetActionNextTime`：入口 `b 0x14e600`；跳板目标先执行正常写入，再按角色字段 `char[10]` 与全局难度条件覆盖 `nextTime`（观察样例为 `now + 18000`）。因此最终冷却可能远大于 `CHAR_GetActionCoolTime` 的计算值。
+- 只观察 `CHAR_GetActionCoolTime` 的返回值不能代表 monster v29 的最终冷却；实际结束时间以 `CHAR_SetActionNextTime` 返回后的 `action+0x10` 为准。
+
+## 9. 未确认项
 
 - `CHAR_GetAttr(char, 95)` 的属性名称与来源表尚未确认，只确认它是 per-mille 倍率。
 - tick 与真实时间的换算按“每帧 +1”推断；游戏若使用固定步长或变速，需要真机计时校准。
-- `ACTDATABASE` 在 `game-systems.md` 中被归为事件/演出表，但技能冷却读取明确指向它；该表兼作动作参数表的语义需要补充。
-- `ITEMDATABASE +0x02 bit4`、`+0x06 bit5`、`+0x07 bit0` 与物品类别的完整对应关系未逐项枚举。
+- `ACTDATABASE` 同时是技能动作参数表：`+0x0F` u16 为冷却基数，已由 `CHAR_GetActionCoolTime` 直接寻址确认；它在 `game-systems.md` 中仍归入事件/演出相关表，两重用途并存。
+- `ITEMDATABASE +0x02 bit4`、`+0x06 bit5`、`+0x07 bit0` 与物品类别的完整对应关系未逐项枚举；已确认记录下标 26/27 为两类复活卷轴且不参与药水/Buff 冷却。
 
-## 9. 复现方法
+## 10. 复现方法
 
 ```bash
 SO=apk/decoded/c18-v520/lib/arm64-v8a/libgame.so
-readelf -sW "$SO" | grep -iE 'CoolTime|PotionTick|BuffItemTick'
+readelf -sW "$SO" | grep -iE 'CoolTime|Revive|PotionTick|BuffItemTick'
 readelf -rW "$SO" | grep -E '2f49e0|2f6150|2f4b50|2f4ba0|2f4740'
 aarch64-linux-gnu-objdump -d --start-address=0xe30c8 --stop-address=0xe31f4 "$SO"
 aarch64-linux-gnu-objdump -d --start-address=0xeb670 --stop-address=0xec028 "$SO"
+
+# monster v29：两个入口都是 b 跳板
+SO=apk/decoded/monster-v29/lib/arm64-v8a/libgame.so
+aarch64-linux-gnu-objdump -d --start-address=0x747400 --stop-address=0x747480 "$SO"
+aarch64-linux-gnu-objdump -d --start-address=0x14e600 --stop-address=0x14e680 "$SO"
 ```
 
 GOT 槽位与目标全局的映射以 `readelf -rW` 的 `R_AARCH64_RELATIVE` 加数为准（例：`0x2f49e0 -> 0x301990 = ACTDATABASE_pData`）。

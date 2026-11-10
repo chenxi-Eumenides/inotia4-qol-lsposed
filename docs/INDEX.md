@@ -29,7 +29,7 @@
 - `logging.md`：日志行格式、级别与域、文件清单与保留/轮转策略、`qol-crash.log`/`java-crash.log` 格式契约与符号化用法的唯一权威。
 - `game/`：原版游戏系统与逆向结论。
 - `game/attributes.md`：角色属性体系——主属性、attr 0-31、隐藏扩展区、面板可见集合与不属于属性的全局加成。
-- `game/cooldown.md`：技能、药水与道具冷却的运行时结构、时长公式、tick 时间基准与符号地址。
+- `game/cooldown.md`：技能、药水与道具冷却的运行时结构、时长公式、tick 时间基准、复活卷轴与 monster v29 变体差异、符号地址。
 - `game/equipment.md`：群友推荐的可获得与不可获得装备清单。
 - `plugins/`：官方插件当前职责与实现参考。
 
