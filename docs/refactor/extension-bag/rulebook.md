@@ -971,10 +971,10 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
   `INVEN_IsHavingEmptySlot` 空槽统计都不得包含 `space=1`。判定在插件内完成：
   `core.inventory` 经模块已有的 `game_identity` 接口读取 `series_name=="c18"` 且
   `version_label=="v603"`（不修改模块本体、不新增能力位）。**其他 C18 版本与未知后续
-  版本保持六步旧行为**，实测确认移除后再把版本加入版本表。
+  版本保持既有自动落槽顺序**，实测确认移除后再把版本加入版本表。
 - **为什么**：原生 `INVEN_IsHavingEmptySlot` 只扫描 bag 0..4，C18 v603 的
   `INVEN_FindSaveSlot` 上界同样是 5——游戏自身从不把物品自动写进追加袋；v603 的追加袋也
-  不在背包页签中呈现。旧六步自动落槽在原版袋 + 扩展袋全满时写入 `space=1 bag=0 slot=0/1`，
+  不在背包页签中呈现。旧自动落槽在原版袋 + 扩展袋全满时写入 `space=1 bag=0 slot=0/1`，
   玩家在原版/扩展袋都看不到，表现为「背包已满仍能拾取且物品丢失」（真机 2026-11-05：
   原版 bag0 16/16、扩展 bag0 4/4 全满，日志 `FindSaveSlot resolved ... space=1 bag=0`）。
 - **边界**：读取、枚举、API 与 autosell 仍按原语义访问 `space=1`；显式移动
@@ -988,6 +988,35 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
   `test_c18_bag_removed_skips_auto_placement`、`test_explicit_c18_scope_still_supported_when_removed`、
   `test_wrapper_no_target_returns_zero_without_native_fallback`）；真机 `VM-20`
   （v603 全满拾取走背包已满，物品留地）。
+
+### R-68 自动落槽必须先合并；堆满或不可堆叠时优先回到「同物品袋」的空槽
+
+- **规则一句话**：`core.inventory` 的 `placement::resolve_placement` 全局顺序固定为：
+  ① 原版同身份堆合并 → ② 注册源（扩展袋）同身份堆合并 → ③ C18 同身份堆合并 →
+  ④ **同物品袋空槽** → ⑤ 原版空槽 → ⑥ 注册源空槽 → ⑦ C18 空槽。
+  第 ④ 步只按身份判据找“袋内已有同身份物品”的袋（不看数量上限），在该袋内找空槽；
+  第一个同身份袋没有空槽就继续下一个同身份袋，全部无处可放才进入第 ⑤ 步。
+  可堆叠与不可堆叠类别都适用（宝石、神灯等同类不可堆叠物品同样聚袋）。
+- **为什么**：只把“满堆”当普通空槽处理会让原版袋有空槽时抢走本应回扩展袋的堆；
+  玩家视角是“同类物品散落在不同袋”。例：扩展袋 2 的药水堆已满 999，下一个药水应
+  在扩展袋 2 新开堆，而不是落进原版袋 0 的空槽。不可堆叠的同类物品（低级宝石、
+  神灯）没有合并语义，但仍有“同类放同袋”的分组预期。
+- **身份判据**：与合并共用 `qol_inventory_payload_identity_equal`（类别 + `payload[9,11)`
+  I_TYPE + `payload[15,end)` magic/socket/enchant/词缀链；排除长度前缀、UID `[1,9)`、
+  数量位 `[11,15)`）。扩展源侧用 `QolBagSource::export_item` 取身份，原生侧用
+  `serialize_item`。
+- **边界**：任务袋 5 不参与；C18 第 ④ 步同样只在变体仍提供 C18 背包时参与；显式
+  `scope_bag >= 0` 的移动目标仍只扫该袋（空槽扫描本身已限定在该袋，不再单独走第 ④ 步）。
+- **典型破坏方式**：把第 ④ 步只挂在可堆叠类别（宝石/神灯仍散袋）；第 ④ 步只看第一个
+  同身份袋、袋满就放弃（应继续下一个同身份袋）；把第 ④ 步放到第 ⑤ 步之后（等于没改）；
+  用 category-only 判据把词条/镶嵌不同的装备并到同一袋。
+- **验证锚**：Host `test_inventory_placement`
+  （`test_full_registered_stack_new_slot_in_same_bag`、
+  `test_full_native_stack_new_slot_in_same_bag`、
+  `test_full_same_item_bag_falls_through_to_next_same_item_bag`、
+  `test_non_stackable_grouped_into_same_item_bag`、
+  `test_same_item_bags_all_full_fall_back_to_native_empty`、
+  `test_stack_limit_uses_count_limit`）；真机待补：满堆拾取落同袋、宝石/神灯同类聚袋。
 
 ## §6 禁止事项汇总
 

@@ -689,17 +689,91 @@ void test_stack_limit_uses_count_limit() {
     reset_grid();
     uint8_t payload[kPayloadSize];
     make_payload(payload, kPayloadSize, 1, 7);
-    // count_limit=100：99+5=104 超预检上限 → 跳过合并，落原生空槽。
+    // count_limit=100：99+5=104 超预检上限 → 不合并，改在同物品袋（注册 bag0）
+    // 的空槽新开堆，不再落到原生空槽。
     place_reg(0, 0, 10, 99, payload, kPayloadSize, 100);
     QolBagTransfer transfer{};
     make_transfer(&transfer, 10, 5, 1, 7);
     placement::PlacementTarget target{};
     assert(placement::resolve_placement(transfer, true, -1, -1, &target));
-    expect_target(target, qol::contracts::kQolBagSpaceOriginal, 0, 0, false);
+    expect_target(target, kRegSpace, 0, 1, false);
     // 99+1=100 不超上限 → 合并。
     make_transfer(&transfer, 10, 1, 1, 7);
     assert(placement::resolve_placement(transfer, true, -1, -1, &target));
     expect_target(target, kRegSpace, 0, 0, true);
+}
+
+void test_full_registered_stack_new_slot_in_same_bag() {
+    reset_grid();
+    uint8_t payload[kPayloadSize];
+    make_payload(payload, kPayloadSize, 1, 7);
+    // 扩展 bag1 的同类堆已满，bag1 还有空槽；原生全空。
+    place_reg(1, 0, 10, 100, payload, kPayloadSize, 100);
+    QolBagTransfer transfer{};
+    make_transfer(&transfer, 10, 3, 1, 7);
+    placement::PlacementTarget target{};
+    assert(placement::resolve_placement(transfer, true, -1, -1, &target));
+    expect_target(target, kRegSpace, 1, 1, false);
+}
+
+void test_full_native_stack_new_slot_in_same_bag() {
+    reset_grid();
+    uint8_t payload[kPayloadSize];
+    make_payload(payload, kPayloadSize, 1, 7);
+    // 原生 bag3 的同类堆已满；bag0 空。新堆应开在 bag3 的空槽，而不是 bag0。
+    place_native(0, 3, 2, 10, 100, payload, kPayloadSize, 100);
+    QolBagTransfer transfer{};
+    make_transfer(&transfer, 10, 3, 1, 7);
+    placement::PlacementTarget target{};
+    assert(placement::resolve_placement(transfer, true, -1, -1, &target));
+    expect_target(target, qol::contracts::kQolBagSpaceOriginal, 3, 0, false);
+}
+
+void test_full_same_item_bag_falls_through_to_next_same_item_bag() {
+    reset_grid();
+    uint8_t payload[kPayloadSize];
+    make_payload(payload, kPayloadSize, 1, 7);
+    // 原生 bag2 全满（同身份），扩展 bag1 也有同身份且有空槽 → 跳过原生 bag2，
+    // 在扩展 bag1 的空槽新开堆。
+    for (int slot = 0; slot < kSlotsPerBag; ++slot) {
+        place_native(0, 2, slot, 10, 100, payload, kPayloadSize, 100);
+    }
+    place_reg(1, 0, 10, 100, payload, kPayloadSize, 100);
+    QolBagTransfer transfer{};
+    make_transfer(&transfer, 10, 3, 1, 7);
+    placement::PlacementTarget target{};
+    assert(placement::resolve_placement(transfer, true, -1, -1, &target));
+    expect_target(target, kRegSpace, 1, 1, false);
+}
+
+void test_non_stackable_grouped_into_same_item_bag() {
+    reset_grid();
+    uint8_t payload[kPayloadSize];
+    make_payload(payload, kPayloadSize, 1, 7);
+    // 不可堆叠类别（宝石/神灯同类）：原生 bag4 已有同身份物品，bag0 空。
+    // 应在新物品放进 bag4 的空槽，而不是 bag0。
+    place_native(0, 4, 1, 10, 1, payload, kPayloadSize, 1);
+    QolBagTransfer transfer{};
+    make_transfer(&transfer, 10, 1, 1, 7);
+    placement::PlacementTarget target{};
+    assert(placement::resolve_placement(transfer, false, -1, -1, &target));
+    expect_target(target, qol::contracts::kQolBagSpaceOriginal, 4, 0, false);
+}
+
+void test_same_item_bags_all_full_fall_back_to_native_empty() {
+    reset_grid();
+    uint8_t payload[kPayloadSize];
+    make_payload(payload, kPayloadSize, 1, 7);
+    // 原生 bag2 与扩展 bag1 都有同身份物品但袋内无空槽 → 回退原生空槽 bag0。
+    for (int slot = 0; slot < kSlotsPerBag; ++slot) {
+        place_native(0, 2, slot, 10, 1, payload, kPayloadSize, 1);
+        place_reg(1, slot, 10, 1, payload, kPayloadSize, 1);
+    }
+    QolBagTransfer transfer{};
+    make_transfer(&transfer, 10, 1, 1, 7);
+    placement::PlacementTarget target{};
+    assert(placement::resolve_placement(transfer, false, -1, -1, &target));
+    expect_target(target, qol::contracts::kQolBagSpaceOriginal, 0, 0, false);
 }
 
 void test_task_bag_never_returned() {
@@ -865,6 +939,11 @@ int main() {
     test_same_category_different_payload_never_merges();
     test_stackable_false_skips_all_merge_steps();
     test_stack_limit_uses_count_limit();
+    test_full_registered_stack_new_slot_in_same_bag();
+    test_full_native_stack_new_slot_in_same_bag();
+    test_full_same_item_bag_falls_through_to_next_same_item_bag();
+    test_non_stackable_grouped_into_same_item_bag();
+    test_same_item_bags_all_full_fall_back_to_native_empty();
     test_task_bag_never_returned();
     test_scope_resolution();
     test_wrapper_prefers_extension_merge();

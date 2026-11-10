@@ -219,6 +219,118 @@ bool scan_registered_sources(const contracts::QolBagTransfer& transfer, bool mer
     return false;
 }
 
+// ---------------------------------------------------------------------------
+// 同物品袋空槽（第 4 步）：堆已满不能合并时，优先在「已有同身份物品」的袋内新开堆。
+// 只比较身份，不看数量上限；可堆叠类别的满堆与不可堆叠类别（宝石/神灯等）同用此判据。
+// ---------------------------------------------------------------------------
+
+bool native_bag_has_same_item(int32_t space_id, int32_t bag,
+                              const contracts::QolBagTransfer& transfer) {
+    if (!native_read_ready() || !serialize_ready()) return false;
+    const QolBagRef ref{space_id, bag};
+    QolBagInfo info{};
+    if (!qol::contracts::succeeded(inventory_access_api().native_bag_info(&ref, &info)) ||
+        info.capacity < 0) {
+        return false;
+    }
+    for (int32_t slot = 0; slot < info.capacity; ++slot) {
+        QolInventoryItemRef existing{};
+        const QolResult probe = inventory_access_api().native_item_at(&ref, slot, &existing);
+        if (probe.code == kQolErrNotFound) continue;
+        if (!qol::contracts::succeeded(probe)) continue;
+        if (existing.category != transfer.category || existing.count <= 0) continue;
+        uint8_t payload[contracts::kQolBagTransferPayloadCapacity]{};
+        uint32_t size = 0;
+        if (!qol::contracts::succeeded(g_port->read.serialize_item(
+                existing.item, payload, sizeof(payload), &size))) {
+            continue;
+        }
+        if (qol::contracts::qol_inventory_payload_identity_equal(
+                payload, size, transfer.payload, transfer.payload_size)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool scan_native_same_item_empty(int32_t space_id, const contracts::QolBagTransfer& transfer,
+                                 int32_t scope_bag, PlacementTarget* out) {
+    if (out == nullptr || !native_read_ready() || !serialize_ready()) return false;
+    int32_t bag_count = 0;
+    if (!qol::contracts::succeeded(
+            inventory_access_api().native_bag_count(space_id, &bag_count)) ||
+        bag_count < 0) {
+        return false;
+    }
+    for (int32_t bag = 0; bag < bag_count; ++bag) {
+        if (space_id == qol::contracts::kQolBagSpaceOriginal &&
+            bag == qol::contracts::kQolTaskBagIndex) {
+            continue;
+        }
+        if (!scope_bag_selected(bag, scope_bag)) continue;
+        if (!native_bag_has_same_item(space_id, bag, transfer)) continue;
+        if (scan_native_empty(space_id, bag, out)) return true;
+    }
+    return false;
+}
+
+bool registered_bag_has_same_item(const qol::contracts::QolBagSource* source, int32_t bag,
+                                  const contracts::QolBagTransfer& transfer) {
+    if (source == nullptr || source->info == nullptr || source->item_at == nullptr ||
+        source->export_item == nullptr) {
+        return false;
+    }
+    QolBagInfo info{};
+    if (!qol::contracts::succeeded(source->info(bag, &info)) || info.capacity < 0) return false;
+    for (int32_t slot = 0; slot < info.capacity; ++slot) {
+        QolInventoryItemRef existing{};
+        const QolResult probe = source->item_at(bag, slot, &existing);
+        if (probe.code == kQolErrNotFound) continue;
+        if (!qol::contracts::succeeded(probe)) continue;
+        if (existing.category != transfer.category || existing.count <= 0) continue;
+        contracts::QolBagTransfer payload{};
+        if (!qol::contracts::succeeded(source->export_item(existing.item, 1, &payload))) {
+            continue;
+        }
+        if (qol::contracts::qol_inventory_payload_identity_equal(
+                payload.payload, payload.payload_size, transfer.payload,
+                transfer.payload_size)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool scan_registered_same_item_empty(const qol::contracts::QolBagSource* source,
+                                     const contracts::QolBagTransfer& transfer,
+                                     int32_t scope_bag, PlacementTarget* out) {
+    if (out == nullptr || source == nullptr || source->count == nullptr) return false;
+    const int32_t bag_count = source->count();
+    if (bag_count < 0) return false;
+    for (int32_t bag = 0; bag < bag_count; ++bag) {
+        if (!scope_bag_selected(bag, scope_bag)) continue;
+        if (!registered_bag_has_same_item(source, bag, transfer)) continue;
+        if (scan_registered_empty(source, bag, out)) return true;
+    }
+    return false;
+}
+
+// scope_space < 0 = 所有注册源按注册序；否则只扫该注册源空间。
+bool scan_registered_sources_same_item_empty(const contracts::QolBagTransfer& transfer,
+                                             int32_t scope_space, int32_t scope_bag,
+                                             PlacementTarget* out) {
+    for (uint32_t index = 0; index < registered_bag_source_count(); ++index) {
+        const auto* source = registered_bag_source_at(index);
+        if (source == nullptr ||
+            source->space_id < qol::contracts::kQolBagSpaceFirstRegistered) {
+            continue;
+        }
+        if (scope_space >= 0 && source->space_id != scope_space) continue;
+        if (scan_registered_same_item_empty(source, transfer, scope_bag, out)) return true;
+    }
+    return false;
+}
+
 }  // namespace
 
 bool resolve_placement(const contracts::QolBagTransfer& transfer, bool stackable,
@@ -231,7 +343,8 @@ bool resolve_placement(const contracts::QolBagTransfer& transfer, bool stackable
     if (scope_bag >= 0 && scope_space < 0) return false;
 
     if (scope_space < 0) {
-        // 全局严格六步：原生合并 → 注册源合并（注册序）→ C18 合并 →
+        // 全局严格七步：原生合并 → 注册源合并（注册序）→ C18 合并 →
+        // 同物品袋空槽（原生→注册源→C18，逐袋尝试）→
         // 原生空槽 → 注册源空槽（注册序）→ C18 空槽。
         // C18 追加袋只在变体仍提供该背包时参与自动落槽；C18L v603 已移除 C18 背包
         // （原生 IsHavingEmptySlot/FindSaveSlot 也只扫 0..4），由变体能力位关闭这两步。
@@ -245,6 +358,17 @@ bool resolve_placement(const contracts::QolBagTransfer& transfer, bool stackable
             scan_native_merge(qol::contracts::kQolBagSpaceVariant, transfer, -1, out)) {
             return true;
         }
+        // 同物品袋空槽：第一个同身份袋满时继续下一个同身份袋，全部无处可放才继续。
+        if (scan_native_same_item_empty(qol::contracts::kQolBagSpaceOriginal, transfer, -1,
+                                        out)) {
+            return true;
+        }
+        if (scan_registered_sources_same_item_empty(transfer, -1, -1, out)) return true;
+        if (c18_auto &&
+            scan_native_same_item_empty(qol::contracts::kQolBagSpaceVariant, transfer, -1,
+                                        out)) {
+            return true;
+        }
         if (scan_native_empty(qol::contracts::kQolBagSpaceOriginal, -1, out)) return true;
         if (scan_registered_sources(transfer, false, -1, out)) return true;
         if (c18_auto && scan_native_empty(qol::contracts::kQolBagSpaceVariant, -1, out)) return true;
@@ -254,12 +378,20 @@ bool resolve_placement(const contracts::QolBagTransfer& transfer, bool stackable
     if (scope_space == qol::contracts::kQolBagSpaceOriginal ||
         scope_space == qol::contracts::kQolBagSpaceVariant) {
         if (stackable && scan_native_merge(scope_space, transfer, scope_bag, out)) return true;
+        if (scope_bag < 0 &&
+            scan_native_same_item_empty(scope_space, transfer, -1, out)) {
+            return true;
+        }
         return scan_native_empty(scope_space, scope_bag, out);
     }
     if (scope_space >= qol::contracts::kQolBagSpaceFirstRegistered) {
         const auto* source = find_bag_source(scope_space);
         if (source == nullptr) return false;
         if (stackable && scan_registered_merge(source, transfer, scope_bag, out)) return true;
+        if (scope_bag < 0 &&
+            scan_registered_same_item_empty(source, transfer, -1, out)) {
+            return true;
+        }
         return scan_registered_empty(source, scope_bag, out);
     }
     return false;
