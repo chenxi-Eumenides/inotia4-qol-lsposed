@@ -16,6 +16,8 @@
   * 主键为 arm64 `lib/arm64-v8a/libgame.so` 的 md5（16 字节）。
   * `.xapk` 的 arm64 库位于内部 `config.arm64_v8a.apk`，需先打开内层 zip。
   * 无 arm64 库的 APK 记为 unsupported：打印警告，不写入表。
+  * 只增不删：已生成的条目在源包被归档/移除后按原样保留，不因扫描不到而删除；
+    仍有源包的条目以本次扫描结果覆盖（能力位与版本标签随源包重算）。
   * 客观能力位由 ELF 结构事实计算；内容签名能力位从库字节检测，其余语义位由 `CURATION` 登记。
   * 输出确定性排序（系列 → 版本标签 → md5），不含时间戳，重复运行结果一致。
   * 脚本输出仅允许写入 apk/、output/、archive/、.tmp/ 或生成的 .inc 文件。
@@ -253,6 +255,84 @@ def collect() -> tuple[list[dict], list[str]]:
 
 SERIES_ORDER = {"original": 0, "overhaul": 1, "monster": 2, "c18": 3, "fantasy": 4, "unknown": 5}
 
+# 现有表体行：{GameSeries::kMonster, "v29", 0x00000003u, {0x4c, 0x33, ...}},
+TABLE_ROW_RE = re.compile(
+    r'^\s*\{GameSeries::k([A-Za-z0-9]+),\s*"([^"]*)",\s*0x([0-9a-fA-F]+)u,\s*\{([^}]*)\}\},\s*$'
+)
+
+# 表头源文件清单行：//   apk/game-apk/xxx.apk
+SOURCE_COMMENT_RE = re.compile(r"^//   (\S.*)$")
+
+
+def md5_hex_from_literals(body: str) -> str:
+    values = [int(pair, 16) for pair in re.findall(r"0x([0-9a-fA-F]{2})", body)]
+    if len(values) != 16:
+        raise SystemExit(f"[error] 现有变种表的 md5 字段不是 16 字节：{body}")
+    return "".join(f"{value:02x}" for value in values)
+
+
+def parse_table_rows(text: str) -> list[dict]:
+    """从表体文本还原条目；无法识别的行忽略，未知系列视为生成失败。"""
+    entries: list[dict] = []
+    for line in text.splitlines():
+        match = TABLE_ROW_RE.match(line)
+        if match is None:
+            continue
+        series_name, version, caps_hex, md5_body = match.groups()
+        series = series_name.lower()
+        if series not in SERIES_ORDER:
+            raise SystemExit(f"[error] 现有变种表含未知系列 {series_name}")
+        caps = int(caps_hex, 16)
+        entries.append({
+            "name": "(历史保留)",
+            "source": "(历史保留)",
+            "series": series,
+            "version": version,
+            "md5": md5_hex_from_literals(md5_body),
+            "sha256": "",
+            "size": 0,
+            "hidden": bool(caps & CAP_HIDDEN_SEGMENT),
+            "hidden_size": 0,
+            "marker": bool(caps & CAP_WAREHOUSE),
+            "c18_native_bag_layout_candidate": bool(caps & CAP_C18_NATIVE_BAG_LAYOUT_CANDIDATE),
+            "caps": caps,
+            "retained": True,
+        })
+    return entries
+
+
+def load_existing_table() -> tuple[list[dict], list[str]]:
+    """读取现有 .inc 的条目与源文件清单；文件不存在时返回两个空列表。"""
+    if not OUTPUT.exists():
+        return [], []
+    text = OUTPUT.read_text(encoding="utf-8")
+    return parse_table_rows(text), parse_source_list(text)
+
+
+def parse_source_list(text: str) -> list[str]:
+    """从表头注释还原已登记的源文件路径，用于在源包归档后继续保留清单。"""
+    return [match.group(1) for line in text.splitlines() if (match := SOURCE_COMMENT_RE.match(line))]
+
+
+def merge_sources(scanned: list[str], previous: list[str]) -> list[str]:
+    """保持既有清单顺序，追加本轮新扫描到的源文件。"""
+    merged = list(previous)
+    seen = set(previous)
+    for source in scanned:
+        if source not in seen:
+            merged.append(source)
+            seen.add(source)
+    return merged
+
+
+def merge_with_existing(live_entries: list[dict], existing_entries: list[dict]) -> tuple[list[dict], int]:
+    """合并本次扫描结果与既有条目：既有条目全部保留，同一 md5 由本次扫描结果覆盖。"""
+    merged = {entry["md5"]: entry for entry in existing_entries}
+    for entry in live_entries:
+        merged[entry["md5"]] = entry
+    entries = list(merged.values())
+    return entries, sum(1 for entry in entries if entry.get("retained"))
+
 
 def md5_bytes_literal(hex32: str) -> str:
     pairs = [hex32[i:i + 2] for i in range(0, 32, 2)]
@@ -319,11 +399,12 @@ def main() -> int:
             file=sys.stderr,
         )
 
-    entries = unique_entries
-    text = render(entries, sources)
+    previous_entries, previous_sources = load_existing_table()
+    entries, retained_count = merge_with_existing(unique_entries, previous_entries)
+    text = render(entries, merge_sources(sources, previous_sources))
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(text, encoding="utf-8")
-    print(f"生成 {OUTPUT.relative_to(ROOT)}：{len(entries)} 条")
+    print(f"生成 {OUTPUT.relative_to(ROOT)}：{len(entries)} 条（历史保留 {retained_count} 条）")
     if args.all:
         for e in sorted(entries, key=lambda x: (SERIES_ORDER[x["series"]], x["version"], x["md5"])):
             print(
