@@ -3,6 +3,8 @@
 // 资源安装/还原事务引擎（ARCHITECTURE.md §3.2 生命周期、§4.2 物理归还、§4.4 事务表）。
 //
 // 状态机 + 帧步进：每次 tx_step 推进至多一个资源步骤，禁止主线程阻塞等待。
+// 安装事务可由宿主在同一帧多次调用（受每帧全局步数上限约束）以缩短启动窗口；
+// release 事务保持每帧一次，以维持在途等待的帧预算语义。
 // 安装按注册表声明顺序，还原按逆序。执行期间只做机制调用、registry 读写与 gate
 // 读取，不调用插件业务代码；同一插件同时只允许一个未终态事务。
 //
@@ -56,6 +58,7 @@ struct TxStep {
     const char* error = nullptr;         // 本步失败原因；软失败也会保留在本字段
 };
 // 帧步进：推进至多一个资源步骤；返回 true = 仍需继续调用（含在途等待帧）。
+// 安装事务允许同一帧重复调用；release 事务每帧一次，避免 waited_frames 被加速消耗。
 bool tx_step(uint64_t tx_id, TxStep* out);
 
 // 中止仍在途的安装事务：仅 Running 的 kInstall 可用；逆序回滚已装子集后置 Failed 并终态化。
@@ -68,7 +71,7 @@ struct TxStatus {
     TxState state = TxState::kRunning;
     uint32_t step = 0;      // 已完成资源步骤数
     uint32_t total = 0;     // 资源总数
-    uint32_t frames = 0;    // 已消耗帧数（每次 tx_step 计 1）
+    uint32_t frames = 0;    // tx_step 调用次数；安装多步/帧时不再等于墙钟帧数
     uint32_t budget = 120;  // 当前资源的帧预算
     const char* failed_resource_id = nullptr;  // 静态字符串或 nullptr
     const char* error = nullptr;               // 静态字符串或 nullptr
