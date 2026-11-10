@@ -24,22 +24,24 @@ enum class RateId : uint8_t {
 };
 
 // 基础档位仅供 OP 关闭时面板使用；百分比配置可设 0 或超出档位范围，扩展档位才提供 0。
+// 百分比扩展档位：0~5 沿用基础档位，之后 ×10~×100 每 +10，×100 以上每步 ×10，上限 ×1000000。
 inline constexpr int32_t kRateLadder[] = {10, 30, 50, 80, 100, 120, 150, 200, 300, 500};
 inline constexpr uint32_t kRateLadderSize = sizeof(kRateLadder) / sizeof(kRateLadder[0]);
 inline constexpr int32_t kRateLadderExtended[] = {
-    0, 10, 30, 50, 80, 100, 120, 150, 200, 300, 500, 1000, 10000, 100000, 1000000,
-    10000000, 100000000};
+    0, 10, 30, 50, 80, 100, 120, 150, 200, 300, 500,
+    1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000,
+    100000, 1000000, 10000000, 100000000};
 inline constexpr uint32_t kRateLadderExtendedSize =
     sizeof(kRateLadderExtended) / sizeof(kRateLadderExtended[0]);
 inline constexpr int32_t kRateDefault = 100;
 
 // 基础掉落档位不含 0；配置仍可设为 0 表示不掉落。
+// 掉落扩展档位：0~10 每 +1，10~100 每 +10，最大 100。
 inline constexpr int32_t kDropQuantityLadder[] = {1, 2, 3, 4, 5};
 inline constexpr uint32_t kDropQuantityLadderSize =
     sizeof(kDropQuantityLadder) / sizeof(kDropQuantityLadder[0]);
 inline constexpr int32_t kDropQuantityLadderExtended[] = {
-    0, 1, 2, 3, 4, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120,
-    130, 140, 150, 160, 170, 180, 190, 200};
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100};
 inline constexpr uint32_t kDropQuantityLadderExtendedSize =
     sizeof(kDropQuantityLadderExtended) / sizeof(kDropQuantityLadderExtended[0]);
 inline constexpr int32_t kDropQuantityDefault = 1;
@@ -48,18 +50,20 @@ inline constexpr int32_t kDropRerollLadder[] = {1, 2, 3, 4, 5};
 inline constexpr uint32_t kDropRerollLadderSize =
     sizeof(kDropRerollLadder) / sizeof(kDropRerollLadder[0]);
 inline constexpr int32_t kDropRerollLadderExtended[] = {
-    0, 1, 2, 3, 4, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120,
-    130, 140, 150, 160, 170, 180, 190, 200};
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100};
 inline constexpr uint32_t kDropRerollLadderExtendedSize =
     sizeof(kDropRerollLadderExtended) / sizeof(kDropRerollLadderExtended[0]);
 inline constexpr int32_t kDropRerollDefault = 1;
 
-// 冷却倍率：10 = 0.1x，100 = 1x，500 = 5x；OP 扩展档位额外提供 0 与 1000（10x）。
+// 冷却倍率：10 = 0.1x，100 = 1x，500 = 5x。OP 扩展档位 0~5 沿用基础档位，
+// 之后与百分比同一套 ×10~×100 每 +10、×100 以上每步 ×10，上限 ×1000000。
 inline constexpr int32_t kCooldownLadder[] = {10, 30, 50, 80, 100, 200, 300, 500};
 inline constexpr uint32_t kCooldownLadderSize =
     sizeof(kCooldownLadder) / sizeof(kCooldownLadder[0]);
 inline constexpr int32_t kCooldownLadderExtended[] = {
-    0, 10, 30, 50, 80, 100, 200, 300, 500, 1000};
+    0, 10, 30, 50, 80, 100, 200, 300, 500,
+    1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000,
+    100000, 1000000, 10000000, 100000000};
 inline constexpr uint32_t kCooldownLadderExtendedSize =
     sizeof(kCooldownLadderExtended) / sizeof(kCooldownLadderExtended[0]);
 

@@ -14,9 +14,10 @@ void test_ladder_and_metadata() {
     assert(kRateLadderSize == 10);
     assert(kRateLadder[0] == 10 && kRateLadder[4] == 100 && kRateLadder[9] == 500);
     const int32_t expected_extended_percent[] = {
-        0, 10, 30, 50, 80, 100, 120, 150, 200, 300, 500, 1000, 10000, 100000,
-        1000000, 10000000, 100000000};
-    assert(kRateLadderExtendedSize == 17);
+        0, 10, 30, 50, 80, 100, 120, 150, 200, 300, 500,
+        1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000,
+        100000, 1000000, 10000000, 100000000};
+    assert(kRateLadderExtendedSize == 25);
     for (uint32_t i = 0; i < kRateLadderExtendedSize; ++i) {
         assert(kRateLadderExtended[i] == expected_extended_percent[i]);
     }
@@ -40,7 +41,10 @@ void test_ladder_and_metadata() {
     assert(!ladder_can_shift(RateId::kGold, 600, 1, false));
     assert(!ladder_can_shift(RateId::kGold, 100, 0, false));
     assert(ladder_shift(RateId::kGold, 500, 1, true) == 1000);
-    assert(ladder_shift(RateId::kGold, 1000, 1, true) == 10000);
+    assert(ladder_shift(RateId::kGold, 1000, 1, true) == 2000);
+    assert(ladder_shift(RateId::kGold, 10000, 1, true) == 100000);
+    assert(ladder_shift(RateId::kGold, 100000, 1, true) == 1000000);
+    assert(ladder_shift(RateId::kGold, 1000, -1, true) == 500);
     assert(ladder_shift(RateId::kGold, 10000000, 1, true) == 100000000);
     assert(!ladder_can_shift(RateId::kGold, 100000000, 1, true));
     assert(ladder_shift(RateId::kGold, 10, -1, true) == 0);
@@ -91,7 +95,10 @@ void test_ladder_and_metadata() {
     assert(ladder_index(RateId::kPotionCooldown, 100, false) == 4);
     assert(ladder_index(RateId::kSkillCooldown, 10, false) == 0);
     assert(ladder_shift(RateId::kPotionCooldown, 500, 1, true) == 1000);
+    assert(ladder_shift(RateId::kPotionCooldown, 1000, 1, true) == 2000);
     assert(ladder_shift(RateId::kSkillCooldown, 10, -1, true) == 0);
+    assert(ladder_shift(RateId::kSkillCooldown, 10000000, 1, true) == 100000000);
+    assert(kCooldownLadderExtendedSize == 23);
     assert(kDropQuantityLadderSize == 5 && kDropQuantityLadder[0] == 1 &&
            kDropQuantityLadder[4] == 5);
     assert(kDropRerollLadderSize == 5 && kDropRerollLadder[0] == 1 &&
@@ -99,19 +106,22 @@ void test_ladder_and_metadata() {
     assert(ladder_shift(RateId::kDropQuantity, 1, 1, false) == 2);
     assert(ladder_shift(RateId::kDropQuantity, 0, -1, false) == 0);
     assert(ladder_shift(RateId::kDropQuantity, 5, 1, false) == 5);
-    assert(ladder_shift(RateId::kDropQuantity, 5, 1, true) == 10);
+    assert(ladder_shift(RateId::kDropQuantity, 5, 1, true) == 6);
+    assert(ladder_shift(RateId::kDropQuantity, 10, 1, true) == 20);
+    assert(ladder_shift(RateId::kDropQuantity, 100, -1, true) == 90);
     assert(ladder_shift(RateId::kDropQuantity, 1, -1, true) == 0);
     assert(!ladder_can_shift(RateId::kDropQuantity, 0, -1, true));
-    assert(!ladder_can_shift(RateId::kDropQuantity, 200, 1, true));
-    assert(kDropQuantityLadderExtended[0] == 0 && kDropQuantityLadderExtended[25] == 200);
-    assert(kDropRerollLadderExtended[0] == 0 && kDropRerollLadderExtended[25] == 200);
-    assert(kDropQuantityLadderExtendedSize == 26 && kDropRerollLadderExtendedSize == 26);
-    for (uint32_t i = 6; i < kDropQuantityLadderExtendedSize; ++i) {
-        assert(kDropQuantityLadderExtended[i] == static_cast<int32_t>((i - 5) * 10));
-        assert(kDropRerollLadderExtended[i] == static_cast<int32_t>((i - 5) * 10));
+    assert(!ladder_can_shift(RateId::kDropQuantity, 100, 1, true));
+    const int32_t expected_drop_extended[] = {
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100};
+    assert(kDropQuantityLadderExtendedSize == 20 && kDropRerollLadderExtendedSize == 20);
+    for (uint32_t i = 0; i < kDropQuantityLadderExtendedSize; ++i) {
+        assert(kDropQuantityLadderExtended[i] == expected_drop_extended[i]);
+        assert(kDropRerollLadderExtended[i] == expected_drop_extended[i]);
     }
     assert(ladder_shift(RateId::kDropReroll, 1, -1, true) == 0);
-    assert(ladder_shift(RateId::kDropReroll, 5, 1, true) == 10);
+    assert(ladder_shift(RateId::kDropReroll, 5, 1, true) == 6);
+    assert(ladder_shift(RateId::kDropReroll, 10, 1, true) == 20);
     assert(rate_display(RateId::kDropQuantity, 0) == "×0");
     assert(rate_display(RateId::kDropQuantity, 6) == "×6");
     assert(rate_display(RateId::kDropQuantity, INT32_MAX) == "×2147483647");
