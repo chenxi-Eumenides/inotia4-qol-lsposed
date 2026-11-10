@@ -26,6 +26,9 @@ enum class QolItemType : int32_t {
     kLamp = 13,
     kUseAfterConfirm = 14,
     kOther = 15,
+    // monster 改版宝石拆卸器（永久）：拖到装备上走 UIEquip_ApplyStuff 的
+    // category 0x3fa 专属分支，取出已镶宝石且不消耗自身。
+    kGemRemover = 16,
 };
 
 // Native use paths:
@@ -35,6 +38,7 @@ enum class QolItemType : int32_t {
 // - kUseAfterConfirm: UI confirmation, then CHAR_UseItemEx.
 // - kMercenarySeal: MERCENARYSYSTEM_MakeMercenary.
 // - kItemBox: ITEMSYSTEM_OpenItemBox or ITEMSYSTEM_ProcessUnpack.
-// - kEquipment/kBackpack/kJewel/kEnchantScroll: equip/apply, not use.
+// - kEquipment/kBackpack/kJewel/kEnchantScroll/kGemRemover: equip/apply, not use.
+//   kGemRemover 只存在于 monster 变体，apply 成功后材料不消耗。
 
 }  // namespace qol::contracts

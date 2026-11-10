@@ -228,6 +228,7 @@ bool valid_item_type(qol::contracts::QolItemType type) {
         case QolItemType::kItemBox:
         case QolItemType::kSynthSet:
         case QolItemType::kOther:
+        case QolItemType::kGemRemover:
             return true;
     }
     return false;

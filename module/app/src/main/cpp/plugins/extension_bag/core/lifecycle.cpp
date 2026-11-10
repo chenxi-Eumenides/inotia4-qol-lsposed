@@ -119,10 +119,10 @@ uint64_t call_original_event_with_inventory_guard(uint64_t event, uint64_t param
     return result;
 }
 
-// 0x18 落点若不是任何背包格/页签目标，扩展宝石/强化卷轴唯一合法的原版落点是
-// 人物装备槽。该情形必须把 release 交还原版 TouchHandle，让装备槽控件的 0x04
-// 进入 H-15 适配；session 在原版返回前保持存活。仅按源物品类型与“无背包目标”
-// 判定，装备槽识别和 apply 准入仍由 H-15 自己完成。
+// 0x18 落点若不是任何背包格/页签目标，扩展 apply 材料（宝石/强化卷轴/拆卸器）
+// 唯一合法的原版落点是人物装备槽。该情形必须把 release 交还原版 TouchHandle，
+// 让装备槽控件的 0x04 进入 H-15 适配；session 在原版返回前保持存活。仅按源物品
+// 类型与“无背包目标”判定，装备槽识别和 apply 准入仍由 H-15 自己完成。
 bool projected_release_is_equipment_apply_candidate_locked(int64_t x, int64_t y) {
     if (!projected_drag_session_active_locked()) return false;
     const auto& session = qol::extension_bag::ui_state().ui.extension_drag_session;
@@ -131,8 +131,7 @@ bool projected_release_is_equipment_apply_candidate_locked(int64_t x, int64_t y)
         return false;
     }
     void* material = qol::extension_bag::ui_state().objects.module_objects[session.source_bag][session.source_slot];
-    if (!item_type_is(material, qol::contracts::QolItemType::kJewel) &&
-        !item_type_is(material, qol::contracts::QolItemType::kEnchantScroll)) {
+    if (!item_is_apply_material(material)) {
         return false;
     }
     if (original_bag_button_index(x, y) >= 0) return false;

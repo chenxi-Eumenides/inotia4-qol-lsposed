@@ -4,6 +4,7 @@
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/model/equip_rules.h"
 
 #include <cstdint>
 
@@ -196,6 +197,16 @@ bool read_item_cumulate_count(const void* item, int* out_count) {
 bool item_type_is(const void* item, qol::contracts::QolItemType expected) {
     qol::contracts::QolItemType type = qol::contracts::QolItemType::kUnknown;
     return read_item_type(item, &type) && type == expected;
+}
+
+bool item_is_apply_material(const void* item) {
+    qol::contracts::QolItemType type = qol::contracts::QolItemType::kUnknown;
+    return read_item_type(item, &type) && extension_bag_item_type_is_apply_material(type);
+}
+
+bool item_apply_consumes(const void* item) {
+    qol::contracts::QolItemType type = qol::contracts::QolItemType::kUnknown;
+    return read_item_type(item, &type) && extension_bag_item_type_consumes_on_apply(type);
 }
 
 bool read_item_is_usable(int category) {

@@ -76,6 +76,14 @@ QolResult read_item_type(contracts::QolItemHandle handle, contracts::QolItemType
     const int category = attr_item_category(item);
     if (category < 0) return not_ready();
 
+    // monster 宝石拆卸器（永久）固定使用 ITEMDATABASE 下标 1018（0x3fa）。
+    // 游戏只在 UIEquip_IsApplyStuff/UIEquip_ApplyStuff 的变体入口按该 category
+    // 分派拆卸，ITEMCLASSBASE 没有对应记录，无法从通用 use_type 推出。
+    if (qol::is_gem_remover_category(qol::game_variant().series, category)) {
+        *out = contracts::QolItemType::kGemRemover;
+        return contracts::ok();
+    }
+
     // The order encodes precedence: a backpack is not reported as equipment,
     // and a sealed skill book is a skill book rather than a generic item box.
     if (item_is_backpack_category(category)) {

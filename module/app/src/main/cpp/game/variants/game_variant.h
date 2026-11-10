@@ -41,6 +41,12 @@ const GameVariant& game_variant();
 // C18L v507+ 的 MakeJewel 用表驱动宝石数值（0x14ee68）；旧 C18 仍走 CAL 公式。
 bool c18_gem_table_supported(const GameVariant& variant);
 bool c18_gem_table_available();
+// monster v20+ 的宝石拆卸器（永久）固定占用 ITEMDATABASE 下标 1018（0x3fa）；
+// 同下标的 c18「随机饰品」与 overhaul 越界项不得按拆卸器处理。
+inline bool is_gem_remover_category(GameSeries series, int category) {
+    return series == GameSeries::kMonster && category == 1018;
+}
+
 // "unknown" / "original" / "overhaul" / "monster" / "c18" / "fantasy"
 const char* game_series_name(GameSeries s);
 bool sell_multiplier(GameSeries series, uint32_t sale_path, uint32_t* num, uint32_t* den);

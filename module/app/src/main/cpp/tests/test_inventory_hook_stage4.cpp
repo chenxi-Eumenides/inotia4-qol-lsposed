@@ -5,6 +5,7 @@
 #include "plugins/extension_bag/model/equip_rules.h"
 
 #include "game/symbols/game_symbols.h"
+#include "game/variants/game_variant.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -229,6 +230,22 @@ static void test_object_operations() {
     CHECK(extension_bag_is_apply_candidate(false, true, true, true) == false);
     CHECK(extension_bag_is_apply_candidate(true, false, true, true) == false);
     CHECK(extension_bag_is_apply_candidate(false, false, false, false) == false);
+    // 作用材料分类：monster 宝石拆卸器与宝石/卷轴同为 apply 材料，但拆卸器为永久
+    // 道具，apply 成功后不消耗自身。
+    CHECK(extension_bag_item_type_is_apply_material(qol::contracts::QolItemType::kJewel));
+    CHECK(extension_bag_item_type_is_apply_material(qol::contracts::QolItemType::kEnchantScroll));
+    CHECK(extension_bag_item_type_is_apply_material(qol::contracts::QolItemType::kGemRemover));
+    CHECK(!extension_bag_item_type_is_apply_material(qol::contracts::QolItemType::kPotion));
+    CHECK(!extension_bag_item_type_is_apply_material(qol::contracts::QolItemType::kOther));
+    CHECK(extension_bag_item_type_consumes_on_apply(qol::contracts::QolItemType::kJewel));
+    CHECK(extension_bag_item_type_consumes_on_apply(qol::contracts::QolItemType::kEnchantScroll));
+    CHECK(!extension_bag_item_type_consumes_on_apply(qol::contracts::QolItemType::kGemRemover));
+    // 1018 只在 monster 变体是宝石拆卸器；c18 同下标为随机饰品，overhaul 越界。
+    CHECK(qol::is_gem_remover_category(qol::GameSeries::kMonster, 1018));
+    CHECK(!qol::is_gem_remover_category(qol::GameSeries::kMonster, 1017));
+    CHECK(!qol::is_gem_remover_category(qol::GameSeries::kC18, 1018));
+    CHECK(!qol::is_gem_remover_category(qol::GameSeries::kOverhaul, 1018));
+    CHECK(!qol::is_gem_remover_category(qol::GameSeries::kOriginal, 1018));
     CHECK(extension_bag_finish_requires_abort(false));
     CHECK(!extension_bag_finish_requires_abort(true));
 }

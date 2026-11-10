@@ -345,9 +345,8 @@ bool route_projected_session_drop_locked(::qol::extension_bag::ReentryLock& lock
         ? qol::extension_bag::ui_state().objects.module_objects[source_bag][source_slot] : nullptr;
     void* target_item = target_slot >= 0 && target_slot < runtime_state().objects.bag.capacities[target_bag]
         ? qol::extension_bag::ui_state().objects.module_objects[target_bag][target_slot] : nullptr;
-    const bool source_is_apply_material =
-        item_type_is(material, qol::contracts::QolItemType::kJewel) || item_type_is(material, qol::contracts::QolItemType::kEnchantScroll);
-    // S-03 apply 准入（R-50）：同袋 + 扩展宝石/强化卷轴源 + 目标为装备类 +
+    const bool source_is_apply_material = item_is_apply_material(material);
+    // S-03 apply 准入（R-50）：同袋 + 扩展 apply 材料源（宝石/卷轴/拆卸器）+ 目标为装备类 +
     // IsApplyStuff 判真。目标类型用 item.facts.item_type 判定（不可用按非装备
     // fail-closed），普通物品目标不得进入 apply；不设提前 return，统一落到
     // 下方事务分支（交换/移动）并保证 session_finish_transaction 必然执行。

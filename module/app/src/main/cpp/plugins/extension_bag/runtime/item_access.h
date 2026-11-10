@@ -9,6 +9,8 @@ JavaVM* g_jvm();
 bool read_item_category(const void* item, int* out_category);
 bool read_item_type(const void* item, qol::contracts::QolItemType* out_type);
 bool item_type_is(const void* item, qol::contracts::QolItemType expected);
+bool item_is_apply_material(const void* item);
+bool item_apply_consumes(const void* item);
 int original_item_category_locked(void* item);
 bool extension_bag_register_item_handle(void* item);
 bool extension_bag_item_handle_for_pointer(void* item,

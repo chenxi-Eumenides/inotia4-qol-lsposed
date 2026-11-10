@@ -167,6 +167,7 @@ kMaxRenderedExtensionBagTabs = 20; // UI 页签上限（4 列 × 5 行）
 - 资源：`ptrslot:MOVE_MERGE_GOT`（optional、fail-closed），声明表在 `core/move_merge_hook.cpp`；端口 `QOL_PORT_MOVE_MERGE`（Host 白名单允许 `core.item` 或 `extension_bag`）。
 - feature：`move_merge.drag_merge`（「拖动合并」，BasicOptimization、默认开启），callback 更新合并 gate；禁用或 wrapper 未就绪时不启用自动合并。
 - 行为边界：只在整个源堆可放入目标剩余容量时合并，不拆成部分堆叠；投影显示槽同步与原版刷新由本插件完成。原 `move_merge.control` 提供面已删除，可用性以 gate/wrapper 就绪状态为准。
+- 落到装备槽的 apply 材料（`item.facts.item_type` = 宝石/强化卷轴/`gem_remover`）交原版 `UIEquip_ApplyStuff` 处理，不执行两槽交换。`gem_remover` 是 monster 变体的宝石拆卸器，属永久道具：原生 apply 成功后材料仍保留，扩展袋路径不得把“未消耗”判为失败。
 
 ### 8.4 装备页 UI hook（自 `core.item` 迁入）
 

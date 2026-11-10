@@ -13,6 +13,7 @@
 #include "contracts/ui.h"
 #include "plugins/extension_bag/assembly/projection_registration.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
+#include "plugins/extension_bag/model/equip_rules.h"
 #include "plugins/extension_bag/runtime/state.h"
 
 namespace qol::features::extension_bag::merge {
@@ -90,15 +91,15 @@ bool extension_item(const contracts::InventoryProjectionCallbacks* projection,
     return contracts::succeeded(projection->identify_extension_item(item, &bag, &slot));
 }
 
-// 只有卷轴/宝石这类“作用到装备上”的物品才允许走强化/镶嵌；药水等一律走交换。
+// 只有“作用到装备上”的物品（宝石/强化卷轴，及 monster 变体的宝石拆卸器）才允许
+// 交给原版做强化的镶嵌/拆卸；药水等一律走交换。
 // item.facts.item_type 是权威分类（kJewel/kEnchantScroll 等价旧 static_text
 // "gem"/"scroll" 判定），迁移后不再依赖 ITEM 端口读静态文本。
 bool is_apply_material(const contracts::ItemFactsApi* facts, contracts::QolItemHandle item) {
     if (facts == nullptr || facts->item_type == nullptr) return false;
     contracts::QolItemType type = contracts::QolItemType::kUnknown;
     if (!contracts::succeeded(facts->item_type(item, &type))) return false;
-    return type == contracts::QolItemType::kJewel ||
-           type == contracts::QolItemType::kEnchantScroll;
+    return extension_bag_item_type_is_apply_material(type);
 }
 
 bool item_facts(const contracts::ItemFactsApi* facts, contracts::QolItemHandle item,

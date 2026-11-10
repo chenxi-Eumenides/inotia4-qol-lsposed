@@ -87,9 +87,8 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
         target_slot_index = control != nullptr ? extension_bag_ui_item_slot(control) : -1;
         const bool extension_source =
             source_item != nullptr && module_slot_of_item_locked(source_item, &source_bag, &source_slot);
-        const bool source_is_apply_material = extension_source &&
-            (item_type_is(source_item, qol::contracts::QolItemType::kJewel) ||
-             item_type_is(source_item, qol::contracts::QolItemType::kEnchantScroll));
+        const bool source_is_apply_material =
+            extension_source && item_is_apply_material(source_item);
         // H-15 装备槽事件适配（R-50）：目标必须是装备类（item_is_equip 判定；
         // 类别数据不可用时 item_is_equip 为假，按非装备 fail-closed 直通原版
         // backup，不得 Blocked），且落点是装备槽控件（slot index >= 16）。
@@ -272,12 +271,16 @@ bool apply_extension_material_to_slot_locked(
     const int source_category = ::qol::extension_bag::access::bag().items[src_bag][src_slot].category;
     const bool source_is_jewel = item_type_is(material, qol::contracts::QolItemType::kJewel);
     const bool source_is_scroll = item_type_is(material, qol::contracts::QolItemType::kEnchantScroll);
-    if (!source_is_jewel && !source_is_scroll) {
-        VIRTBAG_LOG("apply reject reason=material kind=%d jewel=%d scroll=%d",
-                    source_category, source_is_jewel ? 1 : 0, source_is_scroll ? 1 : 0);
+    const bool source_is_remover = item_type_is(material, qol::contracts::QolItemType::kGemRemover);
+    if (!source_is_jewel && !source_is_scroll && !source_is_remover) {
+        VIRTBAG_LOG("apply reject reason=material kind=%d jewel=%d scroll=%d remover=%d",
+                    source_category, source_is_jewel ? 1 : 0, source_is_scroll ? 1 : 0,
+                    source_is_remover ? 1 : 0);
         return false;
     }
-    const char* kind = source_is_jewel ? "jewel" : "scroll";
+    const char* kind = source_is_jewel ? "jewel" : (source_is_scroll ? "scroll" : "remover");
+    // 拆卸器是永久道具：原生拆卸成功后材料仍保留，不能把“未消耗”判为 apply 失败。
+    const bool material_consumes = item_apply_consumes(material);
 
     const auto& host = ::qol::extension_bag::access::host();
     int32_t apply_allowed = 0;
@@ -330,7 +333,7 @@ bool apply_extension_material_to_slot_locked(
     bool consumed = false;
     ModuleUseReleasePlan release_plan{};
     const bool finished = module_use_finish_locked(use_token, &consumed, &release_plan);
-    if (!finished || !consumed) {
+    if (!finished || (!consumed && material_consumes)) {
         bool isolated = false;
         if (finished) {
             isolated = module_use_abort_isolate_locked(use_token);
@@ -476,11 +479,10 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
         }
     }
     const int dst_bag = qol::extension_bag::ui_state().objects.module_view_index;
-    const bool source_is_apply_material =
-        item_type_is(item, qol::contracts::QolItemType::kJewel) || item_type_is(item, qol::contracts::QolItemType::kEnchantScroll);
+    const bool source_is_apply_material = item_is_apply_material(item);
     void* dst_data = extension_bag_ui_data(dst_control);
     void* target_item = dst_data != nullptr ? *reinterpret_cast<void**>(dst_data) : nullptr;
-    // S-03 apply 准入（R-50）：同袋 + 扩展宝石/强化卷轴源 + 目标为装备类 +
+    // S-03 apply 准入（R-50）：同袋 + 扩展 apply 材料源（宝石/卷轴/拆卸器）+ 目标为装备类 +
     // IsApplyStuff 判真。目标类别用 item_is_equip 判定（kNotEncoded=装备类；
     // 数据不可用返回 false，按非装备 fail-closed 回退 swap），不得按
     // 「不可堆叠」近似装备。非 apply 候选必须 fallthrough 到下方扩展事务，
