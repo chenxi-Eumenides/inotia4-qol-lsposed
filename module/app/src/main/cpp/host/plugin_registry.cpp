@@ -2256,7 +2256,9 @@ static bool lifecycle_apply_actual(const char* plugin_id, int32_t action) {
                 return false;
             }
             ctx = make_plugin_context(plugin->id);
-            if (plugin->install != nullptr && plugin->install(ctx) != 0) {
+            const int32_t install_code = plugin->install != nullptr ? plugin->install(ctx) : 0;
+            if (install_code != 0) {
+                g_last_failure_code[index] = install_code;
                 QOL_LOG_ERROR(QolDomain::kCore,
                               "plugin %s install failed: plugin install returned nonzero",
                               plugin->id);
@@ -2644,7 +2646,10 @@ static uint32_t lifecycle_step_engine() {
                     revoke_resource(out.resource_id, g_install_deps);
                 } else if (plugin.on_resource_ready != nullptr) {
                     contracts::PluginContext ctx = make_plugin_context(plugin.id);
-                    if (plugin.on_resource_ready(ctx, out.resource_id, out.backup) != 0) {
+                    const int32_t ready_code =
+                        plugin.on_resource_ready(ctx, out.resource_id, out.backup);
+                    if (ready_code != 0) {
+                        g_last_failure_code[slot.plugin_index] = ready_code;
                         const contracts::ResourceClaim* ready_claim =
                             hooks::find_claim(out.resource_id);
                         const bool soft_ready =
@@ -2724,10 +2729,11 @@ static uint32_t lifecycle_step_engine() {
             const bool succeeded = have_status && status.state == hooks::TxState::kSucceeded;
             contracts::PluginContext ctx = make_plugin_context(plugin.id);
             if (succeeded) {
-                // 事务成功终态：此前记录的本步失败码不再代表插件当前状态，
-                // 避免 Reconciler 依据陈旧 NotReady 触发多余重试。
-                g_last_failure_code[slot.plugin_index] = 0;
                 if (slot.kind == hooks::TxKind::kInstall) {
+                    // 安装事务成功终态：此前记录的本步失败码不再代表插件当前状态，
+                    // 避免 Reconciler 依据陈旧 NotReady 触发多余重试。撤销事务成功
+                    // 不清除该码：安装失败后的清理撤销不能抹掉驱动重试的瞬态码。
+                    g_last_failure_code[slot.plugin_index] = 0;
                     if (g_feature_mode && (!g_feature_wanted[slot.plugin_index] ||
                                           check_requires(plugin, slot.plugin_index) != nullptr)) {
                         const auto index = slot.plugin_index;

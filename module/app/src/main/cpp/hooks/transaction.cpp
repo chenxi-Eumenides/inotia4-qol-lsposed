@@ -177,13 +177,15 @@ void rollback_install(Tx& tx) {
     }
 }
 
-bool fail_install(Tx& tx, const char* resource_id, const char* error, TxStep* out) {
+bool fail_install(Tx& tx, const char* resource_id, const char* error, TxStep* out,
+                  int32_t code = 1) {
     tx.failed_resource_id = resource_id;
     tx.error = error;
     rollback_install(tx);
     tx.state = TxState::kFailed;
     out->resource_id = resource_id;
-    out->ok = 1;
+    // 保留原始失败码（required+fail-closed 的 NotReady 决定宿主是否可重试）；非 0 即失败。
+    out->ok = code != 0 ? code : 1;
     out->backup = nullptr;
     out->finished = true;
     out->error = error;
@@ -229,7 +231,7 @@ bool fail_install_resource(Tx& tx, const contracts::ResourceClaim& claim, int32_
         claim.requirement == contracts::ResourceRequirement::kRequired &&
         claim.failure == contracts::ResourceFailure::kFailClosed;
     if (fail_closed_required) {
-        return fail_install(tx, claim.id, error, out);
+        return fail_install(tx, claim.id, error, out, code);
     }
     // ownership 的 NotReady 定向恢复由宿主按 SaveEnter 信号单独武装；
     // 这里只覆盖常驻 fail-soft/optional 机制，避免与宿主恢复状态重复。

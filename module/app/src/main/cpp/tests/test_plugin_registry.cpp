@@ -1036,6 +1036,34 @@ void test_last_failure_code_tracks_notready_until_success() {
     g_ownership.fail_acquire_at = 0;
 }
 
+ResourceClaim fm_code_required[] = {ownership_claim("own:fm:code:req", "fm_code_req")};
+
+// required + fail-closed 安装失败终态也必须保留原始机制码：NotReady 是 Reconciler
+// 判断可重试的唯一依据，不能退化成通用失败码 1。
+void test_last_failure_code_keeps_notready_on_failed_terminal() {
+    reset_feature_mode("fm_code_req", fm_code_required, 1);
+    g_ownership.fail_acquire_at = 1;
+    g_ownership.fail_acquire_code = kQolErrNotReady;
+    CHECK(qol::host::feature_registry_transition("fm_code_req", true));
+    drive_feature_steps();
+    CHECK(feature_state_is("fm_code_req", FeatureState::kFailed));
+    CHECK(qol::hooks::state_of("own:fm:code:req") == ResourceState::kFree);
+    CHECK(qol::host::feature_registry_last_failure_code("fm_code_req") == kQolErrNotReady);
+}
+
+ResourceClaim fm_code_permanent[] = {claim("hook:fm:code:perm:a", "fm_code_perm", nullptr)};
+
+// 永久失败（安装原语返回普通错误）不得被误报为 NotReady，否则会触发无意义重试。
+void test_last_failure_code_permanent_error_is_generic() {
+    reset_feature_mode("fm_code_perm", fm_code_permanent, 1);
+    g_backend.fail_hook_call = 1;
+    CHECK(qol::host::feature_registry_transition("fm_code_perm", true));
+    drive_feature_steps();
+    CHECK(feature_state_is("fm_code_perm", FeatureState::kFailed));
+    CHECK(qol::host::feature_registry_last_failure_code("fm_code_perm") == 1);
+    CHECK(qol::host::feature_registry_last_failure_code("fm_code_perm") != kQolErrNotReady);
+}
+
 }  // namespace
 
 int main() {
@@ -1065,6 +1093,8 @@ int main() {
     test_startup_ownership_ready_notify_failure_revokes();
     test_startup_ownership_restore_keeps_other_optional_degraded();
     test_last_failure_code_tracks_notready_until_success();
+    test_last_failure_code_keeps_notready_on_failed_terminal();
+    test_last_failure_code_permanent_error_is_generic();
     std::printf("plugin_registry: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
