@@ -16,6 +16,11 @@
 
 证据：`module/app/src/main/cpp/game/symbols/game_symbols.h:19,70-87,493`；`module/app/src/main/cpp/game/ops/character_state_read.cpp:107-118`。
 
+### 1.1 面板选中角色与上限重算
+
+- 面板当前选中角色由 `PARTY_GetMenuCharacter`（`0x120338`）给出，索引在 `PARTY_nMenuIndex`（`0x728ed8`）。该入口与原版角色面板同源；`menu_character` 为空或解析失败时才回退 `party_member(0)`。固定取 0 号队员不等于面板选中角色。
+- 最大生命上限重算走 `CHAR_UpdateAttrFromMonster` 唯一入口。直接写 HP 上限字段（`ch+0x9c`）不会触发派生属性重算；需要重算时必须走该入口。
+
 ## 2. 主属性（5 项）
 
 | i | 名称 | 主要贡献 |

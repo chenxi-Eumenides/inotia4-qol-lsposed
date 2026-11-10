@@ -1,6 +1,6 @@
 # 冷却机制（技能 / 药水 / 道具）
 
-> 日期：2026-11-08（2026-11-10 补充复活卷轴与 monster v29 变体） ｜ 适用版本：`c18-v520`、`c18-v603`（冷却符号同址） ｜ 样本：`apk/decoded/c18-v520/lib/arm64-v8a/libgame.so`
+> 日期：2026-11-08（2026-11-10 补充复活卷轴、monster v29 变体与 60ms 逻辑帧换算） ｜ 适用版本：`c18-v520`、`c18-v603`（冷却符号同址） ｜ 样本：`apk/decoded/c18-v520/lib/arm64-v8a/libgame.so`
 > 来源：`readelf` 动态符号 + `aarch64-linux-gnu-objdump` 反汇编 + `apk/static-data/json/tables/ACTDATABASE.json`
 
 ## 1. 结论摘要
@@ -30,7 +30,7 @@
 9cba4: str  x0,  [x19]
 ```
 
-因此所有冷却常量单位均为 tick。按 60 FPS 估算：`165 tick ≈ 2.75 s`，`15 tick = 0.25 s`；技能按公式换算。实际秒数依赖游戏逻辑帧率，非固定 60 时需要真机校准。
+因此所有冷却常量单位均为 tick。**本运行环境逻辑帧固定 60ms/帧（约 16.7 FPS）**，换算必须用 60ms/tick：`165 tick ≈ 9.9 s`，`15 tick ≈ 0.9 s`，`45 tick ≈ 2.7 s`；技能按公式换算。不要按 60 FPS（16.7ms/tick）估算，旧版文档中的 2.75s/0.25s 示例已过期。逻辑帧率若变化，按 60ms/tick 重新校准，见 [`runtime.md`](runtime.md)。
 
 ## 3. 技能冷却
 
