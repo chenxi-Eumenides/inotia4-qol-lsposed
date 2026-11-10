@@ -1,4 +1,5 @@
 #include "contracts/character_facts.h"
+#include "contracts/events.h"
 #include "contracts/game_host.h"
 #include "contracts/game_ports/character_extras_port.h"
 #include "contracts/game_ports/ports.h"
@@ -11,6 +12,7 @@
 #include <cassert>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -81,6 +83,51 @@ int g_merc_slot_calls = 0;
 int g_desc_type_calls = 0;
 int g_backup_equip_calls = 0;
 int g_backup_unequip_calls = 0;
+
+// ---- 事件总线 fake：记录订阅并支持按类型注入 payload ----
+struct FakeEventSubscription {
+    uint32_t type = 0;
+    QolEventHandler handler = nullptr;
+    void* ctx = nullptr;
+    uint64_t id = 0;
+};
+
+std::vector<FakeEventSubscription> g_event_subscriptions;
+int g_event_subscribe_calls = 0;
+int g_event_unsubscribe_calls = 0;
+uint64_t g_next_event_subscription = 1;
+
+QolResult fake_event_subscribe(uint32_t type, QolEventHandler handler, void* ctx,
+                               uint64_t* out_id) {
+    ++g_event_subscribe_calls;
+    assert(handler != nullptr && out_id != nullptr);
+    FakeEventSubscription subscription{};
+    subscription.type = type;
+    subscription.handler = handler;
+    subscription.ctx = ctx;
+    subscription.id = g_next_event_subscription++;
+    g_event_subscriptions.push_back(subscription);
+    *out_id = subscription.id;
+    return ok();
+}
+
+QolResult fake_event_unsubscribe(uint64_t id) {
+    ++g_event_unsubscribe_calls;
+    for (auto it = g_event_subscriptions.begin(); it != g_event_subscriptions.end(); ++it) {
+        if (it->id == id) {
+            g_event_subscriptions.erase(it);
+            return ok();
+        }
+    }
+    return error(kQolErrNotFound, "not found", 9);
+}
+
+void publish_fake_event(uint32_t type, const void* payload) {
+    const std::vector<FakeEventSubscription> snapshot = g_event_subscriptions;
+    for (const FakeEventSubscription& subscription : snapshot) {
+        if (subscription.type == type) subscription.handler(subscription.ctx, payload);
+    }
+}
 
 std::string g_intercept_resource_id;
 int32_t (*g_intercept_predicate)(void*) = nullptr;
@@ -347,11 +394,17 @@ void setup_fake_interfaces() {
     g_optional_warning_logged = false;
     g_backup_equip_calls = 0;
     g_backup_unequip_calls = 0;
+    g_event_subscriptions.clear();
+    g_event_subscribe_calls = 0;
+    g_event_unsubscribe_calls = 0;
+    g_next_event_subscription = 1;
     reset_read_counts();
 
     g_sdk.log.write = &fake_log_write;
     g_sdk.log.debug_enabled = &fake_debug_enabled;
     g_sdk.capabilities.require = &fake_require;
+    g_sdk.events.subscribe = &fake_event_subscribe;
+    g_sdk.events.unsubscribe = &fake_event_unsubscribe;
     g_sdk.hooks.set_intercept = &fake_set_intercept;
     g_sdk.hooks.clear_intercept = &fake_clear_intercept;
     g_sdk.in_flight.enter = &fake_in_flight_enter;
@@ -597,6 +650,64 @@ void test_reject_diagnostics() {
     g_debug_enabled = false;
 }
 
+int reject_character_type_reads() {
+    reset_read_counts();
+    g_debug_enabled = true;
+    g_can_change_value = 0;  // 保证走 log_reject（诊断路径读取 character type）。
+    const int result = can_equip_wrapper(&g_character_object, &g_item_object);
+    g_debug_enabled = false;
+    g_can_change_value = 1;
+    assert(result == 0);
+    return g_character_type_calls;
+}
+
+void test_capability_event_subscription() {
+    const auto& descriptor = plugin_descriptor();
+    install_success();
+
+    // install 订阅能力变更事件。
+    assert(g_event_subscribe_calls == 1);
+    assert(g_event_subscriptions.size() == 1);
+    assert(g_event_subscriptions[0].type == kEventCapabilityChanged);
+    descriptor.on_resource_ready(g_context, kResourceIdCanEquipItem,
+                                 reinterpret_cast<void*>(&fake_backup_can_equip));
+
+    // character.facts 撤销：缓存清空，诊断不再读取 character type。
+    g_character_capability_available = false;
+    const CapabilityChangedEvent unavailable_event{kCharacterFactsCapabilityId,
+                                                   kCharacterFactsVersionMajor,
+                                                   kCharacterFactsVersionMinor, 0, {}};
+    publish_fake_event(kEventCapabilityChanged, &unavailable_event);
+    assert(reject_character_type_reads() == 0);
+
+    // 无关能力、空 payload、空 id 均保持幂等。
+    const CapabilityChangedEvent other_event{kItemFactsCapabilityId, kItemFactsVersionMajor,
+                                             kItemFactsVersionMinor, 1, {}};
+    publish_fake_event(kEventCapabilityChanged, &other_event);
+    publish_fake_event(kEventCapabilityChanged, nullptr);
+    const CapabilityChangedEvent null_id_event{nullptr, 1, 0, 1, {}};
+    publish_fake_event(kEventCapabilityChanged, &null_id_event);
+    assert(reject_character_type_reads() == 0);
+
+    // character.facts 恢复：事件处理器重新 require 并重新设置缓存。
+    g_character_capability_available = true;
+    const int requires_before = g_require_calls;
+    const CapabilityChangedEvent available_event{kCharacterFactsCapabilityId,
+                                                 kCharacterFactsVersionMajor,
+                                                 kCharacterFactsVersionMinor, 1, {}};
+    publish_fake_event(kEventCapabilityChanged, &available_event);
+    assert(g_require_calls == requires_before + 1);
+    assert(reject_character_type_reads() == 1);
+
+    // deactivate 取消事件订阅。
+    const int unsubscribes_before = g_event_unsubscribe_calls;
+    descriptor.deactivate(g_context);
+    assert(g_event_unsubscribe_calls == unsubscribes_before + 1);
+    assert(g_event_subscriptions.empty());
+
+    setup_fake_interfaces();
+}
+
 void test_lifecycle_cleanup() {
     const auto& descriptor = plugin_descriptor();
     const int clears_before = g_clear_intercept_calls;
@@ -627,6 +738,7 @@ int main() {
     test_install_failures_and_optional_dependency();
     test_wrappers_and_sale_predicate();
     test_reject_diagnostics();
+    test_capability_event_subscription();
     test_lifecycle_cleanup();
     return 0;
 }

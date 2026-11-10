@@ -1,9 +1,11 @@
 #include "plugin.h"
 
 #include <cstdint>
+#include <cstring>
 
 #include "feature.h"
 #include "../../contracts/character_facts.h"
+#include "../../contracts/events.h"
 #include "../../contracts/item_facts.h"
 #include "../../contracts/game_ports/character_extras_port.h"
 
@@ -31,6 +33,8 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
 const contracts::QolCharacterExtrasPort* g_character_extras = nullptr;
+// character.facts 是可选诊断能力：能力变更时据此重新缓存或清空。
+uint64_t g_capability_event_subscription = 0;
 
 const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_CHARACTER_EXTRAS,
@@ -38,7 +42,55 @@ const contracts::QolPortRequirement kPorts[] = {
       contracts::kQolPortCharacterExtrasVersion.minor}},
 };
 
+// 能力注册表变更：只关心 character.facts。注册后重新 require，撤销后清空缓存。
+void on_capability_changed(void*, const void* payload) {
+    if (payload == nullptr) return;
+    const auto* event = static_cast<const contracts::CapabilityChangedEvent*>(payload);
+    if (event->id == nullptr ||
+        std::strcmp(event->id, contracts::kCharacterFactsCapabilityId) != 0) {
+        return;
+    }
+    if (event->available == 0) {
+        set_character_facts(nullptr);
+        return;
+    }
+    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) {
+        set_character_facts(nullptr);
+        return;
+    }
+    const void* iface = nullptr;
+    if (!contracts::succeeded(g_sdk->capabilities.require(
+            contracts::kCharacterFactsCapabilityId,
+            {contracts::kCharacterFactsVersionMajor, contracts::kCharacterFactsVersionMinor},
+            &iface)) ||
+        iface == nullptr) {
+        set_character_facts(nullptr);
+        return;
+    }
+    set_character_facts(static_cast<const contracts::CharacterFactsApi*>(iface));
+}
+
+void subscribe_capability_changes() {
+    if (g_sdk == nullptr || g_sdk->events.subscribe == nullptr) return;
+    if (g_capability_event_subscription != 0) return;
+    uint64_t subscription = 0;
+    if (contracts::succeeded(g_sdk->events.subscribe(contracts::kEventCapabilityChanged,
+                                                     &on_capability_changed, nullptr,
+                                                     &subscription))) {
+        g_capability_event_subscription = subscription;
+    }
+}
+
+void unsubscribe_capability_changes() {
+    if (g_capability_event_subscription == 0) return;
+    if (g_sdk != nullptr && g_sdk->events.unsubscribe != nullptr) {
+        (void)g_sdk->events.unsubscribe(g_capability_event_subscription);
+    }
+    g_capability_event_subscription = 0;
+}
+
 void clear_install_globals() {
+    unsubscribe_capability_changes();
     set_gate(false);
     set_item_facts(nullptr);
     set_character_facts(nullptr);
@@ -82,6 +134,8 @@ const contracts::ResourceClaim kResources[] = {
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
+    // 重新 install 可能未经过 deactivate；先撤销旧订阅再覆盖 sdk，避免订阅泄漏。
+    unsubscribe_capability_changes();
     g_sdk = ctx.sdk;
     g_game = ctx.game;
     g_character_extras = nullptr;
@@ -108,6 +162,8 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     set_item_facts(static_cast<const contracts::ItemFactsApi*>(iface));
+    // 先订阅再探测可选能力：避免订阅落地前 character.facts 恰好注册完成而错过通知。
+    subscribe_capability_changes();
     iface = nullptr;
     if (!contracts::succeeded(g_sdk->capabilities.require(
             contracts::kCharacterFactsCapabilityId,
@@ -139,6 +195,7 @@ int plugin_install(contracts::PluginContext& ctx) {
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
+    unsubscribe_capability_changes();
     // 门禁置 false 并注销布尔门（幂等）；重复调用安全。
     set_gate(false);
     set_item_facts(nullptr);

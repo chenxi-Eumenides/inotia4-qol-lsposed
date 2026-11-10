@@ -94,6 +94,8 @@ void ui_uidesc_draw();
 
 const qol::contracts::UiPanelsApi* autosell_panels_api();
 const qol::contracts::QolUiComponents* autosell_components();
+// ui_components 能力撤销通知：只清缓存指针，下一次 autosell_components() 懒加载重新 require。
+void autosell_invalidate_ui_components();
 void autosell_request_panel_close();
 
 void autosell_ctrl_abs(void* ctrl, int64_t* x, int64_t* y);

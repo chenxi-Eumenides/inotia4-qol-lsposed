@@ -103,6 +103,10 @@ const qol::contracts::QolUiComponents* autosell_components() {
     return g_ui_components;
 }
 
+void autosell_invalidate_ui_components() {
+    g_ui_components = nullptr;
+}
+
 void autosell_request_panel_close() {
     const auto* sdk = host_sdk();
     if (sdk != nullptr && sdk->panels.close != nullptr) sdk->panels.close("autosell");

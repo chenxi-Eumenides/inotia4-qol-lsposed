@@ -1,6 +1,7 @@
 #include "contracts/item_facts.h"
 #include "contracts/inventory_access.h"
 #include "contracts/bag.h"
+#include "contracts/host_sdk.h"
 #include "contracts/inventory_slot.h"
 #include "contracts/inventory_action.h"
 #include "contracts/inventory_refresh.h"
@@ -15,6 +16,8 @@
 #include "contracts/game_host.h"
 #include "contracts/attribute_quality.h"
 #include "plugins/core.item/plugin.h"
+#include "plugins/core.item/api/bag_source.h"
+#include "plugins/core.item/api/native_inventory.h"
 
 #include <cstdio>
 #include <cstddef>
@@ -136,6 +139,105 @@ static_assert(sizeof(qol::contracts::QolItemHandleApi) == sizeof(void*) * 6,
 static_assert(sizeof(qol::contracts::QolInventoryItemRef) ==
                   sizeof(int32_t) * 6 + sizeof(qol::contracts::QolItemHandle),
               "inventory reference must not carry a native object pointer");
+
+namespace {
+
+using namespace qol::contracts;
+
+QolResult fake_item_at(void*, const QolInventorySlotRef*, QolInventoryItemRef*) { return ok(); }
+QolResult fake_locate(void*, QolItemHandle, QolInventoryItemRef*) { return ok(); }
+QolResult fake_find_first(void*, int32_t, QolInventoryItemRef*) { return ok(); }
+QolResult fake_find_empty(void*, int32_t, QolInventorySlotRef*) { return ok(); }
+QolResult fake_count_item(void*, int32_t, int32_t* out_count) {
+    if (out_count != nullptr) *out_count = 0;
+    return ok();
+}
+QolResult fake_move(void*, const QolInventorySlotRef*, const QolInventorySlotRef*) { return ok(); }
+QolResult fake_take(void*, const QolInventorySlotRef*, QolInventoryItem*) { return ok(); }
+QolResult fake_place(void*, const QolInventorySlotRef*, const QolInventoryItem*) { return ok(); }
+QolResult fake_remove_count(void*, const QolInventorySlotRef*, int32_t) { return ok(); }
+QolResult fake_native_bag_count(int32_t, int32_t* out_count) {
+    if (out_count != nullptr) *out_count = 0;
+    return ok();
+}
+QolResult fake_native_bag_info(const QolBagRef*, QolBagInfo*) { return ok(); }
+QolResult fake_native_item_at(const QolBagRef*, int32_t, QolInventoryItemRef*) { return ok(); }
+QolResult fake_native_for_each(int32_t, QolInventoryBagSlotFn, void*) { return ok(); }
+
+const QolInventoryAccessApi kFakeInventoryAccessApi{
+    sizeof(QolInventoryAccessApi), nullptr,
+    &fake_item_at, &fake_locate, &fake_find_first, &fake_find_empty, &fake_count_item,
+    &fake_move, &fake_take, &fake_place, &fake_remove_count,
+    &fake_native_bag_count, &fake_native_bag_info, &fake_native_item_at,
+    &fake_native_for_each};
+
+const QolBagSource kFakeBagSource{QolVersion{1, 3}, kQolBagSpaceFirstRegistered};
+QolResult fake_source_at(uint32_t, const QolBagSource** out_source) {
+    if (out_source == nullptr) return error(kQolErrInvalidArgument, "bad out", 7);
+    *out_source = &kFakeBagSource;
+    return ok();
+}
+uint32_t fake_source_count() { return 1; }
+QolResult fake_register_source(const QolBagSource*) { return ok(); }
+QolResult fake_unregister_source(int32_t) { return ok(); }
+
+const QolBagSourceRegistryApi kFakeBagSourceRegistry{
+    sizeof(QolBagSourceRegistryApi), &fake_register_source, &fake_unregister_source,
+    &fake_source_count, &fake_source_at};
+
+int g_native_requires = 0;
+int g_bag_source_requires = 0;
+
+QolResult test_require(const char* id, QolVersionRange, const void** out_iface) {
+    if (id == nullptr || out_iface == nullptr) return error(kQolErrInvalidArgument, "bad", 3);
+    if (std::strcmp(id, kInventoryAccessCapabilityId) == 0) {
+        ++g_native_requires;
+        *out_iface = &kFakeInventoryAccessApi;
+        return ok();
+    }
+    if (std::strcmp(id, kBagSourceCapabilityId) == 0) {
+        ++g_bag_source_requires;
+        *out_iface = &kFakeBagSourceRegistry;
+        return ok();
+    }
+    *out_iface = nullptr;
+    return error(kQolErrNotFound, "missing", 1);
+}
+
+// 可选能力缓存失效：invalidate 后下一次查询必须重新 require（保留 sdk）。
+void test_capability_cache_invalidation() {
+    QolHostSdk sdk{};
+    sdk.capabilities.require = &test_require;
+    qol::features::core_item::bind_native_inventory_sdk(&sdk);
+    qol::features::core_item::bind_bag_source_sdk(&sdk);
+    g_native_requires = 0;
+    g_bag_source_requires = 0;
+
+    const auto* native = qol::features::core_item::inventory_native_api();
+    CHECK(native == &kFakeInventoryAccessApi);
+    CHECK(g_native_requires == 1);
+    CHECK(qol::features::core_item::inventory_native_api() == native);
+    CHECK(g_native_requires == 1);
+    qol::features::core_item::invalidate_native_inventory_api();
+    CHECK(qol::features::core_item::inventory_native_api() == &kFakeInventoryAccessApi);
+    CHECK(g_native_requires == 2);
+
+    const auto* source =
+        qol::features::core_item::find_bag_source(kQolBagSpaceFirstRegistered);
+    CHECK(source == &kFakeBagSource);
+    CHECK(g_bag_source_requires == 1);
+    CHECK(qol::features::core_item::find_bag_source(kQolBagSpaceFirstRegistered) == source);
+    CHECK(g_bag_source_requires == 1);
+    qol::features::core_item::invalidate_bag_source_registry();
+    CHECK(qol::features::core_item::find_bag_source(kQolBagSpaceFirstRegistered) ==
+          &kFakeBagSource);
+    CHECK(g_bag_source_requires == 2);
+
+    qol::features::core_item::reset_native_inventory();
+    qol::features::core_item::reset_bag_sources();
+}
+
+}  // namespace
 
 int main() {
     CHECK(qol::contracts::kItemFactsVersion.major == 4 &&
@@ -325,6 +427,7 @@ int main() {
     CHECK(api->count_limit != nullptr);
     CHECK(api->count_encoding != nullptr);
     CHECK(api->quote != nullptr);
+    test_capability_cache_invalidation();
     CHECK(g_fail == 0);
     std::printf("item_facts_plugin: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

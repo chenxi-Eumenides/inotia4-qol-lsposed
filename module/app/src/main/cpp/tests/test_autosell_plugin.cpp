@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "contracts/events.h"
 #include "contracts/http.h"
 #include "contracts/bag.h"
 #include "contracts/panels.h"
@@ -22,6 +23,7 @@
 #include "contracts/game_ports/item_port.h"
 #include "infra/panels.h"
 #include "plugins/autosell/ui/panel.h"
+#include "plugins/autosell/ui/panel_internal.h"
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -66,6 +68,28 @@ using qol::contracts::ResourceRequirement;
 
 const char* g_fail_require_id = nullptr;
 
+// ---- ui_components 懒加载与能力事件 ----
+int g_ui_components_require_calls = 0;
+const qol::contracts::QolUiComponents kUiComponentsApi{};
+
+// ---- 事件总线 fake：记录订阅并支持按类型注入 payload ----
+struct FakeEventSubscription {
+    uint32_t type = 0;
+    qol::contracts::QolEventHandler handler = nullptr;
+    void* ctx = nullptr;
+    uint64_t id = 0;
+};
+
+FakeEventSubscription g_event_subscription{};
+int g_event_subscribe_calls = 0;
+int g_event_unsubscribe_calls = 0;
+
+void publish_fake_event(uint32_t type, const void* payload) {
+    if (g_event_subscription.type == type && g_event_subscription.handler != nullptr) {
+        g_event_subscription.handler(g_event_subscription.ctx, payload);
+    }
+}
+
 QolResult fake_ui_read_layers(qol::contracts::QolUiLayerVisitFn, void*) {
     return qol::contracts::ok();
 }
@@ -76,15 +100,23 @@ QolResult fake_config_get_bool(const char*, int32_t default_value, int32_t* out_
     return qol::contracts::ok();
 }
 
-QolResult fake_events_subscribe(uint32_t, qol::contracts::QolEventHandler, void*, uint64_t* out_id) {
+QolResult fake_events_subscribe(uint32_t type, qol::contracts::QolEventHandler handler, void*, uint64_t* out_id) {
     if (out_id == nullptr) return QolResult{kQolErrInvalidArgument, kQolErrInvalidArgument, nullptr, 0};
+    ++g_event_subscribe_calls;
+    g_event_subscription.type = type;
+    g_event_subscription.handler = handler;
+    g_event_subscription.id = 1;
     *out_id = 1;
     return qol::contracts::ok();
 }
 
 QolResult fake_events_unsubscribe(uint64_t id) {
-    return id == 1 ? qol::contracts::ok()
-                   : QolResult{kQolErrNotFound, kQolErrNotFound, nullptr, 0};
+    ++g_event_unsubscribe_calls;
+    if (id != g_event_subscription.id) {
+        return QolResult{kQolErrNotFound, kQolErrNotFound, nullptr, 0};
+    }
+    g_event_subscription = {};
+    return qol::contracts::ok();
 }
 
 QolResult fake_panels_register_provider(const qol::contracts::PanelProviderSpec* provider) {
@@ -146,6 +178,9 @@ QolResult fake_capability_require(const char* id, QolVersionRange, const void** 
         *out_iface = &slot_data_api;
     } else if (std::strcmp(id, qol::contracts::kUiStateCapabilityId) == 0) {
         *out_iface = &ui_state_api;
+    } else if (std::strcmp(id, qol::contracts::kUiComponentsCapabilityId) == 0) {
+        ++g_ui_components_require_calls;
+        *out_iface = &kUiComponentsApi;
     } else if (std::strcmp(id, qol::contracts::kBagSourceCapabilityId) == 0) {
         *out_iface = &bag_source_registry_api;
     } else {
@@ -328,6 +363,69 @@ void test_enable_capability_failure_keeps_gate_closed() {
     d.deactivate(ctx);
 }
 
+void test_capability_event_invalidation() {
+    qol::infra::panels_reset_for_test();
+    const qol::contracts::QolHostSdk sdk = fake_sdk();
+    static const qol::contracts::QolInventoryExtrasPort inventory_port{{1, 0}, {}};
+    static const qol::contracts::QolItemPort item_port{
+        qol::contracts::kQolPortItemVersion, sizeof(qol::contracts::QolItemPort), {}};
+    const void* ports[] = {&inventory_port, &item_port};
+    qol::contracts::PluginContext ctx{
+        sizeof(qol::contracts::PluginContext),
+        qol::contracts::kHostSdkMajor,
+        qol::contracts::kHostSdkMinor,
+        &sdk,
+        nullptr,
+        "autosell",
+        ports,
+        2,
+    };
+    ctx.owner_token = 3;
+    const auto& d = qol::features::autosell::plugin_descriptor();
+
+    g_ui_components_require_calls = 0;
+    CHECK(d.install(ctx) == 0);
+    CHECK(g_event_subscribe_calls > 0);
+    CHECK(g_event_subscription.type == qol::contracts::kEventCapabilityChanged);
+    CHECK(g_event_subscription.handler != nullptr);
+
+    // 首次查询懒加载 require 并缓存。
+    const auto* first = qol::features::autosell::autosell_components();
+    CHECK(first == &kUiComponentsApi);
+    CHECK(g_ui_components_require_calls == 1);
+    CHECK(qol::features::autosell::autosell_components() == first);
+    CHECK(g_ui_components_require_calls == 1);
+
+    // ui_components 撤销：缓存失效，下一次查询重新 require。
+    qol::contracts::CapabilityChangedEvent unavailable{
+        qol::contracts::kUiComponentsCapabilityId, qol::contracts::kUiContractMajor,
+        qol::contracts::kUiContractMinor, 0, {}};
+    publish_fake_event(qol::contracts::kEventCapabilityChanged, &unavailable);
+    CHECK(qol::features::autosell::autosell_components() == &kUiComponentsApi);
+    CHECK(g_ui_components_require_calls == 2);
+
+    // 注册通知不主动 require：留待下一次查询懒加载。
+    g_ui_components_require_calls = 0;
+    qol::contracts::CapabilityChangedEvent available{
+        qol::contracts::kUiComponentsCapabilityId, qol::contracts::kUiContractMajor,
+        qol::contracts::kUiContractMinor, 1, {}};
+    publish_fake_event(qol::contracts::kEventCapabilityChanged, &available);
+    CHECK(g_ui_components_require_calls == 0);
+
+    // 无关能力、空 payload、空 id 均幂等。
+    const qol::contracts::CapabilityChangedEvent other{"character.facts", 1, 0, 1, {}};
+    publish_fake_event(qol::contracts::kEventCapabilityChanged, &other);
+    publish_fake_event(qol::contracts::kEventCapabilityChanged, nullptr);
+    const qol::contracts::CapabilityChangedEvent null_id{nullptr, 1, 0, 1, {}};
+    publish_fake_event(qol::contracts::kEventCapabilityChanged, &null_id);
+    CHECK(g_ui_components_require_calls == 0);
+
+    const int unsubscribes_before = g_event_unsubscribe_calls;
+    d.deactivate(ctx);
+    CHECK(g_event_unsubscribe_calls == unsubscribes_before + 1);
+    CHECK(g_event_subscription.handler == nullptr);
+}
+
 void test_null_sdk_is_safe() {
     qol::contracts::PluginContext ctx{};
     const qol::contracts::PluginDescriptor& d =
@@ -343,6 +441,7 @@ int main() {
     test_null_sdk_is_safe();
     test_provider_registration();
     test_enable_capability_failure_keeps_gate_closed();
+    test_capability_event_invalidation();
     std::printf("autosell_plugin: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

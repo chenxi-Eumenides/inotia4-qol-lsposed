@@ -2,9 +2,11 @@
 
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 
 #include "../../contracts/attribute_quality.h"
 #include "../../contracts/bag.h"
+#include "../../contracts/events.h"
 #include "../../contracts/inventory_action.h"
 #include "../../contracts/inventory_access.h"
 #include "../../contracts/panels.h"
@@ -17,7 +19,7 @@
 #include "log.h"
 #include "scan.h"
 #include "store.h"
-#include "ui/panel.h"
+#include "ui/panel_internal.h"
 
 // 自动出售插件：唯一开关为 descriptor feature `autosell.auto_sell`；插件仅在
 // feature 开启（want_run）时安装，install/on_enabled 应用启用态、on_disabled/deactivate
@@ -101,6 +103,39 @@ void unregister_ui_state() {
     if (g_ui_state != nullptr && g_ui_state->unregister_state != nullptr) {
         (void)g_ui_state->unregister_state(contracts::kUiStateTypePanel, kPluginId);
     }
+}
+
+// ui_components 是可选能力：登记/撤销时宿主广播能力变更，插件撤销后只清缓存，
+// 由下一次 autosell_components() 懒加载重新 require。
+uint64_t g_capability_event_subscription = 0;
+
+void on_capability_changed(void*, const void* payload) {
+    if (payload == nullptr) return;
+    const auto* event = static_cast<const contracts::CapabilityChangedEvent*>(payload);
+    if (event->id == nullptr ||
+        std::strcmp(event->id, contracts::kUiComponentsCapabilityId) != 0) {
+        return;
+    }
+    if (event->available == 0) autosell_invalidate_ui_components();
+}
+
+void subscribe_capability_changes() {
+    if (g_sdk == nullptr || g_sdk->events.subscribe == nullptr) return;
+    if (g_capability_event_subscription != 0) return;
+    uint64_t subscription = 0;
+    if (contracts::succeeded(g_sdk->events.subscribe(contracts::kEventCapabilityChanged,
+                                                     &on_capability_changed, nullptr,
+                                                     &subscription))) {
+        g_capability_event_subscription = subscription;
+    }
+}
+
+void unsubscribe_capability_changes() {
+    if (g_capability_event_subscription == 0) return;
+    if (g_sdk != nullptr && g_sdk->events.unsubscribe != nullptr) {
+        (void)g_sdk->events.unsubscribe(g_capability_event_subscription);
+    }
+    g_capability_event_subscription = 0;
 }
 const contracts::QolInventoryExtrasPort* g_inventory_extras = nullptr;
 const contracts::QolItemPort* g_item_port = nullptr;
@@ -226,6 +261,8 @@ bool acquire_runtime_capabilities(contracts::PluginContext& ctx) {
 }
 
 int plugin_install(contracts::PluginContext& ctx) {
+    // 重新 install 可能未经过 deactivate；先撤销旧订阅再覆盖 sdk，避免订阅泄漏。
+    unsubscribe_capability_changes();
     g_sdk = ctx.sdk;
     g_game = ctx.game;
     g_inventory_extras = nullptr;
@@ -254,6 +291,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_item_port = nullptr;
         return 1;
     }
+    subscribe_capability_changes();
     register_ui_state();
     // save_enter/save_exit 事件订阅：注册对同一 fn+ctx 幂等，activate 重入安全。
     autosell_register_save_enter();
@@ -262,6 +300,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     apply_gate(true);
     // 自身初始化：资源由宿主声明式安装；本面板登记 provider 供 core.ui 容器打开。
     if (g_sdk->panels.register_provider(&kPanelProvider).ok != kQolOk) {
+        unsubscribe_capability_changes();
         g_item_port = nullptr;
         return 1;
     }
@@ -269,6 +308,7 @@ int plugin_install(contracts::PluginContext& ctx) {
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
+    unsubscribe_capability_changes();
     autosell_store_unregister();
     unregister_ui_state();
     clear_runtime_capabilities();

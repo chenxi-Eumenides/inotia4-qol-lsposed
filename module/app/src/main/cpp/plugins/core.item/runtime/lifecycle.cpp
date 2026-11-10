@@ -1,10 +1,12 @@
 #include "plugins/core.item/runtime/core_item_internal.h"
+#include "plugins/core.item/api/bag_source.h"
 #include "plugins/core.item/api/native_inventory.h"
 #include "plugins/core.item/api/item_use.h"
 
 #include <cstring>
 
 #include "contracts/commands.h"
+#include "contracts/events.h"
 #include "plugins/core.item/bags/snapshot_store.h"
 #include "plugins/core.item/bags/native_bag_limit.h"
 #include "plugins/core.item/hooks/inventory_hooks.h"
@@ -16,6 +18,9 @@ namespace {
 
 constexpr int32_t kSnapshotFallbackIntervalFrames = 60;
 uint64_t g_frame_task = 0;
+// inventory.access / inventory.bag_source 是可选能力：能力撤销时清除接口缓存，
+// 下一次查询重新 require；注册通知不主动 require（保持懒加载）。
+uint64_t g_capability_event_subscription = 0;
 
 void log_message(const contracts::QolHostSdk* sdk, const char* message) {
     if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
@@ -43,6 +48,36 @@ void apply_native_bag_limit() {
         limit += c18;
     }
     bags::set_native_bag_limit(limit);
+}
+
+void on_capability_changed(void*, const void* payload) {
+    if (payload == nullptr) return;
+    const auto* event = static_cast<const contracts::CapabilityChangedEvent*>(payload);
+    if (event->id == nullptr || event->available != 0) return;
+    if (std::strcmp(event->id, contracts::kInventoryAccessCapabilityId) == 0) {
+        invalidate_native_inventory_api();
+    } else if (std::strcmp(event->id, contracts::kBagSourceCapabilityId) == 0) {
+        invalidate_bag_source_registry();
+    }
+}
+
+void subscribe_capability_changes() {
+    if (g_sdk == nullptr || g_sdk->events.subscribe == nullptr) return;
+    if (g_capability_event_subscription != 0) return;
+    uint64_t subscription = 0;
+    if (contracts::succeeded(g_sdk->events.subscribe(contracts::kEventCapabilityChanged,
+                                                     &on_capability_changed, nullptr,
+                                                     &subscription))) {
+        g_capability_event_subscription = subscription;
+    }
+}
+
+void unsubscribe_capability_changes() {
+    if (g_capability_event_subscription == 0) return;
+    if (g_sdk != nullptr && g_sdk->events.unsubscribe != nullptr) {
+        (void)g_sdk->events.unsubscribe(g_capability_event_subscription);
+    }
+    g_capability_event_subscription = 0;
 }
 
 // Inventory claims；merge ptrslot 与 5 条装备页 UI hook 已迁往 extension_bag。
@@ -86,6 +121,8 @@ void stop_frame_task(const contracts::QolHostSdk* sdk) {
 }
 
 int plugin_install(contracts::PluginContext& ctx) {
+    // 重新 install 可能未经过 deactivate；先撤销旧订阅再覆盖 sdk，避免订阅泄漏。
+    unsubscribe_capability_changes();
     reset_ports();
     reset_bag_sources();
     reset_native_inventory();
@@ -163,7 +200,9 @@ int plugin_install(contracts::PluginContext& ctx) {
     }
     bind_bag_source_sdk(g_sdk);
     bind_native_inventory_sdk(g_sdk);
+    subscribe_capability_changes();
     if (!shop::initialize_snapshot(g_sdk)) {
+        unsubscribe_capability_changes();
         g_snapshot.destroy();
         reset_ports();
         return 1;
@@ -175,12 +214,14 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk->ticket_result.register_typed_result_handler == nullptr ||
         !contracts::succeeded(g_sdk->ticket_result.register_typed_result_handler(
             kItemWriteHandlerId, &item_write_result, nullptr))) {
+        unsubscribe_capability_changes();
         shop::destroy_snapshot();
         g_snapshot.destroy();
         reset_ports();
         return 1;
     }
     if (!inventory_hooks::attach(ctx.sdk, ctx.game, &kItemFactsApi, g_port)) {
+        unsubscribe_capability_changes();
         if (g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
             (void)g_sdk->ticket_result.unregister_typed_result_handler(kItemWriteHandlerId);
         }
@@ -195,6 +236,7 @@ int plugin_install(contracts::PluginContext& ctx) {
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
+    unsubscribe_capability_changes();
     inventory_hooks::detach();
     item_use_reset();
     stop_frame_task(ctx.sdk);

@@ -20,6 +20,8 @@ void reset_native_inventory() {
     g_api = nullptr;
 }
 
+void invalidate_native_inventory_api() { g_api = nullptr; }
+
 const contracts::QolInventoryAccessApi* inventory_native_api() {
     if (g_api != nullptr) return g_api;
     if (g_native_sdk == nullptr || g_native_sdk->capabilities.require == nullptr) return nullptr;

@@ -1265,10 +1265,12 @@ add_test(NAME core_frame_overlay_tests COMMAND core_frame_overlay_tests)
 add_executable(autosell_plugin_tests
     test_autosell_plugin.cpp
     ${CPP_DIR}/plugins/autosell/plugin.cpp
+    ${CPP_DIR}/plugins/autosell/ui/panel_ui.cpp
     ${CPP_DIR}/infra/panels.cpp
 )
 target_include_directories(autosell_plugin_tests PRIVATE
     ${CPP_DIR}
+    ${CPP_DIR}/plugins/autosell
 )
 target_compile_features(autosell_plugin_tests PRIVATE cxx_std_17)
 set_target_properties(autosell_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)

@@ -32,6 +32,8 @@ void bind_bag_source_sdk(const contracts::QolHostSdk* sdk) {
     g_bag_source_registry = nullptr;
 }
 
+void invalidate_bag_source_registry() { g_bag_source_registry = nullptr; }
+
 void bind_bag_source_registry_for_test(const contracts::QolBagSourceRegistryApi* api) {
     g_bag_source_registry = api;
 }

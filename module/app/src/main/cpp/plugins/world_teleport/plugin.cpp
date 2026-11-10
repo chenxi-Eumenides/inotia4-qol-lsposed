@@ -5,6 +5,7 @@
 #include "../../contracts/game_ports/ports.h"
 #include "../../contracts/game_ports/world_action_port.h"
 #include "../../contracts/static_data.h"
+#include "../../contracts/events.h"
 #include "../../contracts/http.h"
 #include "feature.h"
 
@@ -28,6 +29,8 @@ const contracts::QolStaticDataApi* g_static_data = nullptr;
 const contracts::UiStateApi* g_ui_state = nullptr;
 bool g_installed = false;
 const char* g_install_error = nullptr;
+// ui.state 是可选能力：provider 后到或撤销时宿主广播能力变更，插件据此补注册或注销。
+uint64_t g_capability_event_subscription = 0;
 
 uint64_t (*g_backup_call_map_name)() = nullptr;
 
@@ -102,7 +105,52 @@ void register_dialog_state() {
     (void)g_ui_state->register_state(&registration);
 }
 
+void unregister_dialog_state() {
+    if (g_ui_state != nullptr && g_ui_state->unregister_state != nullptr) {
+        (void)g_ui_state->unregister_state(contracts::kUiStateTypeDialog,
+                                           "world_teleport.confirm");
+    }
+    g_ui_state = nullptr;
+}
+
+// 能力注册表变更：只关心 ui.state。available=1 时重新 require 并补注册，
+// available=0 时注销已注册的对话框状态。
+void on_capability_changed(void*, const void* payload) {
+    if (payload == nullptr) return;
+    const auto* event = static_cast<const contracts::CapabilityChangedEvent*>(payload);
+    if (event->id == nullptr ||
+        std::strcmp(event->id, contracts::kUiStateCapabilityId) != 0) {
+        return;
+    }
+    if (event->available != 0) {
+        register_dialog_state();
+    } else {
+        unregister_dialog_state();
+    }
+}
+
+void subscribe_capability_changes() {
+    if (g_sdk == nullptr || g_sdk->events.subscribe == nullptr) return;
+    if (g_capability_event_subscription != 0) return;
+    uint64_t subscription = 0;
+    if (contracts::succeeded(g_sdk->events.subscribe(contracts::kEventCapabilityChanged,
+                                                     &on_capability_changed, nullptr,
+                                                     &subscription))) {
+        g_capability_event_subscription = subscription;
+    }
+}
+
+void unsubscribe_capability_changes() {
+    if (g_capability_event_subscription == 0) return;
+    if (g_sdk != nullptr && g_sdk->events.unsubscribe != nullptr) {
+        (void)g_sdk->events.unsubscribe(g_capability_event_subscription);
+    }
+    g_capability_event_subscription = 0;
+}
+
 int plugin_install(contracts::PluginContext& ctx) {
+    // 重新 install 可能未经过 deactivate；先撤销旧订阅再覆盖 sdk，避免订阅泄漏。
+    unsubscribe_capability_changes();
     g_sdk = ctx.sdk;
     g_game = ctx.game;
     g_world_action_port = nullptr;
@@ -174,17 +222,16 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     g_static_data = static_cast<const contracts::QolStaticDataApi*>(static_data_iface);
+    // 先订阅再探测：避免订阅落地前 ui.state 恰好注册完成而错过通知。
+    subscribe_capability_changes();
     register_dialog_state();
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
-    if (g_ui_state != nullptr && g_ui_state->unregister_state != nullptr) {
-        (void)g_ui_state->unregister_state(contracts::kUiStateTypeDialog,
-                                           "world_teleport.confirm");
-    }
-    g_ui_state = nullptr;
+    unsubscribe_capability_changes();
+    unregister_dialog_state();
     g_installed = false;
     g_backup_call_map_name = nullptr;
     g_world_facts = nullptr;
