@@ -55,6 +55,8 @@ const contracts::QolGameHost* g_game = nullptr;
 const contracts::QolCharacterExtrasPort* g_character_extras = nullptr;
 const contracts::CharacterAttributesApi* g_attributes = nullptr;
 contracts::QolUiHandle g_root = nullptr;
+int64_t g_root_x = 0;
+int64_t g_root_y = 0;
 contracts::QolUiHandle g_nav = nullptr;
 contracts::QolUiHandle g_prev = nullptr;
 contracts::QolUiHandle g_next = nullptr;
@@ -202,6 +204,8 @@ void read_snapshot_impl() {
 void destroy_controls() {
     contracts::QolUiHandle root = g_root;
     g_root = nullptr;
+    g_root_x = 0;
+    g_root_y = 0;
     g_nav = nullptr;
     g_prev = nullptr;
     g_next = nullptr;
@@ -261,6 +265,8 @@ bool create_controls() {
         return false;
     }
     g_root = root;
+    g_root_x = root_x;
+    g_root_y = root_y;
     // 导航盒固定在整屏左上角 (8,8)；root 原点在屏幕 inset，局部坐标需减去 root 原点。
     const contracts::UiNavButtonDesc nav_desc{
         {contracts::ui_theme::kNavBoxAbsX - root_x,
@@ -304,7 +310,7 @@ void draw_column(const ColumnSpec& column, int64_t label_x, int64_t value_right_
         format_value(row, g_snapshot.ok[column.section][row_index] != 0,
                      g_snapshot.learned[column.section][row_index] != 0,
                      g_snapshot.value[column.section][row_index], value, sizeof(value));
-        draw_text(label, label_x, y, contracts::ui_theme::kTextNormal, 0, kBodyFont);
+        draw_text(label, label_x, y, contracts::ui_theme::kTextGold, 0, kBodyFont);
         draw_text(value, value_right_x, y, contracts::ui_theme::kTextBody, 1, kBodyFont);
     }
 }
@@ -315,14 +321,14 @@ void draw_page() {
     // 方框：标题底 72+28+8=108；60% 黑 + 装饰角。
     if (g_components->draw_container_styled != nullptr) {
         const contracts::UiContainerStyleDesc style{
-            {kFrameX, kFrameY, kFrameW, kFrameH}, contracts::ui_theme::kPanelBgRgb565,
-            contracts::ui_theme::kPanelAlpha, 1};
+            {g_root_x + kFrameX, g_root_y + kFrameY, kFrameW, kFrameH},
+            contracts::ui_theme::kPanelBgRgb565, contracts::ui_theme::kPanelAlpha, 1};
         (void)g_components->draw_container_styled(&style);
     }
     // 竖分隔线：两列之间，方框上下各内缩 16（124..528）。
     if (g_components->draw_rect != nullptr) {
         contracts::UiShapeDesc separator{};
-        separator.rect = {465, 124, 2, 528 - 124};
+        separator.rect = {g_root_x + 465, g_root_y + 124, 2, 528 - 124};
         separator.fill_rgb565 = contracts::ui_theme::kFrameGoldRgb565;
         separator.border_rgb565 = 0;
         separator.alpha = 100;
@@ -345,7 +351,7 @@ void draw_page() {
                         static_cast<unsigned>(g_page + 1),
                         static_cast<unsigned>(g_page_count));
     draw_text(page_text, kDesignCenterX, static_cast<int32_t>(kPageTextY),
-              contracts::ui_theme::kTextDisabled, 2, kBodyFont);
+              contracts::ui_theme::kTextBody, 2, kBodyFont);
 }
 
 }  // namespace

@@ -93,10 +93,10 @@
 - 打开条件：`ui_components` 能力就绪且 `character_panel.overview` 开启；`block_reason` 返回 `ui components unavailable` / `character overview disabled`。
 - 布局：根面板 rect 为 `{inset_x, inset_y, 960, 640}`（屏幕 inset 原点 + 设计区尺寸），所有子控件与文本一律使用 960×640 **设计区局部坐标**。
   - 标题：直接使用页面标题（`主属性与面板属性` / `角色属性` / `全队共享`），居中 `x=480`、`y=72`、金色 `kTextGold`、字体 2；无额外「人物属性」总标题。
-  - 方框：`draw_container_styled({40,108,880,436}, 黑色, alpha=60, ornamented=1)`，带装饰角、60% 黑；标题底（72+28）到方框顶 8px。
-  - 方框内文字：正文 font 1；标签 `kTextNormal`、数值 `kTextBody` 右对齐；左列标签 `x=90`、数值右缘 `x=430`；右列标签 `x=500`、数值右缘 `x=840`；行起点 `y=132`、行距 32（11 行末行 452，不超出方框底 544）。
-  - 两列竖线：`draw_rect`，`x=465`、`y=124..528`、宽 2、颜色 `kFrameGoldRgb565`、alpha=100、无边框/圆角。
-  - 分页：方框底 544 → 箭头 `y=552`（间隔 8px）、尺寸 56、中心 `x=480±120`；页码 `y=568` 居中、`kTextDisabled`、字体 1。
+  - 方框：`draw_container_styled({inset_x+40, inset_y+108, 880, 436}, 黑色, alpha=60, ornamented=1)`，带装饰角、60% 黑；标题底（72+28）到方框顶 8px。`draw_container_styled` 使用屏幕绝对坐标，因此加 root 原点。
+  - 方框内文字：正文 font 1；标签 `kTextGold`、数值 `kTextBody` 右对齐；左列标签 `x=90`、数值右缘 `x=430`；右列标签 `x=500`、数值右缘 `x=840`；行起点 `y=132`、行距 32（11 行末行 452，不超出方框底 544）。文本用 root 相对坐标。
+  - 两列竖线：`draw_rect`，绝对坐标 `{inset_x+465, inset_y+124, 2, 404}`、颜色 `kFrameGoldRgb565`、alpha=100、无边框/圆角。
+  - 分页：方框底 544 → 箭头 `y=552`（间隔 8px）、尺寸 56、中心 `x=480±120`；页码 `y=568` 居中、`kTextBody`、字体 1。
 - 绘制接口：全部经 `ui_components`（`draw_container_styled` / `draw_rect` / `draw_control_text` / `arrow_button_*` / `nav_button_*`）；仅 `sdk->ui->begin_frame/end_frame` 属帧封装，不使用 `fill_rect` / `draw_string_with_font` 等低层绘制原语。
 - 导航盒：局部坐标 `{kNavBoxAbsX - root_x, kNavBoxAbsY - root_y, kNavBoxW, kNavBoxH}`，绝对位置为整屏左上角 `(8,8)`，与 settings 页口径一致；横屏/平板黑边不会把按钮或文本挤出可视区。
 - 返回语义：`kUiNavButtonAuto` 在 `ui_panels_depth() > 1` **或** PopupHost 存在原生面板基线时显示返回箭头；本面板从原版人物面板之上打开（模块栈深 1 + 原生基线），因此显示返回箭头，点击走 `ui_panels_request_back`；无原生基线时才显示关闭 X。
