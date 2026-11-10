@@ -61,6 +61,7 @@ std::atomic<void*> g_backup_drop_item{nullptr};
 std::atomic<void*> g_backup_make_item{nullptr};
 std::atomic<void*> g_backup_make_equip_detail{nullptr};
 std::atomic<void*> g_backup_get_action_cooltime{nullptr};
+std::atomic<uint32_t> g_skill_cooltime_trace{0};
 
 const contracts::ItemUseApi* g_item_use = nullptr;
 uint64_t g_item_use_subscription = 0;
@@ -634,13 +635,22 @@ int32_t char_get_action_cooltime_wrapper(void* ch, void* action) {
     if (backup == nullptr) return 0;
 
     const int32_t duration = backup(ch, action);
+    const uint32_t trace = g_skill_cooltime_trace.fetch_add(1, std::memory_order_relaxed);
+    if (trace < 8) {
+        log_info("skill_cooltime ch=%p duration=%d gate=%d", ch, duration,
+                 g_gate.load(std::memory_order_relaxed) ? 1 : 0);
+    }
     if (duration <= 0 || !g_gate.load(std::memory_order_relaxed)) return duration;
     const auto* extras = g_extras;
     if (!cooldown_api_ready(extras)) return duration;
 
     void* active = nullptr;
-    if (extras->cooldown.active_player(&active).ok != kQolOk || active != ch) return duration;
+    if (extras->cooldown.active_player(&active).ok != kQolOk || active != ch) {
+        if (trace < 8) log_info("skill_cooltime active_mismatch active=%p ch=%p", active, ch);
+        return duration;
+    }
     const int32_t percent = rate_value(RateId::kSkillCooldown);
+    if (trace < 8) log_info("skill_cooltime percent=%d", percent);
     if (percent == kRateDefault) return duration;
     return scale_by_percent(duration, percent);
 }
@@ -779,6 +789,7 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
     }
     if (std::strcmp(resource_id, kResourceIdGetActionCoolTime) == 0) {
         g_backup_get_action_cooltime.store(backup, std::memory_order_release);
+        log_info("skill cooldown hook bound backup=%p", backup);
         return 0;
     }
     log_warn("unknown resource id: %s", resource_id);
