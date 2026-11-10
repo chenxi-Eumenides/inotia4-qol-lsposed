@@ -30,6 +30,7 @@ void ui_panels_close(const char*) { ++g_close_calls; }
 bool ui_panels_active(const char*) { return true; }
 void ui_panels_request_back() { g_back_requested = true; }
 int ui_panels_depth() { return 1; }
+bool ui_panels_has_original_popup_baseline() { return false; }
 }  // namespace qol::features::core_ui
 
 namespace {

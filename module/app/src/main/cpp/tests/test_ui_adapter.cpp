@@ -678,15 +678,14 @@ int main() {
     CHECK(adapter->size == sizeof(qol::contracts::QolUiAdapter));
     CHECK(adapter->major == qol::contracts::kUiAdapterMajor);
     CHECK(adapter->minor == qol::contracts::kUiAdapterMinor);
-    // 原版人物属性面板内容区：inset + (496,133)，尺寸 412×431；nullptr 参数与 inset 不可用
-    // 分别返回 InvalidArgument / NotReady（面板点击链路依赖该语义）。
+    // 原版人物属性面板：只保留右侧战斗属性框内部文本区（避开左 5 维框/页签/X/分配按钮/+−/重置）。
     fn_calc_res_width = &fake_calc_res_width;
     fn_calc_res_height = &fake_calc_res_height;
     qol::contracts::UiRect content_rect{};
     CHECK(adapter->character_info_content_rect(&content_rect).ok == kQolOk);
-    CHECK(content_rect.x == g_fake_res_width + 496);
-    CHECK(content_rect.y == g_fake_res_height + 133);
-    CHECK(content_rect.w == 412 && content_rect.h == 431);
+    CHECK(content_rect.x == g_fake_res_width + 741);
+    CHECK(content_rect.y == g_fake_res_height + 153);
+    CHECK(content_rect.w == 205 && content_rect.h == 411);
     CHECK(adapter->character_info_content_rect(nullptr).code == kQolErrInvalidArgument);
     fn_calc_res_width = nullptr;
     CHECK(adapter->character_info_content_rect(&content_rect).ok != kQolOk);

@@ -6,17 +6,19 @@
 #include "contracts/ui.h"
 #include "plugins/core.custom_ui/ui_components.h"
 
-// 导航按钮点击内部调用 ui_panels_request_back，自适应绘制按 ui_panels_depth 选图；
-// 本测试只链接 ui_components.cpp，不链接面板栈实现，故在此补齐这两个外部符号。
-// 必须在定义 core_ui 函数前声明计数与深度，供其引用。
+// 导航按钮点击内部调用 ui_panels_request_back，自适应绘制按 ui_panels_depth 与
+// 原生面板基线选图；本测试只链接 ui_components.cpp，不链接面板栈实现，故在此补齐
+// 这三个外部符号。必须在定义 core_ui 函数前声明计数与深度，供其引用。
 namespace {
 int g_back_requests = 0;
 int g_fake_depth = 1;
+bool g_fake_original_baseline = false;
 }  // namespace
 
 namespace qol::features::core_ui {
 void ui_panels_request_back() { ++g_back_requests; }
 int ui_panels_depth() { return g_fake_depth; }
+bool ui_panels_has_original_popup_baseline() { return g_fake_original_baseline; }
 }  // namespace qol::features::core_ui
 
 namespace {
@@ -258,8 +260,9 @@ int main() {
     CHECK(components->nav_button_create(&auto_desc, root, &nav).ok == kQolOk);
     CHECK(nav != nullptr);
 
-    // auto + 栈深 1：走 X 关闭绘制入口（close 贴图），按控件绝对原点给出 rect。
+    // auto + 栈深 1 + 无原生基线：走 X 关闭绘制入口（close 贴图），按控件绝对原点给出 rect。
     g_fake_depth = 1;
+    g_fake_original_baseline = false;
     g_close_draws = 0;
     g_back_draws = 0;
     CHECK(components->nav_button_draw(nav).ok == kQolOk);
@@ -285,11 +288,29 @@ int main() {
     CHECK(g_back_draws == 2 && g_back_pressed == 1);
     static_cast<FakeControl*>(nav)->pressed = 0;
 
-    // auto + 栈深 0：非 >1，安全回落到 X 绘制入口。
-    g_fake_depth = 0;
-    const int close_before = g_close_draws;
+    // auto + 栈深 1 + 有原生基线：模块面板叠在原生面板之上 → 返回箭头。
+    g_fake_depth = 1;
+    g_fake_original_baseline = true;
+    g_back_draws = 0;
+    g_close_draws = 0;
+    g_back_pressed = -1;
+    g_back_handle = nullptr;
     CHECK(components->nav_button_draw(nav).ok == kQolOk);
-    CHECK(g_close_draws == close_before + 1 && g_back_draws == 2);
+    CHECK(g_back_draws == 1 && g_close_draws == 0);
+    CHECK(g_back_pressed == 0 && g_back_handle == nav);
+    static_cast<FakeControl*>(nav)->pressed = 1;
+    CHECK(components->nav_button_draw(nav).ok == kQolOk);
+    CHECK(g_back_draws == 2 && g_back_pressed == 1);
+    static_cast<FakeControl*>(nav)->pressed = 0;
+    g_fake_original_baseline = false;
+
+    // auto + 栈深 0：非 >1 且无原生基线，安全回落到 X 绘制入口。
+    g_fake_depth = 0;
+    g_fake_original_baseline = false;
+    const int close_before = g_close_draws;
+    const int back_before = g_back_draws;
+    CHECK(components->nav_button_draw(nav).ok == kQolOk);
+    CHECK(g_close_draws == close_before + 1 && g_back_draws == back_before);
 
     // 强制模式覆盖栈深：ForceClose 恒走 X，ForceBack 恒走箭头。
     const qol::contracts::UiNavButtonDesc force_close_desc{

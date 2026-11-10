@@ -610,8 +610,9 @@ QolResult resolution_height(int32_t* out) {
     return contracts::ok();
 }
 
-// 原版人物属性面板：基控件偏移(0,133,960,431)，主控件内右侧内容组原点 x=496、宽 450/412。
-// 两组原点相同、宽度不同；取较窄的 412 保证命中范围不超出实际绘制内容。
+// 原版人物属性面板：只保留右侧战斗属性框的内部文本区，避开左侧 5 维框、队伍页签、
+// 关闭 X、属性分配入口按钮与 +/-/重置。几何链：M = B+(0,133)，A = M+(496,0)，
+// 右框外框 A+(226,0,224,431)，内部文本起点 A+(245,20)→(741,153)。
 QolResult character_info_content_rect(UiRect* out) {
     if (out == nullptr) return invalid_argument();
     int32_t inset_x = 0;
@@ -620,10 +621,10 @@ QolResult character_info_content_rect(UiRect* out) {
     if (width.ok != kQolOk) return width;
     const QolResult height = resolution_height(&inset_y);
     if (height.ok != kQolOk) return height;
-    out->x = inset_x + 496;
-    out->y = inset_y + 133;
-    out->w = 412;
-    out->h = 431;
+    out->x = inset_x + 741;
+    out->y = inset_y + 153;
+    out->w = 205;
+    out->h = 411;
     return contracts::ok();
 }
 

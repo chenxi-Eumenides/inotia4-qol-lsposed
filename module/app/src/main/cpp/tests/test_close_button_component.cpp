@@ -10,6 +10,7 @@
 namespace qol::features::core_ui {
 void ui_panels_request_back() {}
 int ui_panels_depth() { return 1; }
+bool ui_panels_has_original_popup_baseline() { return false; }
 }  // namespace qol::features::core_ui
 
 namespace {

@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "panels/host.h"
 #include "panels/stack.h"
 #include "ui_adapter_check.h"
 #include "ui_geometry.h"
@@ -1734,7 +1735,9 @@ QolResult nav_button_draw(contracts::QolUiHandle handle) {
     bool show_back;
     if (button->style == contracts::kUiNavButtonForceBack) show_back = true;
     else if (button->style == contracts::kUiNavButtonForceClose) show_back = false;
-    else show_back = ui_panels_depth() > 1;
+    // Auto：模块栈深 >1 或模块面板叠在原生面板之上（有 PopupHost 基线）时显示返回箭头；
+    // 否则（深 1 且无原生基线）显示关闭 X。
+    else show_back = ui_panels_depth() > 1 || ui_panels_has_original_popup_baseline();
     if (show_back) {
         // 返回箭头沿用原版绘制路径（unit 0x59 loc 3 常态 / loc 2 按下叠加），按控件位置绘制。
         return g_adapter->draw_back_button(handle, pressed != 0 ? 1 : 0);

@@ -106,6 +106,7 @@
 - 触摸分发 `dispatch_touch`（`:422`）只在根矩形内命中子组件，不穿透原生控件。
 - 文本按钮工厂：`text_button_create_impl` 承载校验与创建（`:692`），遗留入口 `text_button_create`（`:766`）；`capsule_`/`decorated_`/`compact_capsule_`/`main_menu_decorated_` 为显式外观工厂（`:1549-1637`）。遗留 `text_button_draw`（`:906`）仍按 decorated 紧凑比例绘制，`height = min(rect.h, rect.w × 48 / 220)`（`:965`）。
 - 图标/箭头/导航按钮：`icon_button_*`（`:1096-1214`）、`arrow_button_*`（`:1003-1095`）、`nav_button_*`（`:1640-1733`）。导航按钮点击一律延迟请求弹栈顶，`on_click` 只是附加通知。
+  `kUiNavButtonAuto` 的绘制判定：`ui_panels_depth() > 1` **或** PopupHost 快照存在原生面板基线（`original_popup_count_ > 0`，即模块面板叠在原版面板之上，经 `ui_panels_has_original_popup_baseline()` 查询；无 host 时返回 false）→ 显示返回箭头；否则（深 1 且无原生基线）显示关闭 X。`kUiNavButtonForceClose` / `kUiNavButtonForceBack` 不受该判定影响。
 
 ### 3.2 面板注册与导航
 

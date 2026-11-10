@@ -58,6 +58,9 @@ public:
     bool overlay_scope_matches(const void* provider, uint64_t generation) const;
     bool custom_backend_active_for_confirmation() const;
     bool custom_overlay_scope_identity(const void** provider, uint64_t* generation) const;
+    // 快照中是否存在原生面板基线（打开模块面板前游戏 popup 栈非空）。原生面板之上打开
+    // 模块面板时，nav 的 Auto 模式据此显示返回箭头而不是关闭 X。
+    bool has_original_popup_baseline() const;
     void dispatch_enter();
     void dispatch_process();
     void dispatch_f3();
@@ -146,4 +149,6 @@ private:
 bool ui_panels_overlay_scope_matches(const void* provider, uint64_t generation);
 bool ui_panels_custom_backend_active();
 bool ui_panels_custom_overlay_scope_identity(const void** provider, uint64_t* generation);
+// 无 PopupHost（未绑定/已解绑）时返回 false。
+bool ui_panels_has_original_popup_baseline();
 }  // namespace qol::features::core_ui

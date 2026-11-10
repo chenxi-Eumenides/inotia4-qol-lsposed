@@ -828,8 +828,9 @@ struct QolUiAdapter {
     // Text is not drawn; callers draw it with the normal adapter text functions.
     QolResult (*draw_help_option_row)(UiRect rect, uint8_t selected, uint8_t pressed);
 
-    // Minor 36 tail: 原版人物属性面板内容区矩形（绝对坐标）。布局常量由宿主集中持有，
-    // 消费方按设计分辨率 + 当前屏幕 inset 取用；面板未打开时返回值不应被使用。
+    // Minor 36 tail: 原版人物属性面板**右侧战斗属性框内部文本区**的绝对矩形（已含 inset）。
+    // 已避开左侧 5 维框、队伍页签、关闭 X、属性分配入口按钮与 +/-/重置；布局常量由宿主
+    // 集中持有，消费方按设计分辨率 + 当前屏幕 inset 取用；面板未打开时返回值不应被使用。
     QolResult (*character_info_content_rect)(UiRect* out);
 };
 

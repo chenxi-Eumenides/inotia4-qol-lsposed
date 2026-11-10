@@ -12,9 +12,8 @@
 #include "feature.h"
 #include "overview_model.h"
 
-// 属性总览页面：4 个分区（主属性与面板属性 / 隐藏属性 / 元素与抗性 / 全局加成），
-// 每页最多 10 行；分区超过 10 行时按顺序拆到后续页（"后续页顺延"），因此页数由
-// 分区行数推导而不是固定 4 页。
+// 属性总览页面：4 页双列（主属性与面板属性 / 隐藏属性 / 元素与抗性 / 全局加成），
+// 每列最多 11 行；分页表见 overview_model.h。P4 只有左列。
 //
 // 绘制只用 ui_components：面板根、标准导航盒、左右箭头按钮、draw_control_text。
 // 适配层只提供帧封装（begin_frame/end_frame）与屏幕 inset；不做 fill_rect /
@@ -29,10 +28,14 @@ constexpr int64_t kHeaderY = 100;
 constexpr int64_t kSectionY = 148;
 constexpr int64_t kRowsTopY = 190;
 constexpr int64_t kRowPitch = 32;
-constexpr int64_t kLabelColumnX = 90;
-constexpr int64_t kValueColumnCenterX = 520;
-constexpr int64_t kPageIndicatorY = 512;
-constexpr int64_t kPageArrowY = 536;
+// 双列：左列标签 90 / 数值右缘 430；右列标签 500 / 数值右缘 840（均设计区局部坐标）。
+constexpr int64_t kLeftLabelX = 90;
+constexpr int64_t kLeftValueRightX = 430;
+constexpr int64_t kRightLabelX = 500;
+constexpr int64_t kRightValueRightX = 840;
+// 分页行：左箭头 / 页码 / 右箭头同一行，不额外占一行。
+constexpr int64_t kPageRowY = 556;
+constexpr int64_t kPageTextY = kPageRowY + 16;
 constexpr int64_t kPageArrowSize = 56;
 constexpr int64_t kPageArrowCenterOffset = 120;
 constexpr int32_t kTitleFont = 2;
@@ -267,10 +270,9 @@ bool create_controls() {
         return false;
     }
     g_root = root;
-    // 导航盒是屏幕绝对坐标（ui_theme::kNavBox*）：换算成根内局部坐标。
+    // 局部坐标 {8,8}：绝对位置 = root 原点(inset) + 8，与 settings 页口径一致。
     const contracts::UiNavButtonDesc nav_desc{
-        {contracts::ui_theme::kNavBoxAbsX - root_x,
-         contracts::ui_theme::kNavBoxAbsY - root_y,
+        {contracts::ui_theme::kNavBoxAbsX, contracts::ui_theme::kNavBoxAbsY,
          contracts::ui_theme::kNavBoxW, contracts::ui_theme::kNavBoxH},
         contracts::kUiNavButtonAuto, nullptr, nullptr};
     if (!contracts::succeeded(components->nav_button_create(&nav_desc, root, &g_nav)) ||
@@ -279,11 +281,11 @@ bool create_controls() {
         return false;
     }
     const contracts::UiArrowButtonDesc prev_desc{
-        {kDesignCenterX - kPageArrowCenterOffset - kPageArrowSize / 2, kPageArrowY,
+        {kDesignCenterX - kPageArrowCenterOffset - kPageArrowSize / 2, kPageRowY,
          kPageArrowSize, kPageArrowSize},
         contracts::kUiArrowLeft, 0, &on_previous_page, nullptr};
     const contracts::UiArrowButtonDesc next_desc{
-        {kDesignCenterX + kPageArrowCenterOffset - kPageArrowSize / 2, kPageArrowY,
+        {kDesignCenterX + kPageArrowCenterOffset - kPageArrowSize / 2, kPageRowY,
          kPageArrowSize, kPageArrowSize},
         contracts::kUiArrowRight, 1, &on_next_page, nullptr};
     if (!contracts::succeeded(components->arrow_button_create(&prev_desc, root, &g_prev)) ||
@@ -296,43 +298,47 @@ bool create_controls() {
     return true;
 }
 
-void draw_page() {
-    // draw_control_text 的偏移相对根控件原点（= 屏幕 inset 原点），传入设计区局部坐标。
-    const int64_t center_x = kDesignCenterX;
-    const int64_t left_x = kLabelColumnX;
-    const int64_t value_x = kValueColumnCenterX;
-    draw_text(kTitleText, center_x, static_cast<int32_t>(kHeaderY),
-              contracts::ui_theme::kTextGold, 2, kTitleFont);
-
-    PageRef page{};
-    if (!locate_page(g_page, &page)) return;
-    const SectionSpec& spec = kSections[page.section];
-    draw_text(spec.title, center_x, static_cast<int32_t>(kSectionY),
-              contracts::ui_theme::kTextNormal, 2, kBodyFont);
-
-    for (uint32_t i = 0; i < page.row_count; ++i) {
-        const uint32_t row_index = page.first_row + i;
-        const RowSpec& row = spec.rows[row_index];
+void draw_column(const ColumnSpec& column, int64_t label_x, int64_t value_right_x) {
+    if (column.row_count == 0 || column.section >= kSectionCount) return;
+    const SectionSpec& section = kSections[column.section];
+    for (uint32_t i = 0; i < column.row_count; ++i) {
+        const uint32_t row_index = column.first_row + i;
+        if (row_index >= section.count) break;
+        const RowSpec& row = section.rows[row_index];
         const int32_t y = static_cast<int32_t>(kRowsTopY + static_cast<int64_t>(i) * kRowPitch);
         if (row.kind == RowKind::kText) {
             // 说明行没有数值列：整行左对齐，逐行带上「不是角色属性」注记。
             char line[128];
             (void)std::snprintf(line, sizeof(line), "%s：%s", row.label, kGlobalNote);
-            draw_text(line, left_x, y, contracts::ui_theme::kTextNormal, 0, kBodyFont);
+            draw_text(line, label_x, y, contracts::ui_theme::kTextNormal, 0, kBodyFont);
             continue;
         }
         char value[kValueBufferSize];
-        format_value(row, g_snapshot.ok[page.section][row_index] != 0,
-                     g_snapshot.value[page.section][row_index], value, sizeof(value));
-        draw_text(row.label, left_x, y, contracts::ui_theme::kTextNormal, 0, kBodyFont);
-        draw_text(value, value_x, y, contracts::ui_theme::kTextBody, 2, kBodyFont);
+        format_value(row, g_snapshot.ok[column.section][row_index] != 0,
+                     g_snapshot.value[column.section][row_index], value, sizeof(value));
+        draw_text(row.label, label_x, y, contracts::ui_theme::kTextNormal, 0, kBodyFont);
+        draw_text(value, value_right_x, y, contracts::ui_theme::kTextBody, 1, kBodyFont);
     }
+}
+
+void draw_page() {
+    // draw_control_text 的偏移相对根控件原点（= 屏幕 inset 原点），传入设计区局部坐标。
+    draw_text(kTitleText, kDesignCenterX, static_cast<int32_t>(kHeaderY),
+              contracts::ui_theme::kTextGold, 2, kTitleFont);
+
+    const PageSpec* page = nullptr;
+    if (!page_at(g_page, &page) || page == nullptr) return;
+    draw_text(page->title, kDesignCenterX, static_cast<int32_t>(kSectionY),
+              contracts::ui_theme::kTextNormal, 2, kBodyFont);
+
+    draw_column(page->left, kLeftLabelX, kLeftValueRightX);
+    draw_column(page->right, kRightLabelX, kRightValueRightX);
 
     char page_text[48];
     (void)std::snprintf(page_text, sizeof(page_text), "第 %u / %u 页",
                         static_cast<unsigned>(g_page + 1),
                         static_cast<unsigned>(g_page_count));
-    draw_text(page_text, center_x, static_cast<int32_t>(kPageIndicatorY),
+    draw_text(page_text, kDesignCenterX, static_cast<int32_t>(kPageTextY),
               contracts::ui_theme::kTextDisabled, 2, kBodyFont);
 }
 
@@ -375,7 +381,7 @@ const char* overview_provider_block_reason() {
 void overview_panel_enter() {
     if (g_root == nullptr && !create_controls()) return;
     // 每次打开（含嵌套返回后的重新进入）只读取一次数据；翻页不再读取。
-    g_page_count = total_page_count();
+    g_page_count = kPageCount;
     g_page = 0;
     read_snapshot();
     g_active.store(true, std::memory_order_release);

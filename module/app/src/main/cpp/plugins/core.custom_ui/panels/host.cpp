@@ -772,6 +772,11 @@ bool PopupHost::custom_overlay_scope_identity(const void** provider, uint64_t* g
     return true;
 }
 
+bool PopupHost::has_original_popup_baseline() const {
+    // 打开模块面板前的游戏 popup 栈基线：>0 表示模块面板叠在原生面板之上。
+    return original_popup_count_ > 0;
+}
+
 uint64_t PopupHost::allocate_open_generation() {
     if (open_generation_counter_ == UINT64_MAX) return 0;
     return ++open_generation_counter_;
@@ -800,6 +805,10 @@ bool ui_panels_custom_backend_active() {
 bool ui_panels_custom_overlay_scope_identity(const void** provider, uint64_t* generation) {
     return g_dispatch_host != nullptr &&
         g_dispatch_host->custom_overlay_scope_identity(provider, generation);
+}
+
+bool ui_panels_has_original_popup_baseline() {
+    return g_dispatch_host != nullptr && g_dispatch_host->has_original_popup_baseline();
 }
 
 }  // namespace qol::features::core_ui

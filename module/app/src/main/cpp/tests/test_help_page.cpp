@@ -248,6 +248,7 @@ void ui_panels_close(const char* id) {
 // 由 main 在回调返回后调用 flush_back_request() 应用（模拟帧边界）。
 void ui_panels_request_back() { g_back_requested = true; }
 int ui_panels_depth() { return 1; }
+bool ui_panels_has_original_popup_baseline() { return false; }
 }  // namespace qol::features::core_ui
 
 namespace {

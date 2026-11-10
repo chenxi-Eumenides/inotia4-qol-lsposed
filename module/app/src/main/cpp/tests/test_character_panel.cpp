@@ -301,7 +301,7 @@ void test_manifest_ids() {
     CHECK(d.features[1].default_enabled == 1);
 }
 
-// 分区行数 + 分页映射：61 行 → 8 页，逐页校验分区/页内序号/首行/行数。
+// 分区行数 + 分页映射：61 行 → 4 页双列（每列最多 11 行），校验左右列与行覆盖。
 void test_overview_row_model() {
     CHECK(i18n::kSectionCount == 4);
     CHECK(i18n::kPanelRowCount == 16);
@@ -309,50 +309,63 @@ void test_overview_row_model() {
     CHECK(i18n::kElementRowCount == 19);
     CHECK(i18n::kGlobalRowCount == 4);
     CHECK(i18n::kTotalRowCount == 61);
-    CHECK(i18n::kMaxRowsPerPage == 10);
-    CHECK(i18n::total_page_count() == 8);
+    CHECK(i18n::kMaxRowsPerColumn == 11);
+    CHECK(i18n::kPageCount == 4);
 
-    // 每页：分区 / 分区内页序号 / 首行 / 行数。
-    struct ExpectedPage {
+    // 4 页双列：每页的左右列（分区 / 首行 / 行数）。
+    struct ExpectedColumn {
         uint32_t section;
-        uint32_t local_page;
         uint32_t first_row;
         uint32_t row_count;
     };
-    const ExpectedPage expected[8] = {
-        {0, 0, 0, 10},   // 主属性与面板属性 (1/2)
-        {0, 1, 10, 6},   // 主属性与面板属性 (2/2)
-        {1, 0, 0, 10},   // 隐藏属性 (1/3)
-        {1, 1, 10, 10},  // 隐藏属性 (2/3)
-        {1, 2, 20, 2},   // 隐藏属性 (3/3)
-        {2, 0, 0, 10},   // 元素与抗性 (1/2)
-        {2, 1, 10, 9},   // 元素与抗性 (2/2)
-        {3, 0, 0, 4},    // 全局加成 (1/1)
+    struct ExpectedPage {
+        ExpectedColumn left;
+        ExpectedColumn right;
     };
-    for (uint32_t page = 0; page < 8; ++page) {
-        i18n::PageRef ref{};
-        CHECK(i18n::locate_page(page, &ref));
-        CHECK(ref.section == expected[page].section);
-        CHECK(ref.local_page == expected[page].local_page);
-        CHECK(ref.first_row == expected[page].first_row);
-        CHECK(ref.row_count == expected[page].row_count);
-        // 页内行必须落在分区范围内。
-        CHECK(ref.first_row + ref.row_count <= i18n::kSections[ref.section].count);
+    const ExpectedPage expected[4] = {
+        {{0, 0, 5}, {0, 5, 11}},    // P1 左 5 维 / 右面板属性 11 行
+        {{1, 0, 11}, {1, 11, 11}},  // P2 隐藏属性左右各 11
+        {{2, 0, 10}, {2, 10, 9}},   // P3 元素左 10 / 右 9
+        {{3, 0, 4}, {3, 0, 0}},     // P4 全局加成仅左列
+    };
+    uint32_t covered_rows = 0;
+    for (uint32_t page = 0; page < i18n::kPageCount; ++page) {
+        const i18n::PageSpec* spec = nullptr;
+        CHECK(i18n::page_at(page, &spec));
+        CHECK(spec != nullptr && spec->title != nullptr);
+        const i18n::ColumnSpec* columns[2] = {&spec->left, &spec->right};
+        const ExpectedColumn* expected_columns[2] = {&expected[page].left,
+                                                    &expected[page].right};
+        for (int column = 0; column < 2; ++column) {
+            const i18n::ColumnSpec& actual = *columns[column];
+            const ExpectedColumn& want = *expected_columns[column];
+            CHECK(actual.section == want.section);
+            CHECK(actual.first_row == want.first_row);
+            CHECK(actual.row_count == want.row_count);
+            CHECK(actual.row_count <= i18n::kMaxRowsPerColumn);
+            // 列内行必须落在分区范围内。
+            CHECK(actual.first_row + actual.row_count <=
+                  i18n::kSections[actual.section].count);
+            covered_rows += actual.row_count;
+        }
     }
+    // 4 页双列覆盖全部 61 行，且全局加成页只有左列。
+    CHECK(covered_rows == i18n::kTotalRowCount);
+    CHECK(i18n::kPages[3].right.row_count == 0);
+    // 主属性与面板属性页：左列恰好 5 维、右列接续到分区末尾。
+    CHECK(i18n::kPages[0].left.row_count == 5);
+    CHECK(i18n::kPages[0].right.first_row == i18n::kPages[0].left.row_count);
+    CHECK(i18n::kPages[0].right.first_row + i18n::kPages[0].right.row_count ==
+          i18n::kPanelRowCount);
 
-    // 边界页首尾：P2 首行 10、末行 15；隐藏属性末页首行 20、末行 22；元素末页末行 18。
-    i18n::PageRef ref{};
-    CHECK(i18n::locate_page(1, &ref) && ref.first_row + ref.row_count == 16);
-    CHECK(i18n::locate_page(4, &ref) && ref.first_row == 20 && ref.first_row + ref.row_count == 22);
-    CHECK(i18n::locate_page(6, &ref) && ref.first_row == 10 && ref.first_row + ref.row_count == 19);
-
-    // 越界页码不产生页引用，且不越界写 out。
-    i18n::PageRef untouched{7, 7, 7, 7};
-    CHECK(!i18n::locate_page(8, &untouched));
-    CHECK(untouched.section == 7 && untouched.local_page == 7 && untouched.first_row == 7 &&
-          untouched.row_count == 7);
-    CHECK(!i18n::locate_page(100, nullptr));
-    CHECK(i18n::locate_page(0, nullptr));
+    // 越界页码返回 false，且不写 out。
+    CHECK(!i18n::page_at(i18n::kPageCount, nullptr));
+    CHECK(!i18n::page_at(100, nullptr));
+    CHECK(i18n::page_at(0, nullptr));
+    const i18n::PageSpec* untouched = reinterpret_cast<const i18n::PageSpec*>(
+        static_cast<uintptr_t>(0x1234));
+    CHECK(!i18n::page_at(4, &untouched));
+    CHECK(reinterpret_cast<uintptr_t>(untouched) == 0x1234);
 }
 
 // 格式化：千分比 raw/10 保留 1 位小数 + %；整数；失败 `--`；说明行带注记。

@@ -155,7 +155,7 @@
 | 闪避率 | `QolCharacterReadApi::evasion_rate_1000(ch, &v)` | `CHAR_GetNormalEvasionRate1000`，内部把临时值夹到 980 |
 | 物抗 | `QolCharacterReadApi::display_damage_reduce_rate(ch, &v)` | `CHAR_GetDisplayDamageReduceRate`，内部使用 CAL 全局计算器栈，只能主线程串行调用 |
 
-面板内容区的屏幕绝对矩形由 `QolUiAdapter::character_info_content_rect`（Adapter minor 36）给出，已含屏幕 inset；消费方不得自建布局常量。
+**右侧战斗属性框内部文本区**的屏幕绝对矩形由 `QolUiAdapter::character_info_content_rect`（Adapter minor 36）给出：`{inset_x+741, inset_y+153, 205×411}`，已含屏幕 inset。几何链：`M = B + (0,133)`、`A = M + (496,0)`、右框外框 `A + (226,0,224,431)`、内部文本起点 `A + (245,20)`。该矩形避开左侧 5 维属性框、队伍页签、关闭 X、属性分配入口与 +/−/重置；消费方不得自建布局常量。
 
 ## 6. 装备词缀表 `ITEMOPTINFOBASE`
 
@@ -196,7 +196,7 @@
 | 面板标签与 35188 占位 | `docs/reference/plugins/character_panel.md`、`plugins/character_panel/feature.h:30-39` |
 | 命中/闪避/物抗 getter VMA | `module/app/src/main/cpp/game/symbols/game_symbols.h:501-503`（`F_CHAR_GET_HIT_RATE_1000_VMA`、`F_CHAR_GET_NORMAL_EVASION_RATE_1000_VMA`、`F_CHAR_GET_DISPLAY_DAMAGE_REDUCE_RATE_VMA`）；按名解析登记 `game/symbols/symbol_registry.h:72-74` |
 | 面板派生只读面（v2.13） | `contracts/game_host.h:67-83`（`QolCharacterReadApi::main_stat`/`normal_damage`/`normal_magic_damage`/`hit_rate_1000`/`evasion_rate_1000`/`display_damage_reduce_rate`）、`contracts/game_host.h:312-314`（`kGameHostCharacterReadMinor=13`）、`game/adapter_ports/game_host_port.cpp:996-1112` |
-| 人物面板内容区矩形 | `contracts/ui.h:831-833`（`character_info_content_rect`）、`contracts/ui.h:17`（`kUiAdapterMinor=36`）、`host/ui_adapter.cpp:613-628` |
+| 右侧战斗属性框内部文本区矩形 | `contracts/ui.h:831-833`（`character_info_content_rect`）、`contracts/ui.h:17`（`kUiAdapterMinor=36`）、`host/ui_adapter.cpp:613-628`（`inset+(741,153)`、`205×411`） |
 | 属性贡献与格挡结论 | `docs/reference/game/game-systems.md` §6.1 |
 | 词缀表与公式 | `apk/static-data/json/tables/ITEMOPTINFOBASE.json`、`apk/static-data/json/text/formula-e.json` |
 | 默认属性值 | `apk/static-data/json/tables/ATTRINITBASE.json`（`[attr_id, class_mask, default_u16]`） |

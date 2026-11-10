@@ -9,8 +9,11 @@
 // 本头不依赖 Host SDK / Game Host / 游戏内存，可在 host 单测中直接断言
 // 行数、页边界与格式化结果；overview.cpp 只负责读取与绘制。
 //
-// 分页规则：每页最多 10 行；分区超过 10 行时按顺序拆到后续页（"后续页顺延"），
-// 页数由分区行数推导。当前 61 行 → 8 页（2 + 3 + 2 + 1）。
+// 分页规则：双列布局，每列最多 11 行，共 4 页：
+//   P1 主属性与面板属性：左列 5 维属性、右列面板属性 11 行；
+//   P2 隐藏属性：左 11、右 11；
+//   P3 元素与抗性：左 10、右 9；
+//   P4 全局加成：左列 4 行说明。
 
 namespace qol::features::character_panel {
 
@@ -127,7 +130,7 @@ inline constexpr SectionSpec kSections[] = {
 
 inline constexpr uint32_t kSectionCount = static_cast<uint32_t>(sizeof(kSections) /
                                                                 sizeof(kSections[0]));
-inline constexpr uint32_t kMaxRowsPerPage = 10;
+inline constexpr uint32_t kMaxRowsPerColumn = 11;
 // 快照容量上限；分区行数增大时需要同步调整。
 inline constexpr uint32_t kMaxSectionRows = 32;
 inline constexpr uint32_t kPanelRowCount =
@@ -151,43 +154,44 @@ inline constexpr const char* kGlobalNote = "不是角色属性（佣兵团技能
 // 单行读取失败时显示的占位。
 inline constexpr const char* kUnknownValue = "--";
 
-inline constexpr uint32_t pages_in_section(uint32_t count) {
-    return count == 0 ? 0 : (count + kMaxRowsPerPage - 1) / kMaxRowsPerPage;
-}
-
-inline constexpr uint32_t total_page_count() {
-    uint32_t pages = 0;
-    for (uint32_t i = 0; i < kSectionCount; ++i) pages += pages_in_section(kSections[i].count);
-    return pages == 0 ? 1 : pages;
-}
-
-// 页码 → 分区 + 分区内页序号 + 该页起始行/行数（行数受 10 行与分区末页限制）。
-struct PageRef {
+// 页的一列：引用某个分区内的连续行（section 为 kSections 下标）。
+struct ColumnSpec {
     uint32_t section;
-    uint32_t local_page;
     uint32_t first_row;
     uint32_t row_count;
 };
 
+struct PageSpec {
+    const char* title;
+    ColumnSpec left;
+    ColumnSpec right;  // row_count == 0 表示本页只有左列
+};
+
+// 4 页固定布局；行数与分区顺序一一对应（61 行全覆盖）。
+inline constexpr PageSpec kPages[] = {
+    {"主属性与面板属性", {0, 0, 5}, {0, 5, 11}},
+    {"隐藏属性", {1, 0, 11}, {1, 11, 11}},
+    {"元素与抗性", {2, 0, 10}, {2, 10, 9}},
+    {"全局加成", {3, 0, 4}, {3, 0, 0}},
+};
+inline constexpr uint32_t kPageCount =
+    static_cast<uint32_t>(sizeof(kPages) / sizeof(kPages[0]));
+
+static_assert(kPageCount == 4, "属性总览固定 4 页");
+static_assert(kPages[0].left.row_count <= kMaxRowsPerColumn &&
+                  kPages[0].right.row_count <= kMaxRowsPerColumn &&
+                  kPages[1].left.row_count <= kMaxRowsPerColumn &&
+                  kPages[1].right.row_count <= kMaxRowsPerColumn &&
+                  kPages[2].left.row_count <= kMaxRowsPerColumn &&
+                  kPages[2].right.row_count <= kMaxRowsPerColumn &&
+                  kPages[3].left.row_count <= kMaxRowsPerColumn,
+              "每列最多 11 行");
+
 // 页码越界返回 false（不写 out）。
-inline bool locate_page(uint32_t page, PageRef* out) {
-    uint32_t remaining = page;
-    for (uint32_t i = 0; i < kSectionCount; ++i) {
-        const uint32_t pages = pages_in_section(kSections[i].count);
-        if (remaining < pages) {
-            if (out != nullptr) {
-                const uint32_t first_row = remaining * kMaxRowsPerPage;
-                const uint32_t left = kSections[i].count - first_row;
-                out->section = i;
-                out->local_page = remaining;
-                out->first_row = first_row;
-                out->row_count = left > kMaxRowsPerPage ? kMaxRowsPerPage : left;
-            }
-            return true;
-        }
-        remaining -= pages;
-    }
-    return false;
+inline bool page_at(uint32_t index, const PageSpec** out) {
+    if (index >= kPageCount) return false;
+    if (out != nullptr) *out = &kPages[index];
+    return true;
 }
 
 // 单行数值格式化（固定缓冲，无动态分配）：
