@@ -58,9 +58,9 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 
 面板 id `world_tuning`，provider 在 `plugin_install` 内注册（需要 `ui_panels` + `ui_components` 同时可用）。
 
-- 960×640 root，单栏容器 `{28,100,920,444}`；与设置页相同的 `kPanelBg` 底、`draw_container_styled`（`ornamented=1`）边框/内底和左右装饰图（`draw_image_part` unit `0x4f`/`0x50`）；不绘制标题与说明行。迁移前使用的 `draw_container_ornamented` 已随 ui_components Major 2 移除。
-- 9 行，行高 71，使用 `scroll_list`（关闭选中态）；每行：名称、数值、左右 `arrow_button`；行底 2 逻辑单位金色分割线，与设置页行样式一致。
-- 列表视口高 428，内容高 639（9 行 × 71），超出部分由 `scroll_list` 滚动；滚动条沿用原生 `scroll_list` 自带的一条，不额外自绘。
+- 960×640 root，单一装饰框 `{44,104,872,412}`；使用 `draw_container_styled`（`ornamented=1`、`fill_rgb565=0x0000`、`alpha=60`，即黑色 60%）绘制边框与四角装饰；不绘制标题、说明行或侧边装饰图。迁移前使用的 `draw_container_ornamented` 已随 ui_components Major 2 移除。
+- 框内左右两列各 400 宽、列间距 24；每列 5 行、每页最多 10 项，先填满左列再进右列。行高 76；每行：名称、数值、左右 `arrow_button`；行底 2 逻辑单位金色分割线，行本身不绘制底色。
+- 框内不使用 `scroll_list` 或原生滚动。框下方居中放置左右翻页箭头与页码；当前 9 项单页（左 5、右 4），翻页按钮存在但禁用；项数超过 10 时自动分页，只创建当前页的箭头。
 - OP 关闭时使用基础档位：百分比 `{10,30,50,80,100,120,150,200,300,500}`，掉落数量/重抽 `{1,2,3,4,5}`，冷却倍率 `{10,30,50,80,100,200,300,500}`。因此基础档位不提供 0。
 - OP 开启时使用扩展档位：百分比从 0、10 开始，500 后为 1000、10000……100000000（最高显示 `×1000000.0`）；掉落数量/重抽从 0、1、2、3、4、5 开始，之后按 10 递增至 200；冷却倍率追加 0 与 1000（10x）。
 - 百分比行显示 `×1.5` 形式（0 显示 `×0`）；掉落数量/重抽行显示整数。配置值无上限（int32 范围内），面板档位上限为百分比 100000000、掉落 200。
@@ -144,7 +144,7 @@ monster v29 的 `CHAR_AddDamage` 入口是 `b <隐藏段目标>`，且 mod 会�
 | `plugins/world_tuning/plugin.cpp` / `plugin.h` | descriptor、feature、install/deactivate、面板注册、配置读取 |
 | `plugins/world_tuning/feature.cpp` / `feature.h` | 九个入口 wrapper、`item.use` 回调、阵营判定、HP 账本、掉落上下文与重抽、倍率原子值、配置读写 |
 | `plugins/world_tuning/rates.cpp` / `rates.h` | 档位、字段/文案表、JSON 编解码与校验、缩放函数 |
-| `plugins/world_tuning/panel.cpp` / `panel.h` | 面板 provider、列表/箭头/文本绘制、receipt 轮询 |
+| `plugins/world_tuning/panel.cpp` / `panel.h` | 面板 provider、双列分页布局、箭头/文本绘制、receipt 轮询 |
 | `plugins/world_tuning/settings_contribution.cpp` / `.h` | 旧 catalog contribution 空实现 |
 | `plugins/world_tuning/CMakeLists.txt` | `qol_plugin_world_tuning` 静态库 |
 
