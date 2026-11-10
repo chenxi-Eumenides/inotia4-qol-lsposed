@@ -532,3 +532,12 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | 工具链识别 | **PASS**：`check_arch.py` 八步全绿；`scripts/patch-apk.sh` 对 5 个顶层 APK 全部成功（成功 5 / 失败 0），产出 `output/Inotia4_Fantasy_v1.2_debug_lspatch.apk`；`release_stem` 对 6 个变体名（含幻想、C18L、C18）输出均符合 `Inotia4_<变体>_<版本>`；集成包内 `lib/arm64-v8a/libgame.so` MD5 仍为 `869a348a…`，内嵌模块 APK 的 `libgamebridge.so` 含 `fantasy` 字符串；`apksigner verify` 通过。 | 生成前脚本按既定行为删除并重建 `output/` 下旧集成包（清理 4 个）。 |
 | Host/构建 | **PASS（定向）**：`game_variant_tests` 138 通过 / 0 失败（含新增 fantasy 表项、系列名与倍率断言）；`scripts/build-debug.sh --offline` BUILD SUCCESSFUL → `output/inotia4_qol_lsposed_debug_2611091119_d43a194110f9.apk`（SHA-256 `d43a194110f9…`）。 | 未跑全量 CTest：`item_facts_plugin_tests` 的 `kGameHostMinor == 10` 静态断言在本次改动前即与工作区契约版本不一致，属无关既有状态，按“只保证识别”口径跳过并单独说明。 |
 | 真机识别 | **NOT_ACCEPTED（未执行）**：未安装幻想集成包。 | 待核验：安装后 `/api/health` 返回 `series=fantasy`、`version=v1.2`、`known=true`、`capabilities=1`；设置页显示 `幻想版 v1.2`。 |
+
+### 5.34 崩溃回栈多级化（2026-11-10；Host/aarch64 编译/Debug 构建通过，真机待验）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 缺陷 | **已定位**：c18 打怪闪退的 `qol-crash.log` 只有 `bt0` 一行。FP 链方向判定写成 `next_fp >= fp → break`，注释还写着「合法链必须递减」——栈向下生长，调用者 FP 必然更大，首帧后即断链，多级栈永远写不出来。证据 `apk/logs/qol-crash-c18打怪闪退.log`：`pc=libgame.so+0x12dc3c`、`bt0=libgame.so+0xe1cb8`，无 `bt1` | 崩溃现场采样本身正常（sp 落在 `[anon:stack_and_tls:<tid>]`、`x29 == sp`），只是回溯算法方向写反 |
+| 修复 | **已实现**：链方向改为调用者 FP 必须大于当前 FP；每帧按 `/proc/self/maps` 校验 FP 落在崩溃线程栈映射内、返回地址落在可执行映射内，任一不满足即截断（不输出伪造帧）；maps 解析失败时退化为「8 字节对齐 + 严格递增」；帧记录缺失（叶函数沿用调用者 FP / FP 被复用）时退回写 `bt0=x30`；上限仍 64 帧 | `infra/log/qol_crash.cpp`；崩溃文件四段顺序与 `key=value` 契约不变，新增内容仍在寄存器段与 `--- maps ---` 之间 |
+| 工具/文档 | **已同步**：`symbolize_crash.py` 的 `btN` 改为按帧号自然排序（原字符串序会排成 bt0/bt1/bt10/bt11/bt2）；`docs/reference/logging.md` §7 更新方向、maps 校验与 LR 回退语义；`qol_crash.h` 头部「不展开调用栈」更正为 FP 链回溯 | 符号名还原仍是离线步骤（`llvm-symbolizer`），崩溃处理器内不做符号化 |
+| 验证 | **PASS（Host/编译/构建）**：`qol_log_tests` 119 passed / 0 failed（新增非 arm64 `backtrace=unavailable` 断言）；`clang++ --target=aarch64-linux-android24 -fsyntax-only -Wall -Wextra` 零告警；`scripts/build-debug.sh` → `output/inotia4_qol_lsposed_debug_2611101105_798dbb4fabf8.apk`（SHA-256 `798dbb4f…`） | **NOT_ACCEPTED（真机未验）**：需要一次真实崩溃确认 `bt1..btN` 连续、无伪造帧。本轮无可用崩溃样本，样本复现依赖 §5.34 之外的 c18 打怪路径 |

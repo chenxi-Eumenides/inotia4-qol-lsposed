@@ -119,10 +119,12 @@ qol.log 尾部 4 KB 原文
 
 - `ident.*` identity/config 行：位于 header 段内 `signal=` 之后、寄存器之前；identity 文本由
   Kotlin 生成并自带前缀，native 原样整段写出（§6）。
-- `btN` FP 链回溯行：位于寄存器之后、maps 之前。arm64 从 `x29`（FP）起链，`fp[0]` 是上一帧 FP、
-  `fp[1]` 是本帧返回地址；经 `process_vm_readv` 读 `[fp, fp+16)`，坏 FP/非递减链即截断，
-  最多 64 帧（`kBacktraceMaxFrames`）。回溯失败只截断 `btN` 行，不影响后续段；
-  非 arm64 写 `backtrace=unavailable`。
+- `btN` FP 链回溯行：位于寄存器之后、maps 之前。arm64 从 `x29`（FP）起链，`fp[0]` 是调用者 FP、
+  `fp[1]` 是本帧返回地址。栈向下生长，调用者 FP 必须大于当前 FP（合法链递增），递减或相等即截断。
+  每帧先按 `/proc/self/maps` 校验：FP 必须落在崩溃线程的栈映射内、返回地址必须落在可执行映射内，
+  不满足即截断，不输出伪造帧；最多 64 帧（`kBacktraceMaxFrames`）。帧记录缺失（叶函数沿用调用者
+  FP、FP 被复用）时退回写 `bt0=x30`。回溯失败只截断 `btN` 行，不影响后续段；
+  非 arm64/非 Linux 写 `backtrace=unavailable`。
 
 identity/config 缓冲用 seqlock 防撕裂：读到写入中途输出 `ident.unstable=1`；未下发时输出
 `ident.device=(not set)` / `ident.config=(not set)`。不输出半截内容。

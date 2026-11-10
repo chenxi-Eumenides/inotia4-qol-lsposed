@@ -378,6 +378,10 @@ static void test_crash_capture() {
     CHECK(content.find("frame=") != std::string::npos);
     CHECK(content.find("--- maps ---") != std::string::npos);
     CHECK(content.find("qol_log_tests") != std::string::npos);  // 可执行文件必须在 maps 里
+#if !defined(__aarch64__)
+    // 回溯只在 arm64/Linux 上实现；其余平台写固定标记，符号化脚本按 key=value 忽略。
+    CHECK(content.find("backtrace=unavailable") != std::string::npos);
+#endif
     CHECK(content.find("--- log tail ---") != std::string::npos);
     CHECK(content.find("last-line-before-crash") != std::string::npos);
 

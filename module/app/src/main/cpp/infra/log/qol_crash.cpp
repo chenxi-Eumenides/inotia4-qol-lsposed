@@ -278,21 +278,151 @@ void write_regs(int fd, void* uc_ptr) {
 }
 
 // ---- FP 链回溯 ----
+//
+// arm64 AAPCS 帧记录：[fp] = 调用者 FP，[fp+8] = 本帧返回地址。栈向下生长，所以
+// 合法的调用者 FP 必然**大于**当前 FP——链必须递增，递减/相等即链已损坏。
+//
+// 读内存统一走 process_vm_readv（对未映射地址只返回错误，不触发二次 fault），且
+// 每帧先校验：FP 在崩溃线程的栈映射内、返回地址落在可执行映射内；任一不满足就
+// 截断，宁可少帧也不输出伪造帧。处理器运行在 SIGSEGV 路径上，二次 fault 会中断
+// 后续 --- maps --- / --- log tail --- 段。键名 btN 由 symbolize_crash.py 与寄存器
+// 同路径做 maps 解析；符号名由离线符号化负责。
 
-#if defined(__aarch64__)
+#if defined(__aarch64__) && defined(__linux__)
+
 constexpr int kBacktraceMaxFrames = 64;
+constexpr int kMaxExecRanges = 128;
 
-// arm64 FP 链：fp[0] 是上一帧 FP，fp[1] 是本帧返回地址。经 process_vm_readv 读
-// [fp, fp+16) 而不是直接解引用：处理器正运行在 SIGSEGV 路径上，坏的 fp 会造成
-// 二次 fault，中断后续 --- maps --- / --- log tail --- 段。任何失败都只截断回溯，
-// 不影响其余段。键名 btN 会被 symbolize_crash.py 按寄存器做 maps 解析；符号名由
-// 离线符号化负责。
+struct AddressRange {
+    uintptr_t start;
+    uintptr_t end;  // 不含
+};
+
+// 崩溃线程的栈映射（约束 FP 链）与全部可执行映射（校验返回地址）。
+struct AddressSpace {
+    AddressRange stack{0, 0};
+    AddressRange exec[kMaxExecRanges];
+    int exec_count = 0;
+};
+
+bool parse_hex_u64(const char** cursor, const char* end, uintptr_t* value) {
+    const char* p = *cursor;
+    uintptr_t v = 0;
+    bool any = false;
+    while (p < end) {
+        const char c = *p;
+        uintptr_t digit = 0;
+        if (c >= '0' && c <= '9') {
+            digit = static_cast<uintptr_t>(c - '0');
+        } else if (c >= 'a' && c <= 'f') {
+            digit = static_cast<uintptr_t>(c - 'a' + 10);
+        } else if (c >= 'A' && c <= 'F') {
+            digit = static_cast<uintptr_t>(c - 'A' + 10);
+        } else {
+            break;
+        }
+        v = (v << 4) | digit;
+        any = true;
+        ++p;
+    }
+    if (!any) return false;
+    *cursor = p;
+    *value = v;
+    return true;
+}
+
+// maps 行：`<start>-<end> <perms> <offset> <dev> <inode> <path>`。
+// 只取 start/end/perms：包含 sp 的那条是崩溃线程栈，`..x` 的是可执行映射。
+void parse_maps_line(const char* begin, const char* end, uintptr_t sp, AddressSpace* space) {
+    const char* p = begin;
+    uintptr_t start = 0;
+    uintptr_t stop = 0;
+    if (!parse_hex_u64(&p, end, &start)) return;
+    if (p >= end || *p != '-') return;
+    ++p;
+    if (!parse_hex_u64(&p, end, &stop)) return;
+    if (start >= stop) return;
+    if (p >= end || *p != ' ') return;
+    while (p < end && *p == ' ') ++p;
+    if (end - p < 4) return;
+    const bool executable = p[2] == 'x';
+    if (start <= sp && sp < stop) {
+        space->stack.start = start;
+        space->stack.end = stop;
+    }
+    if (executable && space->exec_count < kMaxExecRanges) {
+        space->exec[space->exec_count++] = AddressRange{start, stop};
+    }
+}
+
+// 崩溃处理器内解析 /proc/self/maps（无 malloc、无 stdio）：按 '\n' 切行，
+// 跨 read 分片的残行搬到缓冲头部继续拼。
+void read_address_space(uintptr_t sp, AddressSpace* space) {
+    const int maps_fd = ::open("/proc/self/maps", O_RDONLY | O_CLOEXEC);
+    if (maps_fd < 0) return;
+    char buf[2048];
+    size_t carry = 0;
+    for (;;) {
+        const ssize_t n = ::read(maps_fd, buf + carry, sizeof(buf) - carry);
+        if (n <= 0) break;
+        const size_t avail = carry + static_cast<size_t>(n);
+        size_t line_begin = 0;
+        for (size_t i = 0; i < avail; ++i) {
+            if (buf[i] != '\n') continue;
+            parse_maps_line(buf + line_begin, buf + i, sp, space);
+            line_begin = i + 1;
+        }
+        carry = avail - line_begin;
+        if (carry >= sizeof(buf) - 1) {
+            carry = 0;  // 单行超过缓冲：丢弃该行，不解析半截内容
+        } else if (carry > 0) {
+            std::memmove(buf, buf + line_begin, carry);
+        }
+    }
+    ::close(maps_fd);
+}
+
+// 帧记录必须完整落在崩溃线程栈内，读 [fp, fp+16) 才不会跨映射边界。
+bool stack_holds_fp(const AddressSpace& space, uintptr_t fp) {
+    const uintptr_t span = space.stack.end - space.stack.start;
+    if (span < 2 * sizeof(uintptr_t)) return true;  // maps 解析失败或映射异常：不做栈约束
+    if (fp < space.stack.start) return false;
+    return fp <= space.stack.end - 2 * sizeof(uintptr_t);
+}
+
+bool is_executable(const AddressSpace& space, uintptr_t addr) {
+    if (space.exec_count == 0) return true;  // maps 解析失败：不做代码段校验
+    for (int i = 0; i < space.exec_count; ++i) {
+        if (addr >= space.exec[i].start && addr < space.exec[i].end) return true;
+    }
+    return false;
+}
+
+void write_frame_line(int fd, int frame, uintptr_t value) {
+    char key[8];
+    size_t n = put_raw(key, sizeof(key), 0, "bt");
+    n = put_dec(key, sizeof(key), n, static_cast<uint64_t>(frame));
+    key[n] = '\0';
+    write_kv_hex(fd, key, static_cast<uint64_t>(value));
+}
+
+// 从 x29 起沿 FP 链回溯，直到链尾/损坏/达到 kBacktraceMaxFrames。
+// 帧记录缺失（叶函数沿用调用者的 FP、或 FP 已被复用）时，用 x30 记录一层返回地址。
 void write_backtrace_aarch64(int fd, const ucontext_t& uc) {
+    const uintptr_t sp = static_cast<uintptr_t>(uc.uc_mcontext.sp);
+    const uintptr_t lr = static_cast<uintptr_t>(uc.uc_mcontext.regs[30]);
     uintptr_t fp = static_cast<uintptr_t>(uc.uc_mcontext.regs[29]);
-    for (int frame = 0; frame < kBacktraceMaxFrames; ++frame) {
+
+    AddressSpace space;
+    read_address_space(sp, &space);
+    const pid_t pid = ::getpid();
+
+    int frame = 0;
+    while (frame < kBacktraceMaxFrames) {
         if (fp == 0) break;
-        if ((fp & (sizeof(void*) - 1)) != 0) break;  // FP 必须 8 字节对齐
+        if ((fp & (sizeof(void*) - 1)) != 0) break;       // FP 必须 8 字节对齐
         if (fp > UINTPTR_MAX - 2 * sizeof(void*)) break;  // 读 16 字节不得地址回绕
+        if (!stack_holds_fp(space, fp)) break;
         unsigned long pair[2] = {0, 0};
         struct iovec local {};
         local.iov_base = pair;
@@ -300,22 +430,23 @@ void write_backtrace_aarch64(int fd, const ucontext_t& uc) {
         struct iovec remote {};
         remote.iov_base = reinterpret_cast<void*>(fp);
         remote.iov_len = sizeof(pair);
-        if (::process_vm_readv(::getpid(), &local, 1, &remote, 1, 0) <= 0) break;
-        char key[8];
-        size_t n = put_raw(key, sizeof(key), 0, "bt");
-        n = put_dec(key, sizeof(key), n, static_cast<uint64_t>(frame));
-        key[n] = '\0';
-        write_kv_hex(fd, key, static_cast<uint64_t>(pair[1]));
+        if (::process_vm_readv(pid, &local, 1, &remote, 1, 0) <= 0) break;
+        const uintptr_t ret = static_cast<uintptr_t>(pair[1]);
         const uintptr_t next_fp = static_cast<uintptr_t>(pair[0]);
-        if (next_fp == 0) break;  // 链尾
-        if (next_fp >= fp) break;  // 栈向下生长：合法链必须递减
+        if (!is_executable(space, ret)) break;  // 返回地址不在代码段：链已损坏
+        write_frame_line(fd, frame, ret);
+        ++frame;
+        if (next_fp == 0) break;                       // 链尾
+        if (next_fp <= fp) break;                      // 栈向下生长：调用者 FP 必须更大
+        if (!stack_holds_fp(space, next_fp)) break;     // 跳到栈外：链已损坏
         fp = next_fp;
     }
+    if (frame == 0 && lr != 0 && is_executable(space, lr)) write_frame_line(fd, 0, lr);
 }
 #endif
 
 void write_backtrace(int fd, const ucontext_t* uc) {
-#if defined(__aarch64__)
+#if defined(__aarch64__) && defined(__linux__)
     if (uc != nullptr) {
         write_backtrace_aarch64(fd, *uc);
         return;

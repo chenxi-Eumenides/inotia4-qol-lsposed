@@ -4,8 +4,9 @@
 // /proc/self/maps + qol.log 尾部」写进 <log_dir>/qol-crash.log，然后恢复原处理器并
 // 重新抛出信号，交还系统 tombstone / 游戏自身处理器。
 //
-// 不做什么：不 fork、不 exec、不展开调用栈。全线程栈需要 ptrace 型 dumper（另一件事），
-// 这里只保证崩溃不再无声无息，并且寄存器 + maps 足以离线还原 `lib+offset`。
+// 不做什么：不 fork、不 exec。调用栈只回溯崩溃线程的 FP 链（btN 行，最多
+// kBacktraceMaxFrames 帧）；其他线程的栈需要 ptrace 型 dumper（另一件事）。
+// 这里保证崩溃不再无声无息，并且寄存器 + FP 链 + maps 足以离线还原 `lib+offset`。
 //
 // 不接管 SIGABRT：ART 的 FATAL EXCEPTION 走 abort，接管会干扰系统自身的崩溃记录。
 #pragma once

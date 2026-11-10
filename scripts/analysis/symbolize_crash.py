@@ -34,6 +34,15 @@ SIGNAL_LINE = re.compile(r"^signal=(\d+) (\S+) code=(-?\d+) \((\S+)\) fault=(0x[
 PREFERRED_REGS = ("pc", "lr", "fp", "sp")
 
 
+def register_sort_key(name: str) -> tuple[int, int, str]:
+    """输出顺序：btN 按帧号紧随 PREFERRED_REGS，其后通用寄存器，最后其余键。"""
+    if name.startswith("bt") and name[2:].isdigit():
+        return (1, int(name[2:]), "")
+    if name.startswith(("x", "r")):
+        return (2, 0, name)
+    return (3, 0, name)
+
+
 @dataclass
 class Mapping:
     start: int
@@ -181,7 +190,7 @@ def main() -> int:
 
     order = list(PREFERRED_REGS) + sorted(
         (name for name in regs if name not in PREFERRED_REGS),
-        key=lambda name: (not name.startswith(("x", "r")), name),
+        key=register_sort_key,
     )
     seen: set[str] = set()
     for name in order:
