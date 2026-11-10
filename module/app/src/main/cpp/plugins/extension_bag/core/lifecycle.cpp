@@ -12,6 +12,7 @@
 #include "plugins/extension_bag/transaction/transaction.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "plugins/extension_bag/runtime/ownership_port.h"
+#include "plugins/extension_bag/runtime/item_access.h"
 
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
@@ -116,6 +117,41 @@ uint64_t call_original_event_with_inventory_guard(uint64_t event, uint64_t param
         }
     }
     return result;
+}
+
+// 0x18 落点若不是任何背包格/页签目标，扩展宝石/强化卷轴唯一合法的原版落点是
+// 人物装备槽。该情形必须把 release 交还原版 TouchHandle，让装备槽控件的 0x04
+// 进入 H-15 适配；session 在原版返回前保持存活。仅按源物品类型与“无背包目标”
+// 判定，装备槽识别和 apply 准入仍由 H-15 自己完成。
+bool projected_release_is_equipment_apply_candidate_locked(int64_t x, int64_t y) {
+    if (!projected_drag_session_active_locked()) return false;
+    const auto& session = qol::extension_bag::ui_state().ui.extension_drag_session;
+    if (!virtual_bag::valid_index(session.source_bag) || session.source_slot < 0 ||
+        session.source_slot >= virtual_bag::kSlotCount) {
+        return false;
+    }
+    void* material = qol::extension_bag::ui_state().objects.module_objects[session.source_bag][session.source_slot];
+    if (!item_type_is(material, qol::contracts::QolItemType::kJewel) &&
+        !item_type_is(material, qol::contracts::QolItemType::kEnchantScroll)) {
+        return false;
+    }
+    if (original_bag_button_index(x, y) >= 0) return false;
+    int native_bag = -1;
+    if (extension_c18_native_bag_hit(x, y, &native_bag)) return false;
+    const int active = virtual_bag::active_extension_bags();
+    for (int index = 0; index < active; ++index) {
+        if (extension_tab_hit(index, x, y)) return false;
+    }
+    const int view = qol::extension_bag::ui_state().objects.module_view_index;
+    int target_slot = -1;
+    if (virtual_bag::valid_index(view) &&
+        qol::extension_bag::ui_state().objects.projected_item_root != nullptr) {
+        target_slot = extension_bag_projected_slot_index(
+            qol::extension_bag::ui_state().objects.projected_item_root, x, y,
+            runtime_state().objects.bag.capacities[view]);
+    }
+    if (target_slot < 0) target_slot = extension_bag_grid_slot_index(x, y, kGridX, kGridY);
+    return target_slot < 0;
 }
 
 bool consume_projected_release_locked(::qol::extension_bag::ReentryLock& lock, int64_t x, int64_t y) {
@@ -300,6 +336,40 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             void* moving = nullptr;
             void* drop_source = nullptr;
             (void)extension_bag_ui_touch_state(&moving, &drop_source, &x, &y);
+        }
+        bool equipment_apply_release = false;
+        int equipment_apply_source_bag = -1;
+        int equipment_apply_source_slot = -1;
+        {
+            ::qol::extension_bag::ReentryLock lock;
+            equipment_apply_release =
+                projected_release_is_equipment_apply_candidate_locked(x, y);
+            if (equipment_apply_release) {
+                const auto& session = qol::extension_bag::ui_state().ui.extension_drag_session;
+                equipment_apply_source_bag = session.source_bag;
+                equipment_apply_source_slot = session.source_slot;
+                log_exit_trace_locked("equipment_apply_release", event, param, param2, x, y);
+            }
+        }
+        if (equipment_apply_release) {
+            // 原版 TouchHandle 会把 0x04 投递给人物装备槽控件，由 H-15
+            // 校验 session 后执行 ApplyStuff；这里不能在原版返回前清 session。
+            const uint64_t result = call_original_event_with_inventory_guard(event, param, param2);
+            {
+                ::qol::extension_bag::ReentryLock lock;
+                auto& session = qol::extension_bag::ui_state().ui.extension_drag_session;
+                const bool terminal = session.phase == virtual_bag::DragPhase::kCommitted ||
+                                      session.phase == virtual_bag::DragPhase::kRejected ||
+                                      session.phase == virtual_bag::DragPhase::kCancelled;
+                if (!terminal) {
+                    cancel_projected_drag_session_locked("equipment-apply-release-unhandled");
+                }
+                session = {};
+            }
+            VIRTBAG_LOG("equipment apply release delegated source=%d/%d result=%llu",
+                        equipment_apply_source_bag, equipment_apply_source_slot,
+                        static_cast<unsigned long long>(result));
+            return result;
         }
         bool release_cleanup_needed = false;
         bool release_cleanup_handled = false;
