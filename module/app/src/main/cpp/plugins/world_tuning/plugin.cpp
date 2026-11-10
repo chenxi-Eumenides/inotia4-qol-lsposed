@@ -5,6 +5,7 @@
 
 #include "../../contracts/character_facts.h"
 #include "../../contracts/game_ports/character_extras_port.h"
+#include "../../contracts/item_use.h"
 #include "../../contracts/panels.h"
 #include "../../contracts/ui.h"
 #include "feature.h"
@@ -36,6 +37,9 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
       static_cast<uint16_t>(contracts::kUiPanelsVersionMinor)}},
     {contracts::kUiComponentsCapabilityId,
      {contracts::kUiContractMajor, contracts::kUiContractMinor}},
+    // item.use 由 core.item 提供；缺失时只影响药水冷却，其他倍率照常工作。
+    {contracts::kItemUseCapabilityId,
+     {contracts::kItemUseVersion.major, contracts::kItemUseVersion.minor}},
 };
 
 const contracts::QolPortRequirement kPorts[] = {
@@ -147,6 +151,20 @@ const contracts::ResourceClaim kResources[] = {
         120,
         reinterpret_cast<void*>(&make_equip_detail_wrapper),
     },
+    {
+        kResourceIdGetActionCoolTime,
+        "F_CHAR_GET_ACTION_COOLTIME_VMA",
+        contracts::ResourceMechanism::kEntryHook,
+        contracts::ResourcePolicy::kPrivate,
+        contracts::ResourceRequirement::kOptional,
+        contracts::ResourceFailure::kFailSoft,
+        true,
+        kPluginId,
+        "技能冷却时长唯一入口；按玩家技能冷却倍率缩放返回值",
+        nullptr,
+        120,
+        reinterpret_cast<void*>(&char_get_action_cooltime_wrapper),
+    },
 };
 
 void clear_install_state() {
@@ -186,6 +204,20 @@ void ensure_panel(contracts::PluginContext& ctx) {
     g_panel_registered = true;
 }
 
+void ensure_item_use(contracts::PluginContext& ctx) {
+    if (ctx.sdk == nullptr || ctx.sdk->capabilities.require == nullptr) return;
+    const void* iface = nullptr;
+    if (contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kItemUseCapabilityId,
+            {contracts::kItemUseVersion.major, contracts::kItemUseVersion.minor},
+            &iface)) &&
+        iface != nullptr) {
+        bind_item_use(static_cast<const contracts::ItemUseApi*>(iface));
+    } else {
+        unbind_item_use();
+    }
+}
+
 int plugin_install(contracts::PluginContext& ctx) {
     set_gate(false);
     g_sdk = nullptr;
@@ -222,12 +254,14 @@ int plugin_install(contracts::PluginContext& ctx) {
     bind_runtime(g_sdk, g_game, g_character_extras, g_character_facts, ctx.owner_token, kPluginId);
 
     ensure_panel(ctx);
+    ensure_item_use(ctx);
     reload_rates_from_config();
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     set_gate(false);
+    unbind_item_use();
     if (ctx.sdk != nullptr && ctx.sdk->panels.unregister_owner != nullptr)
         (void)ctx.sdk->panels.unregister_owner(kPluginId);
     panel_unbind();
@@ -241,12 +275,14 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 void plugin_on_enabled(contracts::PluginContext& ctx) {
     set_gate(true);
     ensure_panel(ctx);
+    ensure_item_use(ctx);
     reload_rates_from_config();
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     (void)ctx;
     set_gate(false);
+    unbind_item_use();
 }
 
 void plugin_fill_status(contracts::PluginStatusOut& out) {
@@ -291,9 +327,9 @@ const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
     1, kRequires,          // requires=character.facts
-    2, kOptionalRequires,  // optional=ui_panels + ui_components
+    3, kOptionalRequires,  // optional=ui_panels + ui_components + item.use
     0, nullptr,            // provides
-    7, kResources,
+    8, kResources,
     0, nullptr,            // jni
     &plugin_install,
     &plugin_deactivate,

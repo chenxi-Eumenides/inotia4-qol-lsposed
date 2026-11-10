@@ -143,7 +143,7 @@ int main() {
     CHECK(qol::contracts::kQolPortItemVersion.major == 5 &&
           qol::contracts::kQolPortItemVersion.minor == 0);
     CHECK(qol::contracts::kQolPortCharacterExtrasVersion.major == 1 &&
-          qol::contracts::kQolPortCharacterExtrasVersion.minor == 2);
+          qol::contracts::kQolPortCharacterExtrasVersion.minor == 3);
     qol::contracts::ItemFactsApi old_size_api{};
     old_size_api.struct_size = static_cast<uint32_t>(
         offsetof(qol::contracts::ItemFactsApi, count_encoding));

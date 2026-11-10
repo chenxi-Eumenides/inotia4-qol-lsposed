@@ -468,9 +468,9 @@ void test_descriptor() {
     assert(std::strcmp(descriptor.version, "0.1.0") == 0);
     assert(descriptor.requires_count == 1);
     assert(std::strcmp(descriptor.requires[0].id, kCharacterFactsCapabilityId) == 0);
-    assert(descriptor.optional_count == 2);
+    assert(descriptor.optional_count == 3);
     assert(descriptor.validate_config == &validate_rates_config);
-    assert(descriptor.resources_count == 7);
+    assert(descriptor.resources_count == 8);
     assert(descriptor.provides_count == 0);
     assert(descriptor.provides == nullptr);
     assert(std::strcmp(descriptor.resources[0].id, kResourceIdAddDamage) == 0);
@@ -495,7 +495,11 @@ void test_descriptor() {
     assert(std::strcmp(descriptor.resources[6].symbol, "F_MAKE_EQUIP_DETAIL_VMA") == 0);
     assert(descriptor.resources[6].handler ==
            reinterpret_cast<void*>(&make_equip_detail_wrapper));
-    for (uint32_t i = 0; i < 7; ++i) {
+    assert(std::strcmp(descriptor.resources[7].id, kResourceIdGetActionCoolTime) == 0);
+    assert(std::strcmp(descriptor.resources[7].symbol, "F_CHAR_GET_ACTION_COOLTIME_VMA") == 0);
+    assert(descriptor.resources[7].handler ==
+           reinterpret_cast<void*>(&char_get_action_cooltime_wrapper));
+    for (uint32_t i = 0; i < 8; ++i) {
         assert(descriptor.resources[i].requirement == ResourceRequirement::kOptional);
         assert(descriptor.resources[i].failure == ResourceFailure::kFailSoft);
     }

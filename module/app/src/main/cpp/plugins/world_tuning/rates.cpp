@@ -9,18 +9,19 @@ namespace {
 
 constexpr const char* kRateKeys[] = {
     "gold", "exp", "enemy_hp", "damage_out", "damage_in",
-    "drop_quantity", "drop_reroll",
+    "drop_quantity", "drop_reroll", "potion_cooldown", "skill_cooldown",
 };
 constexpr const char* kRateNames[] = {
     "金币倍率", "经验倍率", "敌怪血量倍率", "伤害倍率", "承伤倍率",
-    "掉落数量倍率", "掉落重抽次数",
+    "掉落数量倍率", "掉落重抽次数", "药水冷却倍率", "技能冷却倍率",
 };
 constexpr const char* kRateDescriptions[] = {
     "获得的金钱缩放", "获得的经验缩放", "怪物最大生命的缩放", "对怪物造成的伤害缩放",
     "受到的伤害缩放，数值越低越耐打",
     "每次击杀的掉落结算次数", "可重掷的掉落物取同类别最优（卷轴/宝石/背包/骰子）",
+    "玩家药水冷却时间缩放", "玩家技能冷却时间缩放",
 };
-constexpr bool kRateSupported[] = {true, true, true, true, true, true, true};
+constexpr bool kRateSupported[] = {true, true, true, true, true, true, true, true, true};
 constexpr uint32_t kRateCount = static_cast<uint32_t>(RateId::kCount);
 
 // 旧配置兼容：移速倍率已从面板与 encode_rates 中移除，但已持久化的 rates JSON 仍可能带
@@ -204,6 +205,14 @@ const int32_t* rate_ladder(RateId id, bool extended, uint32_t* out_size) {
             }
             if (out_size != nullptr) *out_size = kDropRerollLadderSize;
             return kDropRerollLadder;
+        case RateId::kPotionCooldown:
+        case RateId::kSkillCooldown:
+            if (extended) {
+                if (out_size != nullptr) *out_size = kCooldownLadderExtendedSize;
+                return kCooldownLadderExtended;
+            }
+            if (out_size != nullptr) *out_size = kCooldownLadderSize;
+            return kCooldownLadder;
         default:
             if (extended) {
                 if (out_size != nullptr) *out_size = kRateLadderExtendedSize;
@@ -230,7 +239,9 @@ bool rate_value_valid(RateId id, int32_t value) {
         case RateId::kExp:
         case RateId::kEnemyHp:
         case RateId::kDamageOut:
-        case RateId::kDamageIn: return value >= 0;
+        case RateId::kDamageIn:
+        case RateId::kPotionCooldown:
+        case RateId::kSkillCooldown: return value >= 0;
         default: return false;
     }
 }
@@ -402,6 +413,15 @@ int64_t scale_money(int64_t value, int32_t percent) {
     if (percent < 0) return value;
     if (value > INT64_MAX / percent) return INT64_MAX;
     return value * percent / 100;
+}
+
+int64_t scale_cooldown_ticks(int64_t ticks, int32_t percent) {
+    if (ticks <= 0 || percent == kRateDefault) return ticks;
+    if (percent == 0) return 0;
+    if (percent < 0) return ticks;
+    if (ticks > INT64_MAX / percent) return INT64_MAX;
+    const int64_t scaled = ticks * percent / 100;
+    return scaled < 1 ? 1 : scaled;
 }
 
 int32_t scale_attribute(int32_t raw, int32_t percent) {

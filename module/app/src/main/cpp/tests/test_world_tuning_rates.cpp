@@ -84,6 +84,14 @@ void test_ladder_and_metadata() {
     assert(rate_supported(RateId::kDropReroll));
     assert(std::strcmp(rate_key(RateId::kDropQuantity), "drop_quantity") == 0);
     assert(std::strcmp(rate_key(RateId::kDropReroll), "drop_reroll") == 0);
+    assert(std::strcmp(rate_key(RateId::kPotionCooldown), "potion_cooldown") == 0);
+    assert(std::strcmp(rate_key(RateId::kSkillCooldown), "skill_cooldown") == 0);
+    assert(rate_default(RateId::kPotionCooldown) == 100);
+    assert(rate_default(RateId::kSkillCooldown) == 100);
+    assert(ladder_index(RateId::kPotionCooldown, 100, false) == 4);
+    assert(ladder_index(RateId::kSkillCooldown, 10, false) == 0);
+    assert(ladder_shift(RateId::kPotionCooldown, 500, 1, true) == 1000);
+    assert(ladder_shift(RateId::kSkillCooldown, 10, -1, true) == 0);
     assert(kDropQuantityLadderSize == 5 && kDropQuantityLadder[0] == 1 &&
            kDropQuantityLadder[4] == 5);
     assert(kDropRerollLadderSize == 5 && kDropRerollLadder[0] == 1 &&
@@ -212,7 +220,8 @@ void test_legacy_move_speed_key() {
     assert(json.find("move_speed") == std::string::npos);
     assert(json == "{\"gold\":100,\"exp\":100,\"enemy_hp\":100,"
                    "\"damage_out\":100,\"damage_in\":100,"
-                   "\"drop_quantity\":1,\"drop_reroll\":1}");
+                   "\"drop_quantity\":1,\"drop_reroll\":1,"
+                   "\"potion_cooldown\":100,\"skill_cooldown\":100}");
 
     // validate_config 同样容忍旧 move_speed 键。
     assert(validate_rates_config("rates", legacy, static_cast<uint32_t>(std::strlen(legacy))).ok ==
@@ -314,6 +323,17 @@ void test_scaling() {
     assert(scale_money(0, 0) == 0);
     assert(scale_money(-7, 0) == -7);
     assert(scale_money(100, -1) == 100);
+
+    assert(scale_cooldown_ticks(165, 100) == 165);
+    assert(scale_cooldown_ticks(165, 10) == 16);
+    assert(scale_cooldown_ticks(165, 30) == 49);
+    assert(scale_cooldown_ticks(165, 50) == 82);
+    assert(scale_cooldown_ticks(165, 200) == 330);
+    assert(scale_cooldown_ticks(165, 500) == 825);
+    assert(scale_cooldown_ticks(1, 10) == 1);
+    assert(scale_cooldown_ticks(165, 0) == 0);
+    assert(scale_cooldown_ticks(0, 500) == 0);
+    assert(scale_cooldown_ticks(-1, 500) == -1);
 }
 
 }  // namespace

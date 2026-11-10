@@ -34,9 +34,23 @@ inline bool qol_character_extras_read_api_size_valid(const QolCharacterExtrasRea
     return api != nullptr && api->struct_size >= sizeof(QolCharacterExtrasReadApi);
 }
 
+struct QolCooldownApi {
+    uint32_t struct_size;
+    QolResult (*active_player)(void** out_character);
+    QolResult (*now_tick)(int64_t* out_tick);
+    QolResult (*potion_tick)(int64_t* out_tick);
+    QolResult (*set_potion_tick)(int64_t tick);
+};
+
+inline bool qol_cooldown_api_size_valid(const QolCooldownApi* api) {
+    return api != nullptr && api->struct_size >= sizeof(QolCooldownApi);
+}
+
 struct QolCharacterExtrasPort {
     QolVersion abi_version;
     QolCharacterExtrasReadApi read;
+    // 冷却 tick 访问（1.3 追加）。旧消费者只读 read，不受尾部追加影响。
+    QolCooldownApi cooldown;
 };
 
 }  // namespace qol::contracts

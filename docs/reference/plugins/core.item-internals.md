@@ -26,7 +26,7 @@
 | descriptor | id `core.item`，version `0.1.0`，`deactivate_allowed=false`。 |
 | required capabilities | 0 项。 |
 | provides | 7 项：`item.facts`、`item.state`、`inventory.action`、`inventory.slot`、`inventory.projection`、`item.payload`、`item.use`；能力名称、版本与用途见[对外契约](core.item.md)的“对外能力”。`inventory_refresh`、`inventory.bag_source`、`move_merge.control` 不再由本插件提供。 |
-| Game ports | 5 项：`QOL_PORT_ITEM` 5.0（单点低层原语；空间化袋读经 `inventory.access` 1.1）、`QOL_PORT_ITEM_MONEY_WRITE` 1.0、`QOL_PORT_ITEM_DICE_WRITE` 1.1、`QOL_PORT_ITEM_INVENTORY_STATE_WRITE` 2.4、`QOL_PORT_CHARACTER_EXTRAS` 1.2。`QOL_PORT_MOVE_MERGE` 已迁 `extension_bag`。 |
+| Game ports | 5 项：`QOL_PORT_ITEM` 5.0（单点低层原语；空间化袋读经 `inventory.access` 1.1）、`QOL_PORT_ITEM_MONEY_WRITE` 1.0、`QOL_PORT_ITEM_DICE_WRITE` 1.1、`QOL_PORT_ITEM_INVENTORY_STATE_WRITE` 2.4、`QOL_PORT_CHARACTER_EXTRAS` 1.3。`QOL_PORT_MOVE_MERGE` 已迁 `extension_bag`。 |
 | optional requires | 7 项：`character.state` 1.0、`http.registry` 1.1、`http.dispatch` 1.1、`world.facts` 2.0、`inventory.bag_source`（由 `core.inventory` 提供）、`inventory.access` 1.1（原生空间袋读）、`inventory_refresh`（由 `extension_bag` 提供）。 |
 
 `world.facts` 缺失时出售以 `kSymbolsUnresolved` 失败，不继续扣款或移除物品。`inventory_refresh` 缺失时出售结算后的原版刷新退化为 no-op；`inventory.bag_source` 缺失时注册源查询为空；`inventory.access` 缺失时原生空间袋读返回 NotReady。其余 optional requires 不构成安装依赖。

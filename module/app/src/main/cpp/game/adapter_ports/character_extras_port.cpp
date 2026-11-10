@@ -6,6 +6,7 @@
 #include "game/access/char.h"
 #include "game/access/craft.h"
 #include "game/access/item_handle_registry.h"
+#include "game/access/world.h"
 
 namespace qol::game {
 namespace {
@@ -183,6 +184,28 @@ QolResult read_party_member(int32_t role, void** out) {
     return *out == nullptr ? not_ready() : contracts::ok();
 }
 
+QolResult read_active_player(void** out) {
+    if (out == nullptr) return error_result(kQolErrInvalidArgument, "invalid argument");
+    void* player = world_active_player();
+    if (player == nullptr) return not_ready();
+    *out = player;
+    return contracts::ok();
+}
+
+QolResult read_now_tick(int64_t* out) {
+    if (out == nullptr) return error_result(kQolErrInvalidArgument, "invalid argument");
+    return world_read_cooltime_now(out) ? contracts::ok() : not_ready();
+}
+
+QolResult read_potion_tick(int64_t* out) {
+    if (out == nullptr) return error_result(kQolErrInvalidArgument, "invalid argument");
+    return world_read_potion_tick(out) ? contracts::ok() : not_ready();
+}
+
+QolResult write_potion_tick(int64_t tick) {
+    return world_write_potion_tick(tick) ? contracts::ok() : not_ready();
+}
+
 const contracts::QolCharacterExtrasPort kPort{
     contracts::kQolPortCharacterExtrasVersion,
     {&read_party_index, &read_is_party_member, &read_summoner, &read_level, &read_merc_slot,
@@ -190,6 +213,8 @@ const contracts::QolCharacterExtrasPort kPort{
      &read_can_equip, &read_find_equip_slot, &read_equipped_item, &read_has_empty_mercenary_slot,
       &read_can_apply_stuff, &read_party_member, &read_can_apply_stuff_items,
       sizeof(contracts::QolCharacterExtrasReadApi)},
+    {sizeof(contracts::QolCooldownApi), &read_active_player, &read_now_tick, &read_potion_tick,
+     &write_potion_tick},
 };
 
 }  // namespace

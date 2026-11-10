@@ -8,7 +8,7 @@
 
 ## 定位与版本
 
-`push_all`，插件版本 `0.1.0`（`plugins/push_all/plugin.cpp:12-13`）。descriptor：1 项 required 依赖 `character.facts` v1.0（`plugin.cpp:19-22`，`plugin.cpp:137`）；`optional_requires` 空；`provides_count=0`；2 条资源；1 条 JNI 绑定；1 个端口 `QOL_PORT_CHARACTER_EXTRAS` v1.2（`plugin.cpp:24-28`，`contracts/game_ports/ports.h:23,53`）；1 个 feature。无 `routes.inc`、无 HTTP query/endpoint。注册于 `host/assembly.cpp:56,226`。
+`push_all`，插件版本 `0.1.0`（`plugins/push_all/plugin.cpp:12-13`）。descriptor：1 项 required 依赖 `character.facts` v1.0（`plugin.cpp:19-22`，`plugin.cpp:137`）；`optional_requires` 空；`provides_count=0`；2 条资源；1 条 JNI 绑定；1 个端口 `QOL_PORT_CHARACTER_EXTRAS` v1.3（`plugin.cpp:24-28`，`contracts/game_ports/ports.h:23,53`）；1 个 feature。无 `routes.inc`、无 HTTP query/endpoint。注册于 `host/assembly.cpp:56,226`。
 
 ## 公开能力与路由
 

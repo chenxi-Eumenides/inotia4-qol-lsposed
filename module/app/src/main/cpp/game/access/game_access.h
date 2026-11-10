@@ -31,6 +31,8 @@ extern void* g_mainmenu_draw;
 extern void* g_popup_stack;
 extern void* g_player_active;
 extern void* g_player_active_got;
+extern void* g_global_cooltime_count;
+extern void* g_checktime_potion_tick;
 extern void* g_mapinfo_pdata_got;
 extern void* g_mapinfo_record_size;
 extern void* g_mapinfo_record_count;

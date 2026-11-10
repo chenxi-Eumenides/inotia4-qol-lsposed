@@ -66,6 +66,14 @@ void world_request_map_change(int map_id, int x, int y, int dir) {
 }
 
 int world_active_player_direction() {
+    void* player = world_active_player();
+    if (player == nullptr) return -1;
+    auto* bytes = reinterpret_cast<uint8_t*>(player);
+    if (!game_memory_accessible(bytes + C_DIRECTION, sizeof(uint8_t), 'r')) return -1;
+    return *reinterpret_cast<uint8_t*>(bytes + C_DIRECTION);
+}
+
+void* world_active_player() {
     void* player = nullptr;
     if (g_player_active_got != nullptr &&
         game_memory_accessible(g_player_active_got, sizeof(void*), 'r')) {
@@ -80,10 +88,34 @@ int world_active_player_direction() {
         game_memory_accessible(g_player_active, sizeof(void*), 'r')) {
         player = *reinterpret_cast<void**>(g_player_active);
     }
-    if (player == nullptr) return -1;
-    auto* bytes = reinterpret_cast<uint8_t*>(player);
-    if (!game_memory_accessible(bytes + C_DIRECTION, sizeof(uint8_t), 'r')) return -1;
-    return *reinterpret_cast<uint8_t*>(bytes + C_DIRECTION);
+    return player;
+}
+
+bool world_cooldown_ready() {
+    return g_global_cooltime_count != nullptr && g_checktime_potion_tick != nullptr &&
+           game_memory_accessible(g_global_cooltime_count, sizeof(int64_t), 'r') &&
+           game_memory_accessible(g_checktime_potion_tick, sizeof(int64_t), 'r');
+}
+
+bool world_read_cooltime_now(int64_t* out_tick) {
+    if (out_tick == nullptr || !world_cooldown_ready()) return false;
+    *out_tick = *reinterpret_cast<int64_t*>(g_global_cooltime_count);
+    return true;
+}
+
+bool world_read_potion_tick(int64_t* out_tick) {
+    if (out_tick == nullptr || !world_cooldown_ready()) return false;
+    *out_tick = *reinterpret_cast<int64_t*>(g_checktime_potion_tick);
+    return true;
+}
+
+bool world_write_potion_tick(int64_t tick) {
+    if (g_checktime_potion_tick == nullptr ||
+        !game_memory_accessible(g_checktime_potion_tick, sizeof(int64_t), 'w')) {
+        return false;
+    }
+    *reinterpret_cast<int64_t*>(g_checktime_potion_tick) = tick;
+    return true;
 }
 
 bool world_money_ready() {

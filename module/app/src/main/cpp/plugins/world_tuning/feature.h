@@ -6,6 +6,7 @@
 #include "../../contracts/plugin.h"
 #include "../../contracts/character_facts.h"
 #include "../../contracts/game_ports/character_extras_port.h"
+#include "../../contracts/item_use.h"
 
 // 游戏世界调整插件业务层（ARCHITECTURE.md §3.3）。
 //
@@ -51,6 +52,7 @@ inline constexpr const char* kResourceIdAddMoney = "hook:INVEN_AddMoney";
 inline constexpr const char* kResourceIdDropItem = "hook:CHARSYSTEM_DropItem";
 inline constexpr const char* kResourceIdMakeItem = "hook:ITEMSYSTEM_MakeItem";
 inline constexpr const char* kResourceIdMakeEquipDetail = "hook:ITEMSYSTEM_MakeEquipDetail";
+inline constexpr const char* kResourceIdGetActionCoolTime = "hook:CHAR_GetActionCoolTime";
 
 // 门禁开关：true = 业务生效；false = wrapper 空转透传（fail-closed）。任意线程可读。
 void set_gate(bool enabled);
@@ -82,5 +84,12 @@ void drop_item_wrapper(void* ch);
 void* make_item_wrapper(int32_t category, int32_t lookup_key, int32_t flag);
 void* make_equip_detail_wrapper(int32_t kind, int32_t min_level, int32_t max_level,
                                 int32_t item, int32_t option);
+
+// 技能冷却倍率：CHAR_GetActionCoolTime 入口 wrapper。
+int32_t char_get_action_cooltime_wrapper(void* ch, void* action);
+
+// item.use 后置通知：绑定/解绑（provider 停用时解绑）。
+void bind_item_use(const contracts::ItemUseApi* api);
+void unbind_item_use();
 
 }  // namespace qol::features::world_tuning

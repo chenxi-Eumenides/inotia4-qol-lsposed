@@ -166,6 +166,8 @@ constexpr uintptr_t G_MAINMENU_ROOT_SLOT = 0x08; // STATE_EnterMainMenu stores r
 constexpr uintptr_t G_POPUP_STACK_VMA = 0x728fd8;    // g_arrPopupStack (32B) UI 弹窗栈（readelf 符号表）
 constexpr uintptr_t G_POPUP_STATE_LIST_GOT_VMA = 0x2f3000 + 0x4f0;  // GOT 槽：*(此地址) = popup state list 基址（g_sPopupStateList，27 条 × 64B：id@+0, enter@+0x10, process@+0x18, f3@+0x28, f4@+0x30, event@+0x38；POPUPSTATE_Push 0x122464 以 id×0x40 索引）
 constexpr uintptr_t G_PLAYER_ACTIVE_VMA = 0x728fc0;  // PLAYER_pActivePlayer (8B 指针) 游戏主控角色对象（PLAYER_SetActivePlayer 0x121a7c 写入；GAMEPLAY_DrawFocus 0x9d3ec / CHAR_Process 0xf1c04 读取；CHAR_MoveAsPath 驱动移动的真实对象，区别于 PARTY_GetMember 队伍槽——v0.4.38 移动修复）
+constexpr uintptr_t G_GLOBAL_COOLTIME_COUNT_VMA = 0x3099b0; // g_nGlobalCoolTimeCount (i64) 全局逻辑帧 tick；GAMESTATE_ProcessPlay 每帧 +1，技能/药水冷却的“当前时间”
+constexpr uintptr_t G_CHECKTIME_POTION_TICK_VMA = 0x307568; // CHECKTIME_nPotionTick (i64) 药水冷却结束 tick；CHAR_UseItemEx 写 now+165，使用前比较 tick < now
 constexpr uintptr_t G_MAPINFOBASE_PDATA_GOT_VMA = 0x2f4000 + 0xe58; // MAPINFOBASE_pData GOT 槽（双层解引用后为地图记录数组）
 constexpr uintptr_t G_MAPINFOBASE_RECORD_SIZE_VMA = 0x3017b8; // MAPINFOBASE_nRecordSize（u8，值=6）
 constexpr uintptr_t G_MAPINFOBASE_RECORD_COUNT_VMA = 0x3017ba; // MAPINFOBASE_nRecordCount（u16，值=416）
@@ -777,6 +779,7 @@ constexpr uintptr_t F_CHAR_IS_ACTIVE_PLAYER_GROUP_VMA = 0xe6d1c;   // int32 (voi
 constexpr uintptr_t F_CHAR_GET_SUMMONER_VMA = 0xdb730;   // void* (void* ch)
 constexpr uintptr_t F_CONSUME_ITEM_VMA = 0x1047bc;     // void (void*) 消耗 1 个（使用药水/卷轴）
 constexpr uintptr_t F_CHAR_USE_ITEM_EX_VMA = 0xeb670;  // int (void* ch, void* item, int flag) 物品效果分派核心
+constexpr uintptr_t F_CHAR_GET_ACTION_COOLTIME_VMA = 0xe30c8; // int (void* ch, void* action) 技能冷却时长计算唯一入口
 constexpr uintptr_t F_CHAR_PROCESS_SHORTCUT_VMA = 0xec028; // int (void* ch, int shortcut) 快捷栏处理
 constexpr uintptr_t F_PLAYER_UPDATE_SHORTCUT_VMA = 0x120e40; // 重算快捷栏物品数量
 constexpr uintptr_t F_SHORTCUT_GET_STATE_VMA = 0x121b80;  // int (void* character, void* shortcut)

@@ -20,7 +20,7 @@ enum class Side {
 };
 
 constexpr uint32_t kRateCount = static_cast<uint32_t>(RateId::kCount);
-static_assert(kRateCount == 7, "rates table size");
+static_assert(kRateCount == 9, "rates table size");
 
 std::atomic<bool> g_gate{false};
 std::atomic<uint32_t> g_add_damage_trace_count{0};
@@ -42,7 +42,7 @@ bool add_damage_trace_available() {
 
 std::atomic<int32_t> g_rates[kRateCount] = {
     kRateDefault, kRateDefault, kRateDefault, kRateDefault, kRateDefault,
-    kDropQuantityDefault, kDropRerollDefault};
+    kDropQuantityDefault, kDropRerollDefault, kRateDefault, kRateDefault};
 
 // wrapper 入口函数指针类型：与游戏函数 ABI 一致。原函数入口由宿主经 on_resource_ready 交还。
 using AddDamageFn = void (*)(void*, void*, int32_t, int32_t, int32_t);
@@ -60,6 +60,10 @@ std::atomic<void*> g_backup_add_money{nullptr};
 std::atomic<void*> g_backup_drop_item{nullptr};
 std::atomic<void*> g_backup_make_item{nullptr};
 std::atomic<void*> g_backup_make_equip_detail{nullptr};
+std::atomic<void*> g_backup_get_action_cooltime{nullptr};
+
+const contracts::ItemUseApi* g_item_use = nullptr;
+uint64_t g_item_use_subscription = 0;
 
 // 掉落上下文：只在 DropItem wrapper 的同步调用栈内为非 0，用于把掉落结算与商店/合成/
 // 开箱的同一批 maker 调用隔离开。仅游戏线程访问。
@@ -197,6 +201,41 @@ HpMark g_hp_marks[kCharPoolSlots] = {};
 int32_t rate_value(RateId id) {
     const auto index = static_cast<uint32_t>(id);
     return index < kRateCount ? g_rates[index].load(std::memory_order_relaxed) : kRateDefault;
+}
+
+bool cooldown_api_ready(const contracts::QolCharacterExtrasPort* extras) {
+    if (extras == nullptr ||
+        extras->abi_version.major != contracts::kQolPortCharacterExtrasVersion.major ||
+        extras->abi_version.minor < contracts::kQolPortCharacterExtrasVersion.minor) {
+        return false;
+    }
+    return contracts::qol_cooldown_api_size_valid(&extras->cooldown) &&
+           extras->cooldown.active_player != nullptr && extras->cooldown.now_tick != nullptr &&
+           extras->cooldown.potion_tick != nullptr &&
+           extras->cooldown.set_potion_tick != nullptr;
+}
+
+// item.use 后置通知：消费者自行读取冷却全局，再决定是否改写。
+void item_use_post(const contracts::QolItemUseEvent* event, void*) {
+    if (event == nullptr || event->result == 0 || !g_gate.load(std::memory_order_relaxed)) return;
+    const auto* extras = g_extras;
+    if (!cooldown_api_ready(extras)) return;
+
+    void* active = nullptr;
+    if (extras->cooldown.active_player(&active).ok != kQolOk || active != event->character) return;
+
+    int64_t now = 0;
+    int64_t tick = 0;
+    if (extras->cooldown.now_tick(&now).ok != kQolOk ||
+        extras->cooldown.potion_tick(&tick).ok != kQolOk) {
+        return;
+    }
+    const int64_t delta = tick - now;
+    if (delta <= 0) return;
+
+    const int32_t percent = rate_value(RateId::kPotionCooldown);
+    if (percent == kRateDefault) return;
+    (void)extras->cooldown.set_potion_tick(now + scale_cooldown_ticks(delta, percent));
 }
 
 }  // namespace
@@ -584,6 +623,50 @@ void clear_runtime() {
     g_plugin_id = nullptr;
 }
 
+using GetActionCoolTimeFn = int32_t (*)(void*, void*);
+
+int32_t char_get_action_cooltime_wrapper(void* ch, void* action) {
+    const auto* sdk = g_sdk;
+    const contracts::InFlightGuard guard(
+        sdk == nullptr ? nullptr : &sdk->in_flight, {kResourceIdGetActionCoolTime});
+    const auto backup = reinterpret_cast<GetActionCoolTimeFn>(
+        g_backup_get_action_cooltime.load(std::memory_order_acquire));
+    if (backup == nullptr) return 0;
+
+    const int32_t duration = backup(ch, action);
+    if (duration <= 0 || !g_gate.load(std::memory_order_relaxed)) return duration;
+    const auto* extras = g_extras;
+    if (!cooldown_api_ready(extras)) return duration;
+
+    void* active = nullptr;
+    if (extras->cooldown.active_player(&active).ok != kQolOk || active != ch) return duration;
+    const int32_t percent = rate_value(RateId::kSkillCooldown);
+    if (percent == kRateDefault) return duration;
+    return scale_by_percent(duration, percent);
+}
+
+void bind_item_use(const contracts::ItemUseApi* api) {
+    if (api == g_item_use && g_item_use_subscription != 0) return;
+    unbind_item_use();
+    if (!contracts::item_use_api_size_valid(api)) return;
+    uint64_t subscription = 0;
+    if (!contracts::succeeded(api->subscribe_post("world_tuning", &item_use_post, nullptr,
+                                                  &subscription)) ||
+        subscription == 0) {
+        return;
+    }
+    g_item_use = api;
+    g_item_use_subscription = subscription;
+}
+
+void unbind_item_use() {
+    if (g_item_use != nullptr && g_item_use_subscription != 0) {
+        (void)g_item_use->unsubscribe_post(g_item_use_subscription);
+    }
+    g_item_use = nullptr;
+    g_item_use_subscription = 0;
+}
+
 void set_gate(bool enabled) {
     g_gate.store(enabled, std::memory_order_release);
     log_info("enabled=%d", enabled);
@@ -689,6 +772,10 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
     }
     if (std::strcmp(resource_id, kResourceIdMakeEquipDetail) == 0) {
         g_backup_make_equip_detail.store(backup, std::memory_order_release);
+        return 0;
+    }
+    if (std::strcmp(resource_id, kResourceIdGetActionCoolTime) == 0) {
+        g_backup_get_action_cooltime.store(backup, std::memory_order_release);
         return 0;
     }
     log_warn("unknown resource id: %s", resource_id);

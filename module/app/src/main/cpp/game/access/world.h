@@ -71,6 +71,15 @@ void world_request_map_change(int map_id, int x, int y, int dir);
 // 主控角色 +C_DIRECTION（u8）；未就绪/不可读返回 -1。
 int world_active_player_direction();
 
+// 当前主控角色对象 PLAYER_pActivePlayer；未就绪返回 nullptr。
+void* world_active_player();
+
+// 冷却 tick 访问：g_nGlobalCoolTimeCount / CHECKTIME_nPotionTick。
+bool world_cooldown_ready();
+bool world_read_cooltime_now(int64_t* out_tick);
+bool world_read_potion_tick(int64_t* out_tick);
+bool world_write_potion_tick(int64_t tick);
+
 // ---- 金币 ----
 
 // INVEN_GetMoney / INVEN_MinusMoney 是否都已解析。

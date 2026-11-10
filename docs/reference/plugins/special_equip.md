@@ -16,7 +16,7 @@
 - `optional_requires` 1 项：`character.facts` v1.0（`contracts/character_facts.h:12-14`），仅用于拒绝日志中的角色类型诊断；缺失不阻断安装。
 - `provides` 0、`jni` 0、HTTP 路由 `nullptr, 0`。
 - `resources` 2 个入口 hook（见下节）；`features` 1 个。
-- `ports` 1 项：`QOL_PORT_CHARACTER_EXTRAS` v1.2（`plugin.cpp:32-36`；`contracts/game_ports/ports.h:54`）。
+- `ports` 1 项：`QOL_PORT_CHARACTER_EXTRAS` v1.3（`plugin.cpp:32-36`；`contracts/game_ports/ports.h:54`）。
 - 生命周期回调：`plugin_install`、`plugin_deactivate`、`plugin_on_enabled`、`plugin_on_disabled`、`plugin_fill_status`、`on_resource_ready`（`plugin.cpp:176-181`）。
 
 注册位于 `host/assembly.cpp:225`。

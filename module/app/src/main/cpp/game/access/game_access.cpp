@@ -234,6 +234,10 @@ bool bridge_init() {
     resolve_global(g_popup_stack, G_POPUP_STACK_VMA, "G_POPUP_STACK_VMA");
     resolve_global(g_player_active, G_PLAYER_ACTIVE_VMA, "G_PLAYER_ACTIVE_VMA");
     resolve_global_slot(g_player_active_got, G_PLAYER_ACTIVE_GOT_VMA, "G_PLAYER_ACTIVE_GOT_VMA");
+    resolve_global(g_global_cooltime_count, G_GLOBAL_COOLTIME_COUNT_VMA,
+                   "G_GLOBAL_COOLTIME_COUNT_VMA");
+    resolve_global(g_checktime_potion_tick, G_CHECKTIME_POTION_TICK_VMA,
+                   "G_CHECKTIME_POTION_TICK_VMA");
     resolve_global_slot(g_mapinfo_pdata_got, G_MAPINFOBASE_PDATA_GOT_VMA,
                         "G_MAPINFOBASE_PDATA_GOT_VMA");
     resolve_global(g_mapinfo_record_size, G_MAPINFOBASE_RECORD_SIZE_VMA,

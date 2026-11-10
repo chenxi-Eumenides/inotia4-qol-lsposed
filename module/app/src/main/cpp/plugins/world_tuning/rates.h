@@ -18,6 +18,8 @@ enum class RateId : uint8_t {
     kDamageIn,
     kDropQuantity,
     kDropReroll,
+    kPotionCooldown,
+    kSkillCooldown,
     kCount,
 };
 
@@ -51,6 +53,15 @@ inline constexpr int32_t kDropRerollLadderExtended[] = {
 inline constexpr uint32_t kDropRerollLadderExtendedSize =
     sizeof(kDropRerollLadderExtended) / sizeof(kDropRerollLadderExtended[0]);
 inline constexpr int32_t kDropRerollDefault = 1;
+
+// 冷却倍率：10 = 0.1x，100 = 1x，500 = 5x；OP 扩展档位额外提供 0 与 1000（10x）。
+inline constexpr int32_t kCooldownLadder[] = {10, 30, 50, 80, 100, 200, 300, 500};
+inline constexpr uint32_t kCooldownLadderSize =
+    sizeof(kCooldownLadder) / sizeof(kCooldownLadder[0]);
+inline constexpr int32_t kCooldownLadderExtended[] = {
+    0, 10, 30, 50, 80, 100, 200, 300, 500, 1000};
+inline constexpr uint32_t kCooldownLadderExtendedSize =
+    sizeof(kCooldownLadderExtended) / sizeof(kCooldownLadderExtended[0]);
 
 struct Rates {
     int32_t value[static_cast<uint32_t>(RateId::kCount)]{};
@@ -91,5 +102,7 @@ int32_t scale_by_percent(int32_t value, int32_t percent);
 int32_t scale_attribute(int32_t raw, int32_t percent);
 // 百分比缩放（金币，int64）：倍率 0 返回 0；int64 溢出时钳到 INT64_MAX。
 int64_t scale_money(int64_t value, int32_t percent);
+// 冷却 tick 缩放（int64）：倍率 0 返回 0；正倍率结果下限为 1（与 tick 判定一致）。
+int64_t scale_cooldown_ticks(int64_t ticks, int32_t percent);
 
 }  // namespace qol::features::world_tuning
