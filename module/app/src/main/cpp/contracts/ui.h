@@ -14,7 +14,7 @@ namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 2, kUiContractMinor = 23;
-constexpr uint16_t kUiAdapterMajor = 2, kUiAdapterMinor = 35;
+constexpr uint16_t kUiAdapterMajor = 2, kUiAdapterMinor = 36;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 2;
 constexpr uint32_t kUiStateMaxCustomPanels = 4;
@@ -827,6 +827,10 @@ struct QolUiAdapter {
     // native unit 0x10 edge parts and the 9-slice highlight used by UIHelp_ButtonMenuListDraw.
     // Text is not drawn; callers draw it with the normal adapter text functions.
     QolResult (*draw_help_option_row)(UiRect rect, uint8_t selected, uint8_t pressed);
+
+    // Minor 36 tail: 原版人物属性面板内容区矩形（绝对坐标）。布局常量由宿主集中持有，
+    // 消费方按设计分辨率 + 当前屏幕 inset 取用；面板未打开时返回值不应被使用。
+    QolResult (*character_info_content_rect)(UiRect* out);
 };
 
 }  // namespace qol::contracts

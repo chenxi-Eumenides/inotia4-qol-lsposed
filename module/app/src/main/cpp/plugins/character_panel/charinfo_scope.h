@@ -9,12 +9,12 @@
 
 #include <cstdint>
 
-namespace qol::features::character_panel_i18n {
+namespace qol::features::character_panel {
 
-// 资源 handler：角色面板每帧绘制入口 wrapper（kEntryHook，owner=character_panel_i18n）。
+// 资源 handler：角色面板每帧绘制入口 wrapper（kEntryHook，owner=character_panel）。
 void scene_draw_charinfo_wrapper();
 
 // on_resource_ready 交还非空 backup（原函数入口）：缓存供 wrapper 转发原调用。
 int32_t charinfo_scope_on_resource_ready(void* backup);
 
-}  // namespace qol::features::character_panel_i18n
+}  // namespace qol::features::character_panel

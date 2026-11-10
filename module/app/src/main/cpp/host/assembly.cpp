@@ -64,7 +64,7 @@
 #include "plugins/special_equip/plugin.h"
 #include "plugins/stack_limit/plugin.h"
 #include "plugins/core.system/plugin.h"
-#include "plugins/character_panel_i18n/plugin.h"
+#include "plugins/character_panel/plugin.h"
 #include "plugins/world_teleport/plugin.h"
 #include "plugins/custom_map/plugin.h"
 #include "plugins/core.world/plugin.h"
@@ -256,7 +256,7 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
     {&features::special_equip::plugin_descriptor},
     {&features::stack_limit::plugin_descriptor},
     {&features::core_system::plugin_descriptor},
-    {&features::character_panel_i18n::plugin_descriptor},
+    {&features::character_panel::plugin_descriptor},
     {&features::world_teleport::plugin_descriptor},
     // custom_map 尚未完成（资源替换与面板未经真机验收），暂不注册：不进入 capability DAG、
     // 不声明 feature 与资源 claim。代码与 target 保留，完成后恢复这一行即可接线。

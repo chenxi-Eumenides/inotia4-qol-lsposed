@@ -499,6 +499,10 @@ constexpr uintptr_t F_CHAR_GET_NORMAL_MAGIC_DAMAGE_VMA = 0xe0c54; // int (void* 
 constexpr uintptr_t F_CHAR_GET_CRITICAL_DAMAGE_VMA = 0xe0768; // int (void* attacker, void* defender, int32 damage)：attr2（暴抗）取自 defender，attr3（暴伤增伤）取自 attacker；damage+damage×(attr3+max(1000-attr2,0))/1000
 constexpr uintptr_t F_CHAR_CALC_MAGICAL_DEFENSE_VMA = 0xe0910; // int (void* unused, void* defender, int32 damage)，首参未使用；damage×(1000-attr11)/1000
 constexpr uintptr_t F_CHAR_CALC_PHYSICAL_DEFENSE_VMA = 0xe07d8; // int (void* unused, void* defender, int32 damage)，动态 CAL 物防公式
+// 面板派生值 getter（由 CharacterInfo_InfoDraw 的 bl 目标反汇编确认，c18/c18-v514/c18-v520 三包同址）。
+constexpr uintptr_t F_CHAR_GET_HIT_RATE_1000_VMA = 0xe0e64; // int (void* ch, void* target_or_null)，返回 ×1000；target==NULL 时按 ch 自身等级计算
+constexpr uintptr_t F_CHAR_GET_NORMAL_EVASION_RATE_1000_VMA = 0xe0db8; // int (void* ch)，返回 ×1000；内部把临时值夹到 980
+constexpr uintptr_t F_CHAR_GET_DISPLAY_DAMAGE_REDUCE_RATE_VMA = 0xe0ce4; // int (void* ch)，attr17×(attr18+1000)/1000 + CAL 公式(attr7)；内部使用 CAL 全局计算器栈，不可并发调用
 constexpr uintptr_t F_GET_EQUIP_VMA = 0xda20c;       // void* (void*, int)
 constexpr uintptr_t F_GET_EXP_VMA = 0xd9b54;         // int64 (void*)
 constexpr uintptr_t F_GET_NEXT_EXP_VMA = 0xd9b68;    // int64 (void*)

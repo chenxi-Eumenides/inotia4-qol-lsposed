@@ -6,7 +6,7 @@
 
 #include "charinfo_scope.h"
 
-namespace qol::features::character_panel_i18n {
+namespace qol::features::character_panel {
 namespace {
 
 const contracts::QolHostSdk* g_sdk = nullptr;
@@ -75,4 +75,4 @@ void unregister_consumers() {
     g_text_layer = nullptr;
 }
 
-}  // namespace qol::features::character_panel_i18n
+}  // namespace qol::features::character_panel

@@ -214,7 +214,7 @@ target_sources(gamebridge PRIVATE
     game/feature/game_feature.cpp
 )
 
-# 角色属性面板战斗属性行标签中文化（character-info-zh-labels；作用域标记归入 character_panel_i18n 插件）
+# 角色属性面板战斗属性行标签中文化（character-info-zh-labels；作用域标记归入 character_panel 插件）
 target_sources(gamebridge PRIVATE
     hooks/dispatch.cpp
 )

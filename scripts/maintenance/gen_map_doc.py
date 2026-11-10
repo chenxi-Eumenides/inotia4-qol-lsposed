@@ -82,7 +82,7 @@ MIGRATED_FEATURE_TESTS: tuple[str, ...] = (
     "test_push_all_rules",
     "test_attribute_quality",
     "test_module_text",
-    "test_character_panel_i18n",
+    "test_character_panel",
     "test_core_custom_ui_host",
     "test_core_data_plugin",
     "test_special_equip_rules",

@@ -57,6 +57,9 @@
 #include <unistd.h>
 #include "infra/text_scope.h"
 
+// game_host_port 的 main_stat 走 game/state 的 char_stat_total；本 target 不链接 game_state.cpp。
+int32_t char_stat_total(const void*, int) { return 0; }
+
 extern int g_host_ui_step_calls;
 extern int g_host_ui_cancel_calls;
 extern int g_host_ui_not_ready_reads;
@@ -458,6 +461,11 @@ int world_map_record_count() { return 3; }
 int world_current_map_id() { return 1; }
 const char* world_map_name(int) { return "test-map"; }
 int world_active_player_direction() { return 2; }
+// character_extras_port 的派生读面在 host 测试里不触碰真实世界状态：返回空/NOT_READY 桩。
+void* world_active_player() { return nullptr; }
+bool world_read_cooltime_now(int64_t*) { return false; }
+bool world_read_potion_tick(int64_t*) { return false; }
+bool world_write_potion_tick(int64_t) { return false; }
 bool world_create_yesno_ready() { return true; }
 bool world_create_yesno(const char*, uint32_t, void*, void*, void*) { return true; }
 bool world_money_ready() { return true; }
@@ -893,6 +901,30 @@ int main() {
         qol::game::qol_seam_bind_host_sdk(nullptr);
         g_base = saved_base;
     }
+    // 符号注册表（X-macro）必须把新面板 getter 映射到正确的 libgame 导出名；
+    // 名字错/漏登记会让 fn_resolve 永久回退 VMA，换版本即漂移。
+    {
+        bool hit_rate_mapped = false;
+        bool evasion_mapped = false;
+        bool damage_reduce_mapped = false;
+#define SYM(macro_name, symbol_name)                                                   \
+    do {                                                                               \
+        const char* test_macro = #macro_name;                                          \
+        if (std::strcmp(test_macro, "F_CHAR_GET_HIT_RATE_1000_VMA") == 0) {            \
+            assert(std::strcmp(#symbol_name, "CHAR_GetHitRate1000") == 0);             \
+            hit_rate_mapped = true;                                                    \
+        } else if (std::strcmp(test_macro, "F_CHAR_GET_NORMAL_EVASION_RATE_1000_VMA") == 0) { \
+            assert(std::strcmp(#symbol_name, "CHAR_GetNormalEvasionRate1000") == 0);   \
+            evasion_mapped = true;                                                     \
+        } else if (std::strcmp(test_macro, "F_CHAR_GET_DISPLAY_DAMAGE_REDUCE_RATE_VMA") == 0) { \
+            assert(std::strcmp(#symbol_name, "CHAR_GetDisplayDamageReduceRate") == 0); \
+            damage_reduce_mapped = true;                                               \
+        }                                                                              \
+    } while (false);
+#include "game/symbols/symbol_registry.h"
+#undef SYM
+        assert(hit_rate_mapped && evasion_mapped && damage_reduce_mapped);
+    }
     test_ui_result_snapshot_retry_does_not_repeat_write();
     test_extension_bag_write_result_channels();
     fn_get_rarity = &fake_item_rarity;
@@ -1247,7 +1279,16 @@ int main() {
     assert(variant.id == static_cast<uint32_t>(qol::GameSeries::kOriginal));
     assert(variant.capabilities == qol::kCapWarehouse);
     assert(game.abi.minor == qol::contracts::kGameHostMinor);
-    assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 10);
+    assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 13);
+    // 人物属性面板/总览使用的只读面：主属性、面板派生 getter 与属性读取全部就绪。
+    assert(game.character_read.attr != nullptr);
+    assert(game.character_read.physical_defense_calculate != nullptr);
+    assert(game.character_read.main_stat != nullptr);
+    assert(game.character_read.normal_damage != nullptr);
+    assert(game.character_read.normal_magic_damage != nullptr);
+    assert(game.character_read.hit_rate_1000 != nullptr);
+    assert(game.character_read.evasion_rate_1000 != nullptr);
+    assert(game.character_read.display_damage_reduce_rate != nullptr);
     assert(game.attr_range_c18.jewel_generation_range != nullptr);
     static_assert(std::is_standard_layout<qol::contracts::QolReadOnlyApi>::value,
                   "read-only face must remain standard layout");

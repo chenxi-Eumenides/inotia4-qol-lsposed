@@ -111,7 +111,7 @@ void test_responses() {
 
     // activate → 映射 4。
     g_next_ticket = 8;
-    call("{\"id\":\"character_panel_i18n\",\"action\":\"activate\"}", storage, sizeof(storage),
+    call("{\"id\":\"character_panel\",\"action\":\"activate\"}", storage, sizeof(storage),
          &response, &result);
     CHECK(body_of(response) == "{\"ok\":true,\"ticket\":8}");
     CHECK(g_last_action == qol::contracts::kFeatureLifecycleActivate);

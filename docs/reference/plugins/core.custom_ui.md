@@ -193,7 +193,7 @@
 | `ui_panels` | `custom_map`、`save_backup`、`settings` | `autosell` |
 | `ui_choice` | — | `world_teleport` |
 | `ui_confirmation` | `custom_map`、`save_backup` | — |
-| `text_layer` | `custom_recipe`、`character_panel_i18n` | — |
+| `text_layer` | `custom_recipe`、`character_panel` | — |
 
 消费者归属以各自 descriptor 的 requires/optional 为最终依据；本表只列当前已核实的消费方。
 

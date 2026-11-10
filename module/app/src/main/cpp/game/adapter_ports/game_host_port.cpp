@@ -993,6 +993,72 @@ QolResult calculate_physical_defense_formula(void* character, int32_t first_arg,
     return contracts::ok();
 }
 
+QolResult read_character_main_stat(void* character, int32_t index, int32_t* out_value) {
+    if (character == nullptr || out_value == nullptr || index < 0 || index > 4)
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    *out_value = char_stat_total(character, index);
+    return contracts::ok();
+}
+
+// 面板派生 getter 与原版绘制同线程域：内部经 CHAR_GetAttr 在脏位置位时重算写回，
+// 物抗还使用 CAL 全局计算器栈，因此只允许游戏主线程调用。
+template <typename Fn>
+QolResult call_panel_getter(const void* character, const char* symbol, uintptr_t fallback,
+                            Fn& cache, int32_t* out_value) {
+    if (character == nullptr || out_value == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (!game_is_main_thread()) return error_result(kQolErrBlocked, "wrong thread");
+    if (cache == nullptr) {
+        if (g_base == 0) return not_ready();
+        cache = reinterpret_cast<Fn>(g_base + fn_resolve(symbol, fallback));
+    }
+    if (cache == nullptr) return not_ready();
+    *out_value = cache(const_cast<void*>(character));
+    return contracts::ok();
+}
+
+QolResult read_character_normal_damage(void* character, int32_t* out_value) {
+    static int32_t (*getter)(void*) = nullptr;
+    return call_panel_getter(character, "F_CHAR_GET_NORMAL_DAMAGE_VMA",
+                             F_CHAR_GET_NORMAL_DAMAGE_VMA, getter, out_value);
+}
+
+QolResult read_character_normal_magic_damage(void* character, int32_t* out_value) {
+    static int32_t (*getter)(void*) = nullptr;
+    return call_panel_getter(character, "F_CHAR_GET_NORMAL_MAGIC_DAMAGE_VMA",
+                             F_CHAR_GET_NORMAL_MAGIC_DAMAGE_VMA, getter, out_value);
+}
+
+QolResult read_character_evasion_rate_1000(void* character, int32_t* out_value) {
+    static int32_t (*getter)(void*) = nullptr;
+    return call_panel_getter(character, "F_CHAR_GET_NORMAL_EVASION_RATE_1000_VMA",
+                             F_CHAR_GET_NORMAL_EVASION_RATE_1000_VMA, getter, out_value);
+}
+
+QolResult read_character_display_damage_reduce_rate(void* character, int32_t* out_value) {
+    static int32_t (*getter)(void*) = nullptr;
+    return call_panel_getter(character, "F_CHAR_GET_DISPLAY_DAMAGE_REDUCE_RATE_VMA",
+                             F_CHAR_GET_DISPLAY_DAMAGE_REDUCE_RATE_VMA, getter, out_value);
+}
+
+// 命中率 getter 的第二个参数是目标；原版人物面板固定传 NULL，只按自身等级计算。
+QolResult read_character_hit_rate_1000(void* character, int32_t* out_value) {
+    if (character == nullptr || out_value == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (!game_is_main_thread()) return error_result(kQolErrBlocked, "wrong thread");
+    static int32_t (*getter)(void*, void*) = nullptr;
+    if (getter == nullptr) {
+        if (g_base == 0) return not_ready();
+        getter = reinterpret_cast<int32_t (*)(void*, void*)>(
+            g_base + fn_resolve("F_CHAR_GET_HIT_RATE_1000_VMA", F_CHAR_GET_HIT_RATE_1000_VMA));
+    }
+    if (getter == nullptr) return not_ready();
+    *out_value = getter(character, nullptr);
+    return contracts::ok();
+}
+
 contracts::QolGameHost make_game_host() {
     contracts::QolGameHost host{};
     host.abi = {sizeof(contracts::QolGameHost), contracts::kGameHostMajor,
@@ -1036,7 +1102,14 @@ contracts::QolGameHost make_game_host() {
     host.game_identity = {&game_query_identity};
     host.attr_range_c18 = {&read_attr_jewel_generation_range};
     host.item_category = {&read_item_category};
-    host.character_read = {&read_character_attr, &calculate_physical_defense_formula};
+    host.character_read = {&read_character_attr,
+                           &calculate_physical_defense_formula,
+                           &read_character_main_stat,
+                           &read_character_normal_damage,
+                           &read_character_normal_magic_damage,
+                           &read_character_hit_rate_1000,
+                           &read_character_evasion_rate_1000,
+                           &read_character_display_damage_reduce_rate};
     return host;
 }
 

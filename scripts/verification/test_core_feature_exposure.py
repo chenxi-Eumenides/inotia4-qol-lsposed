@@ -85,7 +85,8 @@ class CoreFeatureExposureTests(unittest.TestCase):
             "craft_lottery.guarantee": ("0", "kBasicOptimization", "kToggle", "合成器传说保底"),
             "debug.logging": ("0", "kGeneral", "kToggle", "DEBUG日志"),
             "attribute_range_display.ranges": ("1", "kBasicOptimization", "kToggle", "属性范围渲染"),
-            "character_panel_i18n.translation": ("1", "kBasicOptimization", "kToggle", "属性面板汉化"),
+            "character_panel.i18n": ("1", "kBasicOptimization", "kToggle", "属性面板汉化"),
+            "character_panel.overview": ("1", "kBasicOptimization", "kToggle", "属性总览"),
             "world_teleport.map_jump": ("1", "kBasicOptimization", "kToggle", "更好的传送"),
         }
         sources = [source for source in PLUGINS.glob("*/plugin.cpp")
@@ -100,12 +101,12 @@ class CoreFeatureExposureTests(unittest.TestCase):
             feature_id not in {"api.enabled", "op.enabled"}
         }
         self.assertEqual(actual, expected)
-        self.assertEqual(len(actual), 13)
+        self.assertEqual(len(actual), 14)
 
     def test_basic_optimization_metadata_and_defaults(self):
         expected = {
             "attribute_range_display": ("attribute_range_display.ranges", "属性范围渲染"),
-            "character_panel_i18n": ("character_panel_i18n.translation", "属性面板汉化"),
+            "character_panel": ("character_panel.i18n", "属性面板汉化"),
             "world_teleport": ("world_teleport.map_jump", "更好的传送"),
             "custom_map": ("custom_map.load", "自定义地图"),
             "core.item": ("move_merge.drag_merge", "拖动合并"),

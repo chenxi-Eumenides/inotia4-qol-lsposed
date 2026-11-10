@@ -1,4 +1,4 @@
-#include "plugins/character_panel_i18n/feature.h"
+#include "plugins/character_panel/feature.h"
 
 #include "plugins/custom_recipe/model/catalog.h"
 #include "plugins/custom_recipe/table/text_table.h"
@@ -17,15 +17,15 @@ static int g_fail = 0;
     else { ++g_fail; std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
 } while (0)
 
-using qol::features::character_panel_i18n::Entry;
+using qol::features::character_panel::Entry;
 using qol::features::custom_recipe::TextEntry;
 using qol::infra::TextScope;
-namespace i18n = qol::features::character_panel_i18n;
+namespace i18n = qol::features::character_panel;
 namespace cr = qol::features::custom_recipe;
 
 // ---------------------------------------------------------------------------
 // 两表完整性：键唯一、文案为二至四字纯中文（UTF-8 → 3 字节/字，故长度 ∈ {6,9,12}）。
-// ADR 0001 D3：角色面板标签归 character_panel_i18n；配方文案归 custom_recipe。
+// ADR 0001 D3：角色面板标签归 character_panel；配方文案归 custom_recipe。
 // ---------------------------------------------------------------------------
 static void test_table_integrity() {
     size_t n = 0;

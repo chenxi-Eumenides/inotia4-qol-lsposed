@@ -7,16 +7,18 @@
 #include "../../contracts/plugin.h"
 #include "../../contracts/text_layer.h"
 
-// 角色面板汉化（character_panel_i18n，ADR 0001 D3/D4）：本插件是**内容贡献者**，
+// 角色面板汉化（character_panel，ADR 0001 D3/D4）：汉化部分仍是**内容贡献者**，
 // 文案表由本插件持有；`core.custom_ui` 通过保留 ID 的 `text_layer` 能力提供文本机制。
 //
 // 本插件同时持有角色面板绘制窗口 hook（`hook:Scene_Draw_Popup_SC_CharacterInfo`，见
 // charinfo_scope.*），把该绘制窗口标记为 kCharacterPanel 作用域；文本机制只在当前线程
 // 处于该作用域时替换 35185..35196 的返回值，其它界面一律原样。
 //
+// 属性总览面板（character_panel.overview）与点击检测见 overview.* 与 charinfo_watch.*。
+//
 // `MEMORYTEXT_GetText` 由 core.custom_ui 持有唯一 hook，避免同一地址重复挂载。
 
-namespace qol::features::character_panel_i18n {
+namespace qol::features::character_panel {
 
 struct Entry {
     const char* key;              // 语义键（唯一）
@@ -102,7 +104,7 @@ void set_active_scope_value(int32_t value);
 // 表查找消费者（after 阶段 Modify）：按当前线程作用域查表；命中返回字面量，未命中 nullptr。
 const char* owner_table_modify(uint32_t text_id, const char* current, void* ctx);
 
-// 用户开关 `character_panel_i18n.translation` 的运行时门禁：关闭后消费者即使仍在册也一律返回
+// 用户开关 `character_panel.i18n` 的运行时门禁：关闭后消费者即使仍在册也一律返回
 // nullptr（不改文本），使开关立即生效，不依赖生命周期撤销的调度时机。
 void set_translation_enabled(bool enabled);
 bool translation_enabled();
@@ -114,4 +116,4 @@ void unregister_consumers();
 inline constexpr int32_t kOwnerTablePhase = contracts::kTextPhaseAfter;
 inline constexpr int32_t kOwnerTableKind = contracts::kTextConsumerModify;
 
-}  // namespace qol::features::character_panel_i18n
+}  // namespace qol::features::character_panel

@@ -69,6 +69,17 @@ struct QolCharacterReadApi {
     // Evaluate the defender-selected native physical-defense text formula with its first argument.
     QolResult (*physical_defense_calculate)(void* character, int32_t first_arg,
                                             int32_t* out_value);
+    // 主属性总属性（Base+Main+Bonus+Sub）：index 0=力量 1=敏捷 2=体力 3=智力 4=精力。
+    // 直读字段，不经 CHAR_GetStat，避免脏位置位时重算并写回。
+    QolResult (*main_stat)(void* character, int32_t index, int32_t* out_value);
+    // 面板派生值：与原版人物面板同一 getter，值含装备与 buff 修正。
+    QolResult (*normal_damage)(void* character, int32_t* out_value);
+    QolResult (*normal_magic_damage)(void* character, int32_t* out_value);
+    // 命中率/闪避率/物抗均为千分比（×1000）。命中率按自身等级计算，忽略目标参数。
+    QolResult (*hit_rate_1000)(void* character, int32_t* out_value);
+    QolResult (*evasion_rate_1000)(void* character, int32_t* out_value);
+    // 使用 CAL 全局计算器栈，只能游戏主线程串行调用。
+    QolResult (*display_damage_reduce_rate)(void* character, int32_t* out_value);
 };
 struct QolReadApi {
     QolAttrRangeReadApi attr_range;
@@ -298,7 +309,8 @@ constexpr uint16_t kGameHostTwoHandedMinor = 8;
 constexpr uint16_t kGameHostC18JewelRangeMinor = 9;
 // 2.10 appended the raw-item category tail used by world_tuning drop quality reroll.
 constexpr uint16_t kGameHostItemCategoryMinor = 10;
-constexpr uint16_t kGameHostCharacterReadMinor = 12;
+// 2.13 appended main-stat and panel-derived getters used by the character overview panel.
+constexpr uint16_t kGameHostCharacterReadMinor = 13;
 constexpr uint16_t kGameHostMinor = kGameHostCharacterReadMinor;
 
 }  // namespace qol::contracts

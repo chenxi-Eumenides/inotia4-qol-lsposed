@@ -392,6 +392,10 @@ decltype(fn_ctrl_get_count) fn_ctrl_get_count = &fake_child_count;
 decltype(fn_ctrl_get_child) fn_ctrl_get_child = &fake_child_at;
 decltype(fn_calc_res_width) fn_calc_res_width = nullptr;
 decltype(fn_calc_res_height) fn_calc_res_height = nullptr;
+int32_t g_fake_res_width = 120;
+int32_t g_fake_res_height = 64;
+int32_t fake_calc_res_width() { return g_fake_res_width; }
+int32_t fake_calc_res_height() { return g_fake_res_height; }
 decltype(fn_touch_handle_unuse_control_event_move) fn_touch_handle_unuse_control_event_move = nullptr;
 decltype(fn_touch_handle_use_control_event_on) fn_touch_handle_use_control_event_on = nullptr;
 decltype(fn_popupstate_push) fn_popupstate_push = nullptr;
@@ -674,6 +678,24 @@ int main() {
     CHECK(adapter->size == sizeof(qol::contracts::QolUiAdapter));
     CHECK(adapter->major == qol::contracts::kUiAdapterMajor);
     CHECK(adapter->minor == qol::contracts::kUiAdapterMinor);
+    // 原版人物属性面板内容区：inset + (496,133)，尺寸 412×431；nullptr 参数与 inset 不可用
+    // 分别返回 InvalidArgument / NotReady（面板点击链路依赖该语义）。
+    fn_calc_res_width = &fake_calc_res_width;
+    fn_calc_res_height = &fake_calc_res_height;
+    qol::contracts::UiRect content_rect{};
+    CHECK(adapter->character_info_content_rect(&content_rect).ok == kQolOk);
+    CHECK(content_rect.x == g_fake_res_width + 496);
+    CHECK(content_rect.y == g_fake_res_height + 133);
+    CHECK(content_rect.w == 412 && content_rect.h == 431);
+    CHECK(adapter->character_info_content_rect(nullptr).code == kQolErrInvalidArgument);
+    fn_calc_res_width = nullptr;
+    CHECK(adapter->character_info_content_rect(&content_rect).ok != kQolOk);
+    fn_calc_res_width = &fake_calc_res_width;
+    fn_calc_res_height = nullptr;
+    CHECK(adapter->character_info_content_rect(&content_rect).ok != kQolOk);
+    fn_calc_res_height = &fake_calc_res_height;
+    fn_calc_res_width = nullptr;
+    fn_calc_res_height = nullptr;
     CHECK(adapter->find_child_in_area != nullptr);
     CHECK(adapter->set_popup_process_info != nullptr);
     CHECK(adapter->popup_stack_snapshot != nullptr);
@@ -992,8 +1014,13 @@ int main() {
                   offsetof(qol::contracts::QolUiAdapter, draw_help_option_row),
                   "help option row must append after container paint");
     static_assert(offsetof(qol::contracts::QolUiAdapter, draw_help_option_row) +
-                      sizeof(adapter->draw_help_option_row) == sizeof(qol::contracts::QolUiAdapter),
-                  "help option row must remain the final adapter field");
+                      sizeof(adapter->draw_help_option_row) ==
+                  offsetof(qol::contracts::QolUiAdapter, character_info_content_rect),
+                  "character info content rect must append after help option row");
+    static_assert(offsetof(qol::contracts::QolUiAdapter, character_info_content_rect) +
+                      sizeof(adapter->character_info_content_rect) ==
+                  sizeof(qol::contracts::QolUiAdapter),
+                  "character info content rect must remain the final adapter field");
     uint64_t param[2]{};
     int source_control = 0;
     std::memcpy(&param[1], &source_control, sizeof(source_control));

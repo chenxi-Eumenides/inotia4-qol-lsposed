@@ -610,6 +610,23 @@ QolResult resolution_height(int32_t* out) {
     return contracts::ok();
 }
 
+// 原版人物属性面板：基控件偏移(0,133,960,431)，主控件内右侧内容组原点 x=496、宽 450/412。
+// 两组原点相同、宽度不同；取较窄的 412 保证命中范围不超出实际绘制内容。
+QolResult character_info_content_rect(UiRect* out) {
+    if (out == nullptr) return invalid_argument();
+    int32_t inset_x = 0;
+    int32_t inset_y = 0;
+    const QolResult width = resolution_width(&inset_x);
+    if (width.ok != kQolOk) return width;
+    const QolResult height = resolution_height(&inset_y);
+    if (height.ok != kQolOk) return height;
+    out->x = inset_x + 496;
+    out->y = inset_y + 133;
+    out->w = 412;
+    out->h = 431;
+    return contracts::ok();
+}
+
 QolResult unuse_control_event_move(QolUiHandle control) {
     if (control == nullptr) return invalid_argument();
     if (fn_touch_handle_unuse_control_event_move == nullptr) return not_ready();
@@ -1879,6 +1896,8 @@ QolUiAdapter g_ui_adapter{
              &draw_container_frame,
              // Minor 35 tail: native help-page option row background/pressed highlight.
              &draw_help_option_row,
+             // Minor 36 tail: character-info content rect for click hit-testing.
+             &character_info_content_rect,
            };
 
 }  // namespace

@@ -579,7 +579,7 @@ target_include_directories(module_text_tests PRIVATE
     ${CPP_DIR}
 )
 target_compile_features(module_text_tests PRIVATE cxx_std_17)
-# 显式锚定 C++17：plugins/character_panel_i18n/feature.h 经 contracts/plugin.h 使用字段名 requires。
+# 显式锚定 C++17：plugins/character_panel/feature.h 经 contracts/plugin.h 使用字段名 requires。
 set_target_properties(module_text_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME module_text_tests COMMAND module_text_tests)
 
@@ -1298,25 +1298,28 @@ set_target_properties(autosell_scan_task_tests PROPERTIES
 target_link_libraries(autosell_scan_task_tests PRIVATE Threads::Threads)
 add_test(NAME autosell_scan_task_tests COMMAND autosell_scan_task_tests)
 
-# ADR 0001 D3/D4：character_panel_i18n 插件清单/资源 host 测试（角色面板作用域 hook claim +
-# 标签表连续性与占位 + backup 交付）。文本机制归 core.custom_ui（其清单见 native_choice_tests）。
+# 人物属性面板插件（ADR 0001 D3/D4）：清单/资源 host 测试（角色面板作用域 hook claim +
+# 标签表连续性与占位 + backup 交付 + 总览点击链路的资源声明）。文本机制归 core.custom_ui
+# （其清单见 native_choice_tests）；面板骨架与真机点击行为由构建/真机验证覆盖。
 # 显式锚定 C++17：contracts/plugin.h 字段名 requires 在 C++20 是关键字。
-add_executable(character_panel_i18n_tests
-    test_character_panel_i18n.cpp
-    ${CPP_DIR}/plugins/character_panel_i18n/plugin.cpp
-    ${CPP_DIR}/plugins/character_panel_i18n/feature.cpp
-    ${CPP_DIR}/plugins/character_panel_i18n/charinfo_scope.cpp
+add_executable(character_panel_tests
+    test_character_panel.cpp
+    ${CPP_DIR}/plugins/character_panel/plugin.cpp
+    ${CPP_DIR}/plugins/character_panel/feature.cpp
+    ${CPP_DIR}/plugins/character_panel/charinfo_scope.cpp
+    ${CPP_DIR}/plugins/character_panel/charinfo_watch.cpp
+    ${CPP_DIR}/plugins/character_panel/overview.cpp
     ${CPP_DIR}/hooks/dispatch.cpp
     ${CPP_DIR}/infra/log/qol_log.cpp
 )
-target_include_directories(character_panel_i18n_tests PRIVATE
+target_include_directories(character_panel_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CPP_DIR}
 )
-target_compile_features(character_panel_i18n_tests PRIVATE cxx_std_17)
-set_target_properties(character_panel_i18n_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-target_link_libraries(character_panel_i18n_tests PRIVATE Threads::Threads)
-add_test(NAME character_panel_i18n_tests COMMAND character_panel_i18n_tests)
+target_compile_features(character_panel_tests PRIVATE cxx_std_17)
+set_target_properties(character_panel_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(character_panel_tests PRIVATE Threads::Threads)
+add_test(NAME character_panel_tests COMMAND character_panel_tests)
 
 # Quest scheduler 生命周期与撤销门禁 host 测试。
 add_executable(quest_lifecycle_tests

@@ -103,7 +103,8 @@ descriptor 只注册一个 `page` entry feature：
 | `attribute_quality` | `attribute_quality.provider` | 属性品质服务 | 1 | Hidden | toggle | 0 | — |
 | `attribute_range_display` | `attribute_range_display.ranges` | 属性范围渲染 | 1 | BasicOptimization | toggle | 0 | — |
 | `autosell` | `autosell.auto_sell` | 自动出售 | 0 | Gameplay | toggle | -1 | — |
-| `character_panel_i18n` | `character_panel_i18n.translation` | 属性面板汉化 | 1 | BasicOptimization | toggle | 0 | — |
+| `character_panel` | `character_panel.i18n` | 属性面板汉化 | 1 | BasicOptimization | toggle | 0 | — |
+| `character_panel` | `character_panel.overview` | 属性总览 | 1 | BasicOptimization | toggle | 0 | — |
 | `core.api` | `api.enabled` | API服务 | 1 | General | toggle | -5 | — |
 | `core.character` | `core.character.provider` | 角色领域服务 | 1 | Hidden | toggle | 0 | — |
 | `core.craft` | `core.craft.provider` | 合成领域服务 | 1 | Hidden | toggle | 0 | — |

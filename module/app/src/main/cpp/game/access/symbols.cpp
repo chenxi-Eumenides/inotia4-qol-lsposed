@@ -60,6 +60,8 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
     {"F_PANEL_UNK2_ENTER", F_PANEL_UNK2_ENTER},
     {"F_PANEL_UNK3_ENTER", F_PANEL_UNK3_ENTER},
     {"F_PANEL_INVENTORY_ENTER", F_PANEL_INVENTORY_ENTER},
+    // 人物属性面板（owner=character_panel）：属性总览点击检测占用该面板 PopupState event 槽。
+    {"F_PANEL_CHARACTER_INFO_ENTER", F_PANEL_CHARACTER_INFO_ENTER},
     // 扩展背包（D2a-3a）：两个入口 hook 目标 + 三个 PopupState 面板 enter（部分 wrap 定位）。
     {"F_SAVE_SAVE_INVENTORY_VMA", F_SAVE_SAVE_INVENTORY_VMA},
     // 扩展背包控件读取入口与容量读取入口（owner=extension_bag）。
