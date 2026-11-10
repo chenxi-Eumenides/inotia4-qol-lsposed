@@ -13,6 +13,7 @@
 #include "contracts/events.h"
 #include "contracts/http.h"
 #include "contracts/bag.h"
+#include "contracts/inventory_access.h"
 #include "contracts/panels.h"
 #include "contracts/plugin.h"
 #include "contracts/world_facts.h"
@@ -71,6 +72,35 @@ const char* g_fail_require_id = nullptr;
 // ---- ui_components 懒加载与能力事件 ----
 int g_ui_components_require_calls = 0;
 const qol::contracts::QolUiComponents kUiComponentsApi{};
+
+// ---- inventory.access 懒加载与能力事件 ----
+int g_inventory_access_require_calls = 0;
+
+QolResult fake_native_bag_count(int32_t, int32_t* out_count) {
+    if (out_count != nullptr) *out_count = 0;
+    return qol::contracts::ok();
+}
+QolResult fake_native_bag_info(const qol::contracts::QolBagRef*, qol::contracts::QolBagInfo*) {
+    return qol::contracts::ok();
+}
+QolResult fake_native_item_at(const qol::contracts::QolBagRef*, int32_t,
+                              qol::contracts::QolInventoryItemRef*) {
+    return qol::contracts::ok();
+}
+QolResult fake_native_for_each_space_slot(int32_t, qol::contracts::QolInventoryBagSlotFn, void*) {
+    return qol::contracts::ok();
+}
+
+const qol::contracts::QolInventoryAccessApi kInventoryAccessApi{
+    sizeof(qol::contracts::QolInventoryAccessApi),
+    nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr,
+    &fake_native_bag_count,
+    &fake_native_bag_info,
+    &fake_native_item_at,
+    &fake_native_for_each_space_slot,
+};
 
 // ---- 事件总线 fake：记录订阅并支持按类型注入 payload ----
 struct FakeEventSubscription {
@@ -183,6 +213,9 @@ QolResult fake_capability_require(const char* id, QolVersionRange, const void** 
         *out_iface = &kUiComponentsApi;
     } else if (std::strcmp(id, qol::contracts::kBagSourceCapabilityId) == 0) {
         *out_iface = &bag_source_registry_api;
+    } else if (std::strcmp(id, qol::contracts::kInventoryAccessCapabilityId) == 0) {
+        ++g_inventory_access_require_calls;
+        *out_iface = &kInventoryAccessApi;
     } else {
         return QolResult{kQolErrNotFound, kQolErrNotFound, nullptr, 0};
     }
@@ -426,6 +459,67 @@ void test_capability_event_invalidation() {
     CHECK(g_event_subscription.handler == nullptr);
 }
 
+void test_inventory_access_lazy_cache() {
+    qol::infra::panels_reset_for_test();
+    const qol::contracts::QolHostSdk sdk = fake_sdk();
+    static const qol::contracts::QolInventoryExtrasPort inventory_port{{1, 0}, {}};
+    static const qol::contracts::QolItemPort item_port{
+        qol::contracts::kQolPortItemVersion, sizeof(qol::contracts::QolItemPort), {}};
+    const void* ports[] = {&inventory_port, &item_port};
+    qol::contracts::PluginContext ctx{
+        sizeof(qol::contracts::PluginContext),
+        qol::contracts::kHostSdkMajor,
+        qol::contracts::kHostSdkMinor,
+        &sdk,
+        nullptr,
+        "autosell",
+        ports,
+        2,
+    };
+    ctx.owner_token = 4;
+    const auto& d = qol::features::autosell::plugin_descriptor();
+
+    g_inventory_access_require_calls = 0;
+    CHECK(d.install(ctx) == 0);
+    // install 不再主动 require；首次查询懒加载并缓存。
+    CHECK(g_inventory_access_require_calls == 0);
+    const auto* first = qol::features::autosell::inventory_access_api();
+    CHECK(first == &kInventoryAccessApi);
+    CHECK(g_inventory_access_require_calls == 1);
+    CHECK(qol::features::autosell::inventory_access_api() == first);
+    CHECK(g_inventory_access_require_calls == 1);
+
+    // 撤销：清缓存，下一次查询重新 require。
+    qol::contracts::CapabilityChangedEvent unavailable{
+        qol::contracts::kInventoryAccessCapabilityId,
+        qol::contracts::kInventoryAccessVersion.major,
+        qol::contracts::kInventoryAccessVersion.minor, 0, {}};
+    publish_fake_event(qol::contracts::kEventCapabilityChanged, &unavailable);
+    CHECK(qol::features::autosell::inventory_access_api() == &kInventoryAccessApi);
+    CHECK(g_inventory_access_require_calls == 2);
+
+    // 注册通知不主动 require：留待下一次查询。
+    g_inventory_access_require_calls = 0;
+    qol::contracts::CapabilityChangedEvent available{
+        qol::contracts::kInventoryAccessCapabilityId,
+        qol::contracts::kInventoryAccessVersion.major,
+        qol::contracts::kInventoryAccessVersion.minor, 1, {}};
+    publish_fake_event(qol::contracts::kEventCapabilityChanged, &available);
+    CHECK(g_inventory_access_require_calls == 0);
+    CHECK(qol::features::autosell::inventory_access_api() != nullptr);
+    CHECK(g_inventory_access_require_calls == 0);
+
+    // 禁用期间 available=1 不触发 require。
+    d.on_disabled(ctx);
+    g_inventory_access_require_calls = 0;
+    g_ui_components_require_calls = 0;
+    publish_fake_event(qol::contracts::kEventCapabilityChanged, &available);
+    CHECK(g_inventory_access_require_calls == 0);
+    CHECK(g_ui_components_require_calls == 0);
+
+    d.deactivate(ctx);
+}
+
 void test_null_sdk_is_safe() {
     qol::contracts::PluginContext ctx{};
     const qol::contracts::PluginDescriptor& d =
@@ -442,6 +536,7 @@ int main() {
     test_provider_registration();
     test_enable_capability_failure_keeps_gate_closed();
     test_capability_event_invalidation();
+    test_inventory_access_lazy_cache();
     std::printf("autosell_plugin: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

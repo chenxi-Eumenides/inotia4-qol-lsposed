@@ -113,8 +113,8 @@ void unregister_dialog_state() {
     g_ui_state = nullptr;
 }
 
-// 能力注册表变更：只关心 ui.state。available=1 时重新 require 并补注册，
-// available=0 时注销已注册的对话框状态。
+// 能力注册表变更：只关心 ui.state。available=1 时仅在插件启用（installed）状态下
+// 补齐注册，避免禁用期间把已注销的对话框状态重新挂上；available=0 始终注销。
 void on_capability_changed(void*, const void* payload) {
     if (payload == nullptr) return;
     const auto* event = static_cast<const contracts::CapabilityChangedEvent*>(payload);
@@ -122,10 +122,10 @@ void on_capability_changed(void*, const void* payload) {
         std::strcmp(event->id, contracts::kUiStateCapabilityId) != 0) {
         return;
     }
-    if (event->available != 0) {
-        register_dialog_state();
-    } else {
+    if (event->available == 0) {
         unregister_dialog_state();
+    } else if (g_installed) {
+        register_dialog_state();
     }
 }
 

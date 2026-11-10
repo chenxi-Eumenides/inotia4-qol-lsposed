@@ -204,7 +204,7 @@ int main() {
     assert(!status.enabled);
     assert(status.error == nullptr);
 
-    // ui.state 可选能力变更：install 已订阅；available=1 补注册，available=0 注销。
+    // ui.state 可选能力变更：install 已订阅；禁用期间 available=1 不重新注册。
     assert(g_event_subscriptions.size() == 1);
     assert(g_event_subscriptions[0].type == qol::contracts::kEventCapabilityChanged);
     g_ui_state_available = true;
@@ -212,6 +212,10 @@ int main() {
         qol::contracts::kUiStateCapabilityId, qol::contracts::kUiStateVersionMajor,
         qol::contracts::kUiStateVersionMinor, 1, {}};
     publish_fake_event(qol::contracts::kEventCapabilityChanged, &ui_state_available);
+    assert(g_register_state_calls == 0);
+
+    // 重新启用后初始探测注册。
+    descriptor.on_enabled(context);
     assert(g_register_state_calls == 1);
 
     // 无关能力、空 payload、空 id 均不影响注册状态。
@@ -228,9 +232,14 @@ int main() {
     publish_fake_event(qol::contracts::kEventCapabilityChanged, &ui_state_unavailable);
     assert(g_unregister_state_calls == 1);
 
-    // 能力恢复后再注册，deactivate 应注销并取消能力变更订阅。
+    // 能力恢复后再注册；禁用期间 available=0 仍注销。
     publish_fake_event(qol::contracts::kEventCapabilityChanged, &ui_state_available);
     assert(g_register_state_calls == 2);
+    descriptor.on_disabled(context);
+    publish_fake_event(qol::contracts::kEventCapabilityChanged, &ui_state_unavailable);
+    assert(g_unregister_state_calls == 2);
+    descriptor.on_enabled(context);
+    assert(g_register_state_calls == 3);
 
     // on_resource_ready：只接受本插件的入口 hook id 与宿主交还的非空 backup。
     assert(descriptor.on_resource_ready != nullptr);
@@ -246,7 +255,7 @@ int main() {
     descriptor.fill_status(status);
     assert(!status.enabled);
     assert(status.error == nullptr);
-    assert(g_unregister_state_calls == 2);
+    assert(g_unregister_state_calls == 3);
     assert(g_event_subscriptions.empty());
     assert(qol::features::world_teleport::host_sdk() == nullptr);
     assert(qol::features::world_teleport::world_action_port() == nullptr);

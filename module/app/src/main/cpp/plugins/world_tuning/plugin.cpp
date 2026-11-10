@@ -255,24 +255,28 @@ void ensure_item_use() {
 }
 
 // 能力注册表变更：item.use 重绑订阅；ui_panels/ui_components 注册时补注册面板，
-// 任一撤销时注销 provider 并失效绑定缓存。重复事件保持幂等。
+// 任一撤销时注销 provider 并失效绑定缓存。available=1 只在插件启用时生效，
+// 避免禁用期间的事件把已收回的 provider/订阅重新挂上；available=0 始终清理。
 void on_capability_changed(void*, const void* payload) {
     if (payload == nullptr) return;
     const auto* event = static_cast<const contracts::CapabilityChangedEvent*>(payload);
     if (event->id == nullptr) return;
     if (std::strcmp(event->id, contracts::kItemUseCapabilityId) == 0) {
-        // ensure_item_use 已实现「能 require 就 bind，否则 unbind」。
-        ensure_item_use();
+        if (event->available == 0) {
+            unbind_item_use();
+        } else if (gate_enabled()) {
+            ensure_item_use();
+        }
         return;
     }
     if (std::strcmp(event->id, contracts::kUiPanelsCapabilityId) != 0 &&
         std::strcmp(event->id, contracts::kUiComponentsCapabilityId) != 0) {
         return;
     }
-    if (event->available != 0) {
-        ensure_panel();
-    } else {
+    if (event->available == 0) {
         unregister_panel();
+    } else if (gate_enabled()) {
+        ensure_panel();
     }
 }
 
@@ -333,9 +337,9 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_character_facts = static_cast<const contracts::CharacterFactsApi*>(iface);
     bind_runtime(g_sdk, g_game, g_character_extras, g_character_facts, ctx.owner_token, kPluginId);
 
-    ensure_panel();
-    // 先订阅再探测：避免订阅落地前 item.use 恰好注册完成而错过通知。
+    // 先订阅再探测：避免订阅落地前可选能力恰好注册完成而错过通知。
     subscribe_capability_changes();
+    ensure_panel();
     ensure_item_use();
     reload_rates_from_config();
     return 0;

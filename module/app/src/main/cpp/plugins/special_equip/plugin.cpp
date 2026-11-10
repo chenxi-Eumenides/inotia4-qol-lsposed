@@ -42,18 +42,8 @@ const contracts::QolPortRequirement kPorts[] = {
       contracts::kQolPortCharacterExtrasVersion.minor}},
 };
 
-// 能力注册表变更：只关心 character.facts。注册后重新 require，撤销后清空缓存。
-void on_capability_changed(void*, const void* payload) {
-    if (payload == nullptr) return;
-    const auto* event = static_cast<const contracts::CapabilityChangedEvent*>(payload);
-    if (event->id == nullptr ||
-        std::strcmp(event->id, contracts::kCharacterFactsCapabilityId) != 0) {
-        return;
-    }
-    if (event->available == 0) {
-        set_character_facts(nullptr);
-        return;
-    }
+// 从能力注册表重新 require character.facts；失败时清空缓存。调用方决定是否需要。
+void refresh_character_facts() {
     if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) {
         set_character_facts(nullptr);
         return;
@@ -68,6 +58,22 @@ void on_capability_changed(void*, const void* payload) {
         return;
     }
     set_character_facts(static_cast<const contracts::CharacterFactsApi*>(iface));
+}
+
+// 能力注册表变更：只关心 character.facts。注册后重新 require，撤销后清空缓存。
+// available=1 只在插件启用时补缓存，避免禁用期间恢复可选能力；available=0 始终清理。
+void on_capability_changed(void*, const void* payload) {
+    if (payload == nullptr) return;
+    const auto* event = static_cast<const contracts::CapabilityChangedEvent*>(payload);
+    if (event->id == nullptr ||
+        std::strcmp(event->id, contracts::kCharacterFactsCapabilityId) != 0) {
+        return;
+    }
+    if (event->available == 0) {
+        set_character_facts(nullptr);
+        return;
+    }
+    if (gate_enabled()) refresh_character_facts();
 }
 
 void subscribe_capability_changes() {
@@ -206,10 +212,12 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     }
 }
 
-// 启停仅切门禁，不做资源操作（§3.3）。
+// 启停仅切门禁，不做资源操作（§3.3）；重新启用时补一次可选能力探测，
+// 覆盖禁用期间 available=1 被忽略的事件。
 void plugin_on_enabled(contracts::PluginContext& ctx) {
     (void)ctx;
     set_gate(true);
+    refresh_character_facts();
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {

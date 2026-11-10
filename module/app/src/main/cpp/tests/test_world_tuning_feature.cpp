@@ -1300,10 +1300,29 @@ void test_capability_event_subscription() {
     assert(g_event_subscriptions.size() == 1);
     assert(g_event_subscriptions[0].type == kEventCapabilityChanged);
 
-    // b. item.use 注册后 require 成功并完成 subscribe_post。
+    // 禁用状态（install 后 gate=false）：available=1 不绑定 item.use / 不注册面板。
     g_item_use_available = true;
     const CapabilityChangedEvent available_event{kItemUseCapabilityId, kItemUseVersion.major,
                                                  kItemUseVersion.minor, 1, {}};
+    publish_fake_event(kEventCapabilityChanged, &available_event);
+    assert(g_item_use_subscribe_calls == 0);
+    assert(!item_use_bound());
+    g_ui_available = true;
+    const CapabilityChangedEvent panels_available_disabled{
+        kUiPanelsCapabilityId, static_cast<uint16_t>(kUiPanelsVersionMajor),
+        static_cast<uint16_t>(kUiPanelsVersionMinor), 1, {}};
+    publish_fake_event(kEventCapabilityChanged, &panels_available_disabled);
+    assert(g_panel_register_calls == 0);
+    assert(!panel_available());
+
+    // 重新启用：初始探测补齐 item.use 与面板绑定。
+    descriptor.on_enabled(g_context);
+    assert(g_item_use_subscribe_calls == 1);
+    assert(item_use_bound());
+    assert(g_panel_register_calls == 1);
+    assert(panel_available());
+
+    // b. item.use 注册后重复事件保持幂等。
     publish_fake_event(kEventCapabilityChanged, &available_event);
     assert(g_item_use_subscribe_calls == 1);
     assert(item_use_bound());
@@ -1382,12 +1401,34 @@ void test_capability_event_subscription() {
     assert(g_panel_unregister_calls == unregister_before_unrelated);
     assert(panel_available());
 
+    // h. 禁用期间：available=0 仍注销，available=1 不重新挂载；重新启用后恢复绑定。
+    descriptor.on_disabled(g_context);
+    const int unregisters_before_disabled_events = g_panel_unregister_calls;
+    const int registers_before_disabled_events = g_panel_register_calls;
+    const int subscribes_before_disabled_events = g_item_use_subscribe_calls;
+    publish_fake_event(kEventCapabilityChanged, &panels_unavailable);
+    assert(g_panel_unregister_calls == unregisters_before_disabled_events + 1);
+    assert(!panel_available());
+    publish_fake_event(kEventCapabilityChanged, &panels_available);
+    assert(g_panel_register_calls == registers_before_disabled_events);
+    assert(!panel_available());
+    g_item_use_available = true;
+    publish_fake_event(kEventCapabilityChanged, &available_event);
+    assert(g_item_use_subscribe_calls == subscribes_before_disabled_events);
+    assert(!item_use_bound());
+    descriptor.on_enabled(g_context);
+    assert(g_panel_register_calls == registers_before_disabled_events + 1);
+    assert(panel_available());
+    assert(g_item_use_subscribe_calls == subscribes_before_disabled_events + 1);
+    assert(item_use_bound());
+
     // deactivate 取消事件订阅并注销面板。
     const int unsubscribes_before_deactivate = g_event_unsubscribe_calls;
+    const int unregisters_before_deactivate = g_panel_unregister_calls;
     descriptor.deactivate(g_context);
     assert(g_event_unsubscribe_calls == unsubscribes_before_deactivate + 1);
     assert(g_event_subscriptions.empty());
-    assert(g_panel_unregister_calls == unregister_before_unrelated + 1);
+    assert(g_panel_unregister_calls == unregisters_before_deactivate + 1);
     assert(!panel_available());
 }
 

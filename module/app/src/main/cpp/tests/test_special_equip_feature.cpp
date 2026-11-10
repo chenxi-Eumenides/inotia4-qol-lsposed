@@ -689,12 +689,28 @@ void test_capability_event_subscription() {
     publish_fake_event(kEventCapabilityChanged, &null_id_event);
     assert(reject_character_type_reads() == 0);
 
-    // character.facts 恢复：事件处理器重新 require 并重新设置缓存。
-    g_character_capability_available = true;
-    const int requires_before = g_require_calls;
+    // 禁用期间 available=1 不补缓存；available=0 仍清缓存；重新启用执行初始探测。
     const CapabilityChangedEvent available_event{kCharacterFactsCapabilityId,
                                                  kCharacterFactsVersionMajor,
                                                  kCharacterFactsVersionMinor, 1, {}};
+    descriptor.on_disabled(g_context);
+    g_character_capability_available = true;
+    const int requires_before_disabled_event = g_require_calls;
+    publish_fake_event(kEventCapabilityChanged, &available_event);
+    assert(g_require_calls == requires_before_disabled_event);
+    assert(reject_character_type_reads() == 0);
+    descriptor.on_enabled(g_context);
+    assert(g_require_calls == requires_before_disabled_event + 1);
+    assert(reject_character_type_reads() == 1);
+    descriptor.on_disabled(g_context);
+    g_character_capability_available = false;
+    publish_fake_event(kEventCapabilityChanged, &unavailable_event);
+    assert(reject_character_type_reads() == 0);
+    descriptor.on_enabled(g_context);
+
+    // character.facts 恢复：事件处理器重新 require 并重新设置缓存。
+    g_character_capability_available = true;
+    const int requires_before = g_require_calls;
     publish_fake_event(kEventCapabilityChanged, &available_event);
     assert(g_require_calls == requires_before + 1);
     assert(reject_character_type_reads() == 1);

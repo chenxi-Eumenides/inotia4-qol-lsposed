@@ -105,17 +105,20 @@ void unregister_ui_state() {
     }
 }
 
-// ui_components 是可选能力：登记/撤销时宿主广播能力变更，插件撤销后只清缓存，
-// 由下一次 autosell_components() 懒加载重新 require。
+// ui_components 与 inventory.access 都是可选能力：登记/撤销时宿主广播能力变更，
+// 插件撤销后只清缓存，由下一次查询懒加载重新 require。
 uint64_t g_capability_event_subscription = 0;
 
 void on_capability_changed(void*, const void* payload) {
     if (payload == nullptr) return;
     const auto* event = static_cast<const contracts::CapabilityChangedEvent*>(payload);
-    if (event->id == nullptr ||
-        std::strcmp(event->id, contracts::kUiComponentsCapabilityId) != 0) {
+    if (event->id == nullptr) return;
+    if (std::strcmp(event->id, contracts::kInventoryAccessCapabilityId) == 0) {
+        // available=1 不主动 require：缓存由下一次 inventory_access_api() 懒加载。
+        if (event->available == 0) g_inventory_access = nullptr;
         return;
     }
+    if (std::strcmp(event->id, contracts::kUiComponentsCapabilityId) != 0) return;
     if (event->available == 0) autosell_invalidate_ui_components();
 }
 
@@ -237,22 +240,10 @@ bool acquire_runtime_capabilities(contracts::PluginContext& ctx) {
     const auto* ui_state = static_cast<const contracts::UiStateApi*>(iface);
     if (ui_state->read_layers == nullptr) return false;
 
-    iface = nullptr;
-    const contracts::QolInventoryAccessApi* inventory_access = nullptr;
-    if (contracts::succeeded(ctx.sdk->capabilities.require(
-            contracts::kInventoryAccessCapabilityId,
-            {contracts::kInventoryAccessVersion.major, contracts::kInventoryAccessVersion.minor},
-            &iface)) &&
-        iface != nullptr) {
-        const auto* candidate = static_cast<const contracts::QolInventoryAccessApi*>(iface);
-        if (contracts::qol_inventory_native_access_api_valid(candidate)) inventory_access = candidate;
-    }
-
     g_world_facts = world_facts;
     g_item_facts = item_facts;
     g_slot_data_api = slot_data_api;
     g_ui_state = ui_state;
-    g_inventory_access = inventory_access;
     if (!autosell_store_register(ctx.owner_token, slot_data_api)) {
         clear_runtime_capabilities();
         return false;
@@ -424,6 +415,19 @@ const contracts::QolItemPort* item_port() {
 }
 
 const contracts::QolInventoryAccessApi* inventory_access_api() {
+    if (g_inventory_access != nullptr) return g_inventory_access;
+    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
+    const void* iface = nullptr;
+    if (!contracts::succeeded(g_sdk->capabilities.require(
+            contracts::kInventoryAccessCapabilityId,
+            {contracts::kInventoryAccessVersion.major, contracts::kInventoryAccessVersion.minor},
+            &iface)) ||
+        iface == nullptr) {
+        return nullptr;
+    }
+    const auto* candidate = static_cast<const contracts::QolInventoryAccessApi*>(iface);
+    if (!contracts::qol_inventory_native_access_api_valid(candidate)) return nullptr;
+    g_inventory_access = candidate;
     return g_inventory_access;
 }
 
