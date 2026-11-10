@@ -193,6 +193,14 @@ bool is_control_flow_first_instruction(uint32_t word) {
     return false;
 }
 
+// 短补丁可安全改写首条指令的类型：b / cbz / tbz。其余控制流转首条不做跟随。
+bool is_short_hookable_first_instruction(uint32_t word) {
+    if ((word & 0xFC000000u) == 0x14000000u) return true;  // b
+    if ((word & 0x7E000000u) == 0x34000000u) return true;  // cbz/cbnz
+    if ((word & 0x7E000000u) == 0x36000000u) return true;  // tbz/tbnz
+    return false;
+}
+
 std::atomic<bool> g_follow_refused_logged{false};
 
 }  // namespace
@@ -223,7 +231,11 @@ uintptr_t resolve_hook_entry_follow(const char* symbol_name, bool* out_followed)
         return entry;
     }
 
-    if (is_control_flow_first_instruction(*reinterpret_cast<const uint32_t*>(target))) {
+    const uint32_t target_word = *reinterpret_cast<const uint32_t*>(target);
+    // 正常函数序言可跟随；b/cbz/tbz 首条也可跟随，安装层会用 4 字节短补丁而不是
+    // Dobby 的 12/16 字节补丁。其余控制流转首条（bl/b.cond/br/ret 等）仍拒绝。
+    if (is_control_flow_first_instruction(target_word) &&
+        !is_short_hookable_first_instruction(target_word)) {
         if (!g_follow_refused_logged.exchange(true)) {
             QOL_LOG_SEAM_WARN(kQolLogDomainCore,
                               "hook entry follow refused symbol=%s entry=0x%llx target=0x%llx "

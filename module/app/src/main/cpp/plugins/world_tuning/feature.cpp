@@ -61,45 +61,7 @@ std::atomic<void*> g_backup_drop_item{nullptr};
 std::atomic<void*> g_backup_make_item{nullptr};
 std::atomic<void*> g_backup_make_equip_detail{nullptr};
 std::atomic<void*> g_backup_get_action_cooltime{nullptr};
-std::atomic<void*> g_backup_set_action_next_time{nullptr};
 std::atomic<uint32_t> g_skill_cooltime_trace{0};
-std::atomic<uint32_t> g_next_time_trace{0};
-
-// 同一线程内 GetActionCoolTime → SetActionNextTime 的配对标记：
-// 正常路径已经按倍率算好 D，SetActionNextTime 只需跳过二次缩放；
-// monster 变体在原始计算后直接覆盖固定冷却值时，标记不匹配，按最终 delta 兜底缩放。
-thread_local bool g_in_set_action_next_time = false;
-
-constexpr uint32_t kSkillTotalSlots = 256;
-struct SkillTotal {
-    void* action = nullptr;
-    int64_t total = 0;
-};
-SkillTotal g_skill_totals[kSkillTotalSlots];
-uint32_t g_skill_total_cursor = 0;
-
-void store_skill_total(void* action, int64_t total) {
-    if (action == nullptr) return;
-    for (SkillTotal& entry : g_skill_totals) {
-        if (entry.action == action) {
-            entry.total = total;
-            return;
-        }
-    }
-    g_skill_totals[g_skill_total_cursor] = SkillTotal{action, total};
-    g_skill_total_cursor = (g_skill_total_cursor + 1) % kSkillTotalSlots;
-}
-
-bool load_skill_total(void* action, int64_t* out_total) {
-    if (action == nullptr || out_total == nullptr) return false;
-    for (const SkillTotal& entry : g_skill_totals) {
-        if (entry.action == action) {
-            *out_total = entry.total;
-            return true;
-        }
-    }
-    return false;
-}
 
 const contracts::ItemUseApi* g_item_use = nullptr;
 uint64_t g_item_use_subscription = 0;
@@ -668,7 +630,6 @@ void clear_runtime() {
 }
 
 using GetActionCoolTimeFn = int32_t (*)(void*, void*);
-using SetActionNextTimeFn = void (*)(void*, void*);
 
 int32_t char_get_action_cooltime_wrapper(void* ch, void* action) {
     const auto* sdk = g_sdk;
@@ -678,63 +639,28 @@ int32_t char_get_action_cooltime_wrapper(void* ch, void* action) {
         g_backup_get_action_cooltime.load(std::memory_order_acquire));
     if (backup == nullptr) return 0;
 
+    // 只缩放本函数的返回值。SetActionNextTime 与快捷栏冷却饼都调用这里；游戏自己
+    // 负责把时长编码后写入动作节点，monster 变体的 +0x10 不直接暴露可写 tick。
     const int32_t duration = backup(ch, action);
-    const uint32_t trace = g_skill_cooltime_trace.fetch_add(1, std::memory_order_relaxed);
-    if (g_in_set_action_next_time) {
-        if (trace < 8) log_info("skill_cooltime base ch=%p duration=%d", ch, duration);
-        return duration;
-    }
-    int64_t total = 0;
-    if (!load_skill_total(action, &total) || total <= 0) return duration;
-    if (total > INT32_MAX) total = INT32_MAX;
-    if (trace < 8) {
-        log_info("skill_cooltime display ch=%p base=%d total=%lld", ch, duration,
-                 static_cast<long long>(total));
-    }
-    return static_cast<int32_t>(total);
-}
-
-void char_set_action_next_time_wrapper(void* ch, void* action) {
-    const auto* sdk = g_sdk;
-    const contracts::InFlightGuard guard(
-        sdk == nullptr ? nullptr : &sdk->in_flight, {kResourceIdSetActionNextTime});
-    const auto backup = reinterpret_cast<SetActionNextTimeFn>(
-        g_backup_set_action_next_time.load(std::memory_order_acquire));
-    if (backup == nullptr) return;
-
-    const bool was_in_set_action_next_time = g_in_set_action_next_time;
-    g_in_set_action_next_time = true;
-    backup(ch, action);
-    g_in_set_action_next_time = was_in_set_action_next_time;
-    if (action == nullptr) return;
+    if (duration <= 0) return duration;
 
     const auto* extras = g_extras;
-    if (!cooldown_api_ready(extras)) return;
+    if (!cooldown_api_ready(extras)) return duration;
     void* active = nullptr;
-    if (extras->cooldown.active_player(&active).ok != kQolOk || active != ch) return;
-
-    int64_t now = 0;
-    if (extras->cooldown.now_tick(&now).ok != kQolOk) return;
-    auto* next_time = reinterpret_cast<int64_t*>(reinterpret_cast<uint8_t*>(action) + 16);
-    const int64_t delta = *next_time - now;
-    if (delta <= 0) {
-        store_skill_total(action, 0);
-        return;
-    }
+    if (extras->cooldown.active_player(&active).ok != kQolOk || active != ch) return duration;
 
     const int32_t percent = rate_value(RateId::kSkillCooldown);
-    int64_t total = delta;
     const bool apply = g_gate.load(std::memory_order_relaxed) && percent != kRateDefault;
-    if (apply) total = scale_cooldown_ticks(delta, percent);
-    if (apply) *next_time = now + total;
-    store_skill_total(action, total);
+    if (!apply) return duration;
 
-    const uint32_t trace = g_next_time_trace.fetch_add(1, std::memory_order_relaxed);
+    int64_t total = scale_cooldown_ticks(duration, percent);
+    if (total > INT32_MAX) total = INT32_MAX;
+    const uint32_t trace = g_skill_cooltime_trace.fetch_add(1, std::memory_order_relaxed);
     if (trace < 8) {
-        log_info("set_action_next_time ch=%p delta=%lld total=%lld percent=%d gate=%d",
-                 ch, static_cast<long long>(delta), static_cast<long long>(total), percent,
-                 g_gate.load(std::memory_order_relaxed) ? 1 : 0);
+        log_info("skill_cooltime ch=%p action=%p base=%d scaled=%lld percent=%d",
+                 ch, action, duration, static_cast<long long>(total), percent);
     }
+    return static_cast<int32_t>(total);
 }
 
 void bind_item_use(const contracts::ItemUseApi* api) {
@@ -872,11 +798,6 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
     if (std::strcmp(resource_id, kResourceIdGetActionCoolTime) == 0) {
         g_backup_get_action_cooltime.store(backup, std::memory_order_release);
         log_info("skill cooldown hook bound backup=%p", backup);
-        return 0;
-    }
-    if (std::strcmp(resource_id, kResourceIdSetActionNextTime) == 0) {
-        g_backup_set_action_next_time.store(backup, std::memory_order_release);
-        log_info("set_action_next_time hook bound backup=%p", backup);
         return 0;
     }
     if (std::strcmp(resource_id, kResourceIdDropReroll258) == 0 ||

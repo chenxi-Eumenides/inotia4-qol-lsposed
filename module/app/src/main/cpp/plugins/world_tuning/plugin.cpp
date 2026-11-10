@@ -165,24 +165,10 @@ const contracts::ResourceClaim kResources[] = {
         contracts::ResourceFailure::kFailSoft,
         true,
         kPluginId,
-        "技能冷却时长唯一入口；按玩家技能冷却倍率缩放返回值",
+        "技能冷却时长唯一缩放源；c18 hook 正常入口，monster 跟随入口 b 到隐藏段函数体后 hook",
         nullptr,
         120,
         reinterpret_cast<void*>(&char_get_action_cooltime_wrapper),
-    },
-    {
-        kResourceIdSetActionNextTime,
-        "F_CHAR_SET_ACTION_NEXT_TIME_VMA",
-        contracts::ResourceMechanism::kEntryHook,
-        contracts::ResourcePolicy::kPrivate,
-        contracts::ResourceRequirement::kOptional,
-        contracts::ResourceFailure::kFailSoft,
-        true,
-        kPluginId,
-        "动作冷却结束时间写入；按最终 delta 兜底缩放，覆盖 monster 变体在原始计算后直接覆盖冷却值的特殊逻辑",
-        nullptr,
-        120,
-        reinterpret_cast<void*>(&char_set_action_next_time_wrapper),
         false,
         true,
     },
@@ -471,7 +457,7 @@ const contracts::PluginDescriptor kDescriptor = {
     1, kRequires,          // requires=character.facts
     3, kOptionalRequires,  // optional=ui_panels + ui_components + item.use
     0, nullptr,            // provides
-    13, kResources,
+    12, kResources,
     0, nullptr,            // jni
     &plugin_install,
     &plugin_deactivate,

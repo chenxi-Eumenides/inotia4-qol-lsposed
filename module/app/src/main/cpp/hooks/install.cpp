@@ -18,9 +18,14 @@ ReleaseOutcome release_failure(const char* error) {
     return ReleaseOutcome{1, error};
 }
 
-bool is_branch_trampoline(uintptr_t entry) {
+// 短补丁可安全接管的首条指令：b / cbz / tbz。monster 的 CHAR_GetActionCoolTime 跟随
+// 到一个以 cbz 开头的隐藏段函数体，也必须走 4 字节短补丁而不是 Dobby 的 12/16 字节改写。
+bool is_short_hook_candidate(uintptr_t entry) {
     const uint32_t word = *reinterpret_cast<const uint32_t*>(entry);
-    return (word & 0xFC000000u) == 0x14000000u;
+    if ((word & 0xFC000000u) == 0x14000000u) return true;  // b
+    if ((word & 0x7E000000u) == 0x34000000u) return true;  // cbz/cbnz
+    if ((word & 0x7E000000u) == 0x36000000u) return true;  // tbz/tbnz
+    return false;
 }
 
 const ShortHookOps* g_short_hook_ops = nullptr;
@@ -52,7 +57,7 @@ InstallOutcome install_claim_entry_hook(const contracts::ResourceClaim& claim,
     // 无条件 b 跳板入口：用 4 字节短补丁，避免 hook 原语写 12/16 字节绝对跳转时覆盖
     // 入口之后的指令（monster 改版把入口改成 `b <隐藏段桩>`，桩会跳回入口 +8）。
     if (g_short_hook_ops != nullptr && g_short_hook_ops->install != nullptr &&
-        is_branch_trampoline(resolved_entry)) {
+        is_short_hook_candidate(resolved_entry)) {
         void* short_backup = nullptr;
         const int32_t short_rc = g_short_hook_ops->install(resolved_entry, claim.handler, &short_backup);
         if (short_rc != 0) {

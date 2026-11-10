@@ -53,7 +53,6 @@ inline constexpr const char* kResourceIdDropItem = "hook:CHARSYSTEM_DropItem";
 inline constexpr const char* kResourceIdMakeItem = "hook:ITEMSYSTEM_MakeItem";
 inline constexpr const char* kResourceIdMakeEquipDetail = "hook:ITEMSYSTEM_MakeEquipDetail";
 inline constexpr const char* kResourceIdGetActionCoolTime = "hook:CHAR_GetActionCoolTime";
-inline constexpr const char* kResourceIdSetActionNextTime = "hook:CHAR_SetActionNextTime";
 inline constexpr const char* kResourceIdDropReroll258 = "patch:CHARSYSTEM_DropItem+0x258";
 inline constexpr const char* kResourceIdDropReroll3B8 = "patch:CHARSYSTEM_DropItem+0x3b8";
 inline constexpr const char* kResourceIdDropReroll400 = "patch:CHARSYSTEM_DropItem+0x400";
@@ -92,11 +91,9 @@ void* make_equip_detail_wrapper(int32_t kind, int32_t min_level, int32_t max_lev
 // kind5 instruction trampoline ABI: (threshold, max_roll+1) -> adjusted threshold.
 int32_t drop_threshold_patch_helper(int32_t threshold, int32_t threshold_cap);
 
-// 技能冷却倍率：CHAR_GetActionCoolTime 入口 wrapper。
+// 技能冷却倍率：CHAR_GetActionCoolTime 的唯一缩放源。c18 hook 正常入口；
+// monster 经 follow_trampoline 跟随 b 到隐藏段函数体后 hook，仍返回缩放后的时长。
 int32_t char_get_action_cooltime_wrapper(void* ch, void* action);
-// 动作冷却结束时间：CHAR_SetActionNextTime 入口 wrapper；按最终写入值兜底缩放，
-// 覆盖 monster 变体在原始计算之后直接覆盖冷却值的特殊逻辑。
-void char_set_action_next_time_wrapper(void* ch, void* action);
 
 // item.use 后置通知：绑定/解绑（provider 停用时解绑）。
 void bind_item_use(const contracts::ItemUseApi* api);
