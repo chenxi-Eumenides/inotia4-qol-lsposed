@@ -519,6 +519,25 @@ void test_feature_mode_core_hook_failure_rolls_back() {
     CHECK(!feature_degraded("fm_core"));  // 失败态不得误报 partial degraded
 }
 
+ResourceClaim fm_three_install[] = {
+    claim("hook:fm:three:a", "fm_three", nullptr),
+    claim("hook:fm:three:b", "fm_three", nullptr),
+    claim("hook:fm:three:c", "fm_three", nullptr),
+};
+
+// 每帧多步安装：3 个资源远低于 kInstallStepsPerFrame（24），单次 feature_registry_step
+// 内完成全部安装并进入 enabled 终态。
+void test_feature_mode_installs_all_resources_in_one_step() {
+    reset_feature_mode("fm_three", fm_three_install, 3);
+    CHECK(qol::host::feature_registry_transition("fm_three", true));
+    CHECK(qol::host::feature_registry_step() > 0);
+    CHECK(feature_state_is("fm_three", FeatureState::kEnabled));
+    CHECK(qol::hooks::state_of("hook:fm:three:a") == ResourceState::kLive);
+    CHECK(qol::hooks::state_of("hook:fm:three:b") == ResourceState::kLive);
+    CHECK(qol::hooks::state_of("hook:fm:three:c") == ResourceState::kLive);
+    CHECK(g_probe.enabled_calls == 1);
+}
+
 ResourceClaim follow_hook_resource() {
     ResourceClaim c = claim("hook:follow:a", "follow_plugin", nullptr);
     c.follow_trampoline = true;
@@ -844,8 +863,8 @@ int run_production_frames(int frames) {
     return attempts;
 }
 
-// 信号在 ownership 末步之前（安装事务进行中）到达：按生产帧序不得被提前消费，
-// 终态后的那一帧恰好恢复一次；hooks 不重装；无新信号时后续帧不再尝试。
+// 信号在 ownership 末步之前（安装事务进行中）到达：按生产帧序不得在安装推进中途被消费；
+// 每帧多步安装使该帧走完终态后同帧消费，恰好恢复一次；hooks 不重装；无新信号时不再尝试。
 void test_startup_ownership_signal_before_final_step_restores_once() {
     fm_startup_res[1].failure = ResourceFailure::kFailSoft;
     reset_all();
@@ -859,22 +878,18 @@ void test_startup_ownership_signal_before_final_step_restores_once() {
 
     // SaveEnter 在安装事务仍在途（ownership 末步尚未失败）时锁存。
     qol::host::feature_registry_notify_save_ready();
-    CHECK(run_production_frames(1) == 0);  // 在途帧：保留信号、不尝试
-    CHECK(qol::hooks::state_of("own:fm:su:b") == ResourceState::kFree);
-    CHECK(feature_state_is("fm_startup", FeatureState::kResolving));
-    const int hook_calls_during_install = g_backend.hook_calls;
-
-    // 后续帧：ownership NotReady 武装后消费该信号 → 恰好恢复一次。
-    CHECK(run_production_frames(3) == 1);
+    // 2 个资源在单帧内走完安装终态；信号在该帧终态后被消费 → 恰好恢复一次。
+    CHECK(run_production_frames(1) == 1);
     CHECK(qol::hooks::state_of("own:fm:su:b") == ResourceState::kLive);
     CHECK(!qol::hooks::retry_pending_get("own:fm:su:b"));
     CHECK(g_ownership.acquire_calls == 2);  // 初始 NotReady 1 次 + 恢复 1 次
-    CHECK(g_backend.hook_calls == hook_calls_during_install);  // 不重装 hooks
     CHECK(feature_state_is("fm_startup", FeatureState::kEnabled));
+    const int hook_calls_during_install = g_backend.hook_calls;
 
-    // 无新信号：后续帧不再尝试（不逐帧重试）。
+    // 无新信号：后续帧不再尝试（不逐帧重试），hooks 不重装。
     CHECK(run_production_frames(3) == 0);
     CHECK(g_ownership.acquire_calls == 2);
+    CHECK(g_backend.hook_calls == hook_calls_during_install);
 }
 
 // 每信号仅一次：同帧重复/重复帧不再尝试；claim 已 Live 后新信号无目标。
@@ -999,6 +1014,7 @@ int main() {
     test_reset_is_clean();
     test_elf_export_prefix_rejected_for_other_mechanisms();
     test_feature_mode_core_hook_failure_rolls_back();
+    test_feature_mode_installs_all_resources_in_one_step();
     test_follow_trampoline_uses_followed_entry();
     test_feature_mode_soft_middle_keeps_degraded_reason();
     test_feature_mode_soft_last_keeps_degraded_reason();

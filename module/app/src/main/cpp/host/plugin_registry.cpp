@@ -186,6 +186,8 @@ void begin_http_endpoint_stop(const contracts::PluginDescriptor& plugin) {
 }
 
 constexpr uint32_t kMaxResourcesPerPlugin = 32;
+// 60ms/帧、单步通常远低于 1ms；24 步/帧可在约 4 帧内排空当前资源量。
+constexpr uint32_t kInstallStepsPerFrame = 24;
 // 装配依赖：feature_registry_prepare 时存入本 TU 静态，供事务引擎推进安装/还原的
 // 受限回调失败撤回（以及 release 复用同一 hook/unhook 原语）；assembly.cpp 已在装配期传入。
 HostDeps g_install_deps{};
@@ -1466,6 +1468,8 @@ struct LifecycleTx {
 
 // 槽位与插件同容量：事务引擎保证每插件至多一个未终态事务。
 LifecycleTx g_lifecycle_txs[kMaxPlugins];
+// 安装预算耗尽时的起始槽位：下一帧从此处继续，避免数组前部事务长期独占。
+uint32_t g_install_step_cursor = 0;
 
 uint32_t plugin_index_of(const char* plugin_id) {
     if (plugin_id == nullptr) return kMaxPlugins;
@@ -2466,377 +2470,406 @@ void feature_registry_set_wanted(const char* id, bool wanted) {
 
 static uint32_t lifecycle_step_engine() {
     uint32_t advanced = poll_http_stops();
-    for (LifecycleTx& slot : g_lifecycle_txs) {
-        if (!slot.in_use) continue;
-        const contracts::PluginDescriptor& plugin = g_plugins[slot.plugin_index].descriptor;
-        bool publish_enabled_actual = false;
+    uint32_t install_steps = 0;
+    // 外层 pass 在同一帧内多次轮转槽位：每 pass 每个安装事务至多推进一步，
+    // 推进总量受 kInstallStepsPerFrame 约束，因此 pass 数有界（≤ K+1）。
+    for (uint32_t pass = 0;; ++pass) {
+        bool install_progress = false;
+        bool budget_hit = false;
+        uint32_t stop_index = g_install_step_cursor;
+        for (uint32_t n = 0; n < kMaxPlugins; ++n) {
+            const uint32_t slot_index = (g_install_step_cursor + n) % kMaxPlugins;
+            LifecycleTx& slot = g_lifecycle_txs[slot_index];
+            if (!slot.in_use) continue;
+            // release 事务每帧只处理一轮（pass 0），后续 pass 只继续推进安装。
+            if (pass > 0 && slot.kind != hooks::TxKind::kInstall) continue;
+            const contracts::PluginDescriptor& plugin = g_plugins[slot.plugin_index].descriptor;
+            bool publish_enabled_actual = false;
 
-        if (g_feature_mode && slot.stop_preparing) {
-            if (slot.stopped_token && save_route::prepare_stop_poll(slot.stopped_token).code == kQolErrBusy)
-                continue;
-            slot.stop_preparing = false;
-            slot.owner_drain_pending = true;
-            owner_suspend_begin(&g_plugins[slot.plugin_index]);
-            slot.capabilities_revoke_pending =
-                g_cap_registration[slot.plugin_index] == CapRegistration::kRegistered;
-            slot.provider_drain_pending = slot.capabilities_revoke_pending &&
-                plugin_provides_http_transport(plugin);
-            if (slot.provider_drain_pending) set_http_provider_available(false);
-            http_endpoint_binder_owner_stop_begin(plugin.id);
-            for (uint32_t r = 0; r < plugin.resources_count; ++r) {
-                if (hooks::state_of(plugin.resources[r].id) == contracts::ResourceState::kLive)
-                    hooks::set_state(plugin.resources[r].id, contracts::ResourceState::kDisabled);
-            }
-            infra::status_update(plugin.id, infra::FeatureState::kDeactivating, false, nullptr);
-            publish_runtime_actual(plugin.id, false);
-        }
-
-        if (g_feature_mode && slot.quarantine_pending) {
-            bool drained = true;
-            for (uint32_t r = 0; r < plugin.resources_count; ++r)
-                if (hooks::in_flight_count(plugin.resources[r].id)) drained = false;
-            if (!drained) continue;
-            auto ctx = make_plugin_context(plugin.id);
-            retire_runtime_observers(plugin.id);
-            if (plugin.deactivate) plugin.deactivate(ctx);
-            infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
-                                  "resource release failed; remaining resources released or isolated",
-                                  infra::FeatureFailureStage::kOther);
-            publish_runtime_actual(plugin.id, false);
-            slot = LifecycleTx{};
-            ++advanced;
-            continue;
-        }
-
-        if (slot.owner_drain_pending) {
-            // No callback, resource operation, or wait occurs until both admission domains drain.
-            if (!owner_suspend_poll(&g_plugins[slot.plugin_index]) ||
-                !http_endpoint_binder_owner_stop_poll(plugin.id)) continue;
-            refresh_http_degraded_status(plugin.id);
-            if (slot.provider_drain_pending &&
-                !http_endpoint_binder_provider_drain_poll()) continue;
-            if (slot.capabilities_revoke_pending &&
-                !http_endpoint_binder_all_stops_drained()) continue;
-            if (slot.capabilities_revoke_pending) {
-                unregister_provided_capabilities(slot.plugin_index);
-                slot.capabilities_revoke_pending = false;
-            }
-            if (slot.stopped_token && !save_route::owner_stopped_poll(slot.stopped_token)) continue;
-            bool resources_drained = true;
-            for (uint32_t r = 0; r < plugin.resources_count; ++r) {
-                if (hooks::in_flight_count(plugin.resources[r].id) != 0) resources_drained = false;
-            }
-            if (!resources_drained) continue;
-            auto ctx = make_plugin_context(plugin.id);
-            if (slot.was_enabled && plugin.on_disabled) plugin.on_disabled(ctx);
-            slot.owner_drain_pending = false;
-            if (plugin.resources_count == 0) {
-                retire_runtime_observers(plugin.id);
-                if (plugin.deactivate) plugin.deactivate(ctx);
-                infra::status_update(plugin.id, slot.failed_cleanup ? infra::FeatureState::kFailed
-                                                                    : infra::FeatureState::kInactive,
-                                      false, slot.failed_cleanup ? "activation failed; cleaned up" : nullptr,
-                                      slot.failed_cleanup ? infra::FeatureFailureStage::kActivation
-                                                          : infra::FeatureFailureStage::kNone);
+            if (g_feature_mode && slot.stop_preparing) {
+                if (slot.stopped_token && save_route::prepare_stop_poll(slot.stopped_token).code == kQolErrBusy)
+                    continue;
+                slot.stop_preparing = false;
+                slot.owner_drain_pending = true;
+                owner_suspend_begin(&g_plugins[slot.plugin_index]);
+                slot.capabilities_revoke_pending =
+                    g_cap_registration[slot.plugin_index] == CapRegistration::kRegistered;
+                slot.provider_drain_pending = slot.capabilities_revoke_pending &&
+                    plugin_provides_http_transport(plugin);
+                if (slot.provider_drain_pending) set_http_provider_available(false);
+                http_endpoint_binder_owner_stop_begin(plugin.id);
+                for (uint32_t r = 0; r < plugin.resources_count; ++r) {
+                    if (hooks::state_of(plugin.resources[r].id) == contracts::ResourceState::kLive)
+                        hooks::set_state(plugin.resources[r].id, contracts::ResourceState::kDisabled);
+                }
+                infra::status_update(plugin.id, infra::FeatureState::kDeactivating, false, nullptr);
                 publish_runtime_actual(plugin.id, false);
-                slot = LifecycleTx{};
-                ++advanced;
-                continue;
             }
-            slot.tx_id = hooks::tx_begin(plugin.id, hooks::TxKind::kRelease);
-            if (!slot.tx_id) {
-                revoke_installed_resources(plugin, g_install_deps);
+
+            if (g_feature_mode && slot.quarantine_pending) {
+                bool drained = true;
+                for (uint32_t r = 0; r < plugin.resources_count; ++r)
+                    if (hooks::in_flight_count(plugin.resources[r].id)) drained = false;
+                if (!drained) continue;
+                auto ctx = make_plugin_context(plugin.id);
                 retire_runtime_observers(plugin.id);
                 if (plugin.deactivate) plugin.deactivate(ctx);
                 infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
-                                     "release unavailable", infra::FeatureFailureStage::kOther);
+                                      "resource release failed; remaining resources released or isolated",
+                                      infra::FeatureFailureStage::kOther);
                 publish_runtime_actual(plugin.id, false);
                 slot = LifecycleTx{};
                 ++advanced;
                 continue;
             }
-        }
 
-        hooks::TxStep out{};
-        hooks::tx_step(slot.tx_id, &out);
-        ++advanced;
-
-        // 生命周期事务跨帧推进时，原子成员即使已物理安装也先保持非 live 登记；
-        // 下一成员失败或事务仍在途时，能力与 wrapper 不得观察到部分组。
-        // 只对真实安装成功的资源（kLive）转 kDisabled：软失败步保持 kFree，不得伪装已装。
-        if (slot.kind == hooks::TxKind::kInstall && out.resource_id != nullptr && out.ok == 0 &&
-            (g_feature_mode || atomic_claim_by_id(plugin, out.resource_id) != nullptr) &&
-            hooks::state_of(out.resource_id) == contracts::ResourceState::kLive) {
-            hooks::set_state(out.resource_id, contracts::ResourceState::kDisabled);
-        }
-        // 软失败步（事务继续、资源保持自由）不伪造安装；单独记录原因供终态状态使用。
-        if (g_feature_mode && slot.kind == hooks::TxKind::kInstall && out.resource_id != nullptr &&
-            out.ok != 0) {
-            const char* step_error = out.error != nullptr ? out.error : "unknown";
-            if (out.ok == kQolErrNotReady) {
-                QOL_LOG_WARN(QolDomain::kCore,
-                             "plugin %s resource install deferred resource=%s code=%d: %s",
-                             plugin.id, out.resource_id, out.ok, step_error);
-            } else {
-                QOL_LOG_ERROR(QolDomain::kCore,
-                              "plugin %s resource install failed resource=%s code=%d: %s",
-                              plugin.id, out.resource_id, out.ok, step_error);
-            }
-            record_resource_install_error(slot.plugin_index, out.resource_id, out.error);
-            // 启动期 ownership 注入只在 SaveEnter（world 就绪）后成功：NotReady 时保持 Free
-            // 并武装一次性恢复，等下一次 SaveEnter 信号在既有主帧点定向重试。
-            // 只武装 ownership × fail-soft × 明确 NotReady；其他资源/错误不自动武装。
-            if (out.ok == kQolErrNotReady) {
-                const contracts::ResourceClaim* failed_claim = hooks::find_claim(out.resource_id);
-                if (failed_claim != nullptr &&
-                    failed_claim->mechanism == contracts::ResourceMechanism::kOwnership &&
-                    failed_claim->failure == contracts::ResourceFailure::kFailSoft &&
-                    hooks::state_of(out.resource_id) == contracts::ResourceState::kFree) {
-                    hooks::retry_pending_set(out.resource_id, true);
-                    const uint32_t pindex = slot.plugin_index;
-                    g_deferred_ownership_token[pindex] = owner_token_of(plugin.id);
+            if (slot.owner_drain_pending) {
+                // No callback, resource operation, or wait occurs until both admission domains drain.
+                if (!owner_suspend_poll(&g_plugins[slot.plugin_index]) ||
+                    !http_endpoint_binder_owner_stop_poll(plugin.id)) continue;
+                refresh_http_degraded_status(plugin.id);
+                if (slot.provider_drain_pending &&
+                    !http_endpoint_binder_provider_drain_poll()) continue;
+                if (slot.capabilities_revoke_pending &&
+                    !http_endpoint_binder_all_stops_drained()) continue;
+                if (slot.capabilities_revoke_pending) {
+                    unregister_provided_capabilities(slot.plugin_index);
+                    slot.capabilities_revoke_pending = false;
                 }
-            }
-        }
-
-        // 安装步成功：宿主把原函数入口交还所有者（§3.3 backup 交还）。
-        // backup 非空是「本步真实安装」的判据：幂等跳过步 backup 为 null，交还会把
-        // 插件已持有的有效入口覆盖成 null（wrapper 随即 fail-closed），故跳过。
-        bool switched_to_release = false;
-        if (slot.kind == hooks::TxKind::kInstall && out.resource_id != nullptr &&
-            out.backup != nullptr) {
-            if (slot.ready_failed) {
-                // 已进入回滚：安装事务后续步新装出的资源立即撤回，禁止半装对外可见。
-                revoke_resource(out.resource_id, g_install_deps);
-            } else if (plugin.on_resource_ready != nullptr) {
-                contracts::PluginContext ctx = make_plugin_context(plugin.id);
-                if (plugin.on_resource_ready(ctx, out.resource_id, out.backup) != 0) {
-                    const contracts::ResourceClaim* ready_claim =
-                        hooks::find_claim(out.resource_id);
-                    const bool soft_ready =
-                        ready_claim != nullptr &&
-                        ready_claim->failure == contracts::ResourceFailure::kFailSoft;
-                    if (soft_ready && revoke_resource(out.resource_id, g_install_deps)) {
-                        // 软失败：资源安全撤回为 kFree，不置 failed，记录原因后继续其余资源。
-                        record_resource_install_error(slot.plugin_index, out.resource_id,
-                                                      "resource_ready_failed");
-                        QOL_LOG_WARN(QolDomain::kCore,
-                                     "plugin %s resource_ready_failed (soft) on %s", plugin.id,
-                                     out.resource_id);
-                    } else {
-                        // 受限回调失败：置 failed。若安装事务仍在途，先中止它（禁止后续步继续
-                        // 安装，尤其末尾 ownership acquire 造成 table 短暂发布），再走清理。
-                        infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
-                                             "resource_ready_failed",
-                                             infra::FeatureFailureStage::kActivation);
-                        QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s",
-                                     plugin.id, out.resource_id);
-                        slot.ready_failed = true;
-                        if (hooks::tx_abort_install(slot.tx_id, out.resource_id,
-                                                    "resource_ready_failed")) {
-                            // 安装事务已中止并回滚（Failed + 终态）：直接进入 failed cleanup，
-                            // 不启动还原事务、不重复回滚。
-                            if (g_feature_mode) {
-                                const auto index = slot.plugin_index;
-                                clear_resource_install_error(index);
-                                refresh_degraded_status(index);
-                                slot = LifecycleTx{};
-                                feature_stop(index, true);
-                            } else {
-                                slot.in_use = false;
-                                slot.ready_failed = false;
-                                slot.cascade = false;
-                                slot.tx_id = 0;
-                            }
-                            continue;
-                        }
-                        // 事务已终态：沿用既有还原事务 / 同步兜底清理路径。
-                        const uint64_t release =
-                            hooks::tx_begin(plugin.id, hooks::TxKind::kRelease);
-                        if (release != 0) {
-                            slot.tx_id = release;
-                            slot.kind = hooks::TxKind::kRelease;
-                            switched_to_release = true;
-                        } else {
-                            revoke_installed_resources(plugin, g_install_deps);
-                        }
-                    }
+                if (slot.stopped_token && !save_route::owner_stopped_poll(slot.stopped_token)) continue;
+                bool resources_drained = true;
+                for (uint32_t r = 0; r < plugin.resources_count; ++r) {
+                    if (hooks::in_flight_count(plugin.resources[r].id) != 0) resources_drained = false;
                 }
-            }
-        }
-        if (switched_to_release) continue;
-        if (!out.finished) continue;
-
-        if (slot.ready_failed) {
-            // 已因受限回调置 failed：保留 failed 态，不执行终态状态/回调覆盖。
-            if (g_feature_mode) {
-                const auto index = slot.plugin_index;
-                // Failed 插件不保留逐资源 degraded 标记，避免把失败态误报成 partial degraded。
-                clear_resource_install_error(index);
-                refresh_degraded_status(index);
-                slot = LifecycleTx{};
-                feature_stop(index, true);
-                continue;
-            }
-            slot.in_use = false;
-            slot.ready_failed = false;
-            slot.cascade = false;
-            slot.tx_id = 0;
-            continue;
-        }
-
-        hooks::TxStatus status{};
-        const bool have_status = hooks::tx_query(slot.tx_id, &status);
-        const bool succeeded = have_status && status.state == hooks::TxState::kSucceeded;
-        contracts::PluginContext ctx = make_plugin_context(plugin.id);
-        if (succeeded) {
-            if (slot.kind == hooks::TxKind::kInstall) {
-                if (g_feature_mode && (!g_feature_wanted[slot.plugin_index] ||
-                                      check_requires(plugin, slot.plugin_index) != nullptr)) {
-                    const auto index = slot.plugin_index;
+                if (!resources_drained) continue;
+                auto ctx = make_plugin_context(plugin.id);
+                if (slot.was_enabled && plugin.on_disabled) plugin.on_disabled(ctx);
+                slot.owner_drain_pending = false;
+                if (plugin.resources_count == 0) {
+                    retire_runtime_observers(plugin.id);
+                    if (plugin.deactivate) plugin.deactivate(ctx);
+                    infra::status_update(plugin.id, slot.failed_cleanup ? infra::FeatureState::kFailed
+                                                                        : infra::FeatureState::kInactive,
+                                          false, slot.failed_cleanup ? "activation failed; cleaned up" : nullptr,
+                                          slot.failed_cleanup ? infra::FeatureFailureStage::kActivation
+                                                              : infra::FeatureFailureStage::kNone);
+                    publish_runtime_actual(plugin.id, false);
                     slot = LifecycleTx{};
-                    feature_stop(index, false);
+                    ++advanced;
                     continue;
                 }
-                if (plugin_all_gates_want(plugin)) {
-                    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
-                        const contracts::ResourceClaim& claim = plugin.resources[i];
-                        if ((g_feature_mode || claim.atomic) &&
-                            hooks::state_of(claim.id) == contracts::ResourceState::kDisabled) {
-                            hooks::set_state(claim.id, contracts::ResourceState::kLive);
+                slot.tx_id = hooks::tx_begin(plugin.id, hooks::TxKind::kRelease);
+                if (!slot.tx_id) {
+                    revoke_installed_resources(plugin, g_install_deps);
+                    retire_runtime_observers(plugin.id);
+                    if (plugin.deactivate) plugin.deactivate(ctx);
+                    infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                                         "release unavailable", infra::FeatureFailureStage::kOther);
+                    publish_runtime_actual(plugin.id, false);
+                    slot = LifecycleTx{};
+                    ++advanced;
+                    continue;
+                }
+            }
+
+            if (slot.kind == hooks::TxKind::kInstall && install_steps >= kInstallStepsPerFrame) {
+                // 预留当前槽位给下一帧：游标从此处开始，跨帧公平轮转。
+                stop_index = slot_index;
+                budget_hit = true;
+                break;
+            }
+
+            hooks::TxStep out{};
+            hooks::tx_step(slot.tx_id, &out);
+            ++advanced;
+            if (slot.kind == hooks::TxKind::kInstall) {
+                ++install_steps;
+                install_progress = true;
+            }
+
+            // 生命周期事务跨帧推进时，原子成员即使已物理安装也先保持非 live 登记；
+            // 下一成员失败或事务仍在途时，能力与 wrapper 不得观察到部分组。
+            // 只对真实安装成功的资源（kLive）转 kDisabled：软失败步保持 kFree，不得伪装已装。
+            if (slot.kind == hooks::TxKind::kInstall && out.resource_id != nullptr && out.ok == 0 &&
+                (g_feature_mode || atomic_claim_by_id(plugin, out.resource_id) != nullptr) &&
+                hooks::state_of(out.resource_id) == contracts::ResourceState::kLive) {
+                hooks::set_state(out.resource_id, contracts::ResourceState::kDisabled);
+            }
+            // 软失败步（事务继续、资源保持自由）不伪造安装；单独记录原因供终态状态使用。
+            if (g_feature_mode && slot.kind == hooks::TxKind::kInstall && out.resource_id != nullptr &&
+                out.ok != 0) {
+                const char* step_error = out.error != nullptr ? out.error : "unknown";
+                if (out.ok == kQolErrNotReady) {
+                    QOL_LOG_WARN(QolDomain::kCore,
+                                 "plugin %s resource install deferred resource=%s code=%d: %s",
+                                 plugin.id, out.resource_id, out.ok, step_error);
+                } else {
+                    QOL_LOG_ERROR(QolDomain::kCore,
+                                  "plugin %s resource install failed resource=%s code=%d: %s",
+                                  plugin.id, out.resource_id, out.ok, step_error);
+                }
+                record_resource_install_error(slot.plugin_index, out.resource_id, out.error);
+                // 启动期 ownership 注入只在 SaveEnter（world 就绪）后成功：NotReady 时保持 Free
+                // 并武装一次性恢复，等下一次 SaveEnter 信号在既有主帧点定向重试。
+                // 只武装 ownership × fail-soft × 明确 NotReady；其他资源/错误不自动武装。
+                if (out.ok == kQolErrNotReady) {
+                    const contracts::ResourceClaim* failed_claim = hooks::find_claim(out.resource_id);
+                    if (failed_claim != nullptr &&
+                        failed_claim->mechanism == contracts::ResourceMechanism::kOwnership &&
+                        failed_claim->failure == contracts::ResourceFailure::kFailSoft &&
+                        hooks::state_of(out.resource_id) == contracts::ResourceState::kFree) {
+                        hooks::retry_pending_set(out.resource_id, true);
+                        const uint32_t pindex = slot.plugin_index;
+                        g_deferred_ownership_token[pindex] = owner_token_of(plugin.id);
+                    }
+                }
+            }
+
+            // 安装步成功：宿主把原函数入口交还所有者（§3.3 backup 交还）。
+            // backup 非空是「本步真实安装」的判据：幂等跳过步 backup 为 null，交还会把
+            // 插件已持有的有效入口覆盖成 null（wrapper 随即 fail-closed），故跳过。
+            bool switched_to_release = false;
+            if (slot.kind == hooks::TxKind::kInstall && out.resource_id != nullptr &&
+                out.backup != nullptr) {
+                if (slot.ready_failed) {
+                    // 已进入回滚：安装事务后续步新装出的资源立即撤回，禁止半装对外可见。
+                    revoke_resource(out.resource_id, g_install_deps);
+                } else if (plugin.on_resource_ready != nullptr) {
+                    contracts::PluginContext ctx = make_plugin_context(plugin.id);
+                    if (plugin.on_resource_ready(ctx, out.resource_id, out.backup) != 0) {
+                        const contracts::ResourceClaim* ready_claim =
+                            hooks::find_claim(out.resource_id);
+                        const bool soft_ready =
+                            ready_claim != nullptr &&
+                            ready_claim->failure == contracts::ResourceFailure::kFailSoft;
+                        if (soft_ready && revoke_resource(out.resource_id, g_install_deps)) {
+                            // 软失败：资源安全撤回为 kFree，不置 failed，记录原因后继续其余资源。
+                            record_resource_install_error(slot.plugin_index, out.resource_id,
+                                                          "resource_ready_failed");
+                            QOL_LOG_WARN(QolDomain::kCore,
+                                         "plugin %s resource_ready_failed (soft) on %s", plugin.id,
+                                         out.resource_id);
+                        } else {
+                            // 受限回调失败：置 failed。若安装事务仍在途，先中止它（禁止后续步继续
+                            // 安装，尤其末尾 ownership acquire 造成 table 短暂发布），再走清理。
+                            infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                                                 "resource_ready_failed",
+                                                 infra::FeatureFailureStage::kActivation);
+                            QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s",
+                                         plugin.id, out.resource_id);
+                            slot.ready_failed = true;
+                            if (hooks::tx_abort_install(slot.tx_id, out.resource_id,
+                                                        "resource_ready_failed")) {
+                                // 安装事务已中止并回滚（Failed + 终态）：直接进入 failed cleanup，
+                                // 不启动还原事务、不重复回滚。
+                                if (g_feature_mode) {
+                                    const auto index = slot.plugin_index;
+                                    clear_resource_install_error(index);
+                                    refresh_degraded_status(index);
+                                    slot = LifecycleTx{};
+                                    feature_stop(index, true);
+                                } else {
+                                    slot.in_use = false;
+                                    slot.ready_failed = false;
+                                    slot.cascade = false;
+                                    slot.tx_id = 0;
+                                }
+                                continue;
+                            }
+                            // 事务已终态：沿用既有还原事务 / 同步兜底清理路径。
+                            const uint64_t release =
+                                hooks::tx_begin(plugin.id, hooks::TxKind::kRelease);
+                            if (release != 0) {
+                                slot.tx_id = release;
+                                slot.kind = hooks::TxKind::kRelease;
+                                switched_to_release = true;
+                            } else {
+                                revoke_installed_resources(plugin, g_install_deps);
+                            }
                         }
                     }
                 }
-                const bool enabled = (g_feature_mode || plugin_all_gates_want(plugin)) && atomic_group_satisfied(plugin);
-                const uint32_t plugin_index = slot.plugin_index;
-                if (enabled && g_gate_degraded[plugin_index]) {
-                    g_gate_degraded[plugin_index] = false;
-                    refresh_degraded_status(plugin_index);
-                }
-                // feature-mode：事务成功不等于全部资源已安装。软失败保持 kFree；此时保留
-                // 单独记录的 resource-install 原因（不用会被成功终态清除的 g_gate_degraded）。
-                bool resource_degraded = false;
-                if (g_feature_mode) {
-                    if (plugin_resources_all_installed(plugin)) {
-                        clear_resource_install_error(plugin_index);
-                    } else {
-                        resource_degraded = true;
-                    }
-                    refresh_degraded_status(plugin_index);
-                }
-                const char* terminal_error =
-                    resource_degraded
-                        ? (g_resource_error_present[plugin_index] ? g_resource_error_text[plugin_index]
-                                                                  : "resource install degraded")
-                        : nullptr;
-                infra::status_update(
-                    plugin.id,
-                    enabled ? infra::FeatureState::kEnabled
-                            : infra::FeatureState::kInstalledDisabled,
-                    enabled, terminal_error);
-                if (enabled) {
-                    if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
-                    bind_http_endpoints(plugin);
-                    // §3.4.4：install 成功后进入 enabled 时注册能力。
-                    register_provided_capabilities(slot.plugin_index);
-                    publish_enabled_actual = true;
-                } else {
-                    owner_suspend(&g_plugins[slot.plugin_index]);
-                    defer_http_stop(slot.plugin_index, plugin.on_disabled != nullptr,
-                                    false, false, false);
-                    (void)poll_http_stops();
-                    publish_runtime_actual(plugin.id, false);
-                }
-            } else if (slot.cascade && !g_feature_mode) {
-                infra::status_update(plugin.id, infra::FeatureState::kInstalledDisabled, false,
-                                     "cascade_stopped");
-            } else {
-                // §3.3：deactivate 只做插件自身清理（幂等）；资源已逆序还原，随后置 inactive。
-                // kRelease 事务路径与零资源快速路径一致：先置路由墓碑再清理，停用态错误语义唯一。
-                if (!g_feature_mode) begin_http_endpoint_stop(plugin);
-                retire_runtime_observers(plugin.id);
-                if (plugin.deactivate != nullptr) plugin.deactivate(ctx);
-                infra::status_update(plugin.id, slot.failed_cleanup ? infra::FeatureState::kFailed
-                                                                    : infra::FeatureState::kInactive,
-                                      false, slot.failed_cleanup ? "activation failed; cleaned up" : nullptr,
-                                      slot.failed_cleanup ? infra::FeatureFailureStage::kActivation
-                                                          : infra::FeatureFailureStage::kNone);
-                publish_runtime_actual(plugin.id, false);
             }
-        } else {
-            if (g_feature_mode) {
-                const auto index = slot.plugin_index;
-                const auto kind = slot.kind;
-                if (kind == hooks::TxKind::kInstall) {
-                    // 安装事务失败：插件置 Failed，清逐资源 degraded 记录避免残留误报。
-                    QOL_LOG_ERROR(QolDomain::kCore, "plugin %s activation failed: %s",
-                                  plugin.id,
-                                  g_resource_error_present[index] &&
-                                          g_resource_error_text[index][0] != '\0'
-                                      ? g_resource_error_text[index]
-                                      : "resource install transaction failed");
+            if (switched_to_release) continue;
+            if (!out.finished) continue;
+
+            if (slot.ready_failed) {
+                // 已因受限回调置 failed：保留 failed 态，不执行终态状态/回调覆盖。
+                if (g_feature_mode) {
+                    const auto index = slot.plugin_index;
+                    // Failed 插件不保留逐资源 degraded 标记，避免把失败态误报成 partial degraded。
                     clear_resource_install_error(index);
                     refresh_degraded_status(index);
+                    slot = LifecycleTx{};
+                    feature_stop(index, true);
+                    continue;
                 }
-                slot = LifecycleTx{};
-                if (kind == hooks::TxKind::kInstall) feature_stop(index, true);
-                else {
-                    // The transaction terminates on its first failed inverse step. Sweep
-                    // every remaining installed claim with the existing release/quarantine
-                    // primitive before retiring the plugin's business state.
-                    revoke_installed_resources(plugin, g_install_deps);
-                    slot.in_use = true;
-                    slot.plugin_index = index;
-                    slot.kind = hooks::TxKind::kRelease;
-                    slot.quarantine_pending = true;
-                }
+                slot.in_use = false;
+                slot.ready_failed = false;
+                slot.cascade = false;
+                slot.tx_id = 0;
                 continue;
             }
-            // 失败原因取事务记录；两者均无则用固定静态文本。
-            const char* error =
-                have_status && status.error != nullptr
-                    ? status.error
-                    : (have_status && status.failed_resource_id != nullptr
-                           ? status.failed_resource_id
-                           : "lifecycle transaction failed");
-            const contracts::ResourceClaim* failed_atomic =
-                plugin_has_atomic_claims(plugin)
-                    ? atomic_claim_by_id(plugin, have_status ? status.failed_resource_id : nullptr)
-                    : nullptr;
-            if (failed_atomic != nullptr) {
-                bool rollback_failed = false;
-                rollback_atomic_group(plugin, g_install_deps, &rollback_failed);
-                if (!rollback_failed) {
-                    std::snprintf(g_error_text[slot.plugin_index],
-                                  sizeof(g_error_text[slot.plugin_index]), "resource %s: %s",
-                                  failed_atomic->id, error != nullptr ? error : "failed");
-                    g_gate_degraded[slot.plugin_index] = true;
-                    refresh_degraded_status(slot.plugin_index);
-                    infra::status_update(plugin.id, infra::FeatureState::kInstalledDisabled,
-                                         false, g_error_text[slot.plugin_index]);
-                    QOL_LOG_WARN(QolDomain::kCore, "plugin %s atomic group deferred: %s", plugin.id,
-                                 g_error_text[slot.plugin_index]);
+
+            hooks::TxStatus status{};
+            const bool have_status = hooks::tx_query(slot.tx_id, &status);
+            const bool succeeded = have_status && status.state == hooks::TxState::kSucceeded;
+            contracts::PluginContext ctx = make_plugin_context(plugin.id);
+            if (succeeded) {
+                if (slot.kind == hooks::TxKind::kInstall) {
+                    if (g_feature_mode && (!g_feature_wanted[slot.plugin_index] ||
+                                          check_requires(plugin, slot.plugin_index) != nullptr)) {
+                        const auto index = slot.plugin_index;
+                        slot = LifecycleTx{};
+                        feature_stop(index, false);
+                        continue;
+                    }
+                    if (plugin_all_gates_want(plugin)) {
+                        for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+                            const contracts::ResourceClaim& claim = plugin.resources[i];
+                            if ((g_feature_mode || claim.atomic) &&
+                                hooks::state_of(claim.id) == contracts::ResourceState::kDisabled) {
+                                hooks::set_state(claim.id, contracts::ResourceState::kLive);
+                            }
+                        }
+                    }
+                    const bool enabled = (g_feature_mode || plugin_all_gates_want(plugin)) && atomic_group_satisfied(plugin);
+                    const uint32_t plugin_index = slot.plugin_index;
+                    if (enabled && g_gate_degraded[plugin_index]) {
+                        g_gate_degraded[plugin_index] = false;
+                        refresh_degraded_status(plugin_index);
+                    }
+                    // feature-mode：事务成功不等于全部资源已安装。软失败保持 kFree；此时保留
+                    // 单独记录的 resource-install 原因（不用会被成功终态清除的 g_gate_degraded）。
+                    bool resource_degraded = false;
+                    if (g_feature_mode) {
+                        if (plugin_resources_all_installed(plugin)) {
+                            clear_resource_install_error(plugin_index);
+                        } else {
+                            resource_degraded = true;
+                        }
+                        refresh_degraded_status(plugin_index);
+                    }
+                    const char* terminal_error =
+                        resource_degraded
+                            ? (g_resource_error_present[plugin_index] ? g_resource_error_text[plugin_index]
+                                                                      : "resource install degraded")
+                            : nullptr;
+                    infra::status_update(
+                        plugin.id,
+                        enabled ? infra::FeatureState::kEnabled
+                                : infra::FeatureState::kInstalledDisabled,
+                        enabled, terminal_error);
+                    if (enabled) {
+                        if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
+                        bind_http_endpoints(plugin);
+                        // §3.4.4：install 成功后进入 enabled 时注册能力。
+                        register_provided_capabilities(slot.plugin_index);
+                        publish_enabled_actual = true;
+                    } else {
+                        owner_suspend(&g_plugins[slot.plugin_index]);
+                        defer_http_stop(slot.plugin_index, plugin.on_disabled != nullptr,
+                                        false, false, false);
+                        (void)poll_http_stops();
+                        publish_runtime_actual(plugin.id, false);
+                    }
+                } else if (slot.cascade && !g_feature_mode) {
+                    infra::status_update(plugin.id, infra::FeatureState::kInstalledDisabled, false,
+                                         "cascade_stopped");
+                } else {
+                    // §3.3：deactivate 只做插件自身清理（幂等）；资源已逆序还原，随后置 inactive。
+                    // kRelease 事务路径与零资源快速路径一致：先置路由墓碑再清理，停用态错误语义唯一。
+                    if (!g_feature_mode) begin_http_endpoint_stop(plugin);
+                    retire_runtime_observers(plugin.id);
+                    if (plugin.deactivate != nullptr) plugin.deactivate(ctx);
+                    infra::status_update(plugin.id, slot.failed_cleanup ? infra::FeatureState::kFailed
+                                                                        : infra::FeatureState::kInactive,
+                                          false, slot.failed_cleanup ? "activation failed; cleaned up" : nullptr,
+                                          slot.failed_cleanup ? infra::FeatureFailureStage::kActivation
+                                                              : infra::FeatureFailureStage::kNone);
+                    publish_runtime_actual(plugin.id, false);
+                }
+            } else {
+                if (g_feature_mode) {
+                    const auto index = slot.plugin_index;
+                    const auto kind = slot.kind;
+                    if (kind == hooks::TxKind::kInstall) {
+                        // 安装事务失败：插件置 Failed，清逐资源 degraded 记录避免残留误报。
+                        QOL_LOG_ERROR(QolDomain::kCore, "plugin %s activation failed: %s",
+                                      plugin.id,
+                                      g_resource_error_present[index] &&
+                                              g_resource_error_text[index][0] != '\0'
+                                          ? g_resource_error_text[index]
+                                          : "resource install transaction failed");
+                        clear_resource_install_error(index);
+                        refresh_degraded_status(index);
+                    }
+                    slot = LifecycleTx{};
+                    if (kind == hooks::TxKind::kInstall) feature_stop(index, true);
+                    else {
+                        // The transaction terminates on its first failed inverse step. Sweep
+                        // every remaining installed claim with the existing release/quarantine
+                        // primitive before retiring the plugin's business state.
+                        revoke_installed_resources(plugin, g_install_deps);
+                        slot.in_use = true;
+                        slot.plugin_index = index;
+                        slot.kind = hooks::TxKind::kRelease;
+                        slot.quarantine_pending = true;
+                    }
+                    continue;
+                }
+                // 失败原因取事务记录；两者均无则用固定静态文本。
+                const char* error =
+                    have_status && status.error != nullptr
+                        ? status.error
+                        : (have_status && status.failed_resource_id != nullptr
+                               ? status.failed_resource_id
+                               : "lifecycle transaction failed");
+                const contracts::ResourceClaim* failed_atomic =
+                    plugin_has_atomic_claims(plugin)
+                        ? atomic_claim_by_id(plugin, have_status ? status.failed_resource_id : nullptr)
+                        : nullptr;
+                if (failed_atomic != nullptr) {
+                    bool rollback_failed = false;
+                    rollback_atomic_group(plugin, g_install_deps, &rollback_failed);
+                    if (!rollback_failed) {
+                        std::snprintf(g_error_text[slot.plugin_index],
+                                      sizeof(g_error_text[slot.plugin_index]), "resource %s: %s",
+                                      failed_atomic->id, error != nullptr ? error : "failed");
+                        g_gate_degraded[slot.plugin_index] = true;
+                        refresh_degraded_status(slot.plugin_index);
+                        infra::status_update(plugin.id, infra::FeatureState::kInstalledDisabled,
+                                             false, g_error_text[slot.plugin_index]);
+                        QOL_LOG_WARN(QolDomain::kCore, "plugin %s atomic group deferred: %s", plugin.id,
+                                     g_error_text[slot.plugin_index]);
+                    } else {
+                        infra::status_update(plugin.id, infra::FeatureState::kFailed, false, error,
+                                             infra::FeatureFailureStage::kOther);
+                        publish_runtime_actual(plugin.id, false);
+                        QOL_LOG_WARN(QolDomain::kCore, "plugin %s lifecycle failed: %s", plugin.id,
+                                     error);
+                    }
                 } else {
                     infra::status_update(plugin.id, infra::FeatureState::kFailed, false, error,
-                                         infra::FeatureFailureStage::kOther);
+                                         slot.kind == hooks::TxKind::kInstall
+                                             ? infra::FeatureFailureStage::kActivation
+                                             : infra::FeatureFailureStage::kOther);
                     publish_runtime_actual(plugin.id, false);
                     QOL_LOG_WARN(QolDomain::kCore, "plugin %s lifecycle failed: %s", plugin.id,
                                  error);
                 }
-            } else {
-                infra::status_update(plugin.id, infra::FeatureState::kFailed, false, error,
-                                     slot.kind == hooks::TxKind::kInstall
-                                         ? infra::FeatureFailureStage::kActivation
-                                         : infra::FeatureFailureStage::kOther);
-                publish_runtime_actual(plugin.id, false);
-                QOL_LOG_WARN(QolDomain::kCore, "plugin %s lifecycle failed: %s", plugin.id,
-                             error);
             }
+            slot.in_use = false;
+            slot.cascade = false;
+            slot.tx_id = 0;
+            if (publish_enabled_actual) publish_runtime_actual(plugin.id, true);
         }
-        slot.in_use = false;
-        slot.cascade = false;
-        slot.tx_id = 0;
-        if (publish_enabled_actual) publish_runtime_actual(plugin.id, true);
+        if (budget_hit) {
+            g_install_step_cursor = stop_index;
+            break;
+        }
+        // 本轮没有任何安装推进：继续 pass 只会在等待态上空转。
+        if (!install_progress) break;
     }
     return advanced;
 }
@@ -3062,6 +3095,7 @@ void plugin_registry_reset_for_test() {
     for (LifecycleTx& slot : g_lifecycle_txs) {
         slot = LifecycleTx{};
     }
+    g_install_step_cursor = 0;
     for (uint32_t i = 0; i < kMaxPlugins; ++i) {
         g_cap_registration[i] = CapRegistration::kNone;
         g_http_stop_pending[i] = false;
