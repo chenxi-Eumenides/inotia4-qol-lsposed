@@ -67,6 +67,15 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 - 点击箭头 → 生成完整 `rates` JSON → `request_set_config` → 进入 pending（全部箭头禁用）→ 持久化确认后 `apply_rates`；成功不显示提示，失败/状态未知才在底部显示错误并回滚。
 - 面板打开时重新读取配置，覆盖外部编辑；关闭/插件停用销毁全部控件与回调。
 
+## QOL 水印
+
+Kotlin 侧 `PluginRuntimeEffects` 订阅 `world_tuning` 的 Host runtime effect，从 `config_json` 的 `rates` 读取三项参与难度判定的倍率（缺字段按 100）：
+
+- 偏简单：`damage_in < 100` 或 `enemy_hp < 100` 或 `damage_out > 100`；
+- 偏困难：`damage_in > 100` 或 `enemy_hp > 100` 或 `damage_out < 100`。
+
+插件 desired 启用时，任意一项偏简单显示绿色 `0xCC00FF00`；否则任意一项偏难显示紫色 `0xCCAA00FF`；三项均为 100 或插件未启用时保持默认半透明白色。模块健康异常（红色）优先于以上颜色。其余倍率（金币/经验/掉落/冷却）不参与水印判定。面板写入与 `/api/config/set` 都经同一 runtime effect 刷新水印。
+
 ## 游戏内行为
 
 | 资源 id | 符号 | 用途 |
@@ -162,4 +171,4 @@ monster v29 的 `CHAR_AddDamage` 入口是 `b <隐藏段目标>`，且 mod 会�
 
 ## 验证状态
 
-Host 测试与 Debug 构建状态见 `docs/refactor/verification.md` 的 VM-WT-01；2026-10-29 真机（C18L v589）只覆盖设置页/面板/配置持久化，不覆盖新增 CMP ABI。概率阈值与品质候选的游戏内效果尚无新真机证据，按验收口径登记为 `PARTIAL / NOT_ACCEPTED`。
+Host 测试与 Debug 构建状态见 `docs/refactor/verification.md` 的 VM-WT-01；2026-10-29 真机（C18L v589）只覆盖设置页/面板/配置持久化，不覆盖新增 CMP ABI。概率阈值与品质候选的游戏内效果尚无新真机证据，按验收口径登记为 `PARTIAL / NOT_ACCEPTED`。QOL 水印配色由 `world_tuning` runtime effect 驱动，本批只覆盖 Debug 构建与纯函数判定，真机颜色切换未验收。

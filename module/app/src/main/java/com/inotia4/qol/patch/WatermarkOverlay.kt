@@ -17,6 +17,8 @@ import java.lang.ref.WeakReference
 import java.lang.reflect.Method
 
 internal const val MODULE_HEALTH_WATERMARK_COLOR = 0xCCFF0000.toInt()
+internal const val WORLD_TUNING_WATERMARK_COLOR_EASY = 0xCC00FF00.toInt()
+internal const val WORLD_TUNING_WATERMARK_COLOR_HARD = 0xCCAA00FF.toInt()
 
 internal fun copyModuleHealthNames(unavailableNames: List<String>): List<String> {
     val copied = unavailableNames.filter { it.isNotBlank() }.distinct()
@@ -36,6 +38,30 @@ internal fun moduleHealthWatermarkText(visible: Boolean, unavailableNames: List<
         "qol"
     }
 
+/** 世界调整中参与水印判定的三项倍率；100 为不修改。 */
+internal data class WorldTuningRates(
+    val damageIn: Int,
+    val enemyHp: Int,
+    val damageOut: Int,
+)
+
+internal enum class WorldTuningWatermarkDirection { NEUTRAL, EASY, HARD }
+
+/**
+ * 承伤倍率与敌怪血量越低越简单，伤害倍率越高越简单。
+ * 任意一项偏简单即取绿色；否则任意一项偏难取紫色；三项均为 100 时为中性。
+ */
+internal fun worldTuningWatermarkDirection(rates: WorldTuningRates?): WorldTuningWatermarkDirection {
+    if (rates == null) return WorldTuningWatermarkDirection.NEUTRAL
+    val easier = rates.damageIn < 100 || rates.enemyHp < 100 || rates.damageOut > 100
+    val harder = rates.damageIn > 100 || rates.enemyHp > 100 || rates.damageOut < 100
+    return when {
+        easier -> WorldTuningWatermarkDirection.EASY
+        harder -> WorldTuningWatermarkDirection.HARD
+        else -> WorldTuningWatermarkDirection.NEUTRAL
+    }
+}
+
 /**
  * 常驻水印（qol 三字母）：hook MainActivity.onWindowFocusChanged，在获焦回调后
  * 向 android.R.id.content 末尾注入一个半透明 TextView。
@@ -44,8 +70,9 @@ internal fun moduleHealthWatermarkText(visible: Boolean, unavailableNames: List<
  * 不消费触摸，任何失败只记日志、绝不影响游戏进程。
  *
  * 颜色策略：由静态配色表 [COLOR_RULES] 决定 —— 按序取第一条命中的规则，全不命中用默认色。
- * 模块健康异常优先显示红色；无活动状态时保留默认半透明白色。
- * 配置和模块健康更新均经 refreshColor() 在现有视图上刷新。
+ * 模块健康异常优先显示红色；世界调整三项倍率偏简单显示绿色、偏困难显示紫色；
+ * 无活动状态时保留默认半透明白色。配置、世界调整和模块健康更新均经 refreshColor()
+ * 在现有视图上刷新。
  */
 object WatermarkOverlay {
 
@@ -81,9 +108,19 @@ object WatermarkOverlay {
     @Volatile private var moduleHealthVisible = false
     private val moduleHealthLock = Any()
     private var moduleHealthRevision = Long.MIN_VALUE
+
+    @Volatile private var worldTuningRevision = Long.MIN_VALUE
+    @Volatile private var worldTuningDirection = WorldTuningWatermarkDirection.NEUTRAL
+
     private val COLOR_RULES: List<WatermarkColorRule> = listOf(
         WatermarkColorRule("模块异常", MODULE_HEALTH_WATERMARK_COLOR) {
             moduleHealthRuleActive(moduleHealthVisible, moduleHealthNames)
+        },
+        WatermarkColorRule("世界调整·简单", WORLD_TUNING_WATERMARK_COLOR_EASY) {
+            worldTuningDirection == WorldTuningWatermarkDirection.EASY
+        },
+        WatermarkColorRule("世界调整·困难", WORLD_TUNING_WATERMARK_COLOR_HARD) {
+            worldTuningDirection == WorldTuningWatermarkDirection.HARD
         },
     )
 
@@ -95,6 +132,18 @@ object WatermarkOverlay {
             moduleHealthNames = copiedNames
             moduleHealthVisible = visible && copiedNames.isNotEmpty()
         }
+        refreshColor()
+    }
+
+    /** 世界调整 runtime effect：插件未启用时回落默认色，不保留旧方向。 */
+    internal fun updateWorldTuning(
+        revision: Long,
+        enabled: Boolean,
+        direction: WorldTuningWatermarkDirection,
+    ) {
+        if (revision <= worldTuningRevision) return
+        worldTuningRevision = revision
+        worldTuningDirection = if (enabled) direction else WorldTuningWatermarkDirection.NEUTRAL
         refreshColor()
     }
 

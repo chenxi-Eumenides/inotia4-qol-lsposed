@@ -21,5 +21,39 @@ object WatermarkOverlayPriorityTest {
         check(firstActiveWatermarkRuleIndex(listOf(true, true)) == 0)
         check(firstActiveWatermarkRuleIndex(listOf(false, true)) == 1)
         check(firstActiveWatermarkRuleIndex(listOf(false, false)) == -1)
+
+        check(worldTuningWatermarkDirection(null) == WorldTuningWatermarkDirection.NEUTRAL)
+        check(
+            worldTuningWatermarkDirection(WorldTuningRates(damageIn = 100, enemyHp = 100, damageOut = 100)) ==
+                WorldTuningWatermarkDirection.NEUTRAL
+        )
+        check(
+            worldTuningWatermarkDirection(WorldTuningRates(damageIn = 50, enemyHp = 100, damageOut = 100)) ==
+                WorldTuningWatermarkDirection.EASY
+        )
+        check(
+            worldTuningWatermarkDirection(WorldTuningRates(damageIn = 100, enemyHp = 50, damageOut = 100)) ==
+                WorldTuningWatermarkDirection.EASY
+        )
+        check(
+            worldTuningWatermarkDirection(WorldTuningRates(damageIn = 100, enemyHp = 100, damageOut = 150)) ==
+                WorldTuningWatermarkDirection.EASY
+        )
+        check(
+            worldTuningWatermarkDirection(WorldTuningRates(damageIn = 150, enemyHp = 100, damageOut = 100)) ==
+                WorldTuningWatermarkDirection.HARD
+        )
+        check(
+            worldTuningWatermarkDirection(WorldTuningRates(damageIn = 100, enemyHp = 150, damageOut = 100)) ==
+                WorldTuningWatermarkDirection.HARD
+        )
+        check(
+            worldTuningWatermarkDirection(WorldTuningRates(damageIn = 100, enemyHp = 100, damageOut = 50)) ==
+                WorldTuningWatermarkDirection.HARD
+        )
+        check(
+            worldTuningWatermarkDirection(WorldTuningRates(damageIn = 50, enemyHp = 100, damageOut = 50)) ==
+                WorldTuningWatermarkDirection.EASY
+        )
     }
 }
