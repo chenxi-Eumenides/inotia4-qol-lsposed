@@ -68,10 +68,38 @@ std::atomic<uint32_t> g_next_time_trace{0};
 // 同一线程内 GetActionCoolTime → SetActionNextTime 的配对标记：
 // 正常路径已经按倍率算好 D，SetActionNextTime 只需跳过二次缩放；
 // monster 变体在原始计算后直接覆盖固定冷却值时，标记不匹配，按最终 delta 兜底缩放。
-thread_local bool g_last_skill_scaled_valid = false;
-thread_local int64_t g_last_skill_scaled_duration = 0;
-thread_local void* g_last_skill_scaled_char = nullptr;
 thread_local bool g_in_set_action_next_time = false;
+
+constexpr uint32_t kSkillTotalSlots = 256;
+struct SkillTotal {
+    void* action = nullptr;
+    int64_t total = 0;
+};
+SkillTotal g_skill_totals[kSkillTotalSlots];
+uint32_t g_skill_total_cursor = 0;
+
+void store_skill_total(void* action, int64_t total) {
+    if (action == nullptr) return;
+    for (SkillTotal& entry : g_skill_totals) {
+        if (entry.action == action) {
+            entry.total = total;
+            return;
+        }
+    }
+    g_skill_totals[g_skill_total_cursor] = SkillTotal{action, total};
+    g_skill_total_cursor = (g_skill_total_cursor + 1) % kSkillTotalSlots;
+}
+
+bool load_skill_total(void* action, int64_t* out_total) {
+    if (action == nullptr || out_total == nullptr) return false;
+    for (const SkillTotal& entry : g_skill_totals) {
+        if (entry.action == action) {
+            *out_total = entry.total;
+            return true;
+        }
+    }
+    return false;
+}
 
 const contracts::ItemUseApi* g_item_use = nullptr;
 uint64_t g_item_use_subscription = 0;
@@ -645,32 +673,20 @@ int32_t char_get_action_cooltime_wrapper(void* ch, void* action) {
         g_backup_get_action_cooltime.load(std::memory_order_acquire));
     if (backup == nullptr) return 0;
 
-    if (g_in_set_action_next_time) g_last_skill_scaled_valid = false;
     const int32_t duration = backup(ch, action);
     const uint32_t trace = g_skill_cooltime_trace.fetch_add(1, std::memory_order_relaxed);
-    if (trace < 8) {
-        log_info("skill_cooltime ch=%p duration=%d gate=%d", ch, duration,
-                 g_gate.load(std::memory_order_relaxed) ? 1 : 0);
-    }
-    if (duration <= 0 || !g_gate.load(std::memory_order_relaxed)) return duration;
-    const auto* extras = g_extras;
-    if (!cooldown_api_ready(extras)) return duration;
-
-    void* active = nullptr;
-    if (extras->cooldown.active_player(&active).ok != kQolOk || active != ch) {
-        if (trace < 8) log_info("skill_cooltime active_mismatch active=%p ch=%p", active, ch);
+    if (g_in_set_action_next_time) {
+        if (trace < 8) log_info("skill_cooltime base ch=%p duration=%d", ch, duration);
         return duration;
     }
-    const int32_t percent = rate_value(RateId::kSkillCooldown);
-    if (trace < 8) log_info("skill_cooltime percent=%d", percent);
-    if (percent == kRateDefault) return duration;
-    const int32_t scaled = scale_by_percent(duration, percent);
-    if (g_in_set_action_next_time) {
-        g_last_skill_scaled_valid = true;
-        g_last_skill_scaled_duration = scaled;
-        g_last_skill_scaled_char = ch;
+    int64_t total = 0;
+    if (!load_skill_total(action, &total) || total <= 0) return duration;
+    if (total > INT32_MAX) total = INT32_MAX;
+    if (trace < 8) {
+        log_info("skill_cooltime display ch=%p base=%d total=%lld", ch, duration,
+                 static_cast<long long>(total));
     }
-    return scaled;
+    return static_cast<int32_t>(total);
 }
 
 void char_set_action_next_time_wrapper(void* ch, void* action) {
@@ -685,7 +701,7 @@ void char_set_action_next_time_wrapper(void* ch, void* action) {
     g_in_set_action_next_time = true;
     backup(ch, action);
     g_in_set_action_next_time = was_in_set_action_next_time;
-    if (action == nullptr || !g_gate.load(std::memory_order_relaxed)) return;
+    if (action == nullptr) return;
 
     const auto* extras = g_extras;
     if (!cooldown_api_ready(extras)) return;
@@ -696,20 +712,24 @@ void char_set_action_next_time_wrapper(void* ch, void* action) {
     if (extras->cooldown.now_tick(&now).ok != kQolOk) return;
     auto* next_time = reinterpret_cast<int64_t*>(reinterpret_cast<uint8_t*>(action) + 16);
     const int64_t delta = *next_time - now;
+    if (delta <= 0) {
+        store_skill_total(action, 0);
+        return;
+    }
+
     const int32_t percent = rate_value(RateId::kSkillCooldown);
-    const bool matched = g_last_skill_scaled_valid && g_last_skill_scaled_char == ch &&
-                         delta == g_last_skill_scaled_duration;
+    int64_t total = delta;
+    const bool apply = g_gate.load(std::memory_order_relaxed) && percent != kRateDefault;
+    if (apply) total = scale_cooldown_ticks(delta, percent);
+    if (apply) *next_time = now + total;
+    store_skill_total(action, total);
+
     const uint32_t trace = g_next_time_trace.fetch_add(1, std::memory_order_relaxed);
     if (trace < 8) {
-        log_info("set_action_next_time ch=%p delta=%lld last=%lld valid=%d matched=%d percent=%d",
-                 ch, static_cast<long long>(delta),
-                 static_cast<long long>(g_last_skill_scaled_duration),
-                 g_last_skill_scaled_valid ? 1 : 0, matched ? 1 : 0, percent);
+        log_info("set_action_next_time ch=%p delta=%lld total=%lld percent=%d gate=%d",
+                 ch, static_cast<long long>(delta), static_cast<long long>(total), percent,
+                 g_gate.load(std::memory_order_relaxed) ? 1 : 0);
     }
-    g_last_skill_scaled_valid = false;
-    if (delta <= 0 || percent == kRateDefault) return;
-    if (matched) return;
-    *next_time = now + scale_cooldown_ticks(delta, percent);
 }
 
 void bind_item_use(const contracts::ItemUseApi* api) {
