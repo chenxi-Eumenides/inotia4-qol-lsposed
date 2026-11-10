@@ -53,6 +53,7 @@ add_executable(item_facts_plugin_tests
     ${CPP_DIR}/plugins/core.item/usecases/item_helpers.cpp
     ${CPP_DIR}/plugins/core.item/api/facts.cpp
     ${CPP_DIR}/plugins/core.item/api/state.cpp
+    ${CPP_DIR}/plugins/core.item/api/item_use.cpp
     ${CPP_DIR}/plugins/core.item/http/query_handler.cpp
     ${CPP_DIR}/plugins/core.item/http/write_handler.cpp
     ${CPP_DIR}/plugins/core.item/http/write_results.cpp
@@ -1927,6 +1928,7 @@ add_executable(item_facts_dispatch_tests
     ${CPP_DIR}/plugins/core.item/usecases/item_helpers.cpp
     ${CPP_DIR}/plugins/core.item/api/facts.cpp
     ${CPP_DIR}/plugins/core.item/api/state.cpp
+    ${CPP_DIR}/plugins/core.item/api/item_use.cpp
     ${CPP_DIR}/plugins/core.item/http/query_handler.cpp
     ${CPP_DIR}/plugins/core.item/http/write_handler.cpp
     ${CPP_DIR}/plugins/core.item/http/write_results.cpp
@@ -1970,6 +1972,18 @@ target_compile_features(item_facts_dispatch_tests PRIVATE cxx_std_17)
 set_target_properties(item_facts_dispatch_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(item_facts_dispatch_tests PRIVATE Threads::Threads)
 add_test(NAME item_facts_dispatch_tests COMMAND item_facts_dispatch_tests)
+
+# item.use：CHAR_UseItemEx 后置通知的订阅/注销/顺序/重入/容量。
+add_executable(item_use_dispatch_tests
+    test_item_use_dispatch.cpp
+    ${CPP_DIR}/plugins/core.item/api/item_use.cpp
+)
+target_include_directories(item_use_dispatch_tests PRIVATE ${CPP_DIR})
+target_compile_features(item_use_dispatch_tests PRIVATE cxx_std_17)
+set_target_properties(item_use_dispatch_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(item_use_dispatch_tests PRIVATE Threads::Threads)
+add_test(NAME item_use_dispatch_tests COMMAND item_use_dispatch_tests)
 
 # P5-4-2：quest 4 条 /api/quest* GET query handler 的注册/快照/片段拼接/注销接缝。
 add_executable(quest_dispatch_tests
