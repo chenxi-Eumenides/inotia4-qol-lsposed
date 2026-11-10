@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include "contracts/game_host.h"
 #include "contracts/game_ports/item_inventory_state_write_port.h"
 #include "contracts/game_ports/item_money_write_port.h"
 #include "contracts/game_ports/item_port.h"
@@ -9,9 +10,10 @@
 
 namespace qol::features::core_inventory {
 
-// 插件生命周期绑定的 Host SDK 与 item port；读侧 HTTP（快照刷新/查询）与 hook 层共用。
-// 由 plugin_install 绑定、plugin_deactivate 置空。
+// 插件生命周期绑定的 Host SDK、game host 与 item port；读侧 HTTP（快照刷新/查询）与
+// hook 层共用。由 plugin_install 绑定、plugin_deactivate 置空。
 extern const contracts::QolHostSdk* g_sdk;
+extern const contracts::QolGameHost* g_game;
 extern const contracts::QolItemPort* g_port;
 // 原生库存状态写与金钱写端口：transfer 层的 import/remove 原语与 HTTP 写侧迁移共用。
 // 由 plugin_install 校验并绑定、plugin_deactivate 置空；on_disabled 保留绑定，

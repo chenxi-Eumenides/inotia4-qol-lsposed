@@ -3,8 +3,11 @@
 #include "plugins/core.inventory/api/access.h"
 #include "plugins/core.inventory/api/bag_source.h"
 #include "plugins/core.inventory/plugin.h"
+#include "plugins/core.inventory/runtime/context.h"
 #include "plugins/core.inventory/store/slot_table.h"
+#include "plugins/core.inventory/transfer/locate_item.h"
 #include "plugins/core.inventory/transfer/move_item.h"
+#include "plugins/core.inventory/transfer/replace_item.h"
 
 #include <cassert>
 #include <cstring>
@@ -181,6 +184,62 @@ constexpr int32_t kTransferTestSpace = qol::contracts::kQolBagSpaceFirstRegister
 int g_transfer_export_calls = 0;
 int g_transfer_import_calls = 0;
 int g_transfer_remove_calls = 0;
+int g_transfer_replace_calls = 0;
+int g_native_find_calls = 0;
+
+QolResult transfer_source_identify(qol::contracts::QolItemHandle item,
+                                   qol::contracts::QolBagRef* out, int32_t* out_slot) {
+    if (out == nullptr || out_slot == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad identify output", 20);
+    }
+    if (item.slot != 1 || item.generation != 1) {
+        return qol::contracts::error(kQolErrNotFound, "not provider item", 17);
+    }
+    *out = qol::contracts::QolBagRef{kTransferTestSpace, 0};
+    *out_slot = 0;
+    return qol::contracts::ok();
+}
+
+QolResult transfer_source_replace(qol::contracts::QolItemHandle expected,
+                                  const qol::contracts::QolBagTransfer* replacement,
+                                  qol::contracts::QolBagMutationResult* out) {
+    ++g_transfer_replace_calls;
+    if (replacement == nullptr || out == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad replacement output", 23);
+    }
+    out->ref = qol::contracts::QolBagRef{kTransferTestSpace, 0};
+    out->item = expected;
+    out->count = replacement->count;
+    return qol::contracts::ok();
+}
+
+QolResult fake_serialize_item(qol::contracts::QolItemHandle, uint8_t* out, uint32_t capacity,
+                              uint32_t* out_size) {
+    if (out_size == nullptr || (out != nullptr && capacity < 1)) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad serialize output", 21);
+    }
+    *out_size = 1;
+    if (out != nullptr) out[0] = 0;
+    return qol::contracts::ok();
+}
+
+QolResult fake_apply_payload(qol::contracts::QolItemHandle, const uint8_t*, uint32_t) {
+    return qol::contracts::ok();
+}
+
+QolResult fake_original_find_item_slot(qol::contracts::QolItemHandle item, int32_t* out_bag,
+                                       int32_t* out_slot) {
+    ++g_native_find_calls;
+    if (out_bag == nullptr || out_slot == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad native find output", 23);
+    }
+    if (item.slot != 2 || item.generation != 2) {
+        return qol::contracts::error(kQolErrNotFound, "not native item", 15);
+    }
+    *out_bag = 2;
+    *out_slot = 5;
+    return qol::contracts::ok();
+}
 
 int32_t transfer_source_count() { return 1; }
 
@@ -249,12 +308,6 @@ QolResult transfer_source_remove(qol::contracts::QolItemHandle, int32_t,
     return qol::contracts::ok();
 }
 
-QolResult transfer_source_replace(qol::contracts::QolItemHandle,
-                                  const qol::contracts::QolBagTransfer*,
-                                  qol::contracts::QolBagMutationResult*) {
-    return qol::contracts::error(kQolErrUnsupported, "not implemented", 14);
-}
-
 void test_transfer_move_count_precheck() {
     qol::contracts::QolBagSource source{};
     source.version = qol::contracts::kBagSourceVersion;
@@ -266,6 +319,7 @@ void test_transfer_move_count_precheck() {
     source.export_item = &transfer_source_export;
     source.import_item = &transfer_source_import;
     source.remove = &transfer_source_remove;
+    source.identify = &transfer_source_identify;
     source.replace_item = &transfer_source_replace;
     assert_ok(qol::features::core_inventory::kBagSourceRegistryApi.register_source(&source));
 
@@ -290,12 +344,80 @@ void test_transfer_move_count_precheck() {
         kTransferTestSpace));
 }
 
+void test_transfer_replace_locates_without_native_scan() {
+    qol::contracts::QolBagSource source{};
+    source.version = qol::contracts::kBagSourceVersion;
+    source.space_id = kTransferTestSpace;
+    source.count = &transfer_source_count;
+    source.info = &transfer_source_info;
+    source.item_at = &transfer_source_item_at;
+    source.for_each_item = &transfer_source_for_each;
+    source.export_item = &transfer_source_export;
+    source.import_item = &transfer_source_import;
+    source.remove = &transfer_source_remove;
+    source.identify = &transfer_source_identify;
+    source.replace_item = &transfer_source_replace;
+    assert_ok(qol::features::core_inventory::kBagSourceRegistryApi.register_source(&source));
+
+    qol::contracts::QolItemPort port{};
+    port.read.serialize_item = &fake_serialize_item;
+    qol::contracts::QolItemInventoryStateWritePort state_write{};
+    state_write.apply_payload = &fake_apply_payload;
+    qol::contracts::QolGameHost game{};
+    game.abi.size = sizeof(game);
+    game.abi.major = qol::contracts::kGameHostMajor;
+    game.abi.minor = qol::contracts::kGameHostMinor;
+    game.item_abi.original_find_item_slot = &fake_original_find_item_slot;
+
+    qol::features::core_inventory::g_port = &port;
+    qol::features::core_inventory::g_item_state_write = &state_write;
+    qol::features::core_inventory::g_game = &game;
+    g_transfer_replace_calls = 0;
+    g_native_find_calls = 0;
+
+    qol::contracts::QolBagRef located{};
+    int32_t located_slot = -1;
+    assert_ok(qol::features::core_inventory::transfer::replace_item::locate_item(
+        {1, 1}, &located, &located_slot));
+    assert(located.space_id == kTransferTestSpace && located.bag == 0 && located_slot == 0);
+    assert(g_native_find_calls == 0);
+
+    qol::contracts::QolBagTransfer replacement{};
+    replacement.category = 10;
+    replacement.count = 3;
+    replacement.payload_size = 1;
+    replacement.payload[0] = 0;
+    qol::contracts::QolBagMutationResult out{};
+    assert_ok(qol::features::core_inventory::transfer::replace_item::replace_item(
+        {1, 1}, &replacement, &out));
+    assert(g_transfer_replace_calls == 1);
+    assert(out.ref.space_id == kTransferTestSpace && out.ref.bag == 0);
+    assert(out.item.slot == 1 && out.item.generation == 1);
+    assert(g_native_find_calls == 0);
+
+    g_native_find_calls = 0;
+    qol::contracts::QolBagRef native_ref{};
+    int32_t native_slot = -1;
+    assert_ok(qol::features::core_inventory::transfer::replace_item::locate_item(
+        {2, 2}, &native_ref, &native_slot));
+    assert(native_ref.space_id == qol::contracts::kQolBagSpaceOriginal && native_ref.bag == 2);
+    assert(native_slot == 5);
+    assert(g_native_find_calls == 1);
+
+    qol::features::core_inventory::g_game = nullptr;
+    qol::features::core_inventory::g_item_state_write = nullptr;
+    qol::features::core_inventory::g_port = nullptr;
+    assert_ok(qol::features::core_inventory::kBagSourceRegistryApi.unregister_source(
+        kTransferTestSpace));
+}
+
 }  // namespace
 
 int main() {
     test_descriptor();
     test_store();
     test_transfer_move_count_precheck();
+    test_transfer_replace_locates_without_native_scan();
     inventory_store().clear();
     qol::features::core_inventory::reset_bag_sources();
     return 0;

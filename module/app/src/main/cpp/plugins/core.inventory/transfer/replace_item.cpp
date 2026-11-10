@@ -1,10 +1,12 @@
 #include "plugins/core.inventory/transfer/replace_item.h"
 
+#include <cstddef>
 #include <cstring>
 #include <initializer_list>
 
 #include "plugins/core.inventory/api/bag_source.h"
 #include "plugins/core.inventory/runtime/context.h"
+#include "plugins/core.inventory/transfer/locate_item.h"
 #include "plugins/core.inventory/transfer/native_transport.h"
 #include "plugins/core.inventory/usecases/read_inventory.h"
 
@@ -17,11 +19,6 @@ QolResult error(int32_t code, const char* message) {
 
 bool valid_handle(contracts::QolItemHandle item) {
     return item.slot != 0 && item.generation != 0;
-}
-
-bool is_native_space(int32_t space) {
-    return space == contracts::kQolBagSpaceOriginal ||
-           space == contracts::kQolBagSpaceVariant;
 }
 
 bool replacement_valid(const contracts::QolBagTransfer* replacement) {
@@ -93,7 +90,87 @@ QolResult replace_provider(contracts::QolItemHandle expected,
     return error(kQolErrNotFound, "replacement item not found");
 }
 
+QolResult locate_provider(contracts::QolItemHandle expected, contracts::QolBagRef* out_ref,
+                          int32_t* out_slot) {
+    const uint32_t count = registered_bag_source_count();
+    for (uint32_t index = 0; index < count; ++index) {
+        const contracts::QolBagSource* source = registered_bag_source_at(index);
+        if (source == nullptr || source->identify == nullptr) continue;
+        contracts::QolBagRef ref{};
+        int32_t slot = -1;
+        const QolResult identified = source->identify(expected, &ref, &slot);
+        if (!contracts::succeeded(identified)) continue;
+        if (ref.space_id != source->space_id || ref.bag < 0 || slot < 0) continue;
+        *out_ref = ref;
+        *out_slot = slot;
+        return contracts::ok();
+    }
+    return error(kQolErrNotFound, "replacement item not located");
+}
+
+bool native_find_available() {
+    if (g_game == nullptr) return false;
+    constexpr size_t kItemAbiEnd =
+        offsetof(contracts::QolGameHost, item_abi) + sizeof(contracts::QolItemAbiDispatchApi);
+    return g_game->abi.size >= kItemAbiEnd &&
+           g_game->item_abi.original_find_item_slot != nullptr;
+}
+
+QolResult locate_native_direct(contracts::QolItemHandle expected, contracts::QolBagRef* out_ref,
+                               int32_t* out_slot) {
+    if (!native_find_available()) return error(kQolErrNotFound, "native item not located");
+    int32_t bag = -1;
+    int32_t slot = -1;
+    const QolResult found = g_game->item_abi.original_find_item_slot(expected, &bag, &slot);
+    if (contracts::succeeded(found) && bag >= 0 && bag < contracts::kQolOriginalBagCount &&
+        slot >= 0) {
+        *out_ref = contracts::QolBagRef{contracts::kQolBagSpaceOriginal, bag};
+        *out_slot = slot;
+        return contracts::ok();
+    }
+    return error(kQolErrNotFound, "native item not located");
+}
+
+QolResult locate_native_scan(contracts::QolItemHandle expected, contracts::QolBagRef* out_ref,
+                             int32_t* out_slot) {
+    for (int32_t space : {contracts::kQolBagSpaceOriginal, contracts::kQolBagSpaceVariant}) {
+        contracts::QolBagRef ref{};
+        int32_t slot = -1;
+        const QolResult located = native_transport::locate(space, expected, &ref, &slot);
+        if (contracts::succeeded(located)) {
+            *out_ref = ref;
+            *out_slot = slot;
+            return contracts::ok();
+        }
+        if (space == contracts::kQolBagSpaceVariant &&
+            (located.code == kQolErrNotReady || located.code == kQolErrUnsupported)) {
+            continue;
+        }
+        if (located.code != kQolErrNotFound) return located;
+    }
+    return error(kQolErrNotFound, "native item not located");
+}
+
 }  // namespace
+
+QolResult locate_item(contracts::QolItemHandle expected, contracts::QolBagRef* out_ref,
+                      int32_t* out_slot) {
+    if (out_ref == nullptr || out_slot == nullptr || !valid_handle(expected)) {
+        return error(kQolErrInvalidArgument, "invalid item location request");
+    }
+    *out_ref = {};
+    *out_slot = -1;
+
+    // provider 的 identify 是 32 位定位，优先于原生扫描；EB 等注册源不会因为
+    // 原生袋扫描的无关错误被截断。
+    const QolResult provider = locate_provider(expected, out_ref, out_slot);
+    if (contracts::succeeded(provider)) return contracts::ok();
+
+    const QolResult direct = locate_native_direct(expected, out_ref, out_slot);
+    if (contracts::succeeded(direct)) return contracts::ok();
+
+    return locate_native_scan(expected, out_ref, out_slot);
+}
 
 QolResult replace_item(contracts::QolItemHandle expected,
                        const contracts::QolBagTransfer* replacement,
@@ -103,26 +180,23 @@ QolResult replace_item(contracts::QolItemHandle expected,
     }
     *out = {};
 
-    // 原生空间优先；expected 不在原生库存时再尝试注册源。
-    for (int32_t space : {contracts::kQolBagSpaceOriginal, contracts::kQolBagSpaceVariant}) {
-        contracts::QolBagRef ref{};
-        int32_t slot = -1;
-        const QolResult located = native_transport::locate(space, expected, &ref, &slot);
-        if (contracts::succeeded(located)) {
-            if (contracts::qol_bag_ref_is_task_bag(ref)) {
-                return error(kQolErrBlocked, "task bag excluded");
-            }
-            return replace_native(ref, slot, expected, replacement, out);
+    contracts::QolBagRef ref{};
+    int32_t slot = -1;
+    const QolResult located = locate_item(expected, &ref, &slot);
+    if (contracts::succeeded(located)) {
+        if (ref.space_id >= contracts::kQolBagSpaceFirstRegistered) {
+            return replace_provider(expected, replacement, out);
         }
-        // C18 追加袋在非 C18 变体下不可用；这只是“不在该空间”，继续尝试注册源。
-        if (space == contracts::kQolBagSpaceVariant &&
-            (located.code == kQolErrNotReady || located.code == kQolErrUnsupported)) {
-            continue;
+        if (contracts::qol_bag_ref_is_task_bag(ref)) {
+            return error(kQolErrBlocked, "task bag excluded");
         }
-        if (located.code != kQolErrNotFound) return located;
+        return replace_native(ref, slot, expected, replacement, out);
     }
 
-    return replace_provider(expected, replacement, out);
+    // 兼容没有 identify 的注册源：定位失败时仍按旧路径把 expected 交给来源提交。
+    const QolResult provider = replace_provider(expected, replacement, out);
+    if (provider.code != kQolErrNotFound) return provider;
+    return located;
 }
 
 }  // namespace qol::features::core_inventory::transfer::replace_item

@@ -142,6 +142,7 @@ int plugin_install(contracts::PluginContext& context) {
     }
     g_sdk = context.sdk;
     g_port = port;
+    g_game = context.game;
     g_item_money_write = item_money_write;
     g_item_state_write = item_state_write;
     g_installed = true;
@@ -153,6 +154,7 @@ int plugin_install(contracts::PluginContext& context) {
         unregister_write_result_handler();
         g_sdk = nullptr;
         g_port = nullptr;
+        g_game = nullptr;
         g_item_money_write = nullptr;
         g_item_state_write = nullptr;
         g_installed = false;
@@ -177,6 +179,7 @@ void plugin_deactivate(contracts::PluginContext&) {
     unregister_write_result_handler();
     g_sdk = nullptr;
     g_port = nullptr;
+    g_game = nullptr;
     g_item_money_write = nullptr;
     g_item_state_write = nullptr;
     g_installed = false;

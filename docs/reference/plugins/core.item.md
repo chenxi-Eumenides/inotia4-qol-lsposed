@@ -139,11 +139,11 @@ payload 固定容量 256 字节，有效长度为 `1..255`，不得动态扩容�
 ## `item.payload` 1.0
 
 `update` 从 `source` 句柄或 `base_payload` 取基准 payload，装载临时对象、按 mutation 写字段、
-重新序列化并做结构校验；有 `source` 时再把同一组 mutation 原地写到源对象，保留对象身份与句柄。
-支持的 mutation 见 `contracts/item_payload.h`（jewel word、原生词条、数量、socket、enchant、magic rate）。
-`validate` 只保证长度前缀、loader 接受、`consumed == payload_size` 和重序列化结构等价，不校验
-词条/数值/品质/UID 语义。provider 的权威 payload 由调用方随后经
-`inventory.transfer.replace_item` 分派 `QolBagSource::replace_item` 提交；native 物品无需额外写槽。
+重新序列化并做结构校验；不修改源对象。调用方随后把结果 payload 交给
+`inventory.transfer.replace_item`：native 由 replace 原地写回对象，provider 再分派
+`QolBagSource::replace_item` 提交权威 descriptor。支持的 mutation 见 `contracts/item_payload.h`
+（jewel word、原生词条、数量、socket、enchant、magic rate）。`validate` 只保证长度前缀、
+loader 接受、`consumed == payload_size` 和重序列化结构等价，不校验词条/数值/品质/UID 语义。
 
 ## `inventory.action` v3.3
 

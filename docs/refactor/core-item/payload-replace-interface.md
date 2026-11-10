@@ -189,7 +189,8 @@ QolResult (*replace_item)(QolItemHandle expected,
 
 ## 5. native replace 流程
 
-1. `inventory.transfer.replace_item` 按 space 0/1 定位 `expected`；找不到再尝试注册源。
+1. `inventory.transfer.replace_item` 先按 handle 定位：注册源用 `identify`（32 位 `QolBagRef`），
+   原生用 `INVEN_FindItemSlot` 直查，只有两条直接路径都找不到时才回退原生空间扫描。
 2. 任务袋拒绝。
 3. `apply_payload_to_item` 把 replacement payload 原地写回既有对象：标量字段 + 现有 option
    节点的值；option 结构必须一致。
@@ -198,8 +199,8 @@ QolResult (*replace_item)(QolItemHandle expected,
 
 ## 6. provider replace 流程（extension_bag）
 
-1. core.inventory 先按 payload 原地更新既有对象（见 §5）。
-2. 用 handle 定位槽，确认 `expected` 与 `module_objects[bag][slot]` 一致。
+1. core.inventory 先用来源的 `identify` 定位 provider 槽，再按 payload 原地更新既有对象（见 §5）。
+2. `QolBagSource::replace_item` 用 handle 确认 `expected` 与 `module_objects[bag][slot]` 一致。
 3. 校验 replacement 的长度前缀、category/count、堆叠上限和 `valid_payload`。
 4. 写新 descriptor（category/count/payload）与 `payload_hash`、category 缓存。
 5. `extension_bag_mark_dirty_locked()`，`persist_state_locked()`；失败恢复旧 descriptor/hash/category，
