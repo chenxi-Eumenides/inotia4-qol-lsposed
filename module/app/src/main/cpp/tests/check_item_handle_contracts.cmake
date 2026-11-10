@@ -7,6 +7,13 @@ set(contract_files
 
 foreach(path IN LISTS contract_files)
     file(READ "${path}" source)
+    # 唯一放行的裸物品指针：free_item 释放游戏创建、未进入原生背包的对象，该对象没有
+    # QolItemHandle 可表达。只剔除这条精确签名；改名、改签名或其它裸指针仍按红线拦截。
+    if(path MATCHES "game_ports/item_port\\.h$")
+        string(REGEX REPLACE
+            "QolResult[ \t]*\\(\\*free_item\\)\\(void[ \t]*\\*[ \t]*item\\);" ""
+            source "${source}")
+    endif()
     if(source MATCHES "void[ \t]*\\*[ \t]*native_item" OR
        source MATCHES "(const[ \t]+)?void[ \t]*\\*[ \t]*item[ \t]*[,)]" OR
        source MATCHES "void[ \t]*\\*[ \t]*\\*[ \t]*out_item")

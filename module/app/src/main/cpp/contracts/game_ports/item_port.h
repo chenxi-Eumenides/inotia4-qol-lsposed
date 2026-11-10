@@ -201,6 +201,8 @@ struct QolItemPortReadApi {
     QolResult (*serialize_item)(QolItemHandle item, uint8_t* out, uint32_t capacity,
                                 uint32_t* out_size);
     // Frees a game-created item pointer that was not placed in native inventory.
+    // Such an object has no QolItemHandle, so this is the only raw item pointer the
+    // handle-only contract check allows (see tests/check_item_handle_contracts.cmake).
     QolResult (*free_item)(void* item);
     // 5.0：原生袋布局事实。插件侧空间语义（space 0/1）由 core.inventory 组合，
     // 模块只提供布局与低层单点读取。

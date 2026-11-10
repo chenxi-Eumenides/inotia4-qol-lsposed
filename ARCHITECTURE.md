@@ -274,6 +274,8 @@ provider 的数量和命名随领域边界演进，不受固定插件数量或�
 
 快照不得包含函数指针、迭代器或指向游戏内存的裸指针；发布使用自洽的版本/帧号。跨插件接口不得跨撤销事务缓存裸函数表指针。
 
+唯一例外是 `QolItemPortReadApi::free_item(void*)`：它释放游戏创建但未进入原生背包的物品对象，这类对象没有 `QolItemHandle` 可表达。红线条目只放行这一条精确签名；其余裸物品指针仍被拦截（`tests/check_item_handle_contracts.cmake`）。
+
 状态通知优先使用 Host-owned revisioned observer events：订阅时取得当前状态，后续由 Host 在状态变化时推送；runtime effects、module health 与内部 config receipt observer 不依赖 native 定时轮询。公开 `GET /api/config/receipt/{id}` 和 `/api/system/events` 仍是可由外部调用方轮询的 HTTP 契约。Kotlin 的 MainActivity `onCreate`/focus 启动事件 coalesce 到一个 worker，不创建启动 timer retry；API listener config 变化后的 500ms reconcile 是可取消的单次 debounce，不是轮询。条件变量 `wait_for` 用于一次有界等待通知，不构成重复 polling loop。
 
 ## 7. HTTP、UI 与 Kotlin/native 边界
