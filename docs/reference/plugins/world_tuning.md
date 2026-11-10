@@ -79,6 +79,7 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 | `hook:ITEMSYSTEM_MakeItem` | `F_MAKE_ITEM_VMA` | 掉落槽内造物 `void*(category, lookup_key, flag)`；重抽按类别过滤 |
 | `hook:ITEMSYSTEM_MakeEquipDetail` | `F_MAKE_EQUIP_DETAIL_VMA` | 装备候选选取 `void*(kind,min,max,item,option)`；重抽只按稀有度 |
 | `hook:CHAR_GetActionCoolTime` | `F_CHAR_GET_ACTION_COOLTIME_VMA` | 技能冷却时长唯一入口 `int(void* ch, void* action)`；按玩家技能冷却倍率缩放返回值 |
+| `hook:CHAR_SetActionNextTime` | `F_CHAR_SET_ACTION_NEXT_TIME_VMA` | 动作冷却结束时间写入 `void(void* ch, void* action)`；按最终 delta 兜底缩放，覆盖 monster 在原始计算后直接覆盖冷却值的特殊逻辑 |
 
 经验：入口对 `ch` 做阵营判定，只缩放玩家侧（主角/队友/召唤物）；负数原样透传，倍率 0 结果为 0。
 
@@ -99,7 +100,7 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 冷却倍率：
 
 - 药水：订阅 `core.item` 的 `item.use`。回调只处理 `result != 0` 且 `character == 当前主控`；读取 `g_nGlobalCoolTimeCount` 与 `CHECKTIME_nPotionTick`，当 `tick > now` 时把差值按 `potion_cooldown` 缩放后写回。这样不会影响 Buff 道具的 15 tick 冷却，也不会误伤佣兵/怪物。
-- 技能：`CHAR_GetActionCoolTime` wrapper 在原函数返回后，仅对当前主控角色按 `skill_cooldown` 缩放；`CHAR_SetActionNextTime` 与快捷栏冷却饼读取同一返回值，实际冷却与 UI 一致。
+- 技能：`CHAR_GetActionCoolTime` wrapper 在原函数返回后，仅对当前主控角色按 `skill_cooldown` 缩放；`CHAR_SetActionNextTime` wrapper 在最终写入后按 `nextTime - now` 兜底缩放，覆盖 monster 变体在原始计算后直接覆盖固定冷却值的特殊逻辑。两者用线程内配对标记避免正常路径二次缩放；`CHAR_SetActionNextTime` 声明 `follow_trampoline=true`，入口是 `b` 时落到隐藏段目标。
 - 两者倍率 0 表示无冷却；正倍率结果下限为 1 tick。`scale_cooldown_ticks` 用于 int64 tick 差值，`scale_by_percent` 用于技能 int32 返回值。
 
 monster v29 的 `CHAR_AddDamage` 入口是 `b <隐藏段目标>`，且 mod 会在 hook 安装后约 5 秒内把入口字写回同一个 `b`。本插件对该资源声明 `follow_trampoline=true`：安装时解码入口 `b` 的 imm26，把 hook 落在隐藏段目标上，入口被还原不影响已落在目标上的 hook。目标首条是短桩类控制流（`b`/`bl`/`b.cond`/`cbz`/`tbz`/`br`/`blr`/`ret`）时解析层拒绝跟随并回退入口短补丁（DropItem 形态），避免覆盖「桩返回入口+8」的落点。
@@ -141,7 +142,7 @@ monster v29 的 `CHAR_AddDamage` 入口是 `b <隐藏段目标>`，且 mod 会�
 | 文件 | 职责 |
 |---|---|
 | `plugins/world_tuning/plugin.cpp` / `plugin.h` | descriptor、feature、install/deactivate、面板注册、配置读取 |
-| `plugins/world_tuning/feature.cpp` / `feature.h` | 八个入口 wrapper、`item.use` 回调、阵营判定、HP 账本、掉落上下文与重抽、倍率原子值、配置读写 |
+| `plugins/world_tuning/feature.cpp` / `feature.h` | 九个入口 wrapper、`item.use` 回调、阵营判定、HP 账本、掉落上下文与重抽、倍率原子值、配置读写 |
 | `plugins/world_tuning/rates.cpp` / `rates.h` | 档位、字段/文案表、JSON 编解码与校验、缩放函数 |
 | `plugins/world_tuning/panel.cpp` / `panel.h` | 面板 provider、列表/箭头/文本绘制、receipt 轮询 |
 | `plugins/world_tuning/settings_contribution.cpp` / `.h` | 旧 catalog contribution 空实现 |

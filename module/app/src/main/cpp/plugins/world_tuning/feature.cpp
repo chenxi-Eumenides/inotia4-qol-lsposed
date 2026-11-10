@@ -61,7 +61,17 @@ std::atomic<void*> g_backup_drop_item{nullptr};
 std::atomic<void*> g_backup_make_item{nullptr};
 std::atomic<void*> g_backup_make_equip_detail{nullptr};
 std::atomic<void*> g_backup_get_action_cooltime{nullptr};
+std::atomic<void*> g_backup_set_action_next_time{nullptr};
 std::atomic<uint32_t> g_skill_cooltime_trace{0};
+std::atomic<uint32_t> g_next_time_trace{0};
+
+// 同一线程内 GetActionCoolTime → SetActionNextTime 的配对标记：
+// 正常路径已经按倍率算好 D，SetActionNextTime 只需跳过二次缩放；
+// monster 变体在原始计算后直接覆盖固定冷却值时，标记不匹配，按最终 delta 兜底缩放。
+thread_local bool g_last_skill_scaled_valid = false;
+thread_local int64_t g_last_skill_scaled_duration = 0;
+thread_local void* g_last_skill_scaled_char = nullptr;
+thread_local bool g_in_set_action_next_time = false;
 
 const contracts::ItemUseApi* g_item_use = nullptr;
 uint64_t g_item_use_subscription = 0;
@@ -625,6 +635,7 @@ void clear_runtime() {
 }
 
 using GetActionCoolTimeFn = int32_t (*)(void*, void*);
+using SetActionNextTimeFn = void (*)(void*, void*);
 
 int32_t char_get_action_cooltime_wrapper(void* ch, void* action) {
     const auto* sdk = g_sdk;
@@ -634,6 +645,7 @@ int32_t char_get_action_cooltime_wrapper(void* ch, void* action) {
         g_backup_get_action_cooltime.load(std::memory_order_acquire));
     if (backup == nullptr) return 0;
 
+    if (g_in_set_action_next_time) g_last_skill_scaled_valid = false;
     const int32_t duration = backup(ch, action);
     const uint32_t trace = g_skill_cooltime_trace.fetch_add(1, std::memory_order_relaxed);
     if (trace < 8) {
@@ -652,7 +664,52 @@ int32_t char_get_action_cooltime_wrapper(void* ch, void* action) {
     const int32_t percent = rate_value(RateId::kSkillCooldown);
     if (trace < 8) log_info("skill_cooltime percent=%d", percent);
     if (percent == kRateDefault) return duration;
-    return scale_by_percent(duration, percent);
+    const int32_t scaled = scale_by_percent(duration, percent);
+    if (g_in_set_action_next_time) {
+        g_last_skill_scaled_valid = true;
+        g_last_skill_scaled_duration = scaled;
+        g_last_skill_scaled_char = ch;
+    }
+    return scaled;
+}
+
+void char_set_action_next_time_wrapper(void* ch, void* action) {
+    const auto* sdk = g_sdk;
+    const contracts::InFlightGuard guard(
+        sdk == nullptr ? nullptr : &sdk->in_flight, {kResourceIdSetActionNextTime});
+    const auto backup = reinterpret_cast<SetActionNextTimeFn>(
+        g_backup_set_action_next_time.load(std::memory_order_acquire));
+    if (backup == nullptr) return;
+
+    const bool was_in_set_action_next_time = g_in_set_action_next_time;
+    g_in_set_action_next_time = true;
+    backup(ch, action);
+    g_in_set_action_next_time = was_in_set_action_next_time;
+    if (action == nullptr || !g_gate.load(std::memory_order_relaxed)) return;
+
+    const auto* extras = g_extras;
+    if (!cooldown_api_ready(extras)) return;
+    void* active = nullptr;
+    if (extras->cooldown.active_player(&active).ok != kQolOk || active != ch) return;
+
+    int64_t now = 0;
+    if (extras->cooldown.now_tick(&now).ok != kQolOk) return;
+    auto* next_time = reinterpret_cast<int64_t*>(reinterpret_cast<uint8_t*>(action) + 16);
+    const int64_t delta = *next_time - now;
+    const int32_t percent = rate_value(RateId::kSkillCooldown);
+    const bool matched = g_last_skill_scaled_valid && g_last_skill_scaled_char == ch &&
+                         delta == g_last_skill_scaled_duration;
+    const uint32_t trace = g_next_time_trace.fetch_add(1, std::memory_order_relaxed);
+    if (trace < 8) {
+        log_info("set_action_next_time ch=%p delta=%lld last=%lld valid=%d matched=%d percent=%d",
+                 ch, static_cast<long long>(delta),
+                 static_cast<long long>(g_last_skill_scaled_duration),
+                 g_last_skill_scaled_valid ? 1 : 0, matched ? 1 : 0, percent);
+    }
+    g_last_skill_scaled_valid = false;
+    if (delta <= 0 || percent == kRateDefault) return;
+    if (matched) return;
+    *next_time = now + scale_cooldown_ticks(delta, percent);
 }
 
 void bind_item_use(const contracts::ItemUseApi* api) {
@@ -790,6 +847,11 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
     if (std::strcmp(resource_id, kResourceIdGetActionCoolTime) == 0) {
         g_backup_get_action_cooltime.store(backup, std::memory_order_release);
         log_info("skill cooldown hook bound backup=%p", backup);
+        return 0;
+    }
+    if (std::strcmp(resource_id, kResourceIdSetActionNextTime) == 0) {
+        g_backup_set_action_next_time.store(backup, std::memory_order_release);
+        log_info("set_action_next_time hook bound backup=%p", backup);
         return 0;
     }
     log_warn("unknown resource id: %s", resource_id);

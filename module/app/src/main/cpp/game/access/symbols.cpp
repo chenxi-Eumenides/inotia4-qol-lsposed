@@ -83,6 +83,7 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
     // 诊断 wrapper 的挂载点；handler 在 plugins/core.item/hooks/inventory_hooks.cpp 取址。
     {"F_CHAR_USE_ITEM_EX_VMA", F_CHAR_USE_ITEM_EX_VMA},
     {"F_CHAR_GET_ACTION_COOLTIME_VMA", F_CHAR_GET_ACTION_COOLTIME_VMA},
+    {"F_CHAR_SET_ACTION_NEXT_TIME_VMA", F_CHAR_SET_ACTION_NEXT_TIME_VMA},
     {"F_CHAR_PROCESS_SHORTCUT_VMA", F_CHAR_PROCESS_SHORTCUT_VMA},
     {"F_SHORTCUT_GET_STATE_VMA", F_SHORTCUT_GET_STATE_VMA},
     {"F_FIND_ITEM_VMA", F_FIND_ITEM_VMA},

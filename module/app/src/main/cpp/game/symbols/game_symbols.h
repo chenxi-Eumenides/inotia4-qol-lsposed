@@ -784,6 +784,7 @@ constexpr uintptr_t F_CHAR_GET_SUMMONER_VMA = 0xdb730;   // void* (void* ch)
 constexpr uintptr_t F_CONSUME_ITEM_VMA = 0x1047bc;     // void (void*) 消耗 1 个（使用药水/卷轴）
 constexpr uintptr_t F_CHAR_USE_ITEM_EX_VMA = 0xeb670;  // int (void* ch, void* item, int flag) 物品效果分派核心
 constexpr uintptr_t F_CHAR_GET_ACTION_COOLTIME_VMA = 0xe30c8; // int (void* ch, void* action) 技能冷却时长计算唯一入口
+constexpr uintptr_t F_CHAR_SET_ACTION_NEXT_TIME_VMA = 0xe31f4; // void (void* ch, void* action) 动作冷却结束时间写入；monster 变体入口是 b 跳板
 constexpr uintptr_t F_CHAR_PROCESS_SHORTCUT_VMA = 0xec028; // int (void* ch, int shortcut) 快捷栏处理
 constexpr uintptr_t F_PLAYER_UPDATE_SHORTCUT_VMA = 0x120e40; // 重算快捷栏物品数量
 constexpr uintptr_t F_SHORTCUT_GET_STATE_VMA = 0x121b80;  // int (void* character, void* shortcut)

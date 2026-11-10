@@ -53,6 +53,7 @@ inline constexpr const char* kResourceIdDropItem = "hook:CHARSYSTEM_DropItem";
 inline constexpr const char* kResourceIdMakeItem = "hook:ITEMSYSTEM_MakeItem";
 inline constexpr const char* kResourceIdMakeEquipDetail = "hook:ITEMSYSTEM_MakeEquipDetail";
 inline constexpr const char* kResourceIdGetActionCoolTime = "hook:CHAR_GetActionCoolTime";
+inline constexpr const char* kResourceIdSetActionNextTime = "hook:CHAR_SetActionNextTime";
 
 // 门禁开关：true = 业务生效；false = wrapper 空转透传（fail-closed）。任意线程可读。
 void set_gate(bool enabled);
@@ -87,6 +88,9 @@ void* make_equip_detail_wrapper(int32_t kind, int32_t min_level, int32_t max_lev
 
 // 技能冷却倍率：CHAR_GetActionCoolTime 入口 wrapper。
 int32_t char_get_action_cooltime_wrapper(void* ch, void* action);
+// 动作冷却结束时间：CHAR_SetActionNextTime 入口 wrapper；按最终写入值兜底缩放，
+// 覆盖 monster 变体在原始计算之后直接覆盖冷却值的特殊逻辑。
+void char_set_action_next_time_wrapper(void* ch, void* action);
 
 // item.use 后置通知：绑定/解绑（provider 停用时解绑）。
 void bind_item_use(const contracts::ItemUseApi* api);
