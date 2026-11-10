@@ -209,7 +209,7 @@ save_exit → reject session → remove task
 
 | Target | 覆盖 |
 |---|---|
-| `autosell_rules_tests` | 纯规则：装备 AND、宝石 OR、背包/徽章/骰子分档、硬保护、档位边界、fail-closed。 |
+| `autosell_rules_tests` | 纯规则：装备品质主规则 + 孔位/耐久副规则门槛、宝石 OR、背包/徽章/骰子分档、硬保护、档位边界、fail-closed。 |
 | `autosell_view_diagnostic_tests` | 物品视图字段、真实装备判定、rarity 缺失、宝石档位、背包/徽章/骰子分类、注入的 quality provider 成功/失败/畸形 API。 |
 | `autosell_store_tests` | sidecar JSON 编解码、tier 字段、旧 `special` 回退、字段钳制、版本回退。 |
 | `autosell_slot_data_tests` | slot-data load/capture/complete、revision/dirty、无 session 拒绝、重试路径。 |

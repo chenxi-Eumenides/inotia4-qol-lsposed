@@ -4,7 +4,7 @@
 #include <cstdio>
 
 // host 单测：autosell 纯规则引擎 should_sell 的命中/不命中、边界、
-// 装备三规则同类 AND（0=关不参与）、宝石同类 OR、跨类 OR、
+// 装备规则「品质主 + 孔位/耐久副」门槛、宝石同类 OR、跨类 OR、
 // 值即开关（0=关闭 / 1-based 档位 / 越界物品值不命中）、总开关、
 // 特殊分档与「无规则不出售」；硬保护（已强化/已镶嵌永不出售）。
 // 强化口径 = 剩余强化次数 enhance_remaining（I_ENCHANT bits2-5，UI 名称「强化耐久度」）。
@@ -368,9 +368,10 @@ static void test_gem_range_only_jewels_and_or() {
 }
 
 static void test_equip_rules_and() {
-    // 装备三规则同类 AND：0=关不参与；已开启项须同时命中才出售。
+    // 装备规则：品质为主规则、孔位/耐久为副规则；0=关不参与。
     // 物品：rarity 2 / enhance_remaining 3 / socket_total 2。
-    // 命中档位：rarity 值 3→阈值 2、enhance 值 4→阈值 3、socket 值 3→阈值 2。
+    // 命中档位：rarity 值 3→阈值 2（物品处于阈值档，需副规则全部命中）、
+    // enhance 值 4→阈值 3、socket 值 3→阈值 2。
     ItemView item = equip_item();
     item.rarity = 2;
     item.enhance_remaining = 3;
@@ -452,6 +453,80 @@ static void test_equip_rules_and() {
     none_enabled.enhance = 0;
     none_enabled.socket = 0;
     CHECK(!should_sell(item, none_enabled));
+}
+
+static void test_equip_rarity_primary_secondary_gate() {
+    // 品质为主规则：低于阈值档直接出售（无视孔位/耐久），仅阈值档受副规则约束。
+    // 副规则都开启且都设到最严：enhance 值 1（阈值 0）、socket 值 1（阈值 0）。
+    Config cfg;
+    cfg.enabled = true;
+    cfg.rarity = 3;  // 阈值 2（蓝）
+    cfg.enhance = 1;
+    cfg.socket = 1;
+
+    ItemView item = equip_item();
+    item.enhance_remaining = 9;  // 副规则不命中
+    item.socket_total = 4;       // 副规则不命中
+
+    // 白/绿（低于阈值）直接出售，无视孔位与耐久。
+    item.rarity = 0;
+    CHECK(should_sell(item, cfg));
+    item.rarity = 1;
+    CHECK(should_sell(item, cfg));
+
+    // 蓝（== 阈值）：副规则均不命中 -> 不出售。
+    item.rarity = 2;
+    CHECK(!should_sell(item, cfg));
+
+    // 蓝：耐久命中、孔位不命中 -> 不出售（副规则 AND）。
+    item.enhance_remaining = 0;
+    CHECK(!should_sell(item, cfg));
+
+    // 蓝：孔位命中、耐久不命中 -> 不出售。
+    item.enhance_remaining = 9;
+    item.socket_total = 0;
+    CHECK(!should_sell(item, cfg));
+
+    // 蓝：孔位与耐久均命中 -> 出售。
+    item.enhance_remaining = 0;
+    CHECK(should_sell(item, cfg));
+
+    // 黄/紫（高于阈值）即便副规则命中也不出售。
+    item.rarity = 3;
+    CHECK(!should_sell(item, cfg));
+    item.rarity = 4;
+    CHECK(!should_sell(item, cfg));
+
+    // 阈值档仅开启一条副规则：该条命中即出售，另一条不参与。
+    Config enhance_only = cfg;
+    enhance_only.socket = 0;
+    item.rarity = 2;
+    item.enhance_remaining = 0;
+    item.socket_total = 4;
+    CHECK(should_sell(item, enhance_only));
+
+    // 阈值档两条副规则都关闭：无副规则约束，直接出售。
+    Config no_secondary = cfg;
+    no_secondary.enhance = 0;
+    no_secondary.socket = 0;
+    item.enhance_remaining = 9;
+    item.socket_total = 4;
+    CHECK(should_sell(item, no_secondary));
+
+    // 品质未知：品质规则开启时 fail-closed，不出售。
+    item.rarity = -1;
+    CHECK(!should_sell(item, cfg));
+
+    // 品质规则关闭：副规则退化为纯 AND，全部命中才出售。
+    Config secondary_only = cfg;
+    secondary_only.rarity = 0;
+    item.rarity = 4;
+    item.enhance_remaining = 9;
+    item.socket_total = 4;
+    CHECK(!should_sell(item, secondary_only));
+    item.enhance_remaining = 0;
+    item.socket_total = 0;
+    CHECK(should_sell(item, secondary_only));
 }
 
 static void test_disable_dimension() {
@@ -651,6 +726,7 @@ int main() {
     test_gem_range_value_switch();
     test_gem_range_only_jewels_and_or();
     test_equip_rules_and();
+    test_equip_rarity_primary_secondary_gate();
     test_disable_dimension();
     test_cross_category_independence();
     test_backpack_tiers();

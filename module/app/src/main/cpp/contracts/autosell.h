@@ -10,7 +10,9 @@ namespace autosell {
 struct Config {
     bool enabled = false;  // 总开关；false 时恒不售
 
-    // 装备规则（仅 is_equip 生效，三条之间为 AND：0=关不参与；已开启项须同时命中）。
+    // 装备规则（仅 is_equip 生效）：品质为主规则，宝石孔与强化耐久度为副规则。
+    // rarity 开启时：品质 < 阈值直接出售；品质 == 阈值（配置允许的最高档）时
+    // 已开启副规则须全部命中；品质 > 阈值或未知不出售。rarity 关闭时副规则为纯 AND。
     // 值 v：0=关；1..N → 出售对应量 <= v-1。
     int rarity = 0;   // 0=关；1..5 → 出售 rarity <= 值-1（1=白…5=紫，4 为最高品质）
     int enhance = 0;  // 0=关；1..32 → 出售 enhance_remaining(I_ENCHANT bits2-5) <= 值-1

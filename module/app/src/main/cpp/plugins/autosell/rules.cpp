@@ -4,36 +4,32 @@ namespace autosell {
 
 namespace {
 
-// 装备类规则：三条规则之间为 AND——值 0=关、不参与判定；
-// 所有已开启（值 v>0）的规则必须同时命中才为真；三条全关时不参与（返回 false）。
+// 装备类规则：品质为主规则，宝石孔与强化耐久度为副规则；值 0=关、不参与判定。
 // 比较方向统一 `<=`：值 v → 阈值 v-1。
+// 品质规则开启时：品质低于阈值（< 阈值）直接命中，不看副规则；品质等于阈值
+// （即配置允许的最高品质档）时要求所有已开启副规则命中；品质高于阈值或未知不命中。
+// 品质规则关闭时副规则退化为纯 AND 过滤：至少开启一条且已开启项全部命中。
 bool equip_rule_hit(const ItemView& item, const Config& cfg) {
-    bool any_enabled = false;
-
-    if (cfg.rarity > 0) {
-        any_enabled = true;
-        if (item.rarity < 0) {
-            return false;
-        }
-        if (item.rarity > cfg.rarity - 1) {
-            return false;
-        }
-    }
     // 强化口径：比较「剩余强化次数」enhance_remaining（bits2-5），
     // 界面名称「强化耐久度」；不再读已强化次数 bits6-10（该字段改由硬保护使用）。
-    if (cfg.enhance > 0) {
-        any_enabled = true;
-        if (item.enhance_remaining > cfg.enhance - 1) {
-            return false;
-        }
+    const bool enhance_hit =
+        cfg.enhance <= 0 || item.enhance_remaining <= cfg.enhance - 1;
+    const bool socket_hit = cfg.socket <= 0 || item.socket_total <= cfg.socket - 1;
+
+    if (cfg.rarity <= 0) {
+        return (cfg.enhance > 0 || cfg.socket > 0) && enhance_hit && socket_hit;
     }
-    if (cfg.socket > 0) {
-        any_enabled = true;
-        if (item.socket_total > cfg.socket - 1) {
-            return false;
-        }
+    if (item.rarity < 0) {
+        return false;
     }
-    return any_enabled;
+    const int rarity_threshold = cfg.rarity - 1;
+    if (item.rarity > rarity_threshold) {
+        return false;
+    }
+    if (item.rarity < rarity_threshold) {
+        return true;
+    }
+    return enhance_hit && socket_hit;
 }
 
 // 宝石属性档位 -> 属性百分位阈值（1→30 / 2→60 / 3→75 / 4→90 / 5→99）。
