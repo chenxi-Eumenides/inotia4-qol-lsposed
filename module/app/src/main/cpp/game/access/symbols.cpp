@@ -201,6 +201,25 @@ bool is_short_hookable_first_instruction(uint32_t word) {
     return false;
 }
 
+// monster 的 CHAR_GetActionCoolTime 入口 b 先落到 `cbz x0; cbz x1; b <VM 体>` 守卫桩。
+// 守卫桩依赖入口寄存器，不能直接 hook；跟随第三拍的 b 到 VM 体，后者会自行设置 w16。
+uintptr_t follow_guard_stub(uintptr_t stub) {
+    if (!game_memory_accessible(reinterpret_cast<void*>(stub + 4), 4, 'r') ||
+        !game_memory_accessible(reinterpret_cast<void*>(stub + 8), 4, 'r')) {
+        return 0;
+    }
+    const uint32_t w0 = *reinterpret_cast<const uint32_t*>(stub);
+    const uint32_t w1 = *reinterpret_cast<const uint32_t*>(stub + 4);
+    const uint32_t w2 = *reinterpret_cast<const uint32_t*>(stub + 8);
+    constexpr uint32_t k_branch_mask = 0xFC000000u;
+    if ((w0 & 0x7E000000u) != 0x34000000u ||  // cbz/cbnz x0
+        (w1 & 0x7E000000u) != 0x34000000u ||  // cbz/cbnz x1
+        (w2 & k_branch_mask) != 0x14000000u) {  // b
+        return 0;
+    }
+    return decode_b_target(stub + 8, w2);
+}
+
 std::atomic<bool> g_follow_refused_logged{false};
 
 }  // namespace
@@ -212,7 +231,9 @@ uintptr_t resolve_hook_entry_follow(const char* symbol_name, bool* out_followed)
     if (entry == 0 || !is_trampoline) return entry;
 
     const uint32_t word = *reinterpret_cast<const uint32_t*>(entry);
-    const uintptr_t target = decode_b_target(entry, word);
+    const uintptr_t stub = decode_b_target(entry, word);
+    const uintptr_t guard_body = follow_guard_stub(stub);
+    const uintptr_t target = guard_body != 0 ? guard_body : stub;
     const intptr_t delta = static_cast<intptr_t>(target) - static_cast<intptr_t>(entry);
     const bool distinct = delta > 16 || delta < -16;
     const bool aligned = (target & 0x3u) == 0;

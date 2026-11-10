@@ -108,6 +108,9 @@ struct ResourceClaim {
     // opt-in：入口是无条件 b 跳板时，安装到 b 的目标而不是入口本身。
     // 只适用于「入口被外部周期性还原」的变体；目标首条是短桩控制流时解析层会回退到入口。
     bool follow_trampoline = false;
+    // opt-in：即使首条不是 b/cbz/tbz，也优先使用 4 字节短补丁（适合不依赖入口寄存器的
+    // 隐藏段 VM 体）。短补丁不支持的首条指令会安装失败并交由资源失败策略处理。
+    bool short_hook = false;
 };
 
 // JNI 绑定元数据（§7.2）：三向校验（Kotlin external ↔ native 导出 ↔ 本表）

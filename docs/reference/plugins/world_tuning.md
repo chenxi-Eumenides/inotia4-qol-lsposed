@@ -87,7 +87,7 @@ Kotlin 侧 `PluginRuntimeEffects` 订阅 `world_tuning` 的 Host runtime effect�
 | `hook:CHARSYSTEM_DropItem` | `F_CHARSYSTEM_DROP_ITEM_VMA` | 死亡掉落整次结算入口 `void(void* ch)`；数量倍率重复调用 |
 | `hook:ITEMSYSTEM_MakeItem` | `F_MAKE_ITEM_VMA` | 掉落槽内造物 `void*(category, lookup_key, flag)`；重抽按类别过滤 |
 | `hook:ITEMSYSTEM_MakeEquipDetail` | `F_MAKE_EQUIP_DETAIL_VMA` | 装备候选选取 `void*(kind,min,max,item,option)`；重抽只按稀有度 |
-| `hook:CHAR_GetActionCoolTime` | `F_CHAR_GET_ACTION_COOLTIME_VMA` | 技能冷却时长查询 `int(void* ch, void* action)`；唯一缩放源。c18 hook 正常入口；monster v29 跟随入口 `b` 到隐藏段函数体 `0x747400`，对首条 `cbz` 使用 4 字节短补丁。SetActionNextTime 与快捷栏冷却饼都读取该返回值 |
+| `hook:CHAR_GetActionCoolTime` | `F_CHAR_GET_ACTION_COOLTIME_VMA` | 技能冷却时长查询 `int(void* ch, void* action)`；唯一缩放源。c18 hook 正常入口；monster v29 跟随入口 `b 0x747400` 穿过 `cbz x0; cbz x1; b 0x74f808` 守卫桩，落到隐藏段 VM 体 `0x74f808`，用 4 字节短补丁改首条 `stp`。SetActionNextTime 与快捷栏冷却饼都读取该返回值 |
 
 经验：入口对 `ch` 做阵营判定，只缩放玩家侧（主角/队友/召唤物）；负数原样透传，倍率 0 结果为 0。
 
@@ -111,7 +111,7 @@ Kotlin 侧 `PluginRuntimeEffects` 订阅 `world_tuning` 的 Host runtime effect�
 - 技能：唯一缩放数据源是 `CHAR_GetActionCoolTime` 的返回值。wrapper 调用原函数得到原始时长 `D`，只对当前主控、门禁开启且倍率非 100 时返回 `scale_cooldown_ticks(D, percent)`；游戏自己把返回值编码后写入动作节点。这样 `CHAR_SetActionNextTime`（实际冷却）与 `SHORTCUT_DrawCoolTime`（快捷栏冷却饼）共用同一个缩放结果，不再直接读写 `action+0x10`。monster v29 的 `+0x10` 是隐藏段 VM 的编码值，直接读写会破坏冷却状态。
 - 两者倍率 0 表示无冷却；正倍率结果下限为 1 tick。`scale_cooldown_ticks` 用于 int64 tick 差值，`scale_by_percent` 用于技能 int32 返回值。
 
-monster v29 的 `CHAR_AddDamage` 入口是 `b <隐藏段目标>`，且 mod 会在 hook 安装后约 5 秒内把入口字写回同一个 `b`。本插件对该资源声明 `follow_trampoline=true`：安装时解码入口 `b` 的 imm26，把 hook 落在隐藏段目标上，入口被还原不影响已落在目标上的 hook。`CHAR_GetActionCoolTime` 也声明 `follow_trampoline=true`：c18 入口不是跳板，直接 hook 正常函数；monster 入口是 `b 0x747400`，跟随到首条为 `cbz` 的隐藏段函数体，并用 4 字节短补丁接管。其余控制流转首条（`bl`/`b.cond`/`br`/`blr`/`ret`）仍拒绝跟随，避免覆盖「桩返回入口+8」的落点。
+monster v29 的 `CHAR_AddDamage` 入口是 `b <隐藏段目标>`，且 mod 会在 hook 安装后约 5 秒内把入口字写回同一个 `b`。本插件对该资源声明 `follow_trampoline=true`：安装时解码入口 `b` 的 imm26，把 hook 落在隐藏段目标上，入口被还原不影响已落在目标上的 hook。`CHAR_GetActionCoolTime` 也声明 `follow_trampoline=true` / `short_hook=true`：c18 入口不是跳板，直接短补丁 hook 正常入口；monster 入口是 `b 0x747400`，解析层识别 `cbz x0; cbz x1; b <VM 体>` 守卫桩并跟随到 `0x74f808`，该 VM 体自行设置 `w16`，不依赖入口寄存器，再用 4 字节短补丁改首条 `stp`。其余控制流转首条（`bl`/`b.cond`/`br`/`blr`/`ret`）仍拒绝跟随，避免覆盖「桩返回入口+8」的落点。
 
 敌怪最大生命：
 

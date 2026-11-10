@@ -57,7 +57,7 @@ InstallOutcome install_claim_entry_hook(const contracts::ResourceClaim& claim,
     // 无条件 b 跳板入口：用 4 字节短补丁，避免 hook 原语写 12/16 字节绝对跳转时覆盖
     // 入口之后的指令（monster 改版把入口改成 `b <隐藏段桩>`，桩会跳回入口 +8）。
     if (g_short_hook_ops != nullptr && g_short_hook_ops->install != nullptr &&
-        is_short_hook_candidate(resolved_entry)) {
+        (claim.short_hook || is_short_hook_candidate(resolved_entry))) {
         void* short_backup = nullptr;
         const int32_t short_rc = g_short_hook_ops->install(resolved_entry, claim.handler, &short_backup);
         if (short_rc != 0) {

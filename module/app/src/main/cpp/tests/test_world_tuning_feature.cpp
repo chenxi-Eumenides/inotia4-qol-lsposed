@@ -679,6 +679,8 @@ void test_descriptor() {
     assert(std::strcmp(descriptor.resources[7].symbol, "F_CHAR_GET_ACTION_COOLTIME_VMA") == 0);
     assert(descriptor.resources[7].handler ==
            reinterpret_cast<void*>(&char_get_action_cooltime_wrapper));
+    assert(descriptor.resources[7].follow_trampoline);
+    assert(descriptor.resources[7].short_hook);
     const char* const drop_patch_ids[] = {
         kResourceIdDropReroll258, kResourceIdDropReroll3B8,
         kResourceIdDropReroll400, kResourceIdDropReroll460,

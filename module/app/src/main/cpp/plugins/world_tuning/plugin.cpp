@@ -171,6 +171,7 @@ const contracts::ResourceClaim kResources[] = {
         reinterpret_cast<void*>(&char_get_action_cooltime_wrapper),
         false,
         true,
+        true,
     },
     {
         kResourceIdDropReroll258,
