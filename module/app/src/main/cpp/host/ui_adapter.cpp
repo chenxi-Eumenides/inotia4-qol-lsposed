@@ -621,6 +621,19 @@ QolResult character_info_content_rect(UiRect* out) {
     if (width.ok != kQolOk) return width;
     const QolResult height = resolution_height(&inset_y);
     if (height.ok != kQolOk) return height;
+    // 加点模式下右侧详细属性框不绘制，左侧主属性框覆盖其区域；命中矩形必须失效，
+    // 否则点击会穿透到已不可见的框内进入属性总览。g_base==0 或内存不可读时保持
+    // 原有矩形行为，避免测试与未就绪场景误判。
+    if (g_base != 0) {
+        const auto* panel = reinterpret_cast<const uint8_t*>(g_base + G_UI_CHARACTER_INFO_PANEL_VMA);
+        const auto* adjust_mode = panel + C_CHARACTER_INFO_ADJUST_MODE;
+        if (game_memory_accessible(panel, 1, 'r') &&
+            game_memory_accessible(adjust_mode, 1, 'r') && *adjust_mode != 0) {
+            static constexpr char kAdjustModeMessage[] = "character info adjust mode";
+            return contracts::error(kQolErrNotReady, kAdjustModeMessage,
+                                    sizeof(kAdjustModeMessage) - 1);
+        }
+    }
     out->x = inset_x + 741;
     out->y = inset_y + 153;
     out->w = 205;

@@ -198,6 +198,10 @@ constexpr uintptr_t G_UI_HELP_STATE_VMA = 0x711c90;            // UIHelp_ui8Stat
 constexpr uintptr_t G_UI_MMENU_SEL_CLASS_VMA = 0x7135a9;       // MAINMENU_ui8SelectedClass (u8 主菜单选中分类)
 constexpr uintptr_t G_UI_MMENU_SAVE_SLOT_VMA = 0x7135aa;       // MAINMENU_ui8SaveSlotType (u8 主菜单存档槽类型)
 constexpr uintptr_t G_UI_SHORTCUT_PAGE_VMA = 0x712600;         // UIShortcutMenu_i32Page (i32 快捷栏页码)
+// 原版人物属性面板静态实例（POPUP_SC_CHARACTER_INFO）。arm64 为 0x307e20；
+// armv7 为 0x1C4E9C 且调整模式偏移为 +0x1C，本模块只按 arm64 口径读取。
+constexpr uintptr_t G_UI_CHARACTER_INFO_PANEL_VMA = 0x307e20;
+constexpr uintptr_t C_CHARACTER_INFO_ADJUST_MODE = 0x40;       // u8：0=普通 1=加点
 // CHAR_ProcessShortcut 的快捷栏表：状态对象指针、16 字节条目数组指针、页码字节。
 constexpr uintptr_t G_SHORTCUT_STATE_GOT_VMA = 0x2f40f0;       // [0x2f40f0] -> shortcut state，+20..+40 为 5 个键码
 constexpr uintptr_t G_SHORTCUT_ENTRY_GOT_VMA = 0x2f47e8;       // [0x2f47e8] -> 16 字节 shortcut entry 数组
@@ -767,6 +771,12 @@ constexpr uintptr_t F_CHAR_STOP_COMBAT_VMA = 0xe7c24;   // void (void*) 停止�
 // v23-v27 为 `b 0x7450b8`（mod 插入的跳板，落于第二可执行段）。跳板入口先 `stp x0..x8` 保存再修改寄存器，
 // 故跳板目标处 ABI 与函数入口完全一致；安装 hook 前必须读入口首字判断是否为无条件 b 并跟随一次。
 constexpr uintptr_t F_CHAR_ADD_DAMAGE_VMA = 0xea2d8;   // void (void* 攻击者, void* 受害者, int32 伤害, int32 标记(1=暴击 8=DOT), int32 0=物理 非0=法术)
+// CHAR_AddActEffect：动作/受击特效唯一入口；暴击分支以 0x5a 添加全屏闪白。
+constexpr uintptr_t F_CHAR_ADD_ACT_EFFECT_VMA = 0xe6d8c;  // int32 (void* 攻击者, void* 受害者, int32 effect_id)
+// MAP_SetShake：屏幕震动设置入口；暴击分支在攻击者为当前主控时传入 1。
+constexpr uintptr_t F_MAP_SET_SHAKE_VMA = 0x1134e0;       // void (int32 type)
+// VIBRATION_Play：设备震动播放入口；暴击分支固定传入 3。
+constexpr uintptr_t F_VIBRATION_PLAY_VMA = 0x138158;      // void (int32 type)
 // CHAR_UpdateAttrFromMonster：怪物属性重算/调整层，CHAR_UpdateAttr 对 C_TYPE==1 分派至此（0xdfd0c）。
 // 全部 8 个构建入口均为干净序言 `stp x29,x30,[sp,#-0x60]!`，无跳板（最安全的落点）。
 // ⚠️ 本函数是「读旧槽值 → 变换 → 写回」的幂等调整层：唯一属性槽写点 e011c `str w20,[x19,#0x24]`，

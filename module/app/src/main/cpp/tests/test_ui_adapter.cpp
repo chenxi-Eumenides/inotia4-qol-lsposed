@@ -687,6 +687,21 @@ int main() {
     CHECK(content_rect.y == g_fake_res_height + 153);
     CHECK(content_rect.w == 205 && content_rect.h == 411);
     CHECK(adapter->character_info_content_rect(nullptr).code == kQolErrInvalidArgument);
+    // 加点模式（P+0x40 != 0）右侧详细框不绘制，命中矩形必须失效；普通模式与
+    // 内存不可读场景保持原矩形。
+    {
+        g_base = reinterpret_cast<uintptr_t>(g_popup_test_image);
+        auto* adjust_mode = reinterpret_cast<uint8_t*>(
+            g_base + G_UI_CHARACTER_INFO_PANEL_VMA + C_CHARACTER_INFO_ADJUST_MODE);
+        *adjust_mode = 0;
+        CHECK(adapter->character_info_content_rect(&content_rect).ok == kQolOk);
+        *adjust_mode = 1;
+        CHECK(adapter->character_info_content_rect(&content_rect).code == kQolErrNotReady);
+        g_memory_accessible = false;
+        CHECK(adapter->character_info_content_rect(&content_rect).ok == kQolOk);
+        g_memory_accessible = true;
+        g_base = 0;
+    }
     fn_calc_res_width = nullptr;
     CHECK(adapter->character_info_content_rect(&content_rect).ok != kQolOk);
     fn_calc_res_width = &fake_calc_res_width;

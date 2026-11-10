@@ -81,6 +81,7 @@
    - `0x18`（抬起）：要求**按点与抬点都在同一矩形**内、且 `character_panel.overview` 开启，才置 `g_pending_open=true`；
    - `0x19`（移动）：清除按下点，后续抬起不再触发。
 2. 命中矩形：`{inset_x + 741, inset_y + 153, w=205, h=411}`（绝对坐标，已含屏幕 inset）。几何来源：`M = B + (0,133)`、`A = M + (496,0)`、右框外框 `A + (226,0,224,431)`、内部文本起点 `A + (245,20)`。**左侧 5 维属性框、队伍页签、关闭 X、属性分配入口按钮、+/−、重置都不可点击**。
+   - **加点模式**：`character_info_content_rect` 读取面板实例 `P+0x40` 的调整模式字节；非 0 时返回 `kQolErrNotReady`，命中判定失败。右侧详细属性框在该模式不绘制，因此不可点击。普通模式返回矩形。
 3. 命中判定纯函数 `character_info_tap_inside(rect,x,y)`：左上包含、右下不包含；空/负尺寸恒不命中。
 4. **三类事件始终调用原函数并返回原返回值**（无论是否命中、开关是否开启），原生控件语义不变，也不会被吞掉。
 5. 常驻帧任务 `character_info_open_tick`（`kQolRuntimeFramePointLogicPre`，interval=1，count=0）消费 pending，经 `ui_panels` 能力的 `open("character_panel.overview")` 打开面板；event 内不同步 open。打开失败只记一条 warn（`character overview open rejected`），不重试。
