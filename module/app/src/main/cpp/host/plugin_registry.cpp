@@ -6,6 +6,7 @@
 
 #include "infra/log/qol_log.h"
 #include "contracts/commands.h"
+#include "contracts/events.h"
 #include "contracts/game_ports/craft_ui_write_port.h"
 #include "contracts/game_ports/custom_recipe_write_port.h"
 #include "contracts/game_ports/recipe_table_port.h"
@@ -40,6 +41,7 @@
 #include "host/owner_identity.h"
 #include "infra/capabilities.h"
 #include "infra/config.h"
+#include "infra/events.h"
 #include "infra/status.h"
 #include "patch/instr_patch.h"
 #include "patch/ptr_slot.h"
@@ -1613,7 +1615,13 @@ void register_provided_capabilities(uint32_t index) {
         const contracts::CapabilityProvisionRef& ref = plugin.provides[i];
         if (ref.id == nullptr || ref.iface == nullptr) continue;
         // 重复注册（同 id）返回 false，视为已注册；容量满/非法同样只记录、不阻断。
-        infra::register_capability(infra::CapabilityProvision{ref.id, ref.version, ref.iface});
+        // 只有真正写入注册表才广播，订阅方据此重新 require。
+        if (infra::register_capability(
+                infra::CapabilityProvision{ref.id, ref.version, ref.iface})) {
+            const contracts::CapabilityChangedEvent event{
+                ref.id, ref.version.major, ref.version.minor, 1, {}};
+            infra::publish(contracts::kEventCapabilityChanged, &event);
+        }
         clear_cascade_degraded_for_capability(ref.id);
     }
     g_cap_registration[index] = CapRegistration::kRegistered;
@@ -1627,7 +1635,13 @@ void unregister_provided_capabilities(uint32_t index) {
         set_http_provider_available(false);
     for (uint32_t i = 0; i < plugin.provides_count; ++i) {
         if (plugin.provides[i].id != nullptr) {
-            infra::unregister_capability(plugin.provides[i].id);
+            const contracts::CapabilityProvisionRef& ref = plugin.provides[i];
+            // 撤销后无论注册表状态如何都广播：消费者重新 require 会失败，
+            // 正是撤销后应有的降级语义。
+            infra::unregister_capability(ref.id);
+            const contracts::CapabilityChangedEvent event{
+                ref.id, ref.version.major, ref.version.minor, 0, {}};
+            infra::publish(contracts::kEventCapabilityChanged, &event);
         }
     }
     g_cap_registration[index] = CapRegistration::kNone;

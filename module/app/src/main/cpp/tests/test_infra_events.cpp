@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 static int g_pass = 0;
@@ -120,6 +121,22 @@ void test_save_event_payload_contract() {
     CHECK(publish(qol::contracts::kEventConfigChanged, &config_event) == 1);
     CHECK(g_payloads.size() == 1 && g_payloads[0] == &config_event);
     CHECK(static_cast<const qol::contracts::ConfigChangedEvent*>(g_payloads[0])->int_value == 7);
+}
+
+void test_capability_event_payload_contract() {
+    qol::infra::reset_for_test();
+    reset_log();
+
+    HandlerCtx handler{4};
+    subscribe(qol::contracts::kEventCapabilityChanged, record, &handler);
+    CHECK(qol::contracts::kEventCapabilityChanged == 5);
+    const qol::contracts::CapabilityChangedEvent event{"item.use", 1, 0, 1, {}};
+    CHECK(publish(qol::contracts::kEventCapabilityChanged, &event) == 1);
+    CHECK(g_payloads.size() == 1 && g_payloads[0] == &event);
+    const auto* received = static_cast<const qol::contracts::CapabilityChangedEvent*>(g_payloads[0]);
+    CHECK(std::strcmp(received->id, "item.use") == 0);
+    CHECK(received->major == 1 && received->minor == 0);
+    CHECK(received->available == 1);
 }
 
 void test_unsubscribe() {
@@ -242,6 +259,7 @@ int main() {
     test_subscription_order_and_payload();
     test_type_isolation_and_empty_publish();
     test_save_event_payload_contract();
+    test_capability_event_payload_contract();
     test_unsubscribe();
     test_unsubscribe_during_dispatch_self();
     test_unsubscribe_during_dispatch_other();

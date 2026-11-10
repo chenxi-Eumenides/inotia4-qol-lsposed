@@ -79,6 +79,13 @@ QolResult fake_log_write(int32_t, int32_t, const char*, const char* message,
     return ok();
 }
 
+// ---- item.use fake ----
+ItemUseApi g_item_use_api{};
+bool g_item_use_available = false;
+int g_item_use_subscribe_calls = 0;
+int g_item_use_unsubscribe_calls = 0;
+uint64_t g_item_use_subscription = 0;
+
 QolResult fake_require(const char* id, QolVersionRange, const void** out_iface) {
     ++g_require_calls;
     assert(id != nullptr && out_iface != nullptr);
@@ -86,7 +93,77 @@ QolResult fake_require(const char* id, QolVersionRange, const void** out_iface) 
         *out_iface = nullptr;
         return fake_failure();
     }
+    if (std::strcmp(id, kItemUseCapabilityId) == 0) {
+        if (!g_item_use_available) {
+            *out_iface = nullptr;
+            return fake_failure();
+        }
+        *out_iface = &g_item_use_api;
+        return ok();
+    }
     *out_iface = g_require_returns_null ? nullptr : &g_facts;
+    return ok();
+}
+
+// ---- 事件总线 fake：记录订阅，支持按事件类型注入 payload ----
+struct FakeEventSubscription {
+    uint32_t type = 0;
+    QolEventHandler handler = nullptr;
+    void* ctx = nullptr;
+    uint64_t id = 0;
+};
+
+std::vector<FakeEventSubscription> g_event_subscriptions;
+int g_event_subscribe_calls = 0;
+int g_event_unsubscribe_calls = 0;
+uint64_t g_next_event_subscription = 1;
+
+QolResult fake_event_subscribe(uint32_t type, QolEventHandler handler, void* ctx,
+                               uint64_t* out_id) {
+    ++g_event_subscribe_calls;
+    assert(handler != nullptr && out_id != nullptr);
+    FakeEventSubscription subscription{};
+    subscription.type = type;
+    subscription.handler = handler;
+    subscription.ctx = ctx;
+    subscription.id = g_next_event_subscription++;
+    g_event_subscriptions.push_back(subscription);
+    *out_id = subscription.id;
+    return ok();
+}
+
+QolResult fake_event_unsubscribe(uint64_t id) {
+    ++g_event_unsubscribe_calls;
+    for (auto it = g_event_subscriptions.begin(); it != g_event_subscriptions.end(); ++it) {
+        if (it->id == id) {
+            g_event_subscriptions.erase(it);
+            return ok();
+        }
+    }
+    return error(kQolErrNotFound, "not found", 9);
+}
+
+void publish_fake_event(uint32_t type, const void* payload) {
+    // 与 infra 一致：按快照派发，处理器内注销不影响本轮。
+    const std::vector<FakeEventSubscription> snapshot = g_event_subscriptions;
+    for (const FakeEventSubscription& subscription : snapshot) {
+        if (subscription.type == type) subscription.handler(subscription.ctx, payload);
+    }
+}
+
+// ---- item.use fake ----
+QolResult fake_item_use_subscribe(const char*, QolItemUsePostFn fn, void*, uint64_t* out) {
+    ++g_item_use_subscribe_calls;
+    assert(fn != nullptr && out != nullptr);
+    g_item_use_subscription = 1;
+    *out = g_item_use_subscription;
+    return ok();
+}
+
+QolResult fake_item_use_unsubscribe(uint64_t subscription) {
+    ++g_item_use_unsubscribe_calls;
+    if (subscription != g_item_use_subscription) return error(kQolErrNotFound, "not found", 9);
+    g_item_use_subscription = 0;
     return ok();
 }
 
@@ -357,6 +434,14 @@ void reset_counters() {
     g_log_writes = 0;
     g_last_damage = 0;
     g_log_messages.clear();
+    g_event_subscriptions.clear();
+    g_event_subscribe_calls = 0;
+    g_event_unsubscribe_calls = 0;
+    g_next_event_subscription = 1;
+    g_item_use_available = false;
+    g_item_use_subscribe_calls = 0;
+    g_item_use_unsubscribe_calls = 0;
+    g_item_use_subscription = 0;
 }
 
 void setup_fake_interfaces() {
@@ -381,8 +466,15 @@ void setup_fake_interfaces() {
 
     g_sdk.log.write = &fake_log_write;
     g_sdk.capabilities.require = &fake_require;
+    g_sdk.events.subscribe = &fake_event_subscribe;
+    g_sdk.events.unsubscribe = &fake_event_unsubscribe;
     g_sdk.in_flight.enter = &fake_enter;
     g_sdk.in_flight.leave = &fake_leave;
+
+    g_item_use_api = {};
+    g_item_use_api.struct_size = sizeof(ItemUseApi);
+    g_item_use_api.subscribe_post = &fake_item_use_subscribe;
+    g_item_use_api.unsubscribe_post = &fake_item_use_unsubscribe;
 
     g_extras.read.is_party_member = &fake_party_member;
     g_extras.read.summoner = &fake_summoner;
@@ -1113,6 +1205,49 @@ void test_make_equip_detail_quality_wrapper() {
     assert(g_equip_detail_calls == 1);
 }
 
+void test_capability_event_subscription() {
+    const auto& descriptor = plugin_descriptor();
+    install_success();
+
+    // a. install 订阅能力变更事件。
+    assert(g_event_subscribe_calls == 1);
+    assert(g_event_subscriptions.size() == 1);
+    assert(g_event_subscriptions[0].type == kEventCapabilityChanged);
+
+    // b. item.use 注册后 require 成功并完成 subscribe_post。
+    g_item_use_available = true;
+    const CapabilityChangedEvent available_event{kItemUseCapabilityId, kItemUseVersion.major,
+                                                 kItemUseVersion.minor, 1, {}};
+    publish_fake_event(kEventCapabilityChanged, &available_event);
+    assert(g_item_use_subscribe_calls == 1);
+    assert(item_use_bound());
+
+    // 无关能力的事件不触发 item.use 绑定。
+    const CapabilityChangedEvent other_event{"character.facts", 1, 0, 1, {}};
+    publish_fake_event(kEventCapabilityChanged, &other_event);
+    assert(g_item_use_subscribe_calls == 1);
+
+    // 空 payload / 空 id 直接返回。
+    publish_fake_event(kEventCapabilityChanged, nullptr);
+    const CapabilityChangedEvent null_id_event{nullptr, 1, 0, 1, {}};
+    publish_fake_event(kEventCapabilityChanged, &null_id_event);
+    assert(g_item_use_subscribe_calls == 1);
+
+    // c. 注销事件后解绑：unsubscribe_post 被调用且 item_use_bound() 为 false。
+    g_item_use_available = false;
+    const CapabilityChangedEvent unavailable_event{kItemUseCapabilityId, kItemUseVersion.major,
+                                                   kItemUseVersion.minor, 0, {}};
+    publish_fake_event(kEventCapabilityChanged, &unavailable_event);
+    assert(g_item_use_unsubscribe_calls == 1);
+    assert(!item_use_bound());
+
+    // deactivate 取消事件订阅。
+    const int unsubscribes_before_deactivate = g_event_unsubscribe_calls;
+    descriptor.deactivate(g_context);
+    assert(g_event_unsubscribe_calls == unsubscribes_before_deactivate + 1);
+    assert(g_event_subscriptions.empty());
+}
+
 void test_panel_contract() {
     const auto& provider = panel_provider();
     assert(std::strcmp(provider.panel_id, "world_tuning") == 0);
@@ -1139,6 +1274,7 @@ int main() {
     test_drop_quantity_wrapper();
     test_make_item_quality_wrapper();
     test_make_equip_detail_quality_wrapper();
+    test_capability_event_subscription();
     test_panel_contract();
     assert(g_in_flight_enters == g_in_flight_leaves);
     return 0;

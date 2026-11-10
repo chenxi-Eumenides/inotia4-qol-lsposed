@@ -2,8 +2,10 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 #include "../../contracts/character_facts.h"
+#include "../../contracts/events.h"
 #include "../../contracts/game_ports/character_extras_port.h"
 #include "../../contracts/item_use.h"
 #include "../../contracts/panels.h"
@@ -24,7 +26,8 @@ const contracts::QolCharacterExtrasPort* g_character_extras = nullptr;
 const contracts::CharacterFactsApi* g_character_facts = nullptr;
 const char* g_install_error = nullptr;
 bool g_panel_registered = false;
-uint64_t g_item_use_task = 0;
+// item.use 是可选能力：由宿主在能力注册/撤销时广播变更，插件据此重新 require 或解绑。
+uint64_t g_capability_event_subscription = 0;
 
 const contracts::CapabilityRequirement kRequires[] = {
     {contracts::kCharacterFactsCapabilityId,
@@ -185,6 +188,12 @@ const contracts::ResourceClaim kResources[] = {
 };
 
 void clear_install_state() {
+    // install 失败路径也要撤销事件订阅，避免订阅表残留指向已清空状态的处理器。
+    if (g_sdk != nullptr && g_sdk->events.unsubscribe != nullptr &&
+        g_capability_event_subscription != 0) {
+        (void)g_sdk->events.unsubscribe(g_capability_event_subscription);
+    }
+    g_capability_event_subscription = 0;
     panel_unbind();
     clear_runtime();
     g_sdk = nullptr;
@@ -235,34 +244,39 @@ void ensure_item_use() {
     }
 }
 
-int32_t item_use_bind_tick(int64_t, void*) {
+// 能力注册表变更：只有 item.use 影响本插件的订阅；其余能力由面板路径自行重试。
+void on_capability_changed(void*, const void* payload) {
+    if (payload == nullptr) return;
+    const auto* event = static_cast<const contracts::CapabilityChangedEvent*>(payload);
+    if (event->id == nullptr) return;
+    if (std::strcmp(event->id, contracts::kItemUseCapabilityId) != 0) return;
+    // ensure_item_use 已实现「能 require 就 bind，否则 unbind」，重复事件保持幂等。
     ensure_item_use();
-    if (item_use_bound()) {
-        g_item_use_task = 0;
-        return 0;
-    }
-    return 1;
 }
 
-void start_item_use_retry() {
-    if (g_item_use_task != 0 || item_use_bound()) return;
-    if (g_sdk == nullptr || g_sdk->scheduler.add == nullptr) return;
-    uint64_t task = 0;
-    if (contracts::succeeded(
-            g_sdk->scheduler.add(1, &item_use_bind_tick, nullptr, 30, 0, &task))) {
-        g_item_use_task = task;
+void subscribe_capability_changes() {
+    if (g_sdk == nullptr || g_sdk->events.subscribe == nullptr) return;
+    if (g_capability_event_subscription != 0) return;
+    uint64_t subscription = 0;
+    if (contracts::succeeded(g_sdk->events.subscribe(contracts::kEventCapabilityChanged,
+                                                     &on_capability_changed, nullptr,
+                                                     &subscription))) {
+        g_capability_event_subscription = subscription;
     }
 }
 
-void stop_item_use_retry() {
-    if (g_item_use_task != 0 && g_sdk != nullptr && g_sdk->scheduler.remove != nullptr) {
-        (void)g_sdk->scheduler.remove(g_item_use_task);
+void unsubscribe_capability_changes() {
+    if (g_capability_event_subscription == 0) return;
+    if (g_sdk != nullptr && g_sdk->events.unsubscribe != nullptr) {
+        (void)g_sdk->events.unsubscribe(g_capability_event_subscription);
     }
-    g_item_use_task = 0;
+    g_capability_event_subscription = 0;
 }
 
 int plugin_install(contracts::PluginContext& ctx) {
     set_gate(false);
+    // 重新 install 可能未经过 deactivate；先撤销旧订阅再覆盖 sdk，避免订阅泄漏。
+    unsubscribe_capability_changes();
     g_sdk = nullptr;
     g_game = nullptr;
     g_character_extras = nullptr;
@@ -297,15 +311,16 @@ int plugin_install(contracts::PluginContext& ctx) {
     bind_runtime(g_sdk, g_game, g_character_extras, g_character_facts, ctx.owner_token, kPluginId);
 
     ensure_panel(ctx);
+    // 先订阅再探测：避免订阅落地前 item.use 恰好注册完成而错过通知。
+    subscribe_capability_changes();
     ensure_item_use();
-    start_item_use_retry();
     reload_rates_from_config();
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     set_gate(false);
-    stop_item_use_retry();
+    unsubscribe_capability_changes();
     unbind_item_use();
     if (ctx.sdk != nullptr && ctx.sdk->panels.unregister_owner != nullptr)
         (void)ctx.sdk->panels.unregister_owner(kPluginId);
@@ -321,14 +336,12 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
     set_gate(true);
     ensure_panel(ctx);
     ensure_item_use();
-    start_item_use_retry();
     reload_rates_from_config();
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     (void)ctx;
     set_gate(false);
-    stop_item_use_retry();
     unbind_item_use();
 }
 
