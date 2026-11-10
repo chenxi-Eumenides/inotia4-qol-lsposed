@@ -130,7 +130,7 @@ monster v29 的 `CHAR_AddDamage` 入口是 `b <隐藏段目标>`，且 mod 会�
 ## 生命周期与线程模型
 
 - `plugin_install`：校验 context/port/SDK → require `character.facts` → 缓存 `sdk/game/port/facts/owner/plugin_id` → 可选注册面板 provider → 可选订阅 `item.use` → 读取 `rates`。
-- `plugin_on_enabled`：开门禁、重试面板/`item.use` 绑定并重新读取 `rates`。
+- `plugin_on_enabled`：开门禁、重试面板/`item.use` 绑定并重新读取 `rates`。`item.use` 未就绪时注册 30 帧重试任务，capability 发布后自动订阅并停止任务。
 - `plugin_on_disabled`：关门禁并解绑 `item.use`。
 - `plugin_deactivate`：关门禁 → 解绑 `item.use` → 注销面板 owner → 解绑 UI → 保留 `sdk/game`（残留 wrapper 仍需要 in-flight 与 backup），清空 facts/port。
 - 门禁与倍率为原子变量，游戏线程读、主线程写；HP 账本与掉落上下文（thread_local）仅游戏线程访问。

@@ -24,6 +24,7 @@ const contracts::QolCharacterExtrasPort* g_character_extras = nullptr;
 const contracts::CharacterFactsApi* g_character_facts = nullptr;
 const char* g_install_error = nullptr;
 bool g_panel_registered = false;
+uint64_t g_item_use_task = 0;
 
 const contracts::CapabilityRequirement kRequires[] = {
     {contracts::kCharacterFactsCapabilityId,
@@ -204,10 +205,10 @@ void ensure_panel(contracts::PluginContext& ctx) {
     g_panel_registered = true;
 }
 
-void ensure_item_use(contracts::PluginContext& ctx) {
-    if (ctx.sdk == nullptr || ctx.sdk->capabilities.require == nullptr) return;
+void ensure_item_use() {
+    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return;
     const void* iface = nullptr;
-    if (contracts::succeeded(ctx.sdk->capabilities.require(
+    if (contracts::succeeded(g_sdk->capabilities.require(
             contracts::kItemUseCapabilityId,
             {contracts::kItemUseVersion.major, contracts::kItemUseVersion.minor},
             &iface)) &&
@@ -216,6 +217,32 @@ void ensure_item_use(contracts::PluginContext& ctx) {
     } else {
         unbind_item_use();
     }
+}
+
+int32_t item_use_bind_tick(int64_t, void*) {
+    ensure_item_use();
+    if (item_use_bound()) {
+        g_item_use_task = 0;
+        return 0;
+    }
+    return 1;
+}
+
+void start_item_use_retry() {
+    if (g_item_use_task != 0 || item_use_bound()) return;
+    if (g_sdk == nullptr || g_sdk->scheduler.add == nullptr) return;
+    uint64_t task = 0;
+    if (contracts::succeeded(
+            g_sdk->scheduler.add(1, &item_use_bind_tick, nullptr, 30, 0, &task))) {
+        g_item_use_task = task;
+    }
+}
+
+void stop_item_use_retry() {
+    if (g_item_use_task != 0 && g_sdk != nullptr && g_sdk->scheduler.remove != nullptr) {
+        (void)g_sdk->scheduler.remove(g_item_use_task);
+    }
+    g_item_use_task = 0;
 }
 
 int plugin_install(contracts::PluginContext& ctx) {
@@ -254,13 +281,15 @@ int plugin_install(contracts::PluginContext& ctx) {
     bind_runtime(g_sdk, g_game, g_character_extras, g_character_facts, ctx.owner_token, kPluginId);
 
     ensure_panel(ctx);
-    ensure_item_use(ctx);
+    ensure_item_use();
+    start_item_use_retry();
     reload_rates_from_config();
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     set_gate(false);
+    stop_item_use_retry();
     unbind_item_use();
     if (ctx.sdk != nullptr && ctx.sdk->panels.unregister_owner != nullptr)
         (void)ctx.sdk->panels.unregister_owner(kPluginId);
@@ -275,13 +304,15 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 void plugin_on_enabled(contracts::PluginContext& ctx) {
     set_gate(true);
     ensure_panel(ctx);
-    ensure_item_use(ctx);
+    ensure_item_use();
+    start_item_use_retry();
     reload_rates_from_config();
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     (void)ctx;
     set_gate(false);
+    stop_item_use_retry();
     unbind_item_use();
 }
 

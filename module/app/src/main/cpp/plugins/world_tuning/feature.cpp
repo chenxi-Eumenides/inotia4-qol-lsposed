@@ -657,6 +657,7 @@ void bind_item_use(const contracts::ItemUseApi* api) {
     }
     g_item_use = api;
     g_item_use_subscription = subscription;
+    log_info("item.use subscribed id=%llu", static_cast<unsigned long long>(subscription));
 }
 
 void unbind_item_use() {
@@ -666,6 +667,8 @@ void unbind_item_use() {
     g_item_use = nullptr;
     g_item_use_subscription = 0;
 }
+
+bool item_use_bound() { return g_item_use != nullptr && g_item_use_subscription != 0; }
 
 void set_gate(bool enabled) {
     g_gate.store(enabled, std::memory_order_release);

@@ -91,5 +91,6 @@ int32_t char_get_action_cooltime_wrapper(void* ch, void* action);
 // item.use 后置通知：绑定/解绑（provider 停用时解绑）。
 void bind_item_use(const contracts::ItemUseApi* api);
 void unbind_item_use();
+bool item_use_bound();
 
 }  // namespace qol::features::world_tuning
