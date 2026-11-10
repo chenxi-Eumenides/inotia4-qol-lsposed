@@ -1006,6 +1006,36 @@ void test_startup_ownership_restore_keeps_other_optional_degraded() {
     }
 }
 
+// 最近失败码：软失败步的 NotReady 保留到该插件事务成功终态，随后清零；非法 id 返回 0。
+void test_last_failure_code_tracks_notready_until_success() {
+    static char ids[26][32];
+    static ResourceClaim claims[26];
+    for (int i = 0; i < 26; ++i) {
+        std::snprintf(ids[i], sizeof(ids[i]), "own:fm:code:%02d", i);
+        claims[i] = ownership_claim(ids[i], "fm_code");
+    }
+    // required + fail-soft：安装步软失败保留原始机制码（NotReady），事务继续推进。
+    claims[0].failure = ResourceFailure::kFailSoft;
+    reset_all();
+    arm_tx_deps();
+    CHECK(register_plugin(make_feature_descriptor("fm_code", claims, 26)));
+    CHECK(qol::host::feature_registry_prepare(make_deps()));
+    qol::host::feature_registry_set_wanted("fm_code", true);
+    CHECK(qol::host::feature_registry_last_failure_code(nullptr) == 0);
+    CHECK(qol::host::feature_registry_last_failure_code("not.registered") == 0);
+
+    g_ownership.fail_acquire_at = 1;
+    g_ownership.fail_acquire_code = kQolErrNotReady;
+    CHECK(qol::host::feature_registry_transition("fm_code", true));
+    // 资源数超过 kInstallStepsPerFrame：首帧 24 步后事务仍在途，NotReady 记录可观察。
+    CHECK(qol::host::feature_registry_step() > 0);
+    CHECK(qol::host::feature_registry_last_failure_code("fm_code") == kQolErrNotReady);
+    drive_feature_steps();
+    // 事务成功终态：记录清零（其余资源已安装，插件按 degraded 保持可用）。
+    CHECK(qol::host::feature_registry_last_failure_code("fm_code") == 0);
+    g_ownership.fail_acquire_at = 0;
+}
+
 }  // namespace
 
 int main() {
@@ -1034,6 +1064,7 @@ int main() {
     test_startup_ownership_stop_clears_and_old_token_rejected();
     test_startup_ownership_ready_notify_failure_revokes();
     test_startup_ownership_restore_keeps_other_optional_degraded();
+    test_last_failure_code_tracks_notready_until_success();
     std::printf("plugin_registry: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

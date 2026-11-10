@@ -63,6 +63,9 @@ bool feature_registry_context(const char*, contracts::PluginContext*);
 void feature_registry_set_wanted(const char*, bool);
 uint32_t feature_registry_step();
 bool feature_registry_owner_ready(const char*);
+// 最近一次已执行生命周期事务步骤的失败码；未注册/非法 id 或最近事务成功终态后为 0。
+// 供 Reconciler 区分瞬态失败（kQolErrNotReady）与永久失败。
+int32_t feature_registry_last_failure_code(const char* id);
 
 // Host 私有：SaveEnter 信号锁存。只记录当前有效 activation owner token（installing 期间
 // token 已存在，故信号早于安装末步失败到达也不会丢）；不安装资源、不调用插件、无游戏访问。

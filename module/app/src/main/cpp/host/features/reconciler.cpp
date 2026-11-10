@@ -183,6 +183,8 @@ uint32_t FeatureReconciler::step() {
     if (!bound_) return 0;
     if (main_thread_ == std::thread::id{}) main_thread_ = std::this_thread::get_id();
     if (std::this_thread::get_id() != main_thread_) return 0;
+    // 重试预算按 step() 调用次数计时（无时间预算/线程）；主线程之外的调用不计。
+    ++step_clock_;
 
     bool pending = false;
     bool toggles_dirty = false;
@@ -208,11 +210,11 @@ uint32_t FeatureReconciler::step() {
     // 无配置/依赖/entry 变化、无在途生命周期事务时，正常帧不应重跑整张插件图。
     // 每 300 次空闲 step 强制全量一次，作为漏标记的兜底；首次 step 必须全量。
     const bool force_full = !initialized_ || idle_steps_ >= 300 || activation_retry_ > 0;
-    if (!force_full && !pending && !full_step_pending_ && !toggles_dirty && !pending_work) {
+    if (!force_full && retry_.empty() && !pending && !full_step_pending_ && !toggles_dirty && !pending_work) {
         ++idle_steps_;
         return 0;
     }
-    if (!force_full && !pending && !full_step_pending_ && !pending_work) {
+    if (!force_full && retry_.empty() && !pending && !full_step_pending_ && !pending_work) {
         // 只有 feature callback 投递待处理（例如 revision 已应用但回调尚未送达）。
         notify_toggles();
         std::lock_guard<std::mutex> lock(mutex_);
@@ -247,6 +249,8 @@ uint32_t FeatureReconciler::step() {
             }
             revision_ = pending_revision_;
             ++batch_;
+            // 用户显式变更配置：重置瞬态失败的重试预算，按新配置重新判定。
+            retry_.clear();
         }
         if (dependency_dirty_) { dependency_dirty_ = false; ++batch_; }
     }
@@ -291,9 +295,33 @@ uint32_t FeatureReconciler::step() {
             // Permanent policy rejection: keep the plugin active instead of retrying every step.
             const auto* descriptor = find_plugin(id);
             if (descriptor != nullptr && !descriptor->deactivate_allowed) continue;
-            if (feature_registry_transition(id, false)) ++advanced;
+            if (feature_registry_transition(id, false)) {
+                retry_.erase(id);
+                ++advanced;
+            }
             return advanced;
         }
+    }
+    // 到期重试：清除同批去重标记，让本次激活循环重新尝试该插件。remaining 是总预算，
+    // next_step 只决定下一次尝试的 step 序号（间隔 5 步，步进只算 step() 调用）。
+    for (auto it = retry_.begin(); it != retry_.end();) {
+        if (!wanted(this, it->first.c_str())) {
+            it = retry_.erase(it);
+            continue;
+        }
+        if (step_clock_ < it->second.next_step) {
+            ++it;
+            continue;
+        }
+        // 预算耗尽：只清表项，不解除同批去重，避免本帧又产生一次额外尝试。
+        if (it->second.remaining == 0) {
+            it = retry_.erase(it);
+            continue;
+        }
+        attempted_.erase(it->first);
+        --it->second.remaining;
+        it->second.next_step = step_clock_ + 5;
+        ++it;
     }
     for (uint32_t i = 0; i < count; ++i) {
         const auto* id = order[i];
@@ -304,7 +332,19 @@ uint32_t FeatureReconciler::step() {
             continue;
         }
         attempted_[id] = batch_;
-        if (feature_registry_transition(id, true)) ++advanced;
+        if (feature_registry_transition(id, true)) {
+            retry_.erase(id);
+            ++advanced;
+        } else if (feature_registry_last_failure_code(id) == kQolErrNotReady) {
+            // 首次瞬态失败：最多再试 3 次；已有预算不因重复失败而重置。
+            const auto inserted = retry_.try_emplace(id);
+            if (inserted.second) {
+                inserted.first->second.remaining = 3;
+                inserted.first->second.next_step = step_clock_ + 5;
+            }
+        } else {
+            retry_.erase(id);
+        }
     }
     notify_toggles();
     std::deque<std::pair<std::string, std::string>> entries;

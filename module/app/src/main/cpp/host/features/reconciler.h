@@ -48,6 +48,14 @@ private:
     bool full_step_pending_ = false;
     // owner token 尚未就绪时的有界重试计数（仅激活循环使用）。
     uint32_t activation_retry_ = 0;
+    // 瞬态（NotReady）激活失败的有界重试预算：next_step 为下一次允许尝试的 step 序号，
+    // remaining 为剩余尝试次数。step 序号只按 step() 调用递增，不依赖时间。
+    struct RetryState {
+        uint8_t remaining = 0;
+        uint32_t next_step = 0;
+    };
+    std::map<std::string, RetryState> retry_;
+    uint32_t step_clock_ = 0;
     std::deque<std::pair<std::string, std::string>> entries_;
     std::map<std::string, PluginDesiredSnapshot> desired_;
     std::map<std::string, bool> eligible_;

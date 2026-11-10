@@ -119,6 +119,9 @@ uint32_t g_plugin_count = 0;
 bool g_http_degraded[kMaxPlugins]{};
 bool g_feature_mode = false;
 bool g_feature_wanted[kMaxPlugins]{};
+// 最近一次生命周期事务步骤的失败码：非 0 保留到该插件下一次事务成功终态。
+// Reconciler 据此区分瞬态（NotReady）与永久失败，决定是否做有界重试。
+int32_t g_last_failure_code[kMaxPlugins]{};
 FeatureDesiredRequest g_desired_request = nullptr;
 void* g_desired_request_context = nullptr;
 const void* g_plugin_ports[kMaxPlugins][kMaxPortsPerPlugin] = {};
@@ -2463,6 +2466,10 @@ bool feature_registry_owner_ready(const char* id) {
     if (!owner_suspend_poll(&g_plugins[index])) return false;
     return owner_resume_poll(&g_plugins[index]);
 }
+int32_t feature_registry_last_failure_code(const char* id) {
+    const auto index = plugin_index_of(id);
+    return index == kNoPlugin ? 0 : g_last_failure_code[index];
+}
 void feature_registry_set_wanted(const char* id, bool wanted) {
     const auto index = plugin_index_of(id);
     if (index != kNoPlugin) g_feature_wanted[index] = wanted;
@@ -2581,6 +2588,7 @@ static uint32_t lifecycle_step_engine() {
 
             hooks::TxStep out{};
             hooks::tx_step(slot.tx_id, &out);
+            if (out.ok != 0) g_last_failure_code[slot.plugin_index] = out.ok;
             ++advanced;
             if (slot.kind == hooks::TxKind::kInstall) {
                 ++install_steps;
@@ -2716,6 +2724,9 @@ static uint32_t lifecycle_step_engine() {
             const bool succeeded = have_status && status.state == hooks::TxState::kSucceeded;
             contracts::PluginContext ctx = make_plugin_context(plugin.id);
             if (succeeded) {
+                // 事务成功终态：此前记录的本步失败码不再代表插件当前状态，
+                // 避免 Reconciler 依据陈旧 NotReady 触发多余重试。
+                g_last_failure_code[slot.plugin_index] = 0;
                 if (slot.kind == hooks::TxKind::kInstall) {
                     if (g_feature_mode && (!g_feature_wanted[slot.plugin_index] ||
                                           check_requires(plugin, slot.plugin_index) != nullptr)) {
@@ -3089,6 +3100,7 @@ void plugin_registry_reset_for_test() {
     g_management_sdk = contracts::QolHostSdk{};
     g_management_sdk_bound = false;
     std::memset(g_feature_wanted, 0, sizeof(g_feature_wanted));
+    std::memset(g_last_failure_code, 0, sizeof(g_last_failure_code));
     g_desired_request = nullptr;
     g_desired_request_context = nullptr;
     qol::game::item_count_set_extended_mode(qol::game::ItemCountExtendedMode::kOff);
