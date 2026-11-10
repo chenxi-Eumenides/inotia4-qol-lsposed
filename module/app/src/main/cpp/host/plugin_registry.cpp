@@ -2217,6 +2217,8 @@ static bool lifecycle_apply_actual(const char* plugin_id, int32_t action) {
             }
             infra::status_update(plugin->id, infra::FeatureState::kResolving, false, nullptr);
             const uint32_t index = plugin_index_of(plugin->id);
+            // 每次转换从零记录失败码，避免上一轮 NotReady 残留把本轮永久失败误判为瞬态。
+            if (index < kMaxPlugins) g_last_failure_code[index] = 0;
             // 新一次转换重新开始逐资源安装：清上一轮的 resource-install 失败记录，
             // 并使上一次 activation 的 ownership 恢复信号失效（旧 token 不再匹配）。
             if (g_feature_mode) {
