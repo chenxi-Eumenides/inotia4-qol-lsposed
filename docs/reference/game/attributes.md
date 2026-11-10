@@ -12,7 +12,7 @@
 | 主属性 | `ch+0x250..0x26B` | `CHAR_GetStat(ch, i)`，`i=0..4` | 四项分量：Base `0x250+i`、Main `0x256+i*2`、Bonus `0x260+i`、Sub `0x266+i*2`；总属性 = 四者之和 |
 | 数值属性 | `ch + 0x24 + id*4`（int32） | `CHAR_GetAttr(ch, id)`，VMA `0xdfd18` | 扁平数组，无符号名、无边界检查 |
 
-`CHAR_GetAttr` 反汇编为 `ldr w0, [ch + id*4 + 0x24]`，未做 id 范围校验；数组实际覆盖到 id≈112（`ch+0x1E4`，仍在 `C_HP=0x1F0` 之前）。对外契约只暴露前 32 项（`contracts/game_ports/character_state_port.h:13` 的 `kQolCharacterStateStatCount=32`），**32 号以后的面板不可见属性同样可读**，只是没有走契约。
+`CHAR_GetAttr` 反汇编为 `ldr w0, [ch + id*4 + 0x24]`，未做 id 范围校验。数组实际覆盖 **115 槽（id 0..114）**：`CHAR_ResetAttrUpdatedAll` 的清零循环以 `cmp w19,#0x73` 收尾（0x73 = 115）。其中 id113 是总攻击缓存（`C_TOTAL_ATTACK`），id114 存在但语义未知。对外契约只暴露前 32 项（`contracts/game_ports/character_state_port.h:13` 的 `kQolCharacterStateStatCount=32`），**32 号以后的面板不可见属性同样可读**，只是没有走契约。
 
 证据：`module/app/src/main/cpp/game/symbols/game_symbols.h:19,70-87,493`；`module/app/src/main/cpp/game/ops/character_state_read.cpp:107-118`。
 
@@ -36,7 +36,7 @@
 |---|---|---|
 | 0 | 暴击率（×10，默认 30 = 3.0%） | 实测，`api-reference.md:424`；面板反汇编 |
 | 1 | 暴击抵抗率 | 词缀表对照，未真机逐项确认 |
-| 2 | 暴击伤害抵抗率（默认 8） | 词缀表对照，未真机确认 |
+| 2 | 暴击伤害抵抗率（默认 0） | 词缀表对照，未真机确认；原写默认 8 有误（8 是 attr16 的默认值） |
 | 3 | 暴击伤害（×10，默认 1000 = 100%） | 实测，`api-reference.md:425`；面板反汇编 |
 | 4 | 物理攻击 | 实测，`api-reference.md:426` |
 | 5 | 普攻伤害增幅（千分比） | 旧版逆向注释 |
@@ -62,6 +62,8 @@
 | 30 | HP 上限（缓存于 `ch+0x9C`） | `game_symbols.h:76` |
 | 31 | MP 上限（缓存于 `ch+0xA0`，默认 200） | `game_symbols.h:77` |
 
+`ATTRINITBASE` 的 22 条记录是「有默认值的属性」，不是数组长度；数组长度见 §1 的 115 槽。
+
 ## 4. 隐藏属性：attr ≥ 32 扩展区
 
 同一数组、同一 getter，面板与 `/stats` 都不暴露。按功能分组：
@@ -73,7 +75,7 @@
 | 33 | 吸血百分比（千分比，伤害 × 值 / 1000） |
 | 36 | 固定吸血值 |
 | 60 / 61 | 高额吸血触发概率 / 高额吸血数值 |
-| 27 | 召唤物回蓝 |
+| 39 | 召唤物回蓝（旧注释 0x27=39；27 本身是毒） |
 | 63 / 112 | 命中回蓝 / 命中固定回蓝 |
 | 40 | 友军受击回血 / DOT 层数 |
 | 42 | 治疗增幅百分比 |
@@ -124,6 +126,22 @@
 | 90 | 减速抗性 |
 
 元素与抗性条目来自装备词缀表 `ITEMOPTINFOBASE`，每条抗性按能力等级每级 +1。
+
+### 4.5 掉落与产出
+
+| id | 含义 |
+|---|---|
+| 92 | 掉宝率（千分比）；全队 3 名队员求和后乘入掉落阈值 `w28` |
+
+`PARTY_GetItemChance` 最多累加 3 名出战队员的 attr92；该值不直接改掉落表，而是线性放大 `CHARSYSTEM_DropItem` 的阈值（见 §7.1）。
+
+### 4.6 无确认名称的 attr
+
+以下 43 个 id 没有确认名称，面板统一显示 `attr<id>`，不得按旧注释或猜测命名：
+
+`6, 16, 21, 34, 35, 37, 38, 39, 41, 43, 45, 46, 47, 48, 49, 50, 51, 53, 54, 55, 56, 57, 59, 62, 64, 65, 67, 68, 73, 74, 77, 95, 96, 97, 99, 100, 101, 102, 103, 104, 105, 108, 114`
+
+其中 23 项（34、35、37、38、39、41、43、45、46、47、48、49、50、51、53、54、55、56、57、59、62、64、65）仅有旧版注释，其余 20 项为完全未知；旧注释不足以作为命名依据。
 
 ## 5. 面板可见集合（v588 反汇编）
 
@@ -182,15 +200,54 @@
 
 ### 7.1 佣兵团掉落加成的数值语义
 
-`CHARSYSTEM_DropItem` 的掉落判定是阈值比较，而不是把面板文案的百分比直接加到概率上：
+`CHARSYSTEM_DropItem` 的掉落判定是阈值比较，而不是把面板文案的百分比直接加到概率上。
 
-- 阈值 `w28 = base × (1000 + party) / 1000`（`party` 为技能加值），`roll = MATH_GetRandom(1, 9999)`，`roll < w28` 时该槽位掉一件。
+**基础概率 `base`**
+
+- `base = (raw × 2 × level) / (playerLevel + level)`，其中 `raw` 是 `DROPINFOBASE` 槽位的原始概率，`level` 是怪物等级、`playerLevel` 是玩家等级。
+- 公式来自 `EXPRESSBASE` 第 13 条记录 → text id 13 → `formula-e[13] = "a2*b*cb+/"`（`CAL_Calculate` 的 RPN 语义：`a2` 为第 2 个入参、`b` 为第 1 个入参、`cb` 为常量表项，`+/` 为除法）。
+- 同级时 `base == raw`（`2×level/(level+level) = 1`）。
+
+**全队掉宝倍率与判定**
+
+- `w28 = (1000 + Σ attr92) × base / 1000`；`Σ attr92` 由 `PARTY_GetItemChance` 最多累加 3 名出战队员。
+- `roll = MATH_GetRandom(1, 9999)`，`roll < w28` 时该槽位掉一件。
 - 技能加值在乘法之后叠加：`130`（卷轴）与 `138`（材料）为 `+20`，`142`（装备）为 `+10`。
 - 原版骰子 1..9999：约 `+0.2pp` / `+0.2pp` / `+0.1pp`；monster/overhaul 骰子上限为 2999/5999，约 `+0.67pp` / `+0.67pp` / `+0.17pp`。
 - 加值只控制该槽位**本次是否掉落**，不影响掉落数量与物品类别；每次击杀跑 1 或 3 轮，多个技能之间不叠加。
 - 技能文案写 2%/3%/1%，与实现的实际增量不自洽；面板按实际增量（`+0.2pp` / `+0.2pp` / `+0.1pp`）显示，不采用文案百分比。
 
-证据：`CHARSYSTEM_DropItem` 的三条技能分支地址 `0xf50c4`（130）/`0xf510c`（138）/`0xf517c`（142），随机数入口 `MATH_GetRandom`（`0xa8bcc`），技能是否已学查询 `MERCENARYGROUPSKILLSYSTEM_CheckCondition`（`0x118918`）。
+**等级来源**
+
+- 普通怪：`CHARSYSTEM_GetMonsterLevel(id, MAP_nID)`；地图 12 使用玩家等级。
+- 宝箱/NPC：`MAPINFOBASE[+6]`。
+
+**特殊槽位**
+
+- 槽 8 `ITEMSYSTEM_MakeMonster(玩家等级)`：随机等级 `rand(player, player+3)` 匹配 `MONDATABASE` 的普通类别，再 `CHARSYSTEM_Produce(1, id)` 生成真实怪物；生成后等级改写为地图 `+6`、坐标取死亡点、`situation=4`。原版 `t7=0` 不触发；`t7>0` 时存在链式生成风险。
+- 槽 9 `CHARSYSTEM_Produce(1, +0x1b 固定 id)`：直接按记录尾部的 `produce_monster_id` 生成。
+
+**`DROPINFOBASE` 记录（29 字节）**
+
+| 偏移 | 字段 | 含义 |
+|---|---|---|
+| `0x00..0x11` | `t0..t8` | 9 个掉落槽的原始概率/阈值；`t8` 关联槽 8 的怪物生成 |
+| `0x12..0x17` | `f0..f2` | 3 个槽位标志/修正（按分支参与判定） |
+| `0x18` | `detail_start` | 掉落明细表起始索引（u16） |
+| `0x1a` | `detail_count` | 明细条数（u8） |
+| `0x1b` | `produce_monster_id` | 槽 9 生成怪物 id（u16，`0xffff` = 无） |
+
+#### 掉落率控制点
+
+| 方式 | 说明 |
+|---|---|
+| `attr92`（推荐） | 全队求和后线性放大 `w28`，不改表、不重抽，副作用最小 |
+| hook `CHARSYSTEM_DropItem` 重跑 | 用于 `drop_quantity`（改数量/追加掉落），需自行处理去重与轮次 |
+| hook `ITEMSYSTEM_MakeItem` / `MakeEquipDetail` 重抽 | 用于 `drop_reroll`（品质/词条重掷），消耗游戏 RNG |
+| `DROPINFOBASE` `t2/t4/t5` | 定向修改具体槽位概率，影响面大且需重载表 |
+| 不建议改 `MATH_GetRandom` | 全游戏共用，截获会污染战斗/合成等所有随机 |
+
+证据：`CHARSYSTEM_DropItem` 的三条技能分支地址 `0xf50c4`（130）/`0xf510c`（138）/`0xf517c`（142），随机数入口 `MATH_GetRandom`（`0xa8bcc`），技能是否已学查询 `MERCENARYGROUPSKILLSYSTEM_CheckCondition`（`0x118918`），全队掉宝 `PARTY_GetItemChance`（`0x1200b8`），怪物生成 `ITEMSYSTEM_MakeMonster`（`0x10859c`）/`CHARSYSTEM_Produce`（`0xf3880`，c18-v520/monster/overhaul 同址）。
 
 ## 8. 未确认项
 
@@ -205,6 +262,9 @@
 | 内容 | 位置 |
 |---|---|
 | 属性数组基址、getter、主属性偏移 | `module/app/src/main/cpp/game/symbols/game_symbols.h:19,70-87,493` |
+| 属性数组 115 槽（id 0..114） | `CHAR_ResetAttrUpdatedAll`（`0xd9f0c`）清零循环 `cmp w19,#0x73`；id113=总攻击缓存，id114 语义未知 |
+| 默认值记录口径 | `apk/static-data/json/tables/ATTRINITBASE.json` 22 条 = 有默认值的属性，不是数组长度 |
+| 面板选中角色 | `PARTY_GetMenuCharacter`（`0x120338`）、`PARTY_nMenuIndex`（`0x728ed8`） |
 | 32 项属性读取与契约 | `module/app/src/main/cpp/game/ops/character_state_read.cpp:107-118`、`contracts/game_ports/character_state_port.h:13` |
 | id → 名称实测映射 | `docs/reference/api-reference.md:415-445` |
 | 面板标签与 35188 占位 | `docs/reference/plugins/character_panel.md`、`plugins/character_panel/feature.h:30-39` |
@@ -212,6 +272,9 @@
 | 面板派生只读面（v2.13 起） | `contracts/game_host.h:67-86`（`QolCharacterReadApi::main_stat`/`normal_damage`/`normal_magic_damage`/`hit_rate_1000`/`evasion_rate_1000`/`display_damage_reduce_rate`）、`contracts/game_host.h:317-318`（`kGameHostCharacterReadMinor=14`）、`game/adapter_ports/game_host_port.cpp:996-1112` |
 | 佣兵团技能已学查询（v2.14） | `game/symbols/game_symbols.h:914-916`（`F_MERCENARYGROUPSKILL_CHECK_CONDITION_VMA=0x118918`）、`game/symbols/symbol_registry.h:430`（→ `MERCENARYGROUPSKILLSYSTEM_CheckCondition`）、`contracts/game_host.h:83-85`（`group_skill_learned`）、`game/adapter_ports/game_host_port.cpp:1063-1078` |
 | 佣兵团掉落加值（130/138/142） | `CHARSYSTEM_DropItem` 分支 `0xf50c4`/`0xf510c`/`0xf517c`（`game/symbols/game_symbols.h:815` 为函数入口 `0xf4d30`）；随机数 `MATH_GetRandom`（`game/symbols/game_symbols.h:661`、`game/symbols/symbol_registry.h:130`） |
+| 全队掉宝倍率 | `PARTY_GetItemChance`（`0x1200b8`，c18-v520/monster/overhaul 同址，最多累加 3 名队员 attr92） |
+| 掉落基础概率公式 | `EXPRESSBASE` 第 13 条 → text id 13 → `formula-e[13] = "a2*b*cb+/"`；RPN 求值 `CAL_Calculate`（`CAL_Calculate` 的 `a2`/`b`/`cb` 语义见 §7.1） |
+| 道具生成怪物 | `ITEMSYSTEM_MakeMonster`（`0x10859c`）、`CHARSYSTEM_Produce`（`0xf3880`）；`DROPINFOBASE` 29 字节记录字段见 §7.1 |
 | 右侧战斗属性框内部文本区矩形 | `contracts/ui.h:831-833`（`character_info_content_rect`）、`contracts/ui.h:17`（`kUiAdapterMinor=36`）、`host/ui_adapter.cpp:613-628`（`inset+(741,153)`、`205×411`） |
 | 属性贡献与格挡结论 | `docs/reference/game/game-systems.md` §6.1 |
 | 词缀表与公式 | `apk/static-data/json/tables/ITEMOPTINFOBASE.json`、`apk/static-data/json/text/formula-e.json` |

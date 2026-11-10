@@ -41,6 +41,7 @@ constexpr int64_t kPageArrowCenterOffset = 120;
 constexpr int32_t kTitleFont = 2;
 constexpr int32_t kBodyFont = 1;
 constexpr size_t kValueBufferSize = 40;
+constexpr size_t kLabelBufferSize = 24;
 
 constexpr const char* kTitleText = "人物属性";
 constexpr const char* kBlockedComponents = "ui components unavailable";
@@ -108,8 +109,30 @@ bool read_main_stat(void* character, int32_t index, int32_t* out) {
     return contracts::succeeded(g_game->character_read.main_stat(character, index, out));
 }
 
-bool read_max_hp(void* character, int32_t* out) {
-    if (character == nullptr || out == nullptr || g_character_extras == nullptr ||
+// 全队掉宝倍率：role 0..2 的出战队员 attr92（千分比）求和；空槽位跳过，
+// 任一非空队员读取失败则该行 `--`（不静默少算）。
+bool read_party_drop_multiplier(int32_t* out) {
+    if (out == nullptr || g_character_extras == nullptr || g_game == nullptr ||
+        g_character_extras->read.party_member == nullptr ||
+        g_game->character_read.attr == nullptr) {
+        return false;
+    }
+    int32_t sum = 0;
+    for (int32_t role = 0; role < 3; ++role) {
+        void* member = nullptr;
+        if (!contracts::succeeded(g_character_extras->read.party_member(role, &member)) ||
+            member == nullptr) {
+            continue;  // 空槽位（party_member 对空槽返回 NotReady）
+        }
+        int32_t value = 0;
+        if (!contracts::succeeded(g_game->character_read.attr(member, 92, &value))) return false;
+        sum += value;
+    }
+    *out = sum;
+    return true;
+}
+
+bool read_max_hp(void* character, int32_t* out) {    if (character == nullptr || out == nullptr || g_character_extras == nullptr ||
         g_character_extras->read.max_hp == nullptr) {
         return false;
     }
@@ -118,8 +141,6 @@ bool read_max_hp(void* character, int32_t* out) {
 
 bool read_row_value(void* character, const RowSpec& row, int32_t* out) {
     switch (row.kind) {
-        case RowKind::kText:
-            return true;  // 说明行不读游戏数据
         case RowKind::kGroupSkill:
             // 佣兵团技能（全队生效）：act 119..142，返回 1=已学/0=未学。
             if (g_game == nullptr || g_game->character_read.group_skill_learned == nullptr) {
@@ -127,6 +148,8 @@ bool read_row_value(void* character, const RowSpec& row, int32_t* out) {
             }
             return contracts::succeeded(
                 g_game->character_read.group_skill_learned(row.arg, out));
+        case RowKind::kPartyDropMultiplier:
+            return read_party_drop_multiplier(out);
         case RowKind::kMainStat:
             return read_main_stat(character, row.arg, out);
         case RowKind::kAttrInt:
@@ -178,41 +201,18 @@ bool read_row_value(void* character, const RowSpec& row, int32_t* out) {
     return false;
 }
 
-// 角色指针：优先队伍 0 号位，失败回退菜单角色；两者都失败时全部行显示 `--`。
-void* resolve_character() {
-    void* character = nullptr;
-    if (g_character_extras != nullptr) {
-        const contracts::QolCharacterExtrasReadApi& read = g_character_extras->read;
-        if (read.party_member != nullptr &&
-            contracts::succeeded(read.party_member(0, &character)) && character != nullptr) {
-            return character;
-        }
-        character = nullptr;
-        if (read.menu_character != nullptr &&
-            contracts::succeeded(read.menu_character(&character)) && character != nullptr) {
-            return character;
-        }
-    }
-    return nullptr;
-}
-
 void read_snapshot() {
     g_snapshot = Snapshot{};
-    void* character = resolve_character();
+    void* character = overview_resolve_character();
     for (uint32_t section = 0; section < kSectionCount; ++section) {
         const SectionSpec& spec = kSections[section];
         for (uint32_t row = 0; row < spec.count && row < kMaxSectionRows; ++row) {
             int32_t value = 0;
-            const bool ok = spec.rows[row].kind == RowKind::kText ||
-                            read_row_value(character, spec.rows[row], &value);
-            g_snapshot.value[section][row] = value;
-            g_snapshot.ok[section][row] = spec.rows[row].kind == RowKind::kText
-                                              ? 1
-                                              : (ok ? 1 : 0);
+            const bool ok = read_row_value(character, spec.rows[row], &value);
+            g_snapshot.value[section][row] = ok ? value : 0;
+            g_snapshot.ok[section][row] = ok ? 1 : 0;
             g_snapshot.learned[section][row] =
                 spec.rows[row].kind == RowKind::kGroupSkill && ok && value != 0 ? 1 : 0;
-            if (spec.rows[row].kind == RowKind::kText) continue;
-            if (!ok) g_snapshot.value[section][row] = 0;
         }
     }
 }
@@ -318,19 +318,13 @@ void draw_column(const ColumnSpec& column, int64_t label_x, int64_t value_right_
         if (row_index >= section.count) break;
         const RowSpec& row = section.rows[row_index];
         const int32_t y = static_cast<int32_t>(kRowsTopY + static_cast<int64_t>(i) * kRowPitch);
-        if (row.kind == RowKind::kText) {
-            // 说明行没有数值列：整行左对齐，逐行带注记（行可自定义 note）。
-            char line[128];
-            (void)std::snprintf(line, sizeof(line), "%s：%s", row.label,
-                                row.note != nullptr ? row.note : kGlobalNote);
-            draw_text(line, label_x, y, contracts::ui_theme::kTextNormal, 0, kBodyFont);
-            continue;
-        }
+        char label[kLabelBufferSize];
         char value[kValueBufferSize];
+        format_label(row, label, sizeof(label));
         format_value(row, g_snapshot.ok[column.section][row_index] != 0,
                      g_snapshot.learned[column.section][row_index] != 0,
                      g_snapshot.value[column.section][row_index], value, sizeof(value));
-        draw_text(row.label, label_x, y, contracts::ui_theme::kTextNormal, 0, kBodyFont);
+        draw_text(label, label_x, y, contracts::ui_theme::kTextNormal, 0, kBodyFont);
         draw_text(value, value_right_x, y, contracts::ui_theme::kTextBody, 1, kBodyFont);
     }
 }
@@ -367,6 +361,24 @@ void overview_bind_context(const qol::contracts::QolGameHost* game,
     g_game = game;
     g_character_extras =
         static_cast<const contracts::QolCharacterExtrasPort*>(character_extras_port);
+}
+
+void* overview_resolve_character() {
+    void* character = nullptr;
+    if (g_character_extras != nullptr) {
+        const contracts::QolCharacterExtrasReadApi& read = g_character_extras->read;
+        // 原版面板同源：PARTY_GetMenuCharacter（当前选中角色）。
+        if (read.menu_character != nullptr &&
+            contracts::succeeded(read.menu_character(&character)) && character != nullptr) {
+            return character;
+        }
+        character = nullptr;
+        if (read.party_member != nullptr &&
+            contracts::succeeded(read.party_member(0, &character)) && character != nullptr) {
+            return character;
+        }
+    }
+    return nullptr;
 }
 
 void set_overview_enabled(bool enabled) {

@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "contracts/game_ports/character_extras_port.h"
 #include "contracts/host_sdk.h"
 #include "contracts/panels.h"
 #include "contracts/plugin.h"
@@ -160,6 +161,41 @@ void bind_watch_stub_sdk() {
     i18n::bind_sdk(&sdk);
 }
 
+// ---- 选中角色解析 stub：menu_character 优先、party_member(0) 回退 ----
+void* g_menu_character = reinterpret_cast<void*>(static_cast<uintptr_t>(0x1000));
+void* g_party_character = reinterpret_cast<void*>(static_cast<uintptr_t>(0x2000));
+int g_menu_character_calls = 0;
+int g_party_member_calls = 0;
+bool g_menu_character_ok = true;
+bool g_menu_character_null = false;
+bool g_party_member_ok = true;
+
+QolResult stub_menu_character(void** out) {
+    ++g_menu_character_calls;
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "out", 3);
+    *out = g_menu_character_null ? nullptr : g_menu_character;
+    return g_menu_character_ok ? qol::contracts::ok()
+                               : qol::contracts::error(kQolErrNotReady, "menu", 4);
+}
+
+QolResult stub_party_member(int32_t role, void** out) {
+    ++g_party_member_calls;
+    if (out == nullptr || role != 0) {
+        return qol::contracts::error(kQolErrInvalidArgument, "role", 4);
+    }
+    *out = g_party_character;
+    return g_party_member_ok ? qol::contracts::ok()
+                             : qol::contracts::error(kQolErrNotReady, "party", 5);
+}
+
+void reset_character_stub() {
+    g_menu_character_calls = 0;
+    g_party_member_calls = 0;
+    g_menu_character_ok = true;
+    g_menu_character_null = false;
+    g_party_member_ok = true;
+}
+
 void reset_watch_stub() {
     i18n::character_info_test_reset();
     i18n::set_overview_enabled(true);
@@ -301,18 +337,17 @@ void test_manifest_ids() {
     CHECK(d.features[1].default_enabled == 1);
 }
 
-// 分区行数 + 分页映射：70 行 → 4 页双列（每列最多 11 行），校验左右列与行覆盖。
+// 分区行数 + 分页映射：143 行 → 12 页双列（每列最多 11 行），校验左右列与行覆盖。
 void test_overview_row_model() {
     CHECK(i18n::kSectionCount == 4);
-    CHECK(i18n::kPanelRowCount == 16);
-    CHECK(i18n::kHiddenRowCount == 22);
-    CHECK(i18n::kElementRowCount == 19);
-    CHECK(i18n::kGlobalRowCount == 13);
-    CHECK(i18n::kTotalRowCount == 70);
+    CHECK(i18n::kMainStatRowCount == 5);
+    CHECK(i18n::kDerivedRowCount == 11);
+    CHECK(i18n::kAttrRowCount == 115);
+    CHECK(i18n::kTeamRowCount == 12);
+    CHECK(i18n::kTotalRowCount == 143);
     CHECK(i18n::kMaxRowsPerColumn == 11);
-    CHECK(i18n::kPageCount == 4);
+    CHECK(i18n::kPageCount == 12);
 
-    // 4 页双列：每页的左右列（分区 / 首行 / 行数）。
     struct ExpectedColumn {
         uint32_t section;
         uint32_t first_row;
@@ -322,12 +357,15 @@ void test_overview_row_model() {
         ExpectedColumn left;
         ExpectedColumn right;
     };
-    const ExpectedPage expected[4] = {
-        {{0, 0, 5}, {0, 5, 11}},    // P1 左 5 维 / 右面板属性 11 行
-        {{1, 0, 11}, {1, 11, 11}},  // P2 隐藏属性左右各 11
-        {{2, 0, 10}, {2, 10, 9}},   // P3 元素左 10 / 右 9
-        {{3, 0, 7}, {3, 7, 6}},     // P4 全局加成左 7 / 右 6
-    };
+    ExpectedPage expected[12] = {};
+    expected[0] = {{0, 0, 5}, {1, 0, 11}};  // P1 主属性 / 面板派生
+    for (uint32_t page = 1; page <= 9; ++page) {
+        const uint32_t first = (page - 1) * 12;
+        expected[page] = {{2, first, 6}, {2, first + 6, 6}};
+    }
+    expected[10] = {{2, 108, 6}, {2, 114, 1}};  // attr 末页 7 行
+    expected[11] = {{3, 0, 6}, {3, 6, 6}};      // 全队共享
+
     uint32_t covered_rows = 0;
     for (uint32_t page = 0; page < i18n::kPageCount; ++page) {
         const i18n::PageSpec* spec = nullptr;
@@ -343,23 +381,24 @@ void test_overview_row_model() {
             CHECK(actual.first_row == want.first_row);
             CHECK(actual.row_count == want.row_count);
             CHECK(actual.row_count <= i18n::kMaxRowsPerColumn);
-            // 列内行必须落在分区范围内。
             CHECK(actual.first_row + actual.row_count <=
                   i18n::kSections[actual.section].count);
             covered_rows += actual.row_count;
         }
     }
-    // 4 页双列覆盖全部 70 行；全局加成页左 7 / 右 6。
     CHECK(covered_rows == i18n::kTotalRowCount);
-    CHECK(i18n::kPages[3].left.row_count == 7);
-    CHECK(i18n::kPages[3].right.first_row == i18n::kPages[3].left.row_count);
-    CHECK(i18n::kPages[3].right.first_row + i18n::kPages[3].right.row_count ==
-          i18n::kGlobalRowCount);
-    // 主属性与面板属性页：左列恰好 5 维、右列接续到分区末尾。
+    // 主属性页：左 5 维、右面板派生 11 项。
     CHECK(i18n::kPages[0].left.row_count == 5);
-    CHECK(i18n::kPages[0].right.first_row == i18n::kPages[0].left.row_count);
-    CHECK(i18n::kPages[0].right.first_row + i18n::kPages[0].right.row_count ==
-          i18n::kPanelRowCount);
+    CHECK(i18n::kPages[0].right.row_count == i18n::kDerivedRowCount);
+    // attr 页：P2..P11 共 10 页，前 9 页 6/6、末页 6/1。
+    CHECK(i18n::kPages[10].left.first_row == 108);
+    CHECK(i18n::kPages[10].right.first_row == 114);
+    CHECK(i18n::kPages[10].left.row_count + i18n::kPages[10].right.row_count == 7);
+    // 全队共享页 6/6。
+    CHECK(i18n::kPages[11].left.row_count == 6);
+    CHECK(i18n::kPages[11].right.first_row == i18n::kPages[11].left.row_count);
+    CHECK(i18n::kPages[11].left.row_count + i18n::kPages[11].right.row_count ==
+          i18n::kTeamRowCount);
 
     // 越界页码返回 false，且不写 out。
     CHECK(!i18n::page_at(i18n::kPageCount, nullptr));
@@ -367,22 +406,76 @@ void test_overview_row_model() {
     CHECK(i18n::page_at(0, nullptr));
     const i18n::PageSpec* untouched = reinterpret_cast<const i18n::PageSpec*>(
         static_cast<uintptr_t>(0x1234));
-    CHECK(!i18n::page_at(4, &untouched));
+    CHECK(!i18n::page_at(12, &untouched));
     CHECK(reinterpret_cast<uintptr_t>(untouched) == 0x1234);
 }
 
-// 格式化：千分比 raw/10 保留 1 位小数 + %；整数；失败 `--`；佣兵团技能已学/未学；说明行注记。
+// attr 名称：72 项确认名称，其余 id 一律 attr<id>（不得编造）。
+void test_attr_names() {
+    struct ExpectedName {
+        int32_t id;
+        const char* name;
+    };
+    const ExpectedName expected[] = {
+        {0, "暴击率"}, {1, "暴击抵抗率"}, {2, "暴击伤害抵抗率"}, {3, "暴击伤害"},
+        {4, "物理攻击"}, {5, "普攻伤害增幅"}, {7, "物理防御基础"}, {8, "魔法攻击"},
+        {9, "魔法增伤"}, {10, "专属增伤开关"}, {11, "魔法抵抗"}, {12, "闪避"},
+        {13, "总敏捷"}, {14, "命中率基数"}, {15, "命中率百分比"}, {17, "防御"},
+        {18, "防御增幅系数"}, {19, "武器格挡"}, {20, "盾牌格挡"}, {22, "火"},
+        {23, "风"}, {24, "寒气"}, {25, "神圣"}, {26, "黑暗"}, {27, "毒"},
+        {28, "等级驱动属性"}, {29, "MP恢复"}, {30, "HP上限"}, {31, "MP上限"},
+        {32, "蓝耗增减"}, {33, "HP吸收"}, {36, "固定吸血"}, {40, "友军受击回血"},
+        {42, "治疗增幅"}, {44, "魔法伤害削减"}, {52, "双倍攻击概率"}, {58, "命中生成护盾"},
+        {60, "高额吸血触发概率"}, {61, "高额吸血数值"}, {63, "命中回蓝"}, {66, "重击概率"},
+        {69, "命中持续状态层数"}, {70, "重置召唤物CD概率"}, {71, "增伤阶段"},
+        {72, "命中嘲讽"}, {75, "行为距离加成"}, {76, "反伤"}, {78, "重力摆"},
+        {79, "冰霜"}, {80, "治愈气息"}, {81, "狂战士"}, {82, "瞬间恢复"},
+        {83, "魔力专家"}, {84, "减少敌意值"}, {85, "失明抗性"}, {86, "睡眠抗性"},
+        {87, "眩晕抗性"}, {88, "恐惧抗性"}, {89, "沉默抗性"}, {90, "减速抗性"},
+        {91, "移动速度"}, {92, "掉宝率"}, {93, "武器攻击帧"}, {94, "仇恨系数"},
+        {98, "嘲讽概率"}, {106, "额外普攻开关"}, {107, "受击获得持续增益概率"},
+        {109, "额外普攻增幅"}, {110, "反击减益"}, {111, "命中沉默"},
+        {112, "命中固定回蓝"}, {113, "总攻击"},
+    };
+    CHECK(i18n::kAttrNameCount == 72);
+    CHECK(sizeof(expected) / sizeof(expected[0]) == i18n::kAttrNameCount);
+    for (const ExpectedName& entry : expected) {
+        const char* name = i18n::attr_display_name(entry.id);
+        CHECK(name != nullptr && std::strcmp(name, entry.name) == 0);
+    }
+
+    const int32_t unknown[] = {
+        6, 16, 21, 34, 35, 37, 38, 39, 41, 43, 45, 46, 47, 48, 49, 50, 51,
+        53, 54, 55, 56, 57, 59, 62, 64, 65, 67, 68, 73, 74, 77, 95, 96, 97,
+        99, 100, 101, 102, 103, 104, 105, 108, 114,
+    };
+    CHECK(sizeof(unknown) / sizeof(unknown[0]) ==
+          i18n::kAttrRowCount - i18n::kAttrNameCount);
+    for (int32_t id : unknown) CHECK(i18n::attr_display_name(id) == nullptr);
+
+    char label[24];
+    const i18n::RowSpec known{nullptr, i18n::RowKind::kAttrInt, 33};
+    i18n::format_label(known, label, sizeof(label));
+    CHECK(std::strcmp(label, "HP吸收") == 0);
+    const i18n::RowSpec fallback{nullptr, i18n::RowKind::kAttrInt, 34};
+    i18n::format_label(fallback, label, sizeof(label));
+    CHECK(std::strcmp(label, "attr34") == 0);
+    const i18n::RowSpec labeled{"物攻", i18n::RowKind::kNormalDamage, 0};
+    i18n::format_label(labeled, label, sizeof(label));
+    CHECK(std::strcmp(label, "物攻") == 0);
+}
+
+// 格式化：千分比 raw/10 保留 1 位小数 + %；整数；失败 `--`；佣兵团技能已学/未学；全队掉宝倍率。
 void test_overview_format_value() {
     char buffer[40];
-    const i18n::RowSpec& crit = i18n::kPanelRows[8];      // 暴击率（attr 千分比）
-    const i18n::RowSpec& hit = i18n::kPanelRows[9];       // 命中率（hit_rate_1000）
-    const i18n::RowSpec& defense = i18n::kPanelRows[7];   // 防御力（整数）
-    const i18n::RowSpec& hidden = i18n::kHiddenRows[0];   // HP吸收（attr 原值）
-    const i18n::RowSpec& scroll_drop = i18n::kGlobalRows[0];   // 卷轴掉率 act 130
-    const i18n::RowSpec& legendary = i18n::kGlobalRows[3];     // 传说装备率 act 122
-    const i18n::RowSpec& potion_cooldown = i18n::kGlobalRows[10];  // 药水冷却 act 141
-    const i18n::RowSpec& gold_note = i18n::kGlobalRows[11];    // 金币获得（说明行）
-    const i18n::RowSpec& luck_note = i18n::kGlobalRows[12];    // 幸运（说明行）
+    const i18n::RowSpec& crit = i18n::kDerivedRows[3];    // 暴击率（attr 千分比）
+    const i18n::RowSpec& hit = i18n::kDerivedRows[4];     // 命中率（hit_rate_1000）
+    const i18n::RowSpec& defense = i18n::kDerivedRows[2]; // 防御力（整数）
+    const i18n::RowSpec& hidden = i18n::kAttrRowTable.rows[33];  // HP吸收（attr 原值）
+    const i18n::RowSpec& multiplier = i18n::kTeamRows[0];    // 全队掉宝倍率
+    const i18n::RowSpec& scroll_drop = i18n::kTeamRows[1];   // 卷轴掉率 act 130
+    const i18n::RowSpec& legendary = i18n::kTeamRows[4];     // 传说装备率 act 122
+    const i18n::RowSpec& potion_cooldown = i18n::kTeamRows[11];  // 药水冷却 act 141
 
     i18n::format_value(crit, true, false, 1234, buffer, sizeof(buffer));
     CHECK(std::strcmp(buffer, "123.4%") == 0);
@@ -405,6 +498,14 @@ void test_overview_format_value() {
     i18n::format_value(defense, false, false, 0, buffer, sizeof(buffer));
     CHECK(std::strcmp(buffer, "--") == 0);
 
+    // kPartyDropMultiplier：sum=0 → ×1.00（+0）；sum=300 → ×1.30（+300）；失败 → `--`。
+    i18n::format_value(multiplier, true, false, 0, buffer, sizeof(buffer));
+    CHECK(std::strcmp(buffer, "×1.00（+0）") == 0);
+    i18n::format_value(multiplier, true, false, 300, buffer, sizeof(buffer));
+    CHECK(std::strcmp(buffer, "×1.30（+300）") == 0);
+    i18n::format_value(multiplier, false, false, 0, buffer, sizeof(buffer));
+    CHECK(std::strcmp(buffer, "--") == 0);
+
     // kGroupSkill：已学 → learned_text；未学 → missing_text；读取失败 → `--`。
     i18n::format_value(scroll_drop, true, true, 1, buffer, sizeof(buffer));
     CHECK(std::strcmp(buffer, "+0.2pp") == 0);
@@ -419,15 +520,46 @@ void test_overview_format_value() {
     i18n::format_value(scroll_drop, false, true, 1, buffer, sizeof(buffer));
     CHECK(std::strcmp(buffer, "--") == 0);
 
-    char note_buffer[128];
-    i18n::format_value(gold_note, true, false, 0, note_buffer, sizeof(note_buffer));
-    CHECK(std::strcmp(note_buffer, "无此加成（仅买卖价修正）") == 0);
-    i18n::format_value(luck_note, true, false, 0, note_buffer, sizeof(note_buffer));
-    CHECK(std::strcmp(note_buffer, "无此属性（物品等级门槛）") == 0);
     // 缓冲不足时不得越界写：只校验首字符被写入且仍是 NUL 结尾片段的合法前缀。
     char tiny[4] = {'x', 'x', 'x', 'x'};
     i18n::format_value(crit, true, false, 1234, tiny, sizeof(tiny));
     CHECK(tiny[sizeof(tiny) - 1] == '\0');
+}
+
+// 选中角色优先级：menu_character（原版面板同源）优先；失败/空指针回退 party_member(0)。
+void test_selected_character_priority() {
+    qol::contracts::QolCharacterExtrasPort port{};
+    port.read.menu_character = &stub_menu_character;
+    port.read.party_member = &stub_party_member;
+    i18n::overview_bind_context(nullptr, &port);
+
+    reset_character_stub();
+    CHECK(i18n::overview_resolve_character() == g_menu_character);
+    CHECK(g_menu_character_calls == 1 && g_party_member_calls == 0);
+
+    reset_character_stub();
+    g_menu_character_null = true;
+    CHECK(i18n::overview_resolve_character() == g_party_character);
+    CHECK(g_menu_character_calls == 1 && g_party_member_calls == 1);
+
+    reset_character_stub();
+    g_menu_character_ok = false;
+    CHECK(i18n::overview_resolve_character() == g_party_character);
+    CHECK(g_menu_character_calls == 1 && g_party_member_calls == 1);
+
+    reset_character_stub();
+    g_menu_character_ok = false;
+    g_party_member_ok = false;
+    CHECK(i18n::overview_resolve_character() == nullptr);
+    CHECK(g_menu_character_calls == 1 && g_party_member_calls == 1);
+
+    reset_character_stub();
+    g_menu_character_null = true;
+    g_party_member_ok = false;
+    CHECK(i18n::overview_resolve_character() == nullptr);
+
+    i18n::overview_bind_context(nullptr, nullptr);
+    CHECK(i18n::overview_resolve_character() == nullptr);
 }
 
 // PopupState 装配：acquire 必须传非空 enter/event；enter wrapper 转发原 enter；
@@ -682,6 +814,8 @@ int main() {
     test_registration_failure_observable();
     test_manifest_ids();
     test_overview_row_model();
+    test_attr_names();
+    test_selected_character_priority();
     test_overview_format_value();
     test_character_info_tap_inside();
     test_popup_assembly();
