@@ -2055,6 +2055,16 @@ set_target_properties(core_feature_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_S
 target_link_libraries(core_feature_plugin_tests PRIVATE Threads::Threads)
 add_test(NAME core_feature_plugin_tests COMMAND core_feature_plugin_tests)
 
+# core.feature 暴击特效屏蔽 wrapper：0x5a、0x1f..0x22 及同帧震屏/震动拦截。
+add_executable(core_feature_crit_fx_tests
+    test_core_feature_crit_fx.cpp
+)
+target_include_directories(core_feature_crit_fx_tests PRIVATE ${CPP_DIR})
+target_compile_features(core_feature_crit_fx_tests PRIVATE cxx_std_17)
+set_target_properties(core_feature_crit_fx_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(core_feature_crit_fx_tests PRIVATE Threads::Threads)
+add_test(NAME core_feature_crit_fx_tests COMMAND core_feature_crit_fx_tests)
+
 # D1 批 1：静态资产 ingress、12 route owner responses 和动态大响应缓冲。
 add_executable(core_data_plugin_tests
     test_core_data_plugin.cpp
