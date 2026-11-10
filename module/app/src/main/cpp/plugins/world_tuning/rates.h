@@ -104,5 +104,7 @@ int32_t scale_attribute(int32_t raw, int32_t percent);
 int64_t scale_money(int64_t value, int32_t percent);
 // 冷却 tick 缩放（int64）：倍率 0 返回 0；正倍率结果下限为 1（与 tick 判定一致）。
 int64_t scale_cooldown_ticks(int64_t ticks, int32_t percent);
+// 掉落概率阈值缩放：K=1 与非正阈值恒等，正值按 K² 扩大并饱和到 cap。
+int32_t scale_drop_threshold(int32_t threshold, int32_t reroll, int32_t cap);
 
 }  // namespace qol::features::world_tuning

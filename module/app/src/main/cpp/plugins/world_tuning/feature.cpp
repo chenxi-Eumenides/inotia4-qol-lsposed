@@ -530,6 +530,11 @@ DropQualityGroup quality_group(const void* item, int32_t subtype) {
 
 }  // namespace
 
+int32_t drop_threshold_patch_helper(int32_t threshold, int32_t threshold_cap) {
+    if (!g_gate.load(std::memory_order_relaxed) || !drop_context_active()) return threshold;
+    return scale_drop_threshold(threshold, rate_value(RateId::kDropReroll), threshold_cap);
+}
+
 void drop_item_wrapper(void* ch) {
     const auto* sdk = g_sdk;
     const contracts::InFlightGuard guard(
@@ -872,6 +877,12 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
     if (std::strcmp(resource_id, kResourceIdSetActionNextTime) == 0) {
         g_backup_set_action_next_time.store(backup, std::memory_order_release);
         log_info("set_action_next_time hook bound backup=%p", backup);
+        return 0;
+    }
+    if (std::strcmp(resource_id, kResourceIdDropReroll258) == 0 ||
+        std::strcmp(resource_id, kResourceIdDropReroll3B8) == 0 ||
+        std::strcmp(resource_id, kResourceIdDropReroll400) == 0 ||
+        std::strcmp(resource_id, kResourceIdDropReroll460) == 0) {
         return 0;
     }
     log_warn("unknown resource id: %s", resource_id);

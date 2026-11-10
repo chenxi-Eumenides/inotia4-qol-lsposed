@@ -452,6 +452,26 @@ int main(int argc, char** argv) {
     bad_region_branch.replay_words[0] = 0x90000000u;
     check(!insn_patch_test_generate(&bad_region_branch, words, 40, &count),
           "reject ADRP in region replay");
+    InsnPatchSpec drop_cmp{5, 28, 0, 0, 0, 0x123454, 1,
+                           {0x6b00039fu, 0, 0, 0}, 0, 0,
+                           0x123456789abcdef0u, 0x6b00039fu, 10000};
+    check(insn_patch_test_generate(&drop_cmp, words, 40, &count) && count == 30,
+          "drop threshold helper trampoline generation");
+    check(words[0] == 0xa9bf07e0u && words[9] == 0xa9bf7bf2u &&
+              words[10] == 0x2a1c03e0u && words[16] == 0xd63f0200u &&
+              words[17] == 0x2a0003fcu && words[18] == 0xa8c17bf2u &&
+              words[27] == 0xa8c107e0u,
+          "drop trampoline saves/restores caller registers and LR around helper");
+    check(words[28] == 0x6b00039fu && (words[29] & 0xfc000000u) == 0x14000000u,
+          "drop trampoline replays CMP immediately before flags-preserving B");
+    InsnPatchSpec bad_drop_cmp = drop_cmp;
+    bad_drop_cmp.replay_words[0] = 0x6b1c001fu;
+    check(!insn_patch_test_generate(&bad_drop_cmp, words, 40, &count),
+          "reject replay CMP that differs from expected original word");
+    bad_drop_cmp = drop_cmp;
+    bad_drop_cmp.expected_word = 0;
+    check(!insn_patch_test_generate(&bad_drop_cmp, words, 40, &count),
+          "reject unsupported expected CMP word");
     void* region = mmap(nullptr, 4096, PROT_READ | PROT_WRITE | PROT_EXEC,
                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     check(region != MAP_FAILED, "allocate test code page");
@@ -546,6 +566,37 @@ int main(int argc, char** argv) {
         }
         check(insn_patch_release(site) && code[0] == 0x1b167f76u,
               "relocated BL region release restores original instruction");
+        code[0] = 0x6b00039fu;
+        drop_cmp.ret_addr = site + 4;
+        check(insn_patch_install(site, &drop_cmp, &backup),
+              "install compare replay threshold trampoline");
+        check((code[0] & 0xfc000000u) == 0x14000000u,
+              "instruction-point entry uses B rather than BL");
+        check(reinterpret_cast<uintptr_t>(backup) == 0x6b00039fu,
+              "compare trampoline backup is the exact original CMP word");
+        {
+            uint32_t tramp[32]{};
+            uint32_t tramp_count = 0;
+            uintptr_t slot_base = 0;
+            check(insn_patch_test_read(site, tramp, 32, &tramp_count) && tramp_count == 32,
+                  "read compare replay trampoline");
+            check(insn_patch_test_slot_base(site, &slot_base),
+                  "read compare replay trampoline slot base");
+            check(tramp[28] == 0x6b00039fu && (tramp[29] & 0xfc000000u) == 0x14000000u,
+                  "installed trampoline leaves replayed CMP flags for the original b.cond");
+            if (slot_base != 0) {
+                const int64_t delta = static_cast<int64_t>(
+                    static_cast<int32_t>(tramp[29] << 6) >> 6);
+                check(static_cast<int64_t>(slot_base + 29u * 4u) + delta * 4 ==
+                          static_cast<int64_t>(site + 4),
+                      "compare trampoline B returns to the original conditional branch");
+            }
+        }
+        check(insn_patch_release(site) && code[0] == 0x6b00039fu,
+              "compare patch release physically restores original CMP");
+        code[0] = 0x6b1c001fu;
+        check(!insn_patch_install(site, &drop_cmp, &backup),
+              "reject mismatched expected CMP word at installation");
         (void)munmap(region, 4096);
     }
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

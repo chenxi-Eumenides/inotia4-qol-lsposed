@@ -25,6 +25,9 @@ uint32_t movz_w(uint32_t reg, uint32_t value) {
 uint32_t movz_x(uint32_t reg, uint32_t value) {
     return 0xd2800000u | ((value & 0xffffu) << 5) | reg;
 }
+uint32_t movk_x(uint32_t reg, uint32_t value, uint32_t halfword) {
+    return 0xf2800000u | (halfword << 21) | ((value & 0xffffu) << 5) | reg;
+}
 uint32_t csel_x(uint32_t d, uint32_t n, uint32_t m, uint32_t cond) {
     return 0x9a800000u | (m << 16) | (cond << 12) | (n << 5) | d;
 }
@@ -145,6 +148,39 @@ bool generate(const InsnPatchSpec& s, uint32_t* out, uint32_t cap, uint32_t* cou
         for (uint32_t i = 0; i < s.replay_count; ++i)
             if (replay_sets_flags(s.replay_words[i]) && !emit(s.replay_words[i])) return false;
         if (!emit(0x14000000u)) return false;
+    } else if (s.kind == 5) {
+        // Inline 指令点以 B 进入。helper 是普通 AAPCS 函数调用，因此保存全部
+        // caller-saved GPR 与 LR；10 个 pair 共 160 字节，SP 始终保持 16-byte 对齐。
+        // 恢复寄存器后重放原 CMP，紧随的原 b.cond 消费原比较语义生成的 NZCV。
+        const bool supported_cmp = s.expected_word == 0x6b00039fu ||
+                                   s.expected_word == 0x6b1c001fu;
+        if (s.a_reg != 28 || s.b_reg != 0 || s.d_reg != 0 || s.helper == 0 ||
+            s.threshold_cap == 0 || s.threshold_cap > 0xffffu || s.ret_addr == 0 ||
+            s.replay_count != 1 || s.replay_words[0] != s.expected_word || !supported_cmp ||
+            cap < 30) return false;
+        constexpr uint32_t kPairs[][2] = {
+            {0, 1}, {2, 3}, {4, 5}, {6, 7}, {8, 9},
+            {10, 11}, {12, 13}, {14, 15}, {16, 17}, {18, 30},
+        };
+        for (const auto& pair : kPairs) {
+            const uint32_t stp = 0xa9bf0000u | (pair[1] << 10) | (31u << 5) | pair[0];
+            if (!emit(stp)) return false;
+        }
+        if (!emit(0x2a1c03e0u) || // mov w0,w28
+            !emit(movz_w(1, s.threshold_cap))) return false;
+        const uint64_t helper = static_cast<uint64_t>(s.helper);
+        if (!emit(movz_x(16, static_cast<uint32_t>(helper))) ||
+            !emit(movk_x(16, static_cast<uint32_t>(helper >> 16), 1)) ||
+            !emit(movk_x(16, static_cast<uint32_t>(helper >> 32), 2)) ||
+            !emit(movk_x(16, static_cast<uint32_t>(helper >> 48), 3)) ||
+            !emit(0xd63f0200u) || // blr x16
+            !emit(0x2a0003fcu)) return false; // mov w28,w0
+        for (uint32_t i = 10; i > 0; --i) {
+            const auto& pair = kPairs[i - 1];
+            const uint32_t ldp = 0xa8c10000u | (pair[1] << 10) | (31u << 5) | pair[0];
+            if (!emit(ldp)) return false;
+        }
+        if (!emit(s.expected_word) || !emit(0x14000000u)) return false;
     } else if (s.kind == 3) {
         // 语义：wD = clamp32(x21 ÷ divisor × (sxtw wB) ÷ divisor)；x21 = 64 位乘积（点 B 写入）。
         // 替换 monster v29 Act_M_DD 0xee1c4..0xee1eb 九条（smull/lsr/asr/sub ×2 + mul）。
@@ -237,11 +273,14 @@ bool insn_patch_install(uintptr_t site, const InsnPatchSpec* spec, void** backup
     const uint32_t expected_mul = 0x1b007c00u | (spec->b_reg << 16) |
                                   (spec->a_reg << 5) |
                                   (spec->kind == 4 ? spec->expected_d_reg : spec->a_reg);
-    const uint32_t expected_original = spec->kind == 3 ? 0x9b217ea1u : expected_mul;
+    const uint32_t expected_original = spec->kind == 3 ? 0x9b217ea1u :
+                                       (spec->kind == 5 ? spec->expected_word : expected_mul);
     if (original != expected_original) return false;
+    if (spec->kind == 5 && spec->ret_addr != site + 4) return false;
     void* slots[4]{};
-    const uint32_t slot_count = spec->kind == 1 ? 1u : (spec->kind == 4 ? 4u :
-                               (spec->kind == 3 ? 3u : 2u));
+    const uint32_t slot_count = spec->kind == 1 ? 1u :
+                                (spec->kind == 4 || spec->kind == 5 ? 4u :
+                                (spec->kind == 3 ? 3u : 2u));
     // 多槽 thunk 的槽间 fall-through 依赖槽位内存相邻：slot_count ≥ 2 时必须走
     // 连续多槽分配（空闲表散槽无相邻性，不得复用）；单槽仍走常规空闲表路径。
     if (slot_count == 1) {
@@ -259,12 +298,11 @@ bool insn_patch_install(uintptr_t site, const InsnPatchSpec* spec, void** backup
             call_patch_release_near_entry(reinterpret_cast<uintptr_t>(slots[i]));
         return false;
     }
-    if (spec->kind == 0 || spec->kind == 3 || spec->kind == 4) {
+    if (spec->kind == 0 || spec->kind == 3 || spec->kind == 4 || spec->kind == 5) {
         // kind 0：b_lt@5→12、b_le@9→13、b_store@11→13、b_return@words-1
         // kind 3：b_lt@7→14、b_le@11→15、b_store@13→15、b_return@words-1
-        if (spec->kind == 4) {
-            // BL 占位由 generate 按重放原序写在分解式之后；按实际占位下标重定位，
-            // 不能再按固定词数推算（分解式/重放分组会变）。
+        if (spec->kind == 4 || spec->kind == 5) {
+            // kind 4 的 BL 占位按实际下标重定位；kind 5 则只需把尾部 B 指向 site+4。
             uint32_t bl_index = 0;
             bool has_bl = false;
             for (uint32_t i = 0; i < words; ++i) {
@@ -291,22 +329,22 @@ bool insn_patch_install(uintptr_t site, const InsnPatchSpec* spec, void** backup
             }
             code[words - 1] = branch;
         } else {
-        const uint32_t b_lt_idx = spec->kind == 0 ? 5u : 7u;
-        const uint32_t b_le_idx = spec->kind == 0 ? 9u : 11u;
-        const uint32_t b_store_idx = spec->kind == 0 ? 11u : 13u;
-        const uint32_t lt_target = spec->kind == 0 ? 12u : 14u;
-        const uint32_t le_target = spec->kind == 0 ? 13u : 15u;
-        uint32_t b_lt = 0, b_le = 0, b_store = 0, b_return = 0;
-        if (!encode_bcond(code_pc(b_lt_idx), code_pc(lt_target), 0xb, &b_lt) ||
-            !encode_bcond(code_pc(b_le_idx), code_pc(le_target), 0xd, &b_le) ||
-            !encode_b(code_pc(b_store_idx), code_pc(le_target), &b_store) ||
-            !encode_b(code_pc(words - 1), spec->ret_addr, &b_return)) {
-            for (uint32_t i = 0; i < slot_count; ++i)
-                call_patch_release_near_entry(reinterpret_cast<uintptr_t>(slots[i]));
-            return false;
-        }
-        code[b_lt_idx] = b_lt; code[b_le_idx] = b_le; code[b_store_idx] = b_store;
-        code[words - 1] = b_return;
+            const uint32_t b_lt_idx = spec->kind == 0 ? 5u : 7u;
+            const uint32_t b_le_idx = spec->kind == 0 ? 9u : 11u;
+            const uint32_t b_store_idx = spec->kind == 0 ? 11u : 13u;
+            const uint32_t lt_target = spec->kind == 0 ? 12u : 14u;
+            const uint32_t le_target = spec->kind == 0 ? 13u : 15u;
+            uint32_t b_lt = 0, b_le = 0, b_store = 0, b_return = 0;
+            if (!encode_bcond(code_pc(b_lt_idx), code_pc(lt_target), 0xb, &b_lt) ||
+                !encode_bcond(code_pc(b_le_idx), code_pc(le_target), 0xd, &b_le) ||
+                !encode_b(code_pc(b_store_idx), code_pc(le_target), &b_store) ||
+                !encode_b(code_pc(words - 1), spec->ret_addr, &b_return)) {
+                for (uint32_t i = 0; i < slot_count; ++i)
+                    call_patch_release_near_entry(reinterpret_cast<uintptr_t>(slots[i]));
+                return false;
+            }
+            code[b_lt_idx] = b_lt; code[b_le_idx] = b_le; code[b_store_idx] = b_store;
+            code[words - 1] = b_return;
         }
     }
     for (uint32_t i = 0; i < slot_count; ++i) {
@@ -317,7 +355,10 @@ bool insn_patch_install(uintptr_t site, const InsnPatchSpec* spec, void** backup
         __builtin___clear_cache(reinterpret_cast<char*>(slots[i]),
                                 reinterpret_cast<char*>(slots[i]) + chunk_words * 4);
     }
-    if (!write_word(site, 0x94000000u | (branch_to_thunk & 0x03ffffffu))) {
+    const uint32_t site_branch = spec->kind == 5
+                                     ? branch_to_thunk
+                                     : (0x94000000u | (branch_to_thunk & 0x03ffffffu));
+    if (!write_word(site, site_branch)) {
         for (uint32_t i = 0; i < slot_count; ++i)
             call_patch_release_near_entry(reinterpret_cast<uintptr_t>(slots[i]));
         return false;

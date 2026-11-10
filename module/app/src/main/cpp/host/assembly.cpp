@@ -305,8 +305,10 @@ MechanismOutcome dispatch_install(const contracts::ResourceClaim& claim, uintptr
         const InsnPatchSpec spec{site.kind, site.a_reg, site.b_reg, site.d_reg,
                                  site.divisor, site.ret_addr, site.replay_count,
                                  {site.replay_words[0], site.replay_words[1],
-                                  site.replay_words[2], site.replay_words[3]},
-                                 site.replay_bl_target, site.expected_d_reg};
+                                   site.replay_words[2], site.replay_words[3]},
+                                  site.replay_bl_target, site.expected_d_reg,
+                                  reinterpret_cast<uintptr_t>(claim.handler),
+                                  site.expected_word, site.threshold_cap};
         void* backup = nullptr;
         if (!insn_patch_install(site.addr, &spec, &backup))
             return MechanismOutcome{1, "instruction patch rejected"};

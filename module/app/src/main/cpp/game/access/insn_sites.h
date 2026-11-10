@@ -15,6 +15,8 @@ struct InsnSite {
     uint32_t replay_words[4]{};
     uintptr_t replay_bl_target = 0;
     uint32_t expected_d_reg = 0;
+    uint32_t expected_word = 0;
+    uint32_t threshold_cap = 0;
 };
 
 // Audited exact instruction layouts are registered per supported game series.

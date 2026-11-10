@@ -424,6 +424,17 @@ int64_t scale_cooldown_ticks(int64_t ticks, int32_t percent) {
     return scaled < 1 ? 1 : scaled;
 }
 
+int32_t scale_drop_threshold(int32_t threshold, int32_t reroll, int32_t cap) {
+    if (threshold <= 0 || reroll <= 0 || reroll == 1 || cap <= 0) return threshold;
+    const uint64_t multiplier = static_cast<uint64_t>(reroll);
+    const uint64_t factor = multiplier * multiplier;
+    if (static_cast<uint64_t>(threshold) >
+        (static_cast<uint64_t>(cap) - 1u) / factor) {
+        return cap;
+    }
+    return static_cast<int32_t>(static_cast<uint64_t>(threshold) * factor);
+}
+
 int32_t scale_attribute(int32_t raw, int32_t percent) {
     if (raw <= 0 || percent == kRateDefault) return raw;
     if (percent == 0) {

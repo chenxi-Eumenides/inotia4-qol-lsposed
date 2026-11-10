@@ -334,6 +334,15 @@ void test_scaling() {
     assert(scale_cooldown_ticks(165, 0) == 0);
     assert(scale_cooldown_ticks(0, 500) == 0);
     assert(scale_cooldown_ticks(-1, 500) == -1);
+
+    assert(scale_drop_threshold(123, 1, 10000) == 123);
+    assert(scale_drop_threshold(123, 2, 10000) == 492);
+    assert(scale_drop_threshold(500, 3, 10000) == 4500);
+    assert(scale_drop_threshold(9999, 2, 10000) == 10000);
+    assert(scale_drop_threshold(1, 100, 3000) == 3000);
+    assert(scale_drop_threshold(-7, 100, 3000) == -7);
+    assert(scale_drop_threshold(0, INT32_MAX, 10000) == 0);
+    assert(scale_drop_threshold(INT32_MAX, INT32_MAX, 6000) == 6000);
 }
 
 }  // namespace

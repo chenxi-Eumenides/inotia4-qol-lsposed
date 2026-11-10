@@ -54,6 +54,10 @@ inline constexpr const char* kResourceIdMakeItem = "hook:ITEMSYSTEM_MakeItem";
 inline constexpr const char* kResourceIdMakeEquipDetail = "hook:ITEMSYSTEM_MakeEquipDetail";
 inline constexpr const char* kResourceIdGetActionCoolTime = "hook:CHAR_GetActionCoolTime";
 inline constexpr const char* kResourceIdSetActionNextTime = "hook:CHAR_SetActionNextTime";
+inline constexpr const char* kResourceIdDropReroll258 = "patch:CHARSYSTEM_DropItem+0x258";
+inline constexpr const char* kResourceIdDropReroll3B8 = "patch:CHARSYSTEM_DropItem+0x3b8";
+inline constexpr const char* kResourceIdDropReroll400 = "patch:CHARSYSTEM_DropItem+0x400";
+inline constexpr const char* kResourceIdDropReroll460 = "patch:CHARSYSTEM_DropItem+0x460";
 
 // 门禁开关：true = 业务生效；false = wrapper 空转透传（fail-closed）。任意线程可读。
 void set_gate(bool enabled);
@@ -85,6 +89,8 @@ void drop_item_wrapper(void* ch);
 void* make_item_wrapper(int32_t category, int32_t lookup_key, int32_t flag);
 void* make_equip_detail_wrapper(int32_t kind, int32_t min_level, int32_t max_level,
                                 int32_t item, int32_t option);
+// kind5 instruction trampoline ABI: (threshold, max_roll+1) -> adjusted threshold.
+int32_t drop_threshold_patch_helper(int32_t threshold, int32_t threshold_cap);
 
 // 技能冷却倍率：CHAR_GetActionCoolTime 入口 wrapper。
 int32_t char_get_action_cooltime_wrapper(void* ch, void* action);

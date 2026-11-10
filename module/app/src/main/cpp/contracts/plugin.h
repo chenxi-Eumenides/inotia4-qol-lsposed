@@ -28,8 +28,8 @@ enum class ResourceMechanism : uint8_t {
     kCallPatch = 1,
     kPtrSlot = 2,
     kOwnership = 3,
-    // 函数体内指令级替换（mul→int64 trampoline）；handler 为空，由符号登记表提供机制参数；
-    // backup 语义为原指令字（uintptr_t 值）。
+    // 函数体内指令级替换；handler 为空时由符号登记表提供机制参数，带 helper 的指令点
+    // 可由宿主把 handler 地址传入 trampoline；backup 语义为原指令字（uintptr_t 值）。
     kInsnPatch = 4,
 };
 

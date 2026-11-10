@@ -377,6 +377,7 @@ int g_equip_detail_calls = 0;
 int g_free_item_calls = 0;
 FakeDropItem* g_last_item = nullptr;
 void (*g_drop_invoke)() = nullptr;
+int32_t g_drop_threshold_result = 0;
 
 void* next_fake_item(const FakeItemSpec& spec) {
     FakeDropItem& item = g_fake_items[g_fake_item_next++ % 64];
@@ -480,6 +481,7 @@ void reset_counters() {
     g_fake_item_next = 0;
     g_last_item = nullptr;
     g_drop_invoke = nullptr;
+    g_drop_threshold_result = 0;
     g_last_exp = 0;
     g_last_money = 0;
     g_in_flight_enters = 0;
@@ -648,7 +650,7 @@ void test_descriptor() {
     assert(std::strcmp(descriptor.requires[0].id, kCharacterFactsCapabilityId) == 0);
     assert(descriptor.optional_count == 3);
     assert(descriptor.validate_config == &validate_rates_config);
-    assert(descriptor.resources_count == 9);
+    assert(descriptor.resources_count == 13);
     assert(descriptor.provides_count == 0);
     assert(descriptor.provides == nullptr);
     assert(std::strcmp(descriptor.resources[0].id, kResourceIdAddDamage) == 0);
@@ -681,7 +683,33 @@ void test_descriptor() {
     assert(std::strcmp(descriptor.resources[8].symbol, "F_CHAR_SET_ACTION_NEXT_TIME_VMA") == 0);
     assert(descriptor.resources[8].handler ==
            reinterpret_cast<void*>(&char_set_action_next_time_wrapper));
-    for (uint32_t i = 0; i < 9; ++i) {
+    const char* const drop_patch_ids[] = {
+        kResourceIdDropReroll258, kResourceIdDropReroll3B8,
+        kResourceIdDropReroll400, kResourceIdDropReroll460,
+    };
+    const char* const drop_patch_sites[] = {
+        "INSN_DROP_REROLL_258", "INSN_DROP_REROLL_3B8",
+        "INSN_DROP_REROLL_400", "INSN_DROP_REROLL_460",
+    };
+    for (uint32_t i = 0; i < 4; ++i) {
+        const ResourceClaim& claim = descriptor.resources[9 + i];
+        assert(std::strcmp(claim.id, drop_patch_ids[i]) == 0);
+        assert(std::strcmp(claim.symbol, drop_patch_sites[i]) == 0);
+        assert(claim.mechanism == ResourceMechanism::kInsnPatch);
+        assert(claim.requirement == ResourceRequirement::kOptional);
+        assert(claim.failure == ResourceFailure::kFailSoft);
+        assert(claim.handler == reinterpret_cast<void*>(&drop_threshold_patch_helper));
+    }
+    setup_fake_interfaces();
+    const size_t log_count = g_log_messages.size();
+    for (const char* id : drop_patch_ids) {
+        assert(descriptor.on_resource_ready(g_context, id,
+                                            reinterpret_cast<void*>(uintptr_t{0x6b00039f})) == 0);
+    }
+    for (size_t i = log_count; i < g_log_messages.size(); ++i) {
+        assert(g_log_messages[i].find("unknown resource id") == std::string::npos);
+    }
+    for (uint32_t i = 0; i < descriptor.resources_count; ++i) {
         assert(descriptor.resources[i].requirement == ResourceRequirement::kOptional);
         assert(descriptor.resources[i].failure == ResourceFailure::kFailSoft);
     }
@@ -1164,6 +1192,21 @@ void set_drop_rates(int32_t quantity, int32_t quality) {
 void test_drop_quantity_wrapper() {
     install_success();
     const auto& descriptor = plugin_descriptor();
+    descriptor.on_enabled(g_context);
+    g_drop_invoke = nullptr;
+    assert(drop_threshold_patch_helper(500, 10000) == 500);
+
+    set_drop_rates(1, 3);
+    g_drop_threshold_result = 0;
+    g_drop_invoke = [] { g_drop_threshold_result = drop_threshold_patch_helper(500, 10000); };
+    drop_item_wrapper(nullptr);
+    assert(g_drop_threshold_result == 4500);
+    set_drop_rates(1, 1);
+    g_drop_threshold_result = 0;
+    drop_item_wrapper(nullptr);
+    assert(g_drop_threshold_result == 500);
+    descriptor.on_disabled(g_context);
+    assert(drop_threshold_patch_helper(500, 10000) == 500);
     descriptor.on_enabled(g_context);
     g_drop_invoke = nullptr;
 

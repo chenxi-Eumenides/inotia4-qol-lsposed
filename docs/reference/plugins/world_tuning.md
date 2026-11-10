@@ -12,7 +12,7 @@
 - 伤害倍率：缩放玩家侧对怪物造成的伤害；
 - 承伤倍率（配置键 `damage_in`）：缩放玩家侧受到的伤害；
 - 掉落数量倍率（配置键 `drop_quantity`）：整数 0..INT32_MAX，重复整次 `CHARSYSTEM_DropItem` 结算；
-- 掉落重抽次数（配置键 `drop_reroll`）：整数 0..INT32_MAX，槽内造物重掷取同类别最优；
+- 掉落重抽次数（配置键 `drop_reroll`）：整数 0..INT32_MAX；已核验比较点的概率阈值按 K² 放大，槽内造物仍按 K 候选重掷取最优；
 - 药水冷却倍率（配置键 `potion_cooldown`）：缩放玩家药水冷却；
 - 技能冷却倍率（配置键 `skill_cooldown`）：缩放玩家技能冷却。
 
@@ -25,7 +25,7 @@
 - `optional_requires` 3 项：`ui_panels` v1.3、`ui_components` v2.23、`item.use` v1.0；界面工具被停用时倍率仍生效，仅面板不可用；`item.use` 缺失时只影响药水冷却。
 - `ports` 1 项：`QOL_PORT_CHARACTER_EXTRAS` v1.3。
 - `provides` 0；JNI 0、HTTP route/endpoint 0。
-- `resources` 8 个入口 hook（伤害、怪物最大生命、加经验、加金币、掉落结算、MakeItem、MakeEquipDetail、CHAR_GetActionCoolTime），均为 `kOptional` + `kFailSoft`：单个落点不可用只影响对应倍率，不会把插件置 `failed`。其中 `hook:CHAR_AddDamage` 声明 `follow_trampoline=true`：monster v29 的 mod 会在短补丁安装后数秒内把入口写回自己的 `b`，因此伤害落点改为该 `b` 指向的隐藏段目标（见下）。
+- `resources` 9 个入口 hook（含动作冷却最终写入）与 4 个掉落 CMP `kInsnPatch` claims，均为 `kOptional` + `kFailSoft`：单个落点不可用只影响对应行为，不会把插件置 `failed`。`hook:CHAR_AddDamage` / `hook:CHAR_SetActionNextTime` 声明 `follow_trampoline=true`；monster v29 的 mod 会周期性重写伤害入口，冷却入口则落到隐藏段目标。
 - `validate_config` = `validate_rates_config`，只接受 `rates` 键。
 - 唯一 feature 为 entry（`plugins/world_tuning/plugin.cpp`）：
 
@@ -45,12 +45,12 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 
 - 字段：`gold`、`exp`、`enemy_hp`、`damage_out`、`damage_in`、`drop_quantity`、`drop_reroll`、`potion_cooldown`、`skill_cooldown`；缺字段按各行默认值处理（百分比行默认 100，`drop_quantity`/`drop_reroll` 为 1）。
 - 百分比配置范围为 `0..INT32_MAX`（100 = 不修改），掉落数量和重抽范围均为 `0..INT32_MAX`。配置不限制档位上限；面板档位仅为操作预设，手写的合法非档位值原样生效。
-- `gold`、`exp`、`damage_out`、`damage_in` 的 0 表示 ×0；`enemy_hp` 的 0 按 1e-6 缩放，结果下限为 1。`drop_quantity` 或 `drop_reroll` 为 0 时均不掉落；重抽值 1 表示保留首抽、不重掷。
+- `gold`、`exp`、`damage_out`、`damage_in` 的 0 表示 ×0；`enemy_hp` 的 0 按 1e-6 缩放，结果下限为 1。`drop_quantity` 或 `drop_reroll` 为 0 时均不掉落；重抽值 1 不改变阈值，品质候选也只取首抽。
 - 单字段的非整数、溢出或负数只令该字段回退默认值，其余字段继续生效；未知字段忽略。重复字段、JSON 语法错误及结尾多余内容仍拒绝整份配置。
 - 旧配置兼容：历史 `move_speed` 键解析时跳过并忽略；`drop_quality` 作为 `drop_reroll` 别名，显式 `drop_reroll` 优先；重复旧键仍拒绝。
 - 旧配置里的 `player_hp` 键作为未知字段忽略。
 - `validate_config` 仍校验 `rates` 对象结构；越界字段已回退默认值，不会导致 Host 删除 `rates` 键。写入与 Store 加载两条路径均执行该校验（`host/features/controller.cpp`、`host/core_settings_config_store.cpp`）。
-- `drop_quantity` 或 `drop_reroll` 超过 16 次时写一次 warning；不设置硬上限，仍按配置次数执行。
+- `drop_quantity` 或 `drop_reroll` 超过 16 次时写一次 warning；不设置硬上限，仍按配置次数执行。概率阈值乘 K² 使用饱和运算，避免中间乘法溢出。
 - 读取通道：插件经 `QolFeatureApi::read_config` 读自己的 namespace；写入经 `request_set_config`，面板每帧轮询一次 receipt。`/api/config/set` 改同一键，下次打开面板或插件重新启用时生效。
 - 插件未订阅 `runtime_effects`；外部改动不会即时推送。
 
@@ -118,11 +118,14 @@ monster v29 的 `CHAR_AddDamage` 入口是 `b <隐藏段目标>`，且 mod 会�
 - 入口 `CHARSYSTEM_DropItem` 是整次结算（12 个槽逐个独立判定，可同时命中多个槽）。数量倍率 `N` 表示同步调用原函数 `N` 次；`0` 表示直接返回、不掉落。
 - `drop_reroll=0` 同样在入口直接返回、不掉落；该检查先于槽内 maker 调用。
 - 倍率是**相对该变体原版行为**：C18/C18L 自带每击 3 轮槽扫描，`×2` 实际为 6 轮；大修/monster 的阈值补丁同样保留。
+- `drop_reroll=K` 还有独立的概率阈值语义：在 `CHARSYSTEM_DropItem` 函数偏移 `+0x258/+0x3b8/+0x400/+0x460` 四个已核验 MATH_GetRandom 后 CMP 点，roll 原样保留，只在比较前把 threshold 变换为 `min(threshold×K², max_roll+1)`；threshold≤0 与 K=1 原样透传。乘法饱和，概率最多 100%；CMP 原字重放后由原 `b.cond` 消费 NZCV。
+- 四条 CMP claim 只对明确 allowlist 生效：原版 v1.3.2、C18 v586/v514/v520/v603、monster v1.3.2/v23/v29、盗版大修 20260830。原版/C18 roll 上限为 9999，threshold cap 为 10000；monster/大修前三点 roll 上限为 2999（cap 3000），装备点为 5999（cap 6000）。unknown、fantasy 与未核验版本保持原版比较，不猜测地址/上限；每条 claim 独立 fail-soft。
 - monster 变体的入口被改写成 `b 0x1b58f8`，宿主的 `resolve_hook_entry` 会跟随该跳转后再装 hook，专用掉落（id 554/558）仍会执行。
 
 掉落重抽：
 
 - 只在掉落上下文内生效（`DropItem` wrapper 置 thread_local 计数），商店/合成/开箱等同一批 maker 调用不受影响。
+- 上述阈值 K² 与品质重掷 K 是两种同时生效的语义：每个实际掉落槽仍取 K 个候选（首抽 + K−1 次重掷），保留既有类别/稀有度比较；阈值扩张不改 roll，也不新增随机源调用。
 - `MakeItem`（槽内造物）：首抽为**药水（subtype2）/材料（subtype4）**时直接确定；首抽为**卷轴/宝石（subtype3）**或**背包/骰子（subtype5）**时，重掷 `K-1` 次，只接受**同一小类别**的结果并按物品等级取最高；没有同类别结果时保留首抽。徽章/技能书/神灯等 subtype5 其余物品不参与。
 - `MakeEquipDetail`（槽 2 普通装备）：`kind` 与 `[min,max]` 等级段由上游固定，重掷只按**稀有度**取最高；同稀有度保留首抽。不使用装备需求等级作为评分，避免把掉落推向玩家穿不上的装备。
 - 类别读取走 `QolGameHost.item_category`：C18 按 12bit 物品 id（`bits[6..16) | bits[1:0]<<10`）解码，其余变体（含 unknown）按原版 10bit。
@@ -142,20 +145,21 @@ monster v29 的 `CHAR_AddDamage` 入口是 `b <隐藏段目标>`，且 mod 会�
 | 文件 | 职责 |
 |---|---|
 | `plugins/world_tuning/plugin.cpp` / `plugin.h` | descriptor、feature、install/deactivate、面板注册、配置读取 |
-| `plugins/world_tuning/feature.cpp` / `feature.h` | 九个入口 wrapper、`item.use` 回调、阵营判定、HP 账本、掉落上下文与重抽、倍率原子值、配置读写 |
-| `plugins/world_tuning/rates.cpp` / `rates.h` | 档位、字段/文案表、JSON 编解码与校验、缩放函数 |
+| `plugins/world_tuning/feature.cpp` / `feature.h` | 九个入口 wrapper、CMP helper、`item.use` 回调、阵营判定、HP 账本、掉落上下文与重抽、倍率原子值、配置读写 |
+| `plugins/world_tuning/rates.cpp` / `rates.h` | 档位、字段/文案表、JSON 编解码与校验、常规及 K² 阈值缩放 |
 | `plugins/world_tuning/panel.cpp` / `panel.h` | 面板 provider、双列分页布局、箭头/文本绘制、receipt 轮询 |
 | `plugins/world_tuning/settings_contribution.cpp` / `.h` | 旧 catalog contribution 空实现 |
 | `plugins/world_tuning/CMakeLists.txt` | `qol_plugin_world_tuning` 静态库 |
 
 ## 测试
 
-- `world_tuning_rates_tests`（`tests/test_world_tuning_rates.cpp`）：基础/扩展档位、显示文本、JSON 往返、0 值缩放与 1e-6 敌怪血量、配置非负范围、越界值分字段回退、未知字段忽略、重复/语法错误拒绝、旧配置 `move_speed`/`drop_quality` 键兼容、`validate_config`、缩放边界。
-- `world_tuning_feature_tests`（`tests/test_world_tuning_feature.cpp`）：descriptor（7 资源、无 provides）、安装失败出口、门禁时序、伤害/经验/金币/血量 0 倍率、伤害矩阵、HP 缩放与幂等/倍率变更、阵营失败、残留 wrapper、entry 不可用分支；掉落数量 0/1/3/17 次调用与 warning、重抽 0 不掉落、重抽的类别过滤/取最高/释放次数/掉落上下文隔离。
+- `world_tuning_rates_tests`（`tests/test_world_tuning_rates.cpp`）：基础/扩展档位、显示文本、JSON 往返、0 值缩放与 1e-6 敌怪血量、配置非负范围、越界值分字段回退、未知字段忽略、重复/语法错误拒绝、旧配置 `move_speed`/`drop_quality` 键兼容、`validate_config`；另覆盖 K=1、K²、100% cap、负 threshold 与高 K 饱和无溢出。
+- `world_tuning_feature_tests`（`tests/test_world_tuning_feature.cpp`）：descriptor（13 资源、无 provides）、安装失败出口、门禁时序、伤害/经验/金币/血量 0 倍率、伤害矩阵、HP 缩放与幂等/倍率变更、阵营失败、残留 wrapper、entry 不可用分支；掉落数量 0/1/3/17 次调用与 warning、CMP helper 的 gate/TLS 隔离、重抽 0 不掉落、品质候选仍按 K 次调用及既有过滤/取最高/释放规则。
+- `insn_patch_tests`（`tests/test_insn_patch.cpp`）：kind5 trampoline 保存/恢复寄存器与 LR、精确重放 CMP 后用 B 返回原 `b.cond`、expected-word 拒绝与物理还原。
 - `settings_contributions_tests` 编译本插件的空 contribution。
 
 面板绘制/命中与 entry 联动已有真机观察（见下）；未覆盖：真实设备 hook ABI（伤害/敌怪血量实际生效）、资源安装时序。
 
 ## 验证状态
 
-Host 测试与 Debug 构建通过（2026-11-08：0 倍率语义、基础/扩展档位、越界配置分字段回退、未知字段忽略、17 次掉落与 warning 已覆盖）；2026-10-29 真机（C18L v589）已验证：设置页入口 → 面板打开、行箭头显示与点击、数值写入 `config.json`、无 FATAL（该证据时点面板为 7 行且含已移除的 `rates.move_speed` 键）。各倍率的游戏内实际效果尚未复测，按 `docs/refactor/verification.md` 的口径登记为 `PARTIAL / NOT_ACCEPTED`。
+Host 测试与 Debug 构建状态见 `docs/refactor/verification.md` 的 VM-WT-01；2026-10-29 真机（C18L v589）只覆盖设置页/面板/配置持久化，不覆盖新增 CMP ABI。概率阈值与品质候选的游戏内效果尚无新真机证据，按验收口径登记为 `PARTIAL / NOT_ACCEPTED`。
