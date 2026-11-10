@@ -25,9 +25,12 @@ namespace {
 
 constexpr int64_t kBasePanelW = 960;
 constexpr int64_t kBasePanelH = 640;
-constexpr int64_t kHeaderY = 100;
-constexpr int64_t kSectionY = 148;
-constexpr int64_t kRowsTopY = 190;
+constexpr int64_t kTitleY = 72;
+constexpr int64_t kFrameX = 40;
+constexpr int64_t kFrameY = 108;
+constexpr int64_t kFrameW = 880;
+constexpr int64_t kFrameH = 436;
+constexpr int64_t kRowsTopY = 132;
 constexpr int64_t kRowPitch = 32;
 // 双列：左列标签 90 / 数值右缘 430；右列标签 500 / 数值右缘 840（均设计区局部坐标）。
 constexpr int64_t kLeftLabelX = 90;
@@ -35,7 +38,7 @@ constexpr int64_t kLeftValueRightX = 430;
 constexpr int64_t kRightLabelX = 500;
 constexpr int64_t kRightValueRightX = 840;
 // 分页行：左箭头 / 页码 / 右箭头同一行，不额外占一行。
-constexpr int64_t kPageRowY = 556;
+constexpr int64_t kPageRowY = 552;
 constexpr int64_t kPageTextY = kPageRowY + 16;
 constexpr int64_t kPageArrowSize = 56;
 constexpr int64_t kPageArrowCenterOffset = 120;
@@ -44,7 +47,6 @@ constexpr int32_t kBodyFont = 1;
 constexpr size_t kValueBufferSize = 40;
 constexpr size_t kLabelBufferSize = 24;
 
-constexpr const char* kTitleText = "人物属性";
 constexpr const char* kBlockedComponents = "ui components unavailable";
 constexpr const char* kBlockedDisabled = "character overview disabled";
 
@@ -308,14 +310,32 @@ void draw_column(const ColumnSpec& column, int64_t label_x, int64_t value_right_
 }
 
 void draw_page() {
-    // draw_control_text 的偏移相对根控件原点（= 屏幕 inset 原点），传入设计区局部坐标。
-    draw_text(kTitleText, kDesignCenterX, static_cast<int32_t>(kHeaderY),
-              contracts::ui_theme::kTextGold, 2, kTitleFont);
+    if (g_components == nullptr) return;
+
+    // 方框：标题底 72+28+8=108；60% 黑 + 装饰角。
+    if (g_components->draw_container_styled != nullptr) {
+        const contracts::UiContainerStyleDesc style{
+            {kFrameX, kFrameY, kFrameW, kFrameH}, contracts::ui_theme::kPanelBgRgb565,
+            contracts::ui_theme::kPanelAlpha, 1};
+        (void)g_components->draw_container_styled(&style);
+    }
+    // 竖分隔线：两列之间，方框上下各内缩 16（124..528）。
+    if (g_components->draw_rect != nullptr) {
+        contracts::UiShapeDesc separator{};
+        separator.rect = {465, 124, 2, 528 - 124};
+        separator.fill_rgb565 = contracts::ui_theme::kFrameGoldRgb565;
+        separator.border_rgb565 = 0;
+        separator.alpha = 100;
+        separator.border_width = 0;
+        separator.radius = 0;
+        (void)g_components->draw_rect(&separator);
+    }
 
     const PageSpec* page = nullptr;
     if (!page_at(g_page, &page) || page == nullptr) return;
-    draw_text(page->title, kDesignCenterX, static_cast<int32_t>(kSectionY),
-              contracts::ui_theme::kTextNormal, 2, kBodyFont);
+    // 页面标题（PageSpec::title）居中，字体 2。
+    draw_text(page->title, kDesignCenterX, static_cast<int32_t>(kTitleY),
+              contracts::ui_theme::kTextGold, 2, kTitleFont);
 
     draw_column(page->left, kLeftLabelX, kLeftValueRightX);
     draw_column(page->right, kRightLabelX, kRightValueRightX);

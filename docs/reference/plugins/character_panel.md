@@ -91,8 +91,13 @@
 `overview.cpp` 向 `sdk->panels.register_provider` 注册 `PanelProviderSpec{panel_id="character_panel.overview", owner="character_panel", open, close, active, block_reason, callbacks}`，callbacks 非空（enter/process/f3/f4/event）。PopupState 占用、入栈、`set_process_info`、出栈与 popup 还原由 `core.custom_ui` 的 PopupHost 托管。
 
 - 打开条件：`ui_components` 能力就绪且 `character_panel.overview` 开启；`block_reason` 返回 `ui components unavailable` / `character overview disabled`。
-- 布局：根面板 rect 为 `{inset_x, inset_y, 960, 640}`（屏幕 inset 原点 + 设计区尺寸），所有子控件与文本一律使用 960×640 **设计区局部坐标**。双列：左列标签 `x=90`、数值右对齐 `x=430`；右列标签 `x=500`、数值右对齐 `x=840`；行区 `y=190..534`（11 行 × 32），标题/分区标题在 `y=100/148`。
-- 分页行：左箭头、页码、右箭头同一行（箭头 rect `y=556`、56×56，中心 `x=480±120`；页码 `y=572` 居中），不再单独占一行。
+- 布局：根面板 rect 为 `{inset_x, inset_y, 960, 640}`（屏幕 inset 原点 + 设计区尺寸），所有子控件与文本一律使用 960×640 **设计区局部坐标**。
+  - 标题：直接使用页面标题（`主属性与面板属性` / `角色属性` / `全队共享`），居中 `x=480`、`y=72`、金色 `kTextGold`、字体 2；无额外「人物属性」总标题。
+  - 方框：`draw_container_styled({40,108,880,436}, 黑色, alpha=60, ornamented=1)`，带装饰角、60% 黑；标题底（72+28）到方框顶 8px。
+  - 方框内文字：正文 font 1；标签 `kTextNormal`、数值 `kTextBody` 右对齐；左列标签 `x=90`、数值右缘 `x=430`；右列标签 `x=500`、数值右缘 `x=840`；行起点 `y=132`、行距 32（11 行末行 452，不超出方框底 544）。
+  - 两列竖线：`draw_rect`，`x=465`、`y=124..528`、宽 2、颜色 `kFrameGoldRgb565`、alpha=100、无边框/圆角。
+  - 分页：方框底 544 → 箭头 `y=552`（间隔 8px）、尺寸 56、中心 `x=480±120`；页码 `y=568` 居中、`kTextDisabled`、字体 1。
+- 绘制接口：全部经 `ui_components`（`draw_container_styled` / `draw_rect` / `draw_control_text` / `arrow_button_*` / `nav_button_*`）；仅 `sdk->ui->begin_frame/end_frame` 属帧封装，不使用 `fill_rect` / `draw_string_with_font` 等低层绘制原语。
 - 导航盒：局部坐标 `{kNavBoxAbsX - root_x, kNavBoxAbsY - root_y, kNavBoxW, kNavBoxH}`，绝对位置为整屏左上角 `(8,8)`，与 settings 页口径一致；横屏/平板黑边不会把按钮或文本挤出可视区。
 - 返回语义：`kUiNavButtonAuto` 在 `ui_panels_depth() > 1` **或** PopupHost 存在原生面板基线时显示返回箭头；本面板从原版人物面板之上打开（模块栈深 1 + 原生基线），因此显示返回箭头，点击走 `ui_panels_request_back`；无原生基线时才显示关闭 X。
 - 页面：`panel_create` 根 + 标准导航盒（`ui_theme::kNavBox*`）+ 左右箭头按钮 + `draw_control_text` 文本；关闭走导航按钮，插件不直接 `provider.close()`、不调 `set_process_info`。
@@ -218,7 +223,7 @@ Host/构建：
 
 1. 点击**右侧战斗属性框内部文本区**命中（含屏幕 inset 与四条边界）；左侧 5 维框、队伍页签、关闭 X、属性分配入口、+/−、重置均不触发；按下点在外、抬起在内不触发。
 2. 总览打开/关闭链路：点击 → 下一帧打开 → 导航按钮（返回箭头）→ 回到原版面板；关闭期间原版面板不绘制、不接收事件。
-3. 12 页双列翻页与首尾箭头置灰；每页左右各最多 11 行渲染完整，右列数值右对齐（430/840）不溢出、不与边框或彼此重叠；P11 末页 7 行、P12 全队页 6/6；翻页不重建控件。
+3. 12 页双列翻页与首尾箭头置灰；每页左右各最多 11 行渲染完整，右列数值右对齐（430/840）不溢出、不与边框或彼此重叠；P11 末页 7 行、P12 全队页 6/6；翻页不重建控件；方框装饰角、60% 黑底、两列竖线（x=465,124..528）实际渲染；标题底→方框顶、方框底→分页行均为 8px；长页面标题（`主属性与面板属性`）不溢出方框宽度。
 4. 角色跟随：切换队伍页签后 `menu_character` 变化驱动重开取新角色；`party_index` 失败时指针比对回退；`character.attributes.snapshot` 的 115 槽/`attr_valid` 生效、未知名称显示 `attr<id>`、attr30/31 不触发 HP/MP 钳制、单行失败 `--`。
 5. 第 12 页实际值：11 个 act（130/138/142/122/126/134/133/123/131/135/141）与技能已学/未学状态一一对应、未学显示「未获得」、读取失败显示 `--`；全队掉宝倍率 `(1000+Σ attr92)/1000` 与括号内 sum 一致（空槽跳过、非空队员失败显示 `--`）；双列 6/6 渲染与右对齐不溢出。
 6. ownership 资源 live/释放、插件停用后 entry hook 与 PopupState 条目归还、`overview` 开关关闭后不再打开。
