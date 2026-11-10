@@ -328,8 +328,19 @@ uint32_t FeatureReconciler::step() {
             it = retry_.erase(it);
             continue;
         }
+        // 已激活成功但表项残留：直接清理，避免拖住空闲早退。
+        if (feature_registry_active(it->first.c_str())) {
+            it = retry_.erase(it);
+            continue;
+        }
+        // 事务清理/停用仍在途时不能尝试激活；此时候选只顺延，不消耗重试预算。
+        if (feature_registry_busy(it->first.c_str())) {
+            it->second.next_step = step_clock_ + 5;
+            ++it;
+            continue;
+        }
+        // 只解除同批去重，让本次激活循环尝试；预算在真正尝试失败后扣除。
         attempted_.erase(it->first);
-        --it->second.remaining;
         it->second.next_step = step_clock_ + 5;
         ++it;
     }
@@ -346,11 +357,20 @@ uint32_t FeatureReconciler::step() {
             retry_.erase(id);
             ++advanced;
         } else if (feature_registry_last_failure_code(id) == kQolErrNotReady) {
-            // 首次瞬态失败：最多再试 3 次；已有预算不因重复失败而重置。
-            const auto inserted = retry_.try_emplace(id);
-            if (inserted.second) {
-                inserted.first->second.remaining = 3;
-                inserted.first->second.next_step = step_clock_ + 5;
+            // 首次瞬态失败：最多再试 3 次；已有预算不因重复失败而重置，
+            // 每次真正尝试失败才扣 1 次，预算耗尽后停止重试。
+            auto retry_it = retry_.find(id);
+            if (retry_it == retry_.end()) {
+                retry_it = retry_.emplace(id, RetryState{}).first;
+                retry_it->second.remaining = 3;
+                retry_it->second.next_step = step_clock_ + 5;
+            } else if (retry_it->second.remaining > 0) {
+                --retry_it->second.remaining;
+                if (retry_it->second.remaining == 0) {
+                    retry_.erase(retry_it);
+                } else {
+                    retry_it->second.next_step = step_clock_ + 5;
+                }
             }
         } else {
             retry_.erase(id);
