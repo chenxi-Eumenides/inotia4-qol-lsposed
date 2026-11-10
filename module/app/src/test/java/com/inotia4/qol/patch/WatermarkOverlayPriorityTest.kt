@@ -22,38 +22,28 @@ object WatermarkOverlayPriorityTest {
         check(firstActiveWatermarkRuleIndex(listOf(false, true)) == 1)
         check(firstActiveWatermarkRuleIndex(listOf(false, false)) == -1)
 
+        fun direction(
+            damageIn: Int = 100,
+            enemyHp: Int = 100,
+            damageOut: Int = 100,
+            potionCooldown: Int = 100,
+            skillCooldown: Int = 100,
+        ): WorldTuningWatermarkDirection = worldTuningWatermarkDirection(
+            WorldTuningRates(damageIn, enemyHp, damageOut, potionCooldown, skillCooldown)
+        )
+
         check(worldTuningWatermarkDirection(null) == WorldTuningWatermarkDirection.NEUTRAL)
-        check(
-            worldTuningWatermarkDirection(WorldTuningRates(damageIn = 100, enemyHp = 100, damageOut = 100)) ==
-                WorldTuningWatermarkDirection.NEUTRAL
-        )
-        check(
-            worldTuningWatermarkDirection(WorldTuningRates(damageIn = 50, enemyHp = 100, damageOut = 100)) ==
-                WorldTuningWatermarkDirection.EASY
-        )
-        check(
-            worldTuningWatermarkDirection(WorldTuningRates(damageIn = 100, enemyHp = 50, damageOut = 100)) ==
-                WorldTuningWatermarkDirection.EASY
-        )
-        check(
-            worldTuningWatermarkDirection(WorldTuningRates(damageIn = 100, enemyHp = 100, damageOut = 150)) ==
-                WorldTuningWatermarkDirection.EASY
-        )
-        check(
-            worldTuningWatermarkDirection(WorldTuningRates(damageIn = 150, enemyHp = 100, damageOut = 100)) ==
-                WorldTuningWatermarkDirection.HARD
-        )
-        check(
-            worldTuningWatermarkDirection(WorldTuningRates(damageIn = 100, enemyHp = 150, damageOut = 100)) ==
-                WorldTuningWatermarkDirection.HARD
-        )
-        check(
-            worldTuningWatermarkDirection(WorldTuningRates(damageIn = 100, enemyHp = 100, damageOut = 50)) ==
-                WorldTuningWatermarkDirection.HARD
-        )
-        check(
-            worldTuningWatermarkDirection(WorldTuningRates(damageIn = 50, enemyHp = 100, damageOut = 50)) ==
-                WorldTuningWatermarkDirection.EASY
-        )
+        check(direction() == WorldTuningWatermarkDirection.NEUTRAL)
+        check(direction(damageIn = 50) == WorldTuningWatermarkDirection.EASY)
+        check(direction(enemyHp = 50) == WorldTuningWatermarkDirection.EASY)
+        check(direction(damageOut = 150) == WorldTuningWatermarkDirection.EASY)
+        check(direction(potionCooldown = 50) == WorldTuningWatermarkDirection.EASY)
+        check(direction(skillCooldown = 50) == WorldTuningWatermarkDirection.EASY)
+        check(direction(damageIn = 150) == WorldTuningWatermarkDirection.HARD)
+        check(direction(enemyHp = 150) == WorldTuningWatermarkDirection.HARD)
+        check(direction(damageOut = 50) == WorldTuningWatermarkDirection.HARD)
+        check(direction(potionCooldown = 150) == WorldTuningWatermarkDirection.HARD)
+        check(direction(skillCooldown = 150) == WorldTuningWatermarkDirection.HARD)
+        check(direction(damageIn = 50, damageOut = 50) == WorldTuningWatermarkDirection.EASY)
     }
 }

@@ -38,23 +38,27 @@ internal fun moduleHealthWatermarkText(visible: Boolean, unavailableNames: List<
         "qol"
     }
 
-/** 世界调整中参与水印判定的三项倍率；100 为不修改。 */
+/** 世界调整中参与水印判定的倍率；100 为不修改。 */
 internal data class WorldTuningRates(
     val damageIn: Int,
     val enemyHp: Int,
     val damageOut: Int,
+    val potionCooldown: Int,
+    val skillCooldown: Int,
 )
 
 internal enum class WorldTuningWatermarkDirection { NEUTRAL, EASY, HARD }
 
 /**
- * 承伤倍率与敌怪血量越低越简单，伤害倍率越高越简单。
- * 任意一项偏简单即取绿色；否则任意一项偏难取紫色；三项均为 100 时为中性。
+ * 承伤倍率、敌怪血量与两项冷却倍率越低越简单，伤害倍率越高越简单。
+ * 任意一项偏简单即取绿色；否则任意一项偏难取紫色；全部为 100 时为中性。
  */
 internal fun worldTuningWatermarkDirection(rates: WorldTuningRates?): WorldTuningWatermarkDirection {
     if (rates == null) return WorldTuningWatermarkDirection.NEUTRAL
-    val easier = rates.damageIn < 100 || rates.enemyHp < 100 || rates.damageOut > 100
-    val harder = rates.damageIn > 100 || rates.enemyHp > 100 || rates.damageOut < 100
+    val easier = rates.damageIn < 100 || rates.enemyHp < 100 || rates.damageOut > 100 ||
+        rates.potionCooldown < 100 || rates.skillCooldown < 100
+    val harder = rates.damageIn > 100 || rates.enemyHp > 100 || rates.damageOut < 100 ||
+        rates.potionCooldown > 100 || rates.skillCooldown > 100
     return when {
         easier -> WorldTuningWatermarkDirection.EASY
         harder -> WorldTuningWatermarkDirection.HARD

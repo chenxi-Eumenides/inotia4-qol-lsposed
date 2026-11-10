@@ -29,6 +29,8 @@ object ConfigPlatformEffects {
                 damageIn = rates.optInt("damage_in", 100),
                 enemyHp = rates.optInt("enemy_hp", 100),
                 damageOut = rates.optInt("damage_out", 100),
+                potionCooldown = rates.optInt("potion_cooldown", 100),
+                skillCooldown = rates.optInt("skill_cooldown", 100),
             )
         } catch (t: Throwable) {
             LogFile.error(LogDomain.CONFIG, "world_tuning runtime effect config parse failed", t)

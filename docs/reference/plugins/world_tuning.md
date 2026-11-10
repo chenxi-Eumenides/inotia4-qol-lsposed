@@ -69,12 +69,12 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 
 ## QOL 水印
 
-Kotlin 侧 `PluginRuntimeEffects` 订阅 `world_tuning` 的 Host runtime effect，从 `config_json` 的 `rates` 读取三项参与难度判定的倍率（缺字段按 100）：
+Kotlin 侧 `PluginRuntimeEffects` 订阅 `world_tuning` 的 Host runtime effect，从 `config_json` 的 `rates` 读取五项参与难度判定的倍率（缺字段按 100）：
 
-- 偏简单：`damage_in < 100` 或 `enemy_hp < 100` 或 `damage_out > 100`；
-- 偏困难：`damage_in > 100` 或 `enemy_hp > 100` 或 `damage_out < 100`。
+- 偏简单：`damage_in < 100` 或 `enemy_hp < 100` 或 `damage_out > 100` 或 `potion_cooldown < 100` 或 `skill_cooldown < 100`；
+- 偏困难：`damage_in > 100` 或 `enemy_hp > 100` 或 `damage_out < 100` 或 `potion_cooldown > 100` 或 `skill_cooldown > 100`。
 
-插件 desired 启用时，任意一项偏简单显示绿色 `0xCC00FF00`；否则任意一项偏难显示紫色 `0xCCAA00FF`；三项均为 100 或插件未启用时保持默认半透明白色。模块健康异常（红色）优先于以上颜色。其余倍率（金币/经验/掉落/冷却）不参与水印判定。面板写入与 `/api/config/set` 都经同一 runtime effect 刷新水印。
+承伤倍率、敌怪血量与两项冷却倍率越低越简单，伤害倍率越高越简单。插件 desired 启用时，任意一项偏简单显示绿色 `0xCC00FF00`；否则任意一项偏难显示紫色 `0xCCAA00FF`；五项均为 100 或插件未启用时保持默认半透明白色。模块健康异常（红色）优先于以上颜色。其余倍率（金币/经验/掉落数量/掉落重抽）不参与水印判定。面板写入与 `/api/config/set` 都经同一 runtime effect 刷新水印。
 
 ## 游戏内行为
 
