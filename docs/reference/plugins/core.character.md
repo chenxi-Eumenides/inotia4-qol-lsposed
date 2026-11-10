@@ -7,13 +7,13 @@
 
 ## 1. 定位
 
-`core.character` 是角色、队伍、佣兵、战斗与成长领域的官方 owner/provider：对外发布角色事实与状态投影两类
+`core.character` 是角色、队伍、佣兵、战斗与成长领域的官方 owner/provider：对外发布角色事实、状态投影与角色属性三类
 capability，并在本插件内实现 35 条 HTTP 端点的 native handler。
 
 | 维度 | 事实 |
 |---|---|
 | 插件形态 | 官方核心 provider（`core.<domain>`），可启停、可被依赖、读写一体 |
-| 对外面 | capability `character.facts` 1.0、`character.state` 1.0；35 条 handler 路由 + 6 条元数据路由 |
+| 对外面 | capability `character.facts` 1.0、`character.state` 2.0、`character.attributes` 1.0；35 条 handler 路由 + 6 条元数据路由 |
 | 进程内位置 | `module/app/src/main/cpp/plugins/core.character/`，静态库 `qol_plugin_core.character` |
 | 线程模型 | 查询读不可变快照（HTTP 线程）；写命令投递到游戏主线程执行并回写票据 |
 | 非目标 | HTTP 监听/通用传输（Kotlin host + `core.api`）、物品域（`core.item`）、世界/移动（`core.world`）、静态表（`core.data`）、游戏低层地址与 ABI（Game Adapter / Game Host） |
@@ -47,7 +47,7 @@ capability，并在本插件内实现 35 条 HTTP 端点的 native handler。
 | `QOL_PORT_CHARACTER` | 1.0 | `game/adapter_ports/character_port.cpp` | 角色对象 `type`、`is_active_player_group`（事实面） |
 | `QOL_PORT_CHARACTER_HTTP` | 1.0 | `game/adapter_ports/character_http_port.cpp` | 按 kind 生成 player/party/skills/mercenaries JSON（仅主线程帧任务调用） |
 | `QOL_PORT_CHARACTER_WRITE_OPS` | 1.0 | `game/adapter_ports/character_write_ops_port.cpp` | 20 个 typed 低层写原语，失败回填 `op_err` 文案 |
-| `QOL_PORT_CHARACTER_STATE` | 1.0 | `host/character_state_port.cpp` | 固定宽度 POD 状态：party / player / skills |
+| `QOL_PORT_CHARACTER_STATE` | 1.2 | `host/character_state_port.cpp` | 固定宽度 POD 状态：party / player / skills + attributes/derived/attr/main_stat/present（v1.1/v1.2 尾追加） |
 
 - 3 个可选能力依赖：
   - `item.state`：`withdraw` 的装备入库差量需要富化物品数据；能力缺失只省略 `inventory` 段，不阻止插件启用。
@@ -61,15 +61,24 @@ capability，并在本插件内实现 35 条 HTTP 端点的 native handler。
 | Capability | 版本 | 入口 | 语义 |
 |---|---|---|---|
 | `character.facts` | 1.0 | `CharacterFactsApi.type` / `is_active_player_group` | 对调用方持有的角色对象问询类型与「是否当前出战组」；插件只把指针转发给端口，不保存、不跨帧 |
-| `character.state` | 1.0 | `CharacterStateApi.write_state_json(kind, out, capacity, out_size)` | 由 owner 组装的版本化 JSON 投影：`kParty` / `kPlayer` / `kSkills` |
+| `character.state` | 2.0 | `CharacterStateApi.write_state_json(kind, out, capacity, out_size)` | 由 owner 组装的版本化 JSON 投影：`kParty` / `kPlayer` / `kSkills`；v2.0 删除 party 成员的 `stats[32]`（破坏性变更） |
+| `character.attributes` | 1.0 | `CharacterAttributesApi.present/attr/main_stat/snapshot/derived` | 按 `QolCharacterRef{kind: party 0..2 \| mercenary 0..20}` 只读角色属性：115 槽（id 0..114）、主属性、面板派生值 |
 
-`character.state` 的契约约束（`contracts/character_state.h`）：
+`character.state` 的契约约束（`contracts/character_state.h`，v2.0）：
 
 - JSON 由 owner 组装，跨领域消费者只能过滤或重排，不得重组字段。
 - 缓冲由调用方提供；容量不足返回 `kQolErrBlocked`（`character state buffer too small`）。
 - 未进入游戏时返回 `{"error":"not in game"}` 作为正常结果体，而不是错误码。
 - `party` 为 3 槽数组（空槽 `null`），`skills` 为 3 槽数组，`player` 为
   `money/map_id/x/y/active_quest/leader_slot/party_count` 对象；字段级 schema 见 API 参考 §4。
+- v2.0 起 party 成员不再含 `stats[32]`；attr 0..114 改由 `character.attributes` 读取。
+
+`character.attributes` 的语义（`contracts/character_attributes.h`）：
+
+- 只读、仅游戏主线程；非法 ref/参数返回 InvalidArgument，无角色返回 NotFound，非主线程返回 Blocked。
+- `present` 只查活 CHAR，不物化；`snapshot` 含 `main_stats[5]`、`attrs[115]`、`attr_valid[115]`。
+- mercenary 无活 CHAR 时读取会自动调用 `SAVE_LoadCharacterEx(当前存档槽, merc_slot)` 物化：会占用 CHAR 池位、结算待结算经验，属有副作用的读取；`present` 不走该路径。
+- attr30/31 直读 `C_MAX_HP`/`C_MAX_MP` 缓存，不调用 `CHAR_GetAttr`（避免 HP/MP 钳制写回）。
 
 **消费者**
 
@@ -79,6 +88,7 @@ capability，并在本插件内实现 35 条 HTTP 端点的 native handler。
 | `world_tuning` | `requires character.facts` | 判定角色类型/出战组 |
 | `special_equip` | `optional_requires character.facts` | 装备逻辑的角色判定，缺失时降级 |
 | `core.item` | `optional_requires character.state` | 装备族写结果的 `player.main_stats` 回读（`http/write_results.cpp`） |
+| `character_panel` | `requires character.attributes` | 人物属性页/总览读取主属性、attr 0..114 与派生值 |
 | host 装配（`host/assembly.cpp`） | 运行时 `require` | legacy 角色 JSON 构造；插件撤销后 require 返回 nullptr 并逐字回退 legacy |
 
 ## 4. HTTP 面
@@ -90,7 +100,7 @@ capability，并在本插件内实现 35 条 HTTP 端点的 native handler。
 | 组 | 路由 |
 |---|---|
 | 佣兵 | `/api/character/mercenary`、`/mercenary/list`、`/mercenary/{slot}` |
-| 队伍 | `/api/character/party`、`/party/count`、`/leader`、`/party/{slot}`、`/party/{slot}/id`、`/api/character/party/{slot}/name`、`/party/{slot}/level`、`/party/{slot}/status`、`/party/{slot}/stats`、`/party/{slot}/equipment`、`/party/{slot}/equipment/{equip_slot}`、`/party/{slot}/skills` |
+| 队伍 | `/api/character/party`、`/party/count`、`/leader`、`/party/{slot}`、`/party/{slot}/id`、`/api/character/party/{slot}/name`、`/party/{slot}/level`、`/party/{slot}/status`、`/party/{slot}/attributes`、`/party/{slot}/equipment`、`/party/{slot}/equipment/{equip_slot}`、`/party/{slot}/skills` |
 
 **POST（20 条，command handler）**
 
@@ -267,7 +277,7 @@ Feature：`core.character.provider`，`default=1`，Hidden，toggle，回调为�
 |---|---|---|
 | 路由声明 | `routes.inc` | 41 条 owner/门控/lease 事实 |
 | 路由绑定与初始化 | `plugin.cpp` `kRoutes` / `initialize_http_routes` | 35 条绑定、三源一致性校验、fail-closed |
-| 能力实现 | `plugin.cpp` `kCharacterFactsApi` / `write_character_state_json` | facts 转发 + state JSON 投影 |
+| 能力实现 | `plugin.cpp` `kCharacterFactsApi` / `write_character_state_json` / `kCharacterAttributesApi` | facts 转发 + state JSON 投影 + attributes 端口转发 |
 | 快照 | `plugin.cpp` `CharacterSnapshot` / `update_snapshot` / `frame_tick`；`snapshot_sdk.h` | 三态快照、15 帧节拍、RAII 只读视图 |
 | JSON 切片 | `json_slice.h/.cpp` | 顶层键/下标切片，原样字节 |
 | body 解析 | `plugin.cpp` `char_json_*` / `char_parse_points` | 迁移前 `JSONObject.optXxx` 语义 |
@@ -275,7 +285,7 @@ Feature：`core.character.provider`，`default=1`，Hidden，toggle，回调为�
 | 写 handler | `plugin.cpp` `char_write_command` | 20 条 POST 的校验与 typed 投递 |
 | 结果处理器 | `plugin.cpp` `char_write_result` | 主线程原语分派、判定与结果瘦身 |
 | 生命周期/descriptor | `plugin.cpp` `plugin_install` … `plugin_descriptor` | 端口绑定、快照与结果处理器注册、feature |
-| 契约 | `contracts/character_facts.h`、`character_state.h`、`game_ports/character_*.h` | 能力与端口 ABI |
+| 契约 | `contracts/character_facts.h`、`character_state.h`、`character_attributes.h`、`game_ports/character_*.h` | 能力与端口 ABI |
 | Kotlin 入口 | `CharacterController.kt`、`PartyController.kt`、`CombatController.kt`、`OpController.kt` | 路由声明与原生 dispatch 转发 |
 
 ## 10. 验证与证据

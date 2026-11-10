@@ -555,6 +555,7 @@ constexpr uintptr_t F_SAVE_CREATE_SAVE_SLOT_VMA = 0x129b38;    // void (void) �
 constexpr uintptr_t F_SAVE_DESTROY_SAVE_SLOT_VMA = 0x128a08;   // void (void) 循环 SAVESLOT_Unload 释放三槽已挂接角色对象并复位槽结构（不触碰存档文件）
 constexpr uintptr_t F_SAVE_LOAD_SAVE_SLOT_VMA = 0x1298dc;      // int (int32_t, void*) 按槽加载单个存档到 SAVESLOT 结构
 constexpr uintptr_t F_SAVE_LOAD_CHARACTER_ALL_VMA = 0x129c98;  // void () 读档挂接全部角色（SAVE_LoadFile 成功后调用；内部唯一 bl SAVE_Save@0x129f24 是读档期原版 backup 调用点，地址不落代码，绑定期扫描建立）
+constexpr uintptr_t F_SAVE_LOAD_CHARACTER_EX_VMA = 0x129c40;  // void* (int32_t saveSlot, int32_t mercSlot) SAVE_LoadCharacterEx：返回 CHAR* 或 NULL；先按 mercSlot 查活 CHAR，未命中才读存档
 constexpr size_t F_SAVE_LOAD_CHARACTER_ALL_SPAN = 0x32c;       // SAVE_LoadCharacterAll 函数字节长度（静态反汇编）；loading 旁路 BL 扫描窗口，窗口内命中不唯一即拒绝建立
 constexpr uintptr_t F_SAVESLOT_GET_HERO_VMA = 0x14cda4;       // void* (void*) 取主控角色指针（[slot+0x1c] 索引 → [slot+0x4+idx*8]）
 constexpr uintptr_t F_STATE_HIDE_MODULE_MAIN_MENU_VMA = 0x152ff4;  // void () 主菜单模块隐藏桩（空实现）；同段 +0x30 = 主菜单「开始游戏」按钮 ExecuteProc（未导出局部函数，STATE_EnterMainMenu 0x151fac 经 ControlButton_Create 传入），+0x48 = 其 isAuthUser() 判定分支（cbz w0 → Hive 登录询问弹窗）

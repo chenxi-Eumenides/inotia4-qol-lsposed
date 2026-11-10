@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "contracts/character_facts.h"
+#include "contracts/character_attributes.h"
 #include "contracts/character_state.h"
 #include "contracts/item_state.h"
 #include "contracts/game_ports/character_http_port.h"
@@ -51,7 +52,7 @@ enum class Query : uint8_t {
     kPartyMemberName,
     kPartyMemberLevel,
     kPartyMemberStatus,
-    kPartyMemberStats,
+    kPartyMemberAttributes,
     kPartyMemberEquipment,
     kPartyMemberEquip,
     kPartyMemberSkills,
@@ -83,7 +84,7 @@ CharacterRoute kRoutes[] = {
     {contracts::HttpMethod::kGet, "/api/character/party/{slot}/name", Query::kPartyMemberName},
     {contracts::HttpMethod::kGet, "/api/character/party/{slot}/level", Query::kPartyMemberLevel},
     {contracts::HttpMethod::kGet, "/api/character/party/{slot}/status", Query::kPartyMemberStatus},
-    {contracts::HttpMethod::kGet, "/api/character/party/{slot}/stats", Query::kPartyMemberStats},
+    {contracts::HttpMethod::kGet, "/api/character/party/{slot}/attributes", Query::kPartyMemberAttributes},
     {contracts::HttpMethod::kGet, "/api/character/party/{slot}/equipment", Query::kPartyMemberEquipment},
     {contracts::HttpMethod::kGet, "/api/character/party/{slot}/equipment/{equip_slot}", Query::kPartyMemberEquip},
     {contracts::HttpMethod::kGet, "/api/character/party/{slot}/skills", Query::kPartyMemberSkills},
@@ -201,9 +202,64 @@ QolResult write_character_state_json(contracts::QolCharacterStateKind kind, char
                                      uint32_t capacity, uint32_t* out_size);
 const contracts::CharacterStateApi kCharacterStateApi{&write_character_state_json};
 
+// character.attributes：全部转发到 QOL_PORT_CHARACTER_STATE；端口未就绪返回 NotReady。
+QolResult character_attributes_present(contracts::QolCharacterRef ref, int32_t* out_present) {
+    if (g_character_state_port == nullptr ||
+        g_character_state_port->read.present == nullptr) {
+        return not_ready();
+    }
+    return g_character_state_port->read.present(ref, out_present);
+}
+
+QolResult character_attributes_attr(contracts::QolCharacterRef ref, int32_t attr_id,
+                                    int32_t* out_value) {
+    if (g_character_state_port == nullptr || g_character_state_port->read.attr == nullptr) {
+        return not_ready();
+    }
+    return g_character_state_port->read.attr(ref, attr_id, out_value);
+}
+
+QolResult character_attributes_main_stat(contracts::QolCharacterRef ref, int32_t index,
+                                         int32_t* out_value) {
+    if (g_character_state_port == nullptr ||
+        g_character_state_port->read.main_stat == nullptr) {
+        return not_ready();
+    }
+    return g_character_state_port->read.main_stat(ref, index, out_value);
+}
+
+QolResult character_attributes_snapshot(contracts::QolCharacterRef ref,
+                                        contracts::QolCharacterAttributeSnapshot* out) {
+    if (g_character_state_port == nullptr ||
+        g_character_state_port->read.attributes == nullptr) {
+        return not_ready();
+    }
+    return g_character_state_port->read.attributes(ref, out);
+}
+
+QolResult character_attributes_derived(contracts::QolCharacterRef ref, int32_t kind,
+                                       int32_t* out_value) {
+    if (g_character_state_port == nullptr ||
+        g_character_state_port->read.derived == nullptr) {
+        return not_ready();
+    }
+    return g_character_state_port->read.derived(ref, kind, out_value);
+}
+
+const contracts::CharacterAttributesApi kCharacterAttributesApi{
+    sizeof(contracts::CharacterAttributesApi),
+    &character_attributes_present,
+    &character_attributes_attr,
+    &character_attributes_main_stat,
+    &character_attributes_snapshot,
+    &character_attributes_derived,
+};
+
 const contracts::CapabilityProvisionRef kProvides[] = {
     {contracts::kCharacterFactsCapabilityId, contracts::kCharacterFactsVersion, &kCharacterFactsApi},
     {contracts::kCharacterStateCapabilityId, contracts::kCharacterStateVersion, &kCharacterStateApi},
+    {contracts::kCharacterAttributesCapabilityId, contracts::kCharacterAttributesVersion,
+     &kCharacterAttributesApi},
 };
 
 void append_json_string(std::string& out, const char* value, uint32_t size) {
@@ -292,12 +348,7 @@ void append_character_state_member(std::string& out,
     out += ",\"max_mp\":" + std::to_string(member.max_mp);
     out += ",\"exp\":" + std::to_string(member.exp);
     out += ",\"exp_next\":" + std::to_string(member.exp_next);
-    out += ",\"stats\":{";
-    for (uint32_t i = 0; i < contracts::kQolCharacterStateStatCount; ++i) {
-        if (i != 0) out.push_back(',');
-        out += "\"" + std::to_string(i) + "\":" + std::to_string(member.stats[i]);
-    }
-    out += "},\"main_stats\":[";
+    out += ",\"main_stats\":[";
     for (uint32_t i = 0; i < contracts::kQolCharacterStateMainStatCount; ++i) {
         if (i != 0) out.push_back(',');
         out += std::to_string(member.main_stats[i]);
@@ -721,23 +772,44 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
             const std::string body = "{\"status\":" + status + "}";
             return response_body(response, body.data(), static_cast<uint32_t>(body.size()));
         }
-        case Query::kPartyMemberStats: {
+        case Query::kPartyMemberAttributes: {
             int32_t slot = 0;
             if (!char_path_int(request, "slot", &slot)) {
                 return response_error(response, 400, "bad request");
             }
-            JsonSlice member{};
-            if (!json_element(party, party_size, slot, &member) || json_slice_is_null(member)) {
-                const std::string body = "{\"stats\":null}";
+            if (slot < 0 || slot >= static_cast<int32_t>(contracts::kQolCharacterStatePartySize)) {
+                const std::string body = "{\"attributes\":null}";
                 return response_body(response, body.data(), static_cast<uint32_t>(body.size()));
             }
-            JsonSlice stats{};
-            if (!json_member(member.data, member.size, "stats", &stats) ||
-                json_slice_is_null(stats)) {
-                const std::string body = "{\"stats\":null}";
-                return response_body(response, body.data(), static_cast<uint32_t>(body.size()));
+            contracts::QolCharacterRef ref{contracts::kQolCharacterRefParty, slot};
+            contracts::QolCharacterAttributeSnapshot snapshot{};
+            const QolResult result = kCharacterAttributesApi.snapshot(ref, &snapshot);
+            if (!contracts::succeeded(result)) {
+                if (result.code == kQolErrNotFound) {
+                    const std::string body = "{\"attributes\":null}";
+                    return response_body(response, body.data(),
+                                         static_cast<uint32_t>(body.size()));
+                }
+                return response_error(response, 503, "attributes unavailable");
             }
-            const std::string body = "{\"stats\":" + std::string(stats.data, stats.size) + "}";
+            std::string body = "{\"attributes\":{\"role\":" + std::to_string(slot) +
+                               ",\"present\":" + std::to_string(snapshot.present != 0 ? 1 : 0) +
+                               ",\"main_stats\":[";
+            for (int32_t i = 0; i < contracts::kQolCharacterMainStatCount; ++i) {
+                if (i != 0) body.push_back(',');
+                body += std::to_string(snapshot.main_stats[i]);
+            }
+            body += "],\"attrs\":[";
+            for (int32_t id = 0; id < contracts::kQolCharacterAttrSlotCount; ++id) {
+                if (id != 0) body.push_back(',');
+                body += std::to_string(snapshot.attrs[id]);
+            }
+            body += "],\"attr_valid\":[";
+            for (int32_t id = 0; id < contracts::kQolCharacterAttrSlotCount; ++id) {
+                if (id != 0) body.push_back(',');
+                body += snapshot.attr_valid[id] != 0 ? '1' : '0';
+            }
+            body += "]}}";
             return response_body(response, body.data(), static_cast<uint32_t>(body.size()));
         }
         case Query::kPartyMemberEquipment: {
@@ -2103,7 +2175,12 @@ int plugin_install(contracts::PluginContext& ctx) {
                                contracts::kQolPortCharacterStateVersion.minor}) ||
         g_character_state_port->read.party == nullptr ||
         g_character_state_port->read.player == nullptr ||
-        g_character_state_port->read.skills == nullptr) {
+        g_character_state_port->read.skills == nullptr ||
+        g_character_state_port->read.attributes == nullptr ||
+        g_character_state_port->read.derived == nullptr ||
+        g_character_state_port->read.attr == nullptr ||
+        g_character_state_port->read.main_stat == nullptr ||
+        g_character_state_port->read.present == nullptr) {
         g_port = nullptr;
         g_http_port = nullptr;
         g_character_write_ops = nullptr;
@@ -2196,7 +2273,7 @@ const contracts::PluginDescriptor kDescriptor = {
     nullptr,
     static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
     kOptionalRequires,
-    2,
+    3,
     kProvides,
     0,
     nullptr,

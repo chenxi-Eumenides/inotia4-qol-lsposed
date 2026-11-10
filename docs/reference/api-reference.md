@@ -73,6 +73,8 @@
 
 ### Role（出战角色）
 
+> `character.state` v2.0 起，角色对象不再包含 `stats` 字段；attr 0..114 请使用 `/api/character/party/{slot}/attributes`。
+
 > 字段呈现顺序：可读字段在前（name/type_name/class_name/血量/魔力/经验/主属性），原始字段归尾部（type/class_idx/name_id/stats）。`main_stats` 为结构化列表（`stat_name`/`base_stat`/`additional_stat`，additional=总属性-基础属性，F_GET_STAT=Base+Main+Bonus+Sub）。
 
 ```json
@@ -104,8 +106,7 @@
   ],
   "type": 0,
   "class_idx": 1,
-  "name_id": 2210,
-  "stats": { "0": 130, "1": 0, "2": 0, "30": 10664, "31": 212 }
+  "name_id": 2210
 }
 ```
 
@@ -123,7 +124,6 @@
 | `status_point` | 剩余能力点 |
 | `equipment` | 10 装备槽数组（每件为物品统一结构：`slot`/`name`/`category`/`item_type`/`need_level`/`rarity`/`rarity_tier`/`base`/`bonus`/`gem`/`chaos`/`enchant`，见 Inventory 段物品字段表），空槽为 `null`；位置映射见第二章 |
 | `name_id` | 角色名字文本 ID |
-| `stats` | 战斗属性聚合（角色 +0x24 数组 32 项，**数字 id 为键**：0-29 属性位 + 30=HP上限 + 31=MP上限）。属性名映射见第二章 stats 端点 |
 
 ### Inventory（背包）
 
@@ -399,48 +399,38 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 }
 ```
 
-#### 战斗属性聚合
+#### 战斗属性全量
 
-`GET /api/character/party/{slot}/stats`
+`GET /api/character/party/{slot}/attributes`
 
-**用途**：获取指定出战槽全部战斗属性聚合（一次取全量）。
+**用途**：读取指定出战槽的完整属性（主属性 + attr 0..114 全量 + 每槽有效标志），数据来自 `character.attributes` 的 `snapshot({party,slot})`。
 
 **返回格式**：
 
 ```json
 {
-  "stats": {
-    "crit_rate": 60, "crit_damage": 400, "attack": 300,
-    "magic_attack": 150, "dexterity": 139, "defense": 200,
-    "wdr": 100, "max_hp": 10664, "max_mp": 212
+  "attributes": {
+    "role": 0,
+    "present": 1,
+    "main_stats": [120, 80, 95, 40, 35],
+    "attrs": [60, 0, 0, 400, 300, "…共 115 项，按 id 0..114 升序…"],
+    "attr_valid": [1, 1, 1, "…共 115 项，1=有效 0=无效…"]
   }
 }
 ```
 
-**属性名字段映射**（角色 +0x24 数组 32 项，以属性名为字段名；✅ v0.5.1 实机 frida 实测补全）：
+| 字段 | 说明 |
+|---|---|
+| `role` | 出战槽 0..2 |
+| `present` | 1=当前存在可读角色；0=无角色（当前实现空槽直接返回 `attributes:null`） |
+| `main_stats` | 5 项主属性：力量/敏捷/体力/智力/精力 |
+| `attrs` | attr 0..114 原值（整数数组，固定升序） |
+| `attr_valid` | 与 `attrs` 等长，0/1 表示该槽本次读取是否有效 |
 
-| 字段 | 属性 id | 说明 |
-|---|---|---|
-| `crit_rate` | 0 | 暴击率 ×10（默认 30） |
-| `crit_damage` | 3 | 暴击伤害 ×10（默认 1000） |
-| `attack` | 4 | 攻击（力量×0.5-0.7 + 敏捷×0.5 + 主手武器） |
-| `magic_attack` | 8 | 魔攻（智力/精力×0.6-1.0 + 主手武器） |
-| `magic_resist` | 11 | **魔法抵抗**（面板 M.RES 35193；clamp 750=75.0%） |
-| `dexterity` | 13 | 敏捷（总，=主属性敏捷） |
-| `hit_base` | 14 | **命中率基数**（CHAR_GetHitRate1000 加数；默认 0，LV1 黑魔导 80） |
-| `hit_rate` | 15 | **命中率百分比**（敏捷×4+精力×4） |
-| `defense` | 17 | 防御（体力×1 + 装备） |
-| `phys_reduce` | 18 | **物理减伤系数**（P.RES=attr17×(attr18+1000)/10000） |
-| `wdr` | 19 | 武器伤害减免率 ×10（默认 30） |
-| `sub_weapon_attack` | 20 | 副手武器攻击（slot6） |
-| `level_attr` | 28 | 等级驱动属性 =(960+36×等级)/10（黑魔导；职业各异） |
-| `max_hp` | 30 | HP 上限（属性缓存字段 `[ch+0x9c]`，`char_max_hp`；不调用 `CHAR_GetAttr(0x1e)`——该分支有 HP 写回副作用；=640+72×(等级+10) 黑魔导） |
-| `max_mp` | 31 | MP 上限（属性缓存字段 `[ch+0xa0]`，`char_max_mp`；默认 200） |
-| `total_attack` | 113 | 总攻击 = max(物攻,魔攻)（扩展 id，不在 32 项数组） |
-
-**属性公式表**（CHAR_UpdateAttrFromStat 映射，frida 实测）：力量→攻击(a×700/600/500÷1000，职业条件 4/2/3/5/6/18/1)、敏捷→攻击(a×500÷1000)+命中(a×4)+敏捷(a×1)、体力→HP上限(a×80)+防御(a×1)、智力→魔攻(a×600/700/1000÷1000，条件 5/6/16)、精力→魔攻(a×600/600/1000÷1000)+命中(a×4)。
-
-**注意**：其余 id（1,2,5,6,7,9,10,12,16,21,22-27）仍输出 `attr_<id>` 占位（LV1 实测全 0；21 默认 1000、16 默认 8、29 默认 8 来源未定性，待高等级/词缀样本）。⚠️ 不可直接套用 ITEMOPTINFOBASE 词缀属性编码（如 MP增加 编码 31，而 stats[31] 是 MP上限）——该编号与 stats 数组索引不一致。
+- 空槽或 slot 越界：`{"attributes":null}`（HTTP 200）。
+- 能力不可用：HTTP 503 `{"ok":false,"error":"attributes unavailable"}`。
+- `attr30`（HP 上限）/`attr31`（MP 上限）由能力层直读 `C_MAX_HP`/`C_MAX_MP` 缓存，不调用 `CHAR_GetAttr`，避免 HP/MP 钳制写回。
+- 旧 `/api/character/party/{slot}/stats` 已删除（`character.state` v2.0 移除 party `stats` 字段），调用方改用本端点。
 
 #### 装备列表
 

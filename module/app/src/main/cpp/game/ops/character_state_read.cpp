@@ -104,9 +104,6 @@ QolResult read_member(void* character, QolCharacterStateMember* out) {
     out->max_mp = char_max_mp(character);
     out->exp = *reinterpret_cast<const int32_t*>(bytes + C_EXP);
     out->exp_next = char_next_exp_cached(character);
-    for (uint32_t i = 0; i < kQolCharacterStateStatCount; ++i) {
-        out->stats[i] = *reinterpret_cast<const int32_t*>(bytes + C_ATTR + i * sizeof(int32_t));
-    }
     for (uint32_t i = 0; i < kQolCharacterStateMainStatCount; ++i) {
         out->main_stats[i] = char_stat_total(character, static_cast<int>(i));
     }

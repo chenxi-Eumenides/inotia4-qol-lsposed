@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "../../contracts/character_attributes.h"
 #include "../../contracts/game_ports/character_extras_port.h"
 #include "../../contracts/ownership.h"
 #include "../../contracts/panels.h"
@@ -70,6 +71,9 @@ const contracts::CapabilityRequirement kRequires[] = {
      {contracts::kUiContractMajor, contracts::kUiContractMinor}},
     {contracts::kUiPanelsCapabilityId,
      {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor}},
+    {contracts::kCharacterAttributesCapabilityId,
+     {contracts::kCharacterAttributesVersion.major,
+      contracts::kCharacterAttributesVersion.minor}},
 };
 
 const contracts::QolPortRequirement kPorts[] = {
@@ -157,7 +161,18 @@ int plugin_install(contracts::PluginContext& ctx) {
         bind_sdk(nullptr);
         return 1;
     }
+    const void* attributes_iface = nullptr;
+    if (!contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kCharacterAttributesCapabilityId,
+            {contracts::kCharacterAttributesVersion.major,
+             contracts::kCharacterAttributesVersion.minor},
+            &attributes_iface)) ||
+        attributes_iface == nullptr) {
+        bind_sdk(nullptr);
+        return 1;
+    }
     overview_bind_components(ui_components_iface);
+    overview_bind_attributes(attributes_iface);
     overview_bind_context(ctx.game, ctx.ports[0]);
     set_translation_enabled(true);
     // 表消费者经 text_layer 能力注册；失败即 install 失败（宿主回滚并把插件置 failed）。
@@ -166,6 +181,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     if (!registered) {
         overview_bind_context(nullptr, nullptr);
         overview_bind_components(nullptr);
+        overview_bind_attributes(nullptr);
         bind_sdk(nullptr);
         return 1;
     }
@@ -174,6 +190,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         unregister_consumers();
         overview_bind_context(nullptr, nullptr);
         overview_bind_components(nullptr);
+        overview_bind_attributes(nullptr);
         bind_sdk(nullptr);
         return 1;
     }
@@ -204,6 +221,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     overview_provider_close();
     overview_bind_context(nullptr, nullptr);
     overview_bind_components(nullptr);
+    overview_bind_attributes(nullptr);
     bind_sdk(nullptr);
 }
 
@@ -258,7 +276,7 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    3, kRequires,  // requires=text_layer + ui_components + ui_panels
+    4, kRequires,  // requires=text_layer + ui_components + ui_panels + character.attributes
     0, nullptr,    // optional_requires
     0, nullptr,    // provides（纯消费者）
     2, kResources, // resources（面板绘制作用域 hook + 面板 PopupState 所有权）

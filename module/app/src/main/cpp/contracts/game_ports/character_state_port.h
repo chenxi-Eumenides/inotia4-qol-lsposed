@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "../character_attributes.h"
 #include "../result.h"
 #include "../version.h"
 
@@ -10,7 +11,6 @@ namespace qol::contracts {
 
 constexpr uint32_t kQolCharacterStatePartySize = 3;
 constexpr uint32_t kQolCharacterStateEquipSlots = 10;
-constexpr uint32_t kQolCharacterStateStatCount = 32;
 constexpr uint32_t kQolCharacterStateMainStatCount = 5;
 constexpr uint32_t kQolCharacterStateSkillsPerRole = 64;
 constexpr uint32_t kQolCharacterStateOptionsPerItem = 32;
@@ -74,7 +74,6 @@ struct QolCharacterStateMember {
     int32_t max_mp;
     int32_t exp;
     int64_t exp_next;
-    int32_t stats[kQolCharacterStateStatCount];
     int32_t main_stats[kQolCharacterStateMainStatCount];
     int32_t base_stats[kQolCharacterStateMainStatCount];
     int32_t status_point;
@@ -123,6 +122,13 @@ struct QolCharacterStatePortReadApi {
     QolResult (*party)(QolCharacterStateParty* out_party);
     QolResult (*player)(QolCharacterStatePlayer* out_player);
     QolResult (*skills)(QolCharacterStateSkills* out_skills);
+    // v1.1 尾追加：按角色引用读取 attr 全量与面板派生值（主线程）。
+    QolResult (*attributes)(QolCharacterRef ref, QolCharacterAttributeSnapshot* out);
+    QolResult (*derived)(QolCharacterRef ref, int32_t kind, int32_t* out);
+    // v1.2 尾追加：单点读取与活角色查询（present 不物化/不读存档）。
+    QolResult (*attr)(QolCharacterRef ref, int32_t attr_id, int32_t* out_value);
+    QolResult (*main_stat)(QolCharacterRef ref, int32_t index, int32_t* out_value);
+    QolResult (*present)(QolCharacterRef ref, int32_t* out_present);
 };
 
 struct QolCharacterStatePort {

@@ -9,7 +9,7 @@
 namespace qol::contracts {
 
 constexpr const char* kCharacterStateCapabilityId = "character.state";
-constexpr QolVersion kCharacterStateVersion{1, 0};
+constexpr QolVersion kCharacterStateVersion{2, 0};
 
 // Character owners assemble their domain projection. Cross-domain JSON may only be filtered or
 // reordered; its fields must not be reassembled by another owner.

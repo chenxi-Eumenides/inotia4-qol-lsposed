@@ -159,7 +159,7 @@ void sync_legacy_fixture() {
         *reinterpret_cast<int16_t*>(bytes + C_POS_X) = static_cast<int16_t>(g_live_player.x);
         *reinterpret_cast<int16_t*>(bytes + C_POS_Y) = static_cast<int16_t>(g_live_player.y);
         for (int i = 0; i < 32; ++i) {
-            *reinterpret_cast<int32_t*>(bytes + C_ATTR + i * sizeof(int32_t)) = member.stats[i];
+            *reinterpret_cast<int32_t*>(bytes + C_ATTR + i * sizeof(int32_t)) = 0;
         }
         *reinterpret_cast<uint16_t*>(bytes + C_SKILL_BMP) =
             static_cast<uint16_t>(g_live_skills.members[role].unlock_bitmap);
@@ -414,15 +414,6 @@ std::string frozen_member_json(void* ch) {
     s += ",\"max_mp\":" + std::to_string(char_max_mp(ch));
     s += ",\"exp\":" + std::to_string(*reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(ch) + C_EXP));
     s += ",\"exp_next\":" + std::to_string(char_next_exp_cached(ch));
-    s += ",\"stats\":{";
-    bool first = true;
-    for (int a = 0; a < 32; ++a) {
-        int32_t v = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(ch) + C_ATTR + a * 4);
-        if (!first) s += ",";
-        s += "\"" + std::to_string(a) + "\":" + std::to_string(v);
-        first = false;
-    }
-    s += "}";
     s += ",\"main_stats\":[";
     for (int a = 0; a < 5; ++a) {
         if (a > 0) s += ",";
@@ -631,6 +622,72 @@ QolResult fake_state_skills(qol::contracts::QolCharacterStateSkills* out) {
     return qol::contracts::ok();
 }
 
+// character.attributes 转发：记录调用并按 g_attributes_error 返回指定错误码。
+int g_attributes_present_calls = 0;
+int g_attributes_attr_calls = 0;
+int g_attributes_main_stat_calls = 0;
+int g_attributes_snapshot_calls = 0;
+int g_attributes_derived_calls = 0;
+int32_t g_attributes_error = 0;
+int32_t g_attributes_last_attr_id = -1;
+int32_t g_attributes_last_main_index = -1;
+int32_t g_attributes_last_derived_kind = -1;
+
+QolResult attributes_error_result() {
+    return qol::contracts::error(g_attributes_error, "attributes error", 16);
+}
+
+QolResult fake_attributes_present(qol::contracts::QolCharacterRef, int32_t* out) {
+    ++g_attributes_present_calls;
+    if (g_attributes_error != 0) return attributes_error_result();
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    *out = 1;
+    return qol::contracts::ok();
+}
+
+QolResult fake_attributes_attr(qol::contracts::QolCharacterRef, int32_t attr_id, int32_t* out) {
+    ++g_attributes_attr_calls;
+    g_attributes_last_attr_id = attr_id;
+    if (g_attributes_error != 0) return attributes_error_result();
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    *out = attr_id + 1000;
+    return qol::contracts::ok();
+}
+
+QolResult fake_attributes_main_stat(qol::contracts::QolCharacterRef, int32_t index,
+                                    int32_t* out) {
+    ++g_attributes_main_stat_calls;
+    g_attributes_last_main_index = index;
+    if (g_attributes_error != 0) return attributes_error_result();
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    *out = index + 10;
+    return qol::contracts::ok();
+}
+
+QolResult fake_attributes_snapshot(qol::contracts::QolCharacterRef ref,
+                                   qol::contracts::QolCharacterAttributeSnapshot* out) {
+    ++g_attributes_snapshot_calls;
+    if (g_attributes_error != 0) return attributes_error_result();
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    *out = {};
+    out->struct_size = sizeof(*out);
+    out->ref = ref;
+    out->present = 1;
+    out->main_stats[0] = 11;
+    out->attrs[42] = 4242;
+    out->attr_valid[42] = 1;
+    return qol::contracts::ok();
+}
+
+QolResult fake_attributes_derived(qol::contracts::QolCharacterRef, int32_t kind, int32_t* out) {
+    ++g_attributes_derived_calls;
+    g_attributes_last_derived_kind = kind;
+    if (g_attributes_error != 0) return attributes_error_result();
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    *out = kind + 100;
+    return qol::contracts::ok();
+}
+
 // 注入真实 typed 写原语端口：owner 分派 → game/ops；state 经 typed 读获取。
 const qol::contracts::QolCharacterWriteOpsPort kRealWriteOpsPort{
     qol::contracts::kQolPortCharacterWriteOpsVersion,
@@ -793,7 +850,6 @@ void setup_write_fixture() {
     member.exp = 1;
     member.exp_next = 2;
     member.status_point = 5;
-    member.stats[0] = 1;
     member.main_stats[0] = 9;
     member.name[0] = 'A';
     member.name_size = 1;
@@ -2011,15 +2067,19 @@ int main() {
     std::sort(route_keys.begin(), route_keys.end());
     CHECK(route_keys.size() == 41);
     CHECK(std::unique(route_keys.begin(), route_keys.end()) == route_keys.end());
-    CHECK(descriptor.provides_count == 2 && descriptor.provides != nullptr);
+    CHECK(descriptor.provides_count == 3 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id,
                       qol::contracts::kCharacterFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 0);
     CHECK(descriptor.provides[0].iface != nullptr);
     CHECK(std::strcmp(descriptor.provides[1].id,
                       qol::contracts::kCharacterStateCapabilityId) == 0);
-    CHECK(descriptor.provides[1].version.major == 1 && descriptor.provides[1].version.minor == 0);
+    CHECK(descriptor.provides[1].version.major == 2 && descriptor.provides[1].version.minor == 0);
     CHECK(descriptor.provides[1].iface != nullptr);
+    CHECK(std::strcmp(descriptor.provides[2].id,
+                      qol::contracts::kCharacterAttributesCapabilityId) == 0);
+    CHECK(descriptor.provides[2].version.major == 1 && descriptor.provides[2].version.minor == 0);
+    CHECK(descriptor.provides[2].iface != nullptr);
     CHECK(descriptor.port_count == 4 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_CHARACTER);
     CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_CHARACTER_HTTP);
@@ -2034,6 +2094,22 @@ int main() {
     const auto* state_api = static_cast<const qol::contracts::CharacterStateApi*>(
         descriptor.provides[1].iface);
     CHECK(state_api->write_state_json != nullptr);
+    const auto* attributes_api = static_cast<const qol::contracts::CharacterAttributesApi*>(
+        descriptor.provides[2].iface);
+    CHECK(attributes_api != nullptr);
+    CHECK(attributes_api->struct_size == sizeof(qol::contracts::CharacterAttributesApi));
+    CHECK(attributes_api->present != nullptr && attributes_api->attr != nullptr &&
+          attributes_api->main_stat != nullptr && attributes_api->snapshot != nullptr &&
+          attributes_api->derived != nullptr);
+    // 安装前端口未绑定：五个入口均返回 NotReady。
+    const qol::contracts::QolCharacterRef party_ref{
+        qol::contracts::kQolCharacterRefParty, 0};
+    int32_t preinstall_value = 0;
+    CHECK(attributes_api->present(party_ref, &preinstall_value).code == kQolErrNotReady);
+    CHECK(attributes_api->attr(party_ref, 0, &preinstall_value).code == kQolErrNotReady);
+    CHECK(attributes_api->main_stat(party_ref, 0, &preinstall_value).code == kQolErrNotReady);
+    CHECK(attributes_api->snapshot(party_ref, nullptr).code == kQolErrNotReady);
+    CHECK(attributes_api->derived(party_ref, 0, &preinstall_value).code == kQolErrNotReady);
 
     qol::contracts::QolHostSdk sdk{};
     sdk.abi = {sizeof(qol::contracts::QolHostSdk), qol::contracts::kHostSdkMajor,
@@ -2046,7 +2122,9 @@ int main() {
     const qol::contracts::QolCharacterHttpPort http_port{{1, 0}, {&fake_body_json}};
     const qol::contracts::QolCharacterStatePort state_port{
         qol::contracts::kQolPortCharacterStateVersion,
-        {&fake_state_party, &fake_state_player, &fake_state_skills}};
+        {&fake_state_party, &fake_state_player, &fake_state_skills, &fake_attributes_snapshot,
+         &fake_attributes_derived, &fake_attributes_attr, &fake_attributes_main_stat,
+         &fake_attributes_present}};
     const void* ports[] = {&port, &http_port, &kRealWriteOpsPort, &state_port};
     qol::contracts::PluginContext ctx{
         qol::contracts::PLUGIN_CONTEXT_STRUCT_SIZE,
@@ -2061,6 +2139,53 @@ int main() {
 
     CHECK(descriptor.install(ctx) == 0);
     CHECK(g_result_handler != nullptr);
+
+    // character.attributes 五入口转发到 QOL_PORT_CHARACTER_STATE（假端口）并透传错误码。
+    {
+        int32_t value = 0;
+        g_attributes_error = 0;
+        g_attributes_present_calls = g_attributes_attr_calls = 0;
+        g_attributes_main_stat_calls = g_attributes_snapshot_calls = 0;
+        g_attributes_derived_calls = 0;
+        CHECK(attributes_api->present(party_ref, &value).ok == kQolOk && value == 1);
+        CHECK(attributes_api->attr(party_ref, 42, &value).ok == kQolOk && value == 1042);
+        CHECK(g_attributes_last_attr_id == 42);
+        CHECK(attributes_api->main_stat(party_ref, 3, &value).ok == kQolOk && value == 13);
+        CHECK(g_attributes_last_main_index == 3);
+        qol::contracts::QolCharacterAttributeSnapshot snapshot{};
+        CHECK(attributes_api->snapshot(party_ref, &snapshot).ok == kQolOk);
+        CHECK(snapshot.struct_size == sizeof(snapshot) && snapshot.present == 1 &&
+              snapshot.ref.kind == qol::contracts::kQolCharacterRefParty &&
+              snapshot.ref.index == 0);
+        CHECK(snapshot.main_stats[0] == 11 && snapshot.attrs[42] == 4242 &&
+              snapshot.attr_valid[42] == 1);
+        CHECK(attributes_api->derived(party_ref, qol::contracts::kQolCharacterDerivedHitRate1000,
+                                      &value).ok == kQolOk &&
+              value == 103);
+        CHECK(g_attributes_last_derived_kind == qol::contracts::kQolCharacterDerivedHitRate1000);
+        CHECK(g_attributes_present_calls == 1 && g_attributes_attr_calls == 1 &&
+              g_attributes_main_stat_calls == 1 && g_attributes_snapshot_calls == 1 &&
+              g_attributes_derived_calls == 1);
+
+        // 端口错误码透传：非法参数 / 非主线程 / 无角色。
+        const struct {
+            int32_t code;
+            int32_t expected;
+        } cases[] = {
+            {kQolErrInvalidArgument, kQolErrInvalidArgument},
+            {kQolErrBlocked, kQolErrBlocked},
+            {kQolErrNotFound, kQolErrNotFound},
+        };
+        for (const auto& entry : cases) {
+            g_attributes_error = entry.code;
+            CHECK(attributes_api->present(party_ref, &value).code == entry.expected);
+            CHECK(attributes_api->attr(party_ref, 0, &value).code == entry.expected);
+            CHECK(attributes_api->main_stat(party_ref, 0, &value).code == entry.expected);
+            CHECK(attributes_api->snapshot(party_ref, &snapshot).code == entry.expected);
+            CHECK(attributes_api->derived(party_ref, 0, &value).code == entry.expected);
+        }
+        g_attributes_error = 0;
+    }
     int32_t type_value = 0;
     int32_t active_value = 0;
     CHECK(api->type(reinterpret_cast<const void*>(1), &type_value).ok == kQolOk);
@@ -2103,7 +2228,6 @@ int main() {
     member.max_mp = 6;
     member.exp = 1;
     member.exp_next = 2;
-    member.stats[0] = 1;
     member.main_stats[0] = 9;
     member.status_point = 3;
     member.name[0] = 'A';
@@ -2154,13 +2278,8 @@ int main() {
 
     std::string expected_party =
         "[{\"type\":0,\"class_idx\":1,\"name_id\":7,\"level\":10,\"hp\":50,\"mp\":5,"
-        "\"max_hp\":60,\"max_mp\":6,\"exp\":1,\"exp_next\":2,\"stats\":{";
-    for (int index = 0; index < 32; ++index) {
-        if (index != 0) expected_party.push_back(',');
-        expected_party += "\"" + std::to_string(index) + "\":" +
-                          std::to_string(index == 0 ? 1 : 0);
-    }
-    expected_party += "},\"main_stats\":[9,0,0,0,0],\"status_point\":3,\"equipment\":["
+        "\"max_hp\":60,\"max_mp\":6,\"exp\":1,\"exp_next\":2,\"main_stats\":[9,0,0,0,0],"
+        "\"status_point\":3,\"equipment\":["
                       "{\"slot\":0,\"type_flags\":8,\"raw_rarity\":2,\"category\":12,"
                       "\"count\":1,\"equip\":true,\"rarity\":3,\"damage\":4,\"defense\":5,"
                       "\"magic_rate\":6,\"need_level\":7,\"socket\":33,\"socket_filled\":1,"
@@ -2233,10 +2352,14 @@ int main() {
     CHECK(qol::infra::register_capability({state_provision.id, state_provision.version,
                                            state_provision.iface}));
     CHECK(qol::infra::require_capability(qol::contracts::kCharacterStateCapabilityId,
-                                         {1, 0}) == state_provision.iface);
+                                         {qol::contracts::kCharacterStateVersion.major,
+                                          qol::contracts::kCharacterStateVersion.minor}) ==
+          state_provision.iface);
     CHECK(qol::infra::unregister_capability(qol::contracts::kCharacterStateCapabilityId));
     CHECK(qol::infra::require_capability(qol::contracts::kCharacterStateCapabilityId,
-                                         {1, 0}) == nullptr);
+                                         {qol::contracts::kCharacterStateVersion.major,
+                                          qol::contracts::kCharacterStateVersion.minor}) ==
+          nullptr);
     qol::infra::capabilities_reset_for_test();
 
     const char body[] = "{\"action_id\":7,\"level\":2}";

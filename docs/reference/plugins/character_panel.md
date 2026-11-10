@@ -22,7 +22,7 @@
 
 `character_panel`，插件版本 `0.1.0`（`plugins/character_panel/plugin.cpp`）。descriptor：
 
-- `requires_count=3`：`text_layer` v1.0、`ui_components` v2.23、`ui_panels` v1.3；`optional_count=0`。
+- `requires_count=4`：`text_layer` v1.0、`ui_components` v2.23、`ui_panels` v1.3、`character.attributes` v1.0；`optional_count=0`。
 - `provides_count=0`（纯消费者）；`resources_count=2`；`jni_count=0`。
 - `port_count=1`：`QOL_PORT_CHARACTER_EXTRAS` v1.2（`ctx.ports[0]`）。
 - 无 `routes.inc`、无 `http_queries`、无快照/事件/命令端口。
@@ -118,7 +118,7 @@
 | 11 角色属性（末页） | 6 行：attr108..attr113 | 1 行：attr114 |
 | 12 全队共享 | 6 行：全队掉宝倍率、卷轴掉率(130)、材料掉率(138)、装备掉率(142)、传说装备率(122)、开箱好道具(126) | 6 行：稀有佣兵(134)、经验获得(133)、出售价格(123)、购买价格(131)、药水效果(135)、药水冷却(141) |
 
-**名称规则**：72 项已确认名称显示中文（表在 `overview_model.h` 的 `kAttrNames`）；其余 43 个 id 统一显示 `attr<id>`（如 `attr34`），不编造名称。attr 行显示 `CHAR_GetAttr(ch, id)` 原值；`attr30`（HP 上限）改走 `read.max_hp`；读取失败显示 `--`。
+**名称规则**：72 项已确认名称显示中文（表在 `overview_model.h` 的 `kAttrNames`）；其余 43 个 id 统一显示 `attr<id>`（如 `attr34`），不编造名称。attr 行显示 `snapshot.attrs[id]` 原值，`snapshot.attr_valid[id]=0` 时显示 `--`；attr30/31 由能力层缓存直读。
 
 第 12 页首行「全队掉宝倍率」显示 `×1.30（+300）`：倍率 = `(1000 + Σ attr92) / 1000`（保留 2 位小数），括号内是 3 名出战队员 attr92（角色掉宝率，千分比）之和；`sum=0` 显示 `×1.00（+0）`。读取 role 0..2 的 `party_member` + `attr(92)`，空槽位跳过；任一非空队员读取失败则该行显示 `--`。该值是乘在掉落阈值 `w28` 上的**全队倍率**。
 
@@ -128,35 +128,35 @@
 
 #### 数据来源
 
-角色指针：`QolCharacterExtrasPort::read.menu_character(&ch)` **优先**（与原版面板 `PARTY_GetMenuCharacter` 同源，跟随当前页签）；失败或空指针回退 `party_member(0,&ch)`；两者都失败时所有数值行显示 `--`。
+选中角色：`QolCharacterExtrasPort::read.menu_character(&ch)`（与原版面板 `PARTY_GetMenuCharacter` 同源）→ `party_index(ch,&role)` 得 0..2；`party_index` 失败时遍历 `party_member(0..2)` 与 ch 指针比对；仍失败按 role 0。
+
+属性数据经 `character.attributes`（`CharacterAttributesApi`）读取，全部只在 `overview_panel_enter` 一次装配：
 
 | 行 | 来源 |
 |---|---|
-| 力量..精力 | `QolCharacterReadApi::main_stat(ch, 0..4, &v)` |
-| 物攻 / 法攻 | `normal_damage` / `normal_magic_damage` |
-| 防御力 | `attr(17)` 与 `attr(18)` 组合：`attr17*(attr18+1000)/1000`（int64 计算） |
-| 暴击率 / 爆伤 / 法抗 / 武器格挡 / 盾牌格挡 | `attr(0)` / `attr(3)` / `attr(11)` / `attr(19)` / `attr(20)` |
-| 命中率 / 闪避率 / 物抗 | `hit_rate_1000` / `evasion_rate_1000` / `display_damage_reduce_rate` |
-| attr 0..114 全量 | `QolCharacterReadApi::attr(ch, id, &v)` 原值（升序；id 名称按确认表或 `attr<id>`） |
-| HP 上限（attr30） | `QolCharacterExtrasPort::read.max_hp(ch,&v)`；**不回退** `CHAR_GetAttr(30)` |
-| 全队掉宝倍率 | role 0..2：`QolCharacterExtrasPort::read.party_member(role,&ch)` + `QolCharacterReadApi::attr(ch,92,&v)` 求和；空槽跳过，非空队员失败整行 `--` |
-| 全局加成技能行（11 项） | `QolCharacterReadApi::group_skill_learned(act_id,&v)`（契约 2.14；act 119..142，1=已学/0=未学） |
+| 力量..精力 | `attributes->snapshot({party,role},&snap)` 的 `main_stats[0..4]` |
+| 物攻 / 法攻 / 防御力 | `attributes->derived(ref, 0/1/2)` |
+| 命中率 / 闪避率 / 物抗 | `attributes->derived(ref, 3/4/5)` |
+| 暴击率 / 爆伤 / 法抗 / 武器格挡 / 盾牌格挡 | `snapshot.attrs[0/3/11/19/20]`（按 `attr_valid` 判定） |
+| attr 0..114 全量 | `snapshot.attrs[id]` + `snapshot.attr_valid[id]`（id 升序；名称按确认表或 `attr<id>`） |
+| 全队掉宝倍率 | role 0..2：`attributes->attr({party,role},92,&v)` 求和；`NotFound`（空槽）跳过，其它失败整行 `--` |
+| 全队共享技能行（11 项） | `character_read.group_skill_learned(act_id,&v)`（契约 2.14；act 119..142，1=已学/0=未学） |
 
-`attr 30` 不能走 `CHAR_GetAttr`：它在 HP > maxHP 时会把 HP 夹回上限并写回角色，读属性产生副作用。`max_hp` 取不到时该行显示 `--`，不做 attr 回退。其余 attr 行直接读 `CHAR_GetAttr` 原始整数；MP 上限（attr31）同样走 attr 原值（宿主暂无对应 getter）。
+`attr30`（HP 上限）/`attr31`（MP 上限）由能力层直读 `C_MAX_HP`/`C_MAX_MP` 缓存，面板不再单独处理，也不调用 `CHAR_GetAttr`（避免 HP/MP 钳制写回）。面板不再直接调用 `character_read.attr/main_stat/normal_damage/normal_magic_damage/hit_rate_1000/evasion_rate_1000/display_damage_reduce_rate`，也不再使用 `extras.read.max_hp`；`character_read` 仅保留 `group_skill_learned`。
 
-全队共享页的佣兵团技能在 `overview_panel_enter` 的 snapshot 装配里每行一次调用 `group_skill_learned(act_id)`（全队生效、与角色指针无关）；已学→固定增量文案，未学→「未获得」，调用失败→`--`。全队掉宝倍率同样只在 enter 时对 3 名队员各读一次 `attr(92)` 并求和。`process` 只使用快照，不逐帧读取。
+全队共享页的技能行在 `overview_panel_enter` 的 snapshot 装配里每行一次调用 `group_skill_learned(act_id)`；全队掉宝倍率只在 enter 时对 3 名队员各读一次 `attr(92)` 并求和。`process` 只使用快照，不逐帧读取。
 
 #### 数值格式
 
 - 千分比类（暴击率、命中率、爆伤、物抗、法抗、闪避率、武器格挡、盾牌格挡）：`raw/10`，保留 1 位小数 + `%`；如 `1234 → "123.4%"`、`0 → "0.0%"`、`-5 → "-0.5%"`。
-- 其它数值：整数（attr 行按 `CHAR_GetAttr` 原值显示，`attr30` 例外走 `max_hp`）。
+- 其它数值：整数（attr 行按 `snapshot.attrs` 原值显示；attr30/31 由能力层缓存直读）。
 - 全部 `snprintf` 写入固定缓冲（数值 40B、标签 24B、页码 48B），无动态分配。
 
 #### 数据读取约束
 
 - 只在**游戏主线程**、面板 `enter` 内读取一次；`process` 只格式化与绘制，不逐帧读游戏内存。
 - 每一行独立记录 `ok`；任一读取失败**只让该行显示 `--`**，不会整体打开失败。
-- 宿主只读面在非游戏线程返回 `kQolErrBlocked`（如 `hit_rate_1000`/`evasion_rate_1000`/`display_damage_reduce_rate`）；本插件只在 enter（主线程）调用，因此正常路径不会命中该错误，若被误用则同样落到 `--`。
+- `character.attributes` 在非游戏线程返回 `kQolErrBlocked`；本插件只在 enter（主线程）调用，正常路径不会命中，若被误用同样落到 `--`。
 - 折叠/重开（enter 再次进入）会重新读取一次并把页码复位到第 1 页。
 
 ## 已知约束
@@ -166,19 +166,19 @@
 ## 失败语义（fail-soft）
 
 - 两条资源均 `kFailSoft`：安装失败记 `degraded`，不使插件整体失败；ownership 由宿主按重试语义定向恢复。
-- `install`：SDK/端口校验失败、`ui_components` require 失败、`register_consumers` 失败、`register_provider` 失败 → 返回 1（宿主回滚并把插件置 `failed`）。帧任务注册失败只记 warn（`overview frame task registration failed`），汉化与面板 provider 仍可用。
+- `install`：SDK/端口校验失败、`ui_components`/`character.attributes` require 失败、`register_consumers` 失败、`register_provider` 失败 → 返回 1（宿主回滚并把插件置 `failed`）。帧任务注册失败只记 warn（`overview frame task registration failed`），汉化与面板 provider 仍可用。
 - `on_resource_ready`：入口 hook id 交 `charinfo_scope_on_resource_ready`（空 backup 返回非 0 → 资源撤回）；ownership id（含启动期 `backup=nullptr` 恢复）返回 0。
 - `scene_draw_charinfo_wrapper`：`text_scope.push` 不可用或失败时只透传原绘制、不标记作用域。
 - 点击链路：坐标/矩形任一失败按未命中处理，仍调用原 event；`ui_panels.open` 被拒只记 warn。
-- 属性读取：单行失败显示 `--`；角色指针取不到时全部数值行为 `--`；宿主只读面在非游戏线程返回 `kQolErrBlocked`，该行同样显示 `--`。
+- 属性读取：快照失败或 `present=0` 时角色行全部 `--`；`attr_valid[i]=0` 该行 `--`；全队倍率空槽 `NotFound` 跳过、其它失败整行 `--`；能力非主线程返回 `kQolErrBlocked`，同样显示 `--`。
 - `fill_status` 输出 `enabled = !注册失败 && host_sdk()!=nullptr`，失败时 `error="text consumer registration failed"`。
 
 ## 生命周期
 
-- `install`：绑定 SDK → 校验端口 → require `ui_components` → 绑定 Game Host/端口与组件表 → 注册文本消费者 → 注册面板 provider → 幂等注册常驻打开帧任务。
+- `install`：绑定 SDK → 校验端口 → require `ui_components` 与 `character.attributes` → 绑定 Game Host/端口/组件表/属性能力 → 注册文本消费者 → 注册面板 provider → 幂等注册常驻打开帧任务。
 - `on_enabled`：`set_translation_enabled(true)` + 幂等 `register_consumers()` + 幂等 `ensure_open_task()`（deactivate 后再 activate 能重新注册）。
 - `on_disabled`：关文本门禁并注销消费者；面板与资源由 Host lifecycle 流程回收。
-- `deactivate`：关文本门禁 → 注销消费者 → `ui_panels.deactivate_owner(character_panel)` → `panels.unregister_owner` → 移除帧任务（无论 remove 结果都清空句柄，避免陈旧 id 阻止重注册）→ 清 pending/按下点 → 关闭面板控件 → 解绑 Game Host/组件表/SDK。
+- `deactivate`：关文本门禁 → 注销消费者 → `ui_panels.deactivate_owner(character_panel)` → `panels.unregister_owner` → 移除帧任务（无论 remove 结果都清空句柄，避免陈旧 id 阻止重注册）→ 清 pending/按下点 → 关闭面板控件 → 解绑 Game Host/组件表/属性能力/SDK。
 - 资源归还（含 PopupState 条目还原）由宿主资源事务执行；`character_info_reset()` 只丢弃 pending 与按下点，保留原始 enter/event 入口直到 ownership `release`，避免还原失败时 wrapper 失去原函数。测试可用 `character_info_test_reset()` 强制清理（生产路径不调用）。
 - 禁用期间的 entry hook 由 Loader 保留为空转 wrapper（`resumable=true`）。
 
@@ -205,9 +205,9 @@ Host/构建：
 
 - `./scripts/build-debug.sh` 通过（唯一构建入口）。
 - `character_panel_tests` 通过，覆盖：
-  - descriptor：requires（text_layer/ui_components/ui_panels）、ports（CHARACTER_EXTRAS 1.2）、resources 含 `own:popup.character_info`、两个 feature id 与默认值；
+  - descriptor：requires（text_layer/ui_components/ui_panels/character.attributes）、ports（CHARACTER_EXTRAS 1.2）、resources 含 `own:popup.character_info`、两个 feature id 与默认值；
   - 汉化：标签表连续性/35188 占位、backup 交付与作用域 push/pop、注册失败可观测；
-  - 属性总览纯逻辑：行数/分页（143 行 → 12 页双列、每列 ≤11 行、左右列覆盖 143 行、P11 7 行、P12 6/6）、attr 名称（72 项确认名 + 43 项 `attr<id>` 回退 + `format_label`）、选中角色优先级（menu 优先/party 回退）、全队掉宝倍率格式化、千分比/整数/`--` 格式化、`kGroupSkill` 已学/未学/失败、命中判定（含边界）；共 475 条断言；
+  - 属性总览纯逻辑：行数/分页（143 行 → 12 页双列、每列 ≤11 行、左右列覆盖 143 行、P11 7 行、P12 6/6）、attr 名称（72 项确认名 + 43 项 `attr<id>` 回退 + `format_label`）、选中角色优先级（menu → party_index → party_member 指针比对 → 0）、`character.attributes` 驱动行数据（main_stats/attrs/attr_valid=0→`--`）、全队掉宝倍率格式化与空槽跳过、千分比/整数/`--` 格式化、`kGroupSkill` 已学/未学/失败、命中判定（含边界）；共 **490** 条断言；
   - PopupState 装配：acquire 传入的 hooks `enter`/`event` 非空（`process/f3/f4` 为空 = 部分 wrap）、enter wrapper 转发原 enter、重复 acquire 幂等、release 调 `popup_restore` 并清空缓存入口；
   - 点击流程：按下/抬起同区打开一次、按点在外不打开、`0x19` 清除按下点后不打开、开关关闭不置 pending、event 始终返回原值、tick 连续两次返回非 0（scheduler keep）且只打开一次。
 - `module_text_tests` 通过（两张文本表完整性）。
@@ -219,7 +219,7 @@ Host/构建：
 1. 点击**右侧战斗属性框内部文本区**命中（含屏幕 inset 与四条边界）；左侧 5 维框、队伍页签、关闭 X、属性分配入口、+/−、重置均不触发；按下点在外、抬起在内不触发。
 2. 总览打开/关闭链路：点击 → 下一帧打开 → 导航按钮（返回箭头）→ 回到原版面板；关闭期间原版面板不绘制、不接收事件。
 3. 12 页双列翻页与首尾箭头置灰；每页左右各最多 11 行渲染完整，右列数值右对齐（430/840）不溢出、不与边框或彼此重叠；P11 末页 7 行、P12 全队页 6/6；翻页不重建控件。
-4. 角色跟随：切换队伍页签后 `menu_character` 变化能驱动面板重开取新角色；`menu_character` 失败/空时回退 `party_member(0)`；attr 0..114 全量读取（含 113/114）、未知名称显示 `attr<id>`、HP 上限走 `max_hp`、单行失败 `--`。
+4. 角色跟随：切换队伍页签后 `menu_character` 变化驱动重开取新角色；`party_index` 失败时指针比对回退；`character.attributes.snapshot` 的 115 槽/`attr_valid` 生效、未知名称显示 `attr<id>`、attr30/31 不触发 HP/MP 钳制、单行失败 `--`。
 5. 第 12 页实际值：11 个 act（130/138/142/122/126/134/133/123/131/135/141）与技能已学/未学状态一一对应、未学显示「未获得」、读取失败显示 `--`；全队掉宝倍率 `(1000+Σ attr92)/1000` 与括号内 sum 一致（空槽跳过、非空队员失败显示 `--`）；双列 6/6 渲染与右对齐不溢出。
 6. ownership 资源 live/释放、插件停用后 entry hook 与 PopupState 条目归还、`overview` 开关关闭后不再打开。
 7. 汉化文案与总览面板共存时互不影响（作用域只在绘制窗口内）。

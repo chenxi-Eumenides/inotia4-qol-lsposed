@@ -49,15 +49,6 @@ inline std::string legacy_member_json(void* ch) {
     // 现算并写回（非纯读），不能在本构造线程（预取/HTTP 线程）调用；见 char_next_exp_cached。
     s += ",\"exp\":" + std::to_string(*reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(ch) + C_EXP));
     s += ",\"exp_next\":" + std::to_string(char_next_exp_cached(ch));
-    s += ",\"stats\":{";
-    bool first = true;
-    for (int a = 0; a < 32; ++a) {
-        int32_t v = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(ch) + C_ATTR + a * 4);
-        if (!first) s += ",";
-        s += "\"" + std::to_string(a) + "\":" + std::to_string(v);
-        first = false;
-    }
-    s += "}";
     // main_stats 直读 Base+Main+Bonus+Sub（见 char_stat_total），避免 CHAR_GetStat 经
     // CHAR_GetStatSub 触发动态派生重算写回角色对象。
     s += ",\"main_stats\":[";

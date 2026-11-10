@@ -650,14 +650,6 @@ void append_character_role_enriched(std::string& out, void* ch) {
     out += std::to_string(class_idx);
     field("name_id");
     out += std::to_string(*reinterpret_cast<const uint16_t*>(b + C_NAME_ID));
-    field("stats");
-    out += "{";
-    for (int a = 0; a < 32; ++a) {
-        if (a > 0) out += ",";
-        out += "\"" + std::to_string(a) + "\":";
-        out += std::to_string(*reinterpret_cast<const int32_t*>(b + C_ATTR + a * 4));
-    }
-    out += "}";
     out += "}";
 }
 

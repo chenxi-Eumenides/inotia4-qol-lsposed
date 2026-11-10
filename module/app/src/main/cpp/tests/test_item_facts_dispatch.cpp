@@ -1338,7 +1338,10 @@ QolResult fake_capability_require(const char* id, QolVersionRange required,
     if (std::strcmp(id, qol::contracts::kCharacterStateCapabilityId) == 0) {
         ++g_character_state_require_calls;
         g_character_state_require_order = ++g_party_sequence;
-        if (!g_character_state_available || required.major != 1 || required.min_minor != 0) {
+        // 跟随 character.state 契约版本，避免版本升级后替身仍按旧 major 拒绝。
+        if (!g_character_state_available ||
+            required.major != qol::contracts::kCharacterStateVersion.major ||
+            required.min_minor != 0) {
             return qol::contracts::error(kQolErrNotFound, "missing", 7);
         }
         *out_iface = &kFakeCharacterStateApi;

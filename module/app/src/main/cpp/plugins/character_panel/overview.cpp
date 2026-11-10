@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdio>
 
+#include "../../contracts/character_attributes.h"
 #include "../../contracts/game_host.h"
 #include "../../contracts/game_ports/character_extras_port.h"
 #include "../../contracts/ui.h"
@@ -50,6 +51,7 @@ constexpr const char* kBlockedDisabled = "character overview disabled";
 const contracts::QolUiComponents* g_components = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
 const contracts::QolCharacterExtrasPort* g_character_extras = nullptr;
+const contracts::CharacterAttributesApi* g_attributes = nullptr;
 contracts::QolUiHandle g_root = nullptr;
 contracts::QolUiHandle g_nav = nullptr;
 contracts::QolUiHandle g_prev = nullptr;
@@ -93,53 +95,45 @@ bool components_ready(const contracts::QolUiComponents* components) {
 
 // ---- 属性读取（仅 enter 调用；全部在游戏主线程）----
 
-bool read_attr(void* character, int32_t attr_id, int32_t* out) {
-    if (character == nullptr || out == nullptr || g_game == nullptr ||
-        g_game->character_read.attr == nullptr) {
-        return false;
+bool derived_kind_for(RowKind kind, int32_t* out) {
+    switch (kind) {
+        case RowKind::kNormalDamage: *out = contracts::kQolCharacterDerivedNormalDamage; return true;
+        case RowKind::kNormalMagicDamage:
+            *out = contracts::kQolCharacterDerivedNormalMagicDamage;
+            return true;
+        case RowKind::kDefense: *out = contracts::kQolCharacterDerivedPhysicalDefense; return true;
+        case RowKind::kHitRate: *out = contracts::kQolCharacterDerivedHitRate1000; return true;
+        case RowKind::kEvasion: *out = contracts::kQolCharacterDerivedEvasionRate1000; return true;
+        case RowKind::kDamageReduce:
+            *out = contracts::kQolCharacterDerivedDisplayDamageReduceRate;
+            return true;
+        default: return false;
     }
-    return contracts::succeeded(g_game->character_read.attr(character, attr_id, out));
 }
 
-bool read_main_stat(void* character, int32_t index, int32_t* out) {
-    if (character == nullptr || out == nullptr || g_game == nullptr ||
-        g_game->character_read.main_stat == nullptr) {
-        return false;
-    }
-    return contracts::succeeded(g_game->character_read.main_stat(character, index, out));
-}
-
-// 全队掉宝倍率：role 0..2 的出战队员 attr92（千分比）求和；空槽位跳过，
-// 任一非空队员读取失败则该行 `--`（不静默少算）。
+// 全队掉宝倍率：role 0..2 的 attr92（千分比）求和；空槽（NotFound）跳过，
+// 其它失败整行 `--`。
 bool read_party_drop_multiplier(int32_t* out) {
-    if (out == nullptr || g_character_extras == nullptr || g_game == nullptr ||
-        g_character_extras->read.party_member == nullptr ||
-        g_game->character_read.attr == nullptr) {
-        return false;
-    }
+    if (out == nullptr || g_attributes == nullptr || g_attributes->attr == nullptr) return false;
     int32_t sum = 0;
     for (int32_t role = 0; role < 3; ++role) {
-        void* member = nullptr;
-        if (!contracts::succeeded(g_character_extras->read.party_member(role, &member)) ||
-            member == nullptr) {
-            continue;  // 空槽位（party_member 对空槽返回 NotReady）
-        }
+        const contracts::QolCharacterRef ref{contracts::kQolCharacterRefParty, role};
         int32_t value = 0;
-        if (!contracts::succeeded(g_game->character_read.attr(member, 92, &value))) return false;
-        sum += value;
+        const QolResult result = g_attributes->attr(ref, 92, &value);
+        if (contracts::succeeded(result)) {
+            sum += value;
+            continue;
+        }
+        if (result.code == kQolErrNotFound) continue;  // 空槽位
+        return false;
     }
     *out = sum;
     return true;
 }
 
-bool read_max_hp(void* character, int32_t* out) {    if (character == nullptr || out == nullptr || g_character_extras == nullptr ||
-        g_character_extras->read.max_hp == nullptr) {
-        return false;
-    }
-    return contracts::succeeded(g_character_extras->read.max_hp(character, out));
-}
-
-bool read_row_value(void* character, const RowSpec& row, int32_t* out) {
+bool read_row_value(const contracts::QolCharacterRef& ref,
+                    const contracts::QolCharacterAttributeSnapshot& snapshot,
+                    bool snapshot_ok, const RowSpec& row, int32_t* out) {
     switch (row.kind) {
         case RowKind::kGroupSkill:
             // 佣兵团技能（全队生效）：act 119..142，返回 1=已学/0=未学。
@@ -151,64 +145,48 @@ bool read_row_value(void* character, const RowSpec& row, int32_t* out) {
         case RowKind::kPartyDropMultiplier:
             return read_party_drop_multiplier(out);
         case RowKind::kMainStat:
-            return read_main_stat(character, row.arg, out);
-        case RowKind::kAttrInt:
-            // attr30（HP 上限）必须走 CHAR_GetMaxHP：CHAR_GetAttr 在 HP > maxHP 时会把 HP
-            // 夹回上限并写回角色，读属性不应产生副作用。取不到时该行显示 `--`，不回退 attr。
-            if (row.arg == 30) return read_max_hp(character, out);
-            // attr31（MP 上限）暂无对应宿主 getter，仍直接读 attr。
-            return read_attr(character, row.arg, out);
-        case RowKind::kAttrMilli:
-            return read_attr(character, row.arg, out);
-        case RowKind::kDefense: {
-            int32_t base = 0;
-            int32_t bonus = 0;
-            if (!read_attr(character, 17, &base) || !read_attr(character, 18, &bonus)) return false;
-            // 面板防御公式：attr17 * (attr18 + 1000) / 1000；int64 防止乘法溢出。
-            const int64_t scaled = static_cast<int64_t>(base) *
-                                   (static_cast<int64_t>(bonus) + 1000);
-            *out = static_cast<int32_t>(scaled / 1000);
+            if (!snapshot_ok || row.arg < 0 ||
+                row.arg >= contracts::kQolCharacterMainStatCount) {
+                return false;
+            }
+            *out = snapshot.main_stats[row.arg];
             return true;
+        case RowKind::kAttrInt:
+        case RowKind::kAttrMilli:
+            if (!snapshot_ok || row.arg < 0 ||
+                row.arg >= contracts::kQolCharacterAttrSlotCount ||
+                snapshot.attr_valid[row.arg] == 0) {
+                return false;
+            }
+            *out = snapshot.attrs[row.arg];
+            return true;
+        default: {
+            int32_t derived_kind = 0;
+            if (!snapshot_ok || !derived_kind_for(row.kind, &derived_kind) ||
+                g_attributes == nullptr || g_attributes->derived == nullptr) {
+                return false;
+            }
+            return contracts::succeeded(g_attributes->derived(ref, derived_kind, out));
         }
-        case RowKind::kNormalDamage:
-            if (g_game == nullptr || g_game->character_read.normal_damage == nullptr) return false;
-            return contracts::succeeded(
-                g_game->character_read.normal_damage(character, out));
-        case RowKind::kNormalMagicDamage:
-            if (g_game == nullptr || g_game->character_read.normal_magic_damage == nullptr) {
-                return false;
-            }
-            return contracts::succeeded(
-                g_game->character_read.normal_magic_damage(character, out));
-        case RowKind::kHitRate:
-            if (g_game == nullptr || g_game->character_read.hit_rate_1000 == nullptr) return false;
-            return contracts::succeeded(
-                g_game->character_read.hit_rate_1000(character, out));
-        case RowKind::kEvasion:
-            if (g_game == nullptr || g_game->character_read.evasion_rate_1000 == nullptr) {
-                return false;
-            }
-            return contracts::succeeded(
-                g_game->character_read.evasion_rate_1000(character, out));
-        case RowKind::kDamageReduce:
-            if (g_game == nullptr ||
-                g_game->character_read.display_damage_reduce_rate == nullptr) {
-                return false;
-            }
-            return contracts::succeeded(
-                g_game->character_read.display_damage_reduce_rate(character, out));
     }
-    return false;
 }
 
-void read_snapshot() {
+void read_snapshot_impl() {
     g_snapshot = Snapshot{};
-    void* character = overview_resolve_character();
+    const int32_t role = overview_resolve_party_role();
+    const contracts::QolCharacterRef ref{contracts::kQolCharacterRefParty, role};
+    contracts::QolCharacterAttributeSnapshot attributes{};
+    bool snapshot_ok = false;
+    if (g_attributes != nullptr && g_attributes->snapshot != nullptr &&
+        contracts::succeeded(g_attributes->snapshot(ref, &attributes)) &&
+        attributes.present != 0) {
+        snapshot_ok = true;
+    }
     for (uint32_t section = 0; section < kSectionCount; ++section) {
         const SectionSpec& spec = kSections[section];
         for (uint32_t row = 0; row < spec.count && row < kMaxSectionRows; ++row) {
             int32_t value = 0;
-            const bool ok = read_row_value(character, spec.rows[row], &value);
+            const bool ok = read_row_value(ref, attributes, snapshot_ok, spec.rows[row], &value);
             g_snapshot.value[section][row] = ok ? value : 0;
             g_snapshot.ok[section][row] = ok ? 1 : 0;
             g_snapshot.learned[section][row] =
@@ -363,22 +341,43 @@ void overview_bind_context(const qol::contracts::QolGameHost* game,
         static_cast<const contracts::QolCharacterExtrasPort*>(character_extras_port);
 }
 
-void* overview_resolve_character() {
+void overview_bind_attributes(const void* attributes) {
+    g_attributes = static_cast<const contracts::CharacterAttributesApi*>(attributes);
+}
+
+int32_t overview_resolve_party_role() {
+    if (g_character_extras == nullptr) return 0;
+    const contracts::QolCharacterExtrasReadApi& read = g_character_extras->read;
     void* character = nullptr;
-    if (g_character_extras != nullptr) {
-        const contracts::QolCharacterExtrasReadApi& read = g_character_extras->read;
-        // 原版面板同源：PARTY_GetMenuCharacter（当前选中角色）。
-        if (read.menu_character != nullptr &&
-            contracts::succeeded(read.menu_character(&character)) && character != nullptr) {
-            return character;
-        }
-        character = nullptr;
-        if (read.party_member != nullptr &&
-            contracts::succeeded(read.party_member(0, &character)) && character != nullptr) {
-            return character;
+    if (read.menu_character == nullptr ||
+        !contracts::succeeded(read.menu_character(&character)) || character == nullptr) {
+        return 0;
+    }
+    if (read.party_index != nullptr) {
+        int32_t role = 0;
+        if (contracts::succeeded(read.party_index(character, &role)) && role >= 0 && role < 3) {
+            return role;
         }
     }
-    return nullptr;
+    if (read.party_member != nullptr) {
+        for (int32_t role = 0; role < 3; ++role) {
+            void* member = nullptr;
+            if (contracts::succeeded(read.party_member(role, &member)) && member == character) {
+                return role;
+            }
+        }
+    }
+    return 0;
+}
+
+void overview_refresh_snapshot() { read_snapshot_impl(); }
+
+bool overview_probe_row(uint32_t section, uint32_t row, OverviewRowProbe* out) {
+    if (out == nullptr || section >= kSectionCount || row >= kMaxSectionRows) return false;
+    out->value = g_snapshot.value[section][row];
+    out->ok = g_snapshot.ok[section][row];
+    out->learned = g_snapshot.learned[section][row];
+    return true;
 }
 
 void set_overview_enabled(bool enabled) {
@@ -409,7 +408,7 @@ void overview_panel_enter() {
     // 每次打开（含嵌套返回后的重新进入）只读取一次数据；翻页不再读取。
     g_page_count = kPageCount;
     g_page = 0;
-    read_snapshot();
+    read_snapshot_impl();
     g_active.store(true, std::memory_order_release);
 }
 

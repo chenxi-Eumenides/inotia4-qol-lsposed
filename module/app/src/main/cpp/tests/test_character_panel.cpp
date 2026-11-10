@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "contracts/character_attributes.h"
 #include "contracts/game_ports/character_extras_port.h"
 #include "contracts/host_sdk.h"
 #include "contracts/panels.h"
@@ -161,14 +162,18 @@ void bind_watch_stub_sdk() {
     i18n::bind_sdk(&sdk);
 }
 
-// ---- 选中角色解析 stub：menu_character 优先、party_member(0) 回退 ----
+// ---- 选中角色解析 stub：menu_character → party_index → party_member 指针比对 ----
 void* g_menu_character = reinterpret_cast<void*>(static_cast<uintptr_t>(0x1000));
 void* g_party_character = reinterpret_cast<void*>(static_cast<uintptr_t>(0x2000));
+void* g_party_members[3] = {g_party_character, nullptr, nullptr};
 int g_menu_character_calls = 0;
 int g_party_member_calls = 0;
+int g_party_index_calls = 0;
 bool g_menu_character_ok = true;
 bool g_menu_character_null = false;
 bool g_party_member_ok = true;
+bool g_party_index_ok = true;
+int32_t g_party_index_value = 0;
 
 QolResult stub_menu_character(void** out) {
     ++g_menu_character_calls;
@@ -178,22 +183,118 @@ QolResult stub_menu_character(void** out) {
                                : qol::contracts::error(kQolErrNotReady, "menu", 4);
 }
 
+QolResult stub_party_index(const void*, int32_t* out) {
+    ++g_party_index_calls;
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "out", 3);
+    if (!g_party_index_ok) return qol::contracts::error(kQolErrNotReady, "index", 5);
+    *out = g_party_index_value;
+    return qol::contracts::ok();
+}
+
 QolResult stub_party_member(int32_t role, void** out) {
     ++g_party_member_calls;
-    if (out == nullptr || role != 0) {
+    if (out == nullptr || role < 0 || role >= 3) {
         return qol::contracts::error(kQolErrInvalidArgument, "role", 4);
     }
-    *out = g_party_character;
-    return g_party_member_ok ? qol::contracts::ok()
-                             : qol::contracts::error(kQolErrNotReady, "party", 5);
+    if (!g_party_member_ok || g_party_members[role] == nullptr) {
+        return qol::contracts::error(kQolErrNotReady, "party", 5);
+    }
+    *out = g_party_members[role];
+    return qol::contracts::ok();
 }
 
 void reset_character_stub() {
     g_menu_character_calls = 0;
     g_party_member_calls = 0;
+    g_party_index_calls = 0;
     g_menu_character_ok = true;
     g_menu_character_null = false;
     g_party_member_ok = true;
+    g_party_index_ok = true;
+    g_party_index_value = 0;
+    g_party_members[0] = g_party_character;
+    g_party_members[1] = nullptr;
+    g_party_members[2] = nullptr;
+}
+
+// ---- character.attributes stub：snapshot/derived/attr 驱动页面数据 ----
+bool g_attributes_snapshot_ok = true;
+bool g_attributes_present = true;
+int32_t g_attributes_main_stats[5] = {1, 2, 3, 4, 5};
+int32_t g_attributes_values[qol::contracts::kQolCharacterAttrSlotCount] = {};
+uint8_t g_attributes_valid[qol::contracts::kQolCharacterAttrSlotCount] = {};
+bool g_attributes_derived_ok = true;
+int32_t g_attributes_derived_base = 100;
+bool g_attributes_attr_ok = true;
+bool g_attributes_attr_notfound[3] = {false, false, false};
+int32_t g_attributes_team_values[3] = {0, 0, 0};
+int32_t g_attributes_snapshot_role = -1;
+
+QolResult stub_attributes_snapshot(qol::contracts::QolCharacterRef ref,
+                                   qol::contracts::QolCharacterAttributeSnapshot* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "out", 3);
+    if (!g_attributes_snapshot_ok) {
+        return qol::contracts::error(kQolErrNotReady, "snapshot", 8);
+    }
+    *out = {};
+    out->struct_size = sizeof(*out);
+    out->ref = ref;
+    out->present = g_attributes_present ? 1 : 0;
+    g_attributes_snapshot_role = ref.index;
+    for (int32_t i = 0; i < qol::contracts::kQolCharacterMainStatCount; ++i) {
+        out->main_stats[i] = g_attributes_main_stats[i];
+    }
+    for (int32_t id = 0; id < qol::contracts::kQolCharacterAttrSlotCount; ++id) {
+        out->attrs[id] = g_attributes_values[id];
+        out->attr_valid[id] = g_attributes_valid[id];
+    }
+    return qol::contracts::ok();
+}
+
+QolResult stub_attributes_derived(qol::contracts::QolCharacterRef, int32_t kind, int32_t* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "out", 3);
+    if (!g_attributes_derived_ok) {
+        return qol::contracts::error(kQolErrNotReady, "derived", 7);
+    }
+    *out = g_attributes_derived_base + kind;
+    return qol::contracts::ok();
+}
+
+QolResult stub_attributes_attr(qol::contracts::QolCharacterRef ref, int32_t attr_id,
+                               int32_t* out) {
+    if (out == nullptr || ref.index < 0 || ref.index >= 3) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad ref", 7);
+    }
+    if (!g_attributes_attr_ok) return qol::contracts::error(kQolErrNotReady, "attr", 4);
+    if (g_attributes_attr_notfound[ref.index]) {
+        return qol::contracts::error(kQolErrNotFound, "empty slot", 10);
+    }
+    *out = attr_id == 92 ? g_attributes_team_values[ref.index] : 0;
+    return qol::contracts::ok();
+}
+
+void reset_attributes_stub() {
+    g_attributes_snapshot_ok = true;
+    g_attributes_present = true;
+    g_attributes_derived_ok = true;
+    g_attributes_derived_base = 100;
+    g_attributes_attr_ok = true;
+    g_attributes_snapshot_role = -1;
+    for (int32_t i = 0; i < 5; ++i) g_attributes_main_stats[i] = i + 1;
+    for (int32_t id = 0; id < qol::contracts::kQolCharacterAttrSlotCount; ++id) {
+        g_attributes_values[id] = 0;
+        g_attributes_valid[id] = 0;
+    }
+    for (int32_t role = 0; role < 3; ++role) {
+        g_attributes_attr_notfound[role] = false;
+        g_attributes_team_values[role] = 0;
+    }
+}
+
+QolResult stub_group_skill_learned(int32_t act_id, int32_t* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "out", 3);
+    *out = act_id == 130 ? 1 : 0;
+    return qol::contracts::ok();
 }
 
 void reset_watch_stub() {
@@ -268,7 +369,7 @@ void test_manifest() {
     const qol::contracts::PluginDescriptor& d = i18n::plugin_descriptor();
     CHECK(std::strcmp(d.id, "character_panel") == 0);
     // requires = text_layer + ui_components + ui_panels；optional 为空。
-    CHECK(d.requires_count == 3 && d.optional_count == 0);
+    CHECK(d.requires_count == 4 && d.optional_count == 0);
     CHECK(d.provides_count == 0);  // 纯消费者
     CHECK(d.resources_count == 2);
     CHECK(d.on_resource_ready != nullptr);
@@ -310,13 +411,16 @@ void test_manifest() {
 // requires/feature 的 id 与数量：防止重命名后 descriptor 漏改。
 void test_manifest_ids() {
     const qol::contracts::PluginDescriptor& d = i18n::plugin_descriptor();
-    CHECK(d.requires_count == 3);
+    CHECK(d.requires_count == 4);
     CHECK(std::strcmp(d.requires[0].id, qol::contracts::kTextLayerCapabilityId) == 0);
     CHECK(std::strcmp(d.requires[1].id, qol::contracts::kUiComponentsCapabilityId) == 0);
     CHECK(std::strcmp(d.requires[2].id, qol::contracts::kUiPanelsCapabilityId) == 0);
+    CHECK(std::strcmp(d.requires[3].id, qol::contracts::kCharacterAttributesCapabilityId) == 0);
     CHECK(d.requires[0].range.min_minor == qol::contracts::kTextLayerVersionMinor);
     CHECK(d.requires[1].range.min_minor == qol::contracts::kUiContractMinor);
     CHECK(d.requires[2].range.min_minor == qol::contracts::kUiPanelsVersionMinor);
+    CHECK(d.requires[3].range.major == qol::contracts::kCharacterAttributesVersion.major);
+    CHECK(d.requires[3].range.min_minor == qol::contracts::kCharacterAttributesVersion.minor);
     CHECK(d.ports != nullptr && d.port_count == 1);
     CHECK(d.ports[0].range.major == qol::contracts::kQolPortCharacterExtrasVersion.major);
     CHECK(d.ports[0].range.min_minor == qol::contracts::kQolPortCharacterExtrasVersion.minor);
@@ -530,36 +634,103 @@ void test_overview_format_value() {
 void test_selected_character_priority() {
     qol::contracts::QolCharacterExtrasPort port{};
     port.read.menu_character = &stub_menu_character;
+    port.read.party_index = &stub_party_index;
     port.read.party_member = &stub_party_member;
     i18n::overview_bind_context(nullptr, &port);
 
+    // menu_character + party_index 成功：直接采用 party_index。
     reset_character_stub();
-    CHECK(i18n::overview_resolve_character() == g_menu_character);
-    CHECK(g_menu_character_calls == 1 && g_party_member_calls == 0);
+    g_party_index_value = 1;
+    CHECK(i18n::overview_resolve_party_role() == 1);
+    CHECK(g_menu_character_calls == 1 && g_party_index_calls == 1);
+    CHECK(g_party_member_calls == 0);
 
+    // party_index 失败：party_member 指针比对回退。
+    reset_character_stub();
+    g_party_index_ok = false;
+    g_party_members[2] = g_menu_character;
+    CHECK(i18n::overview_resolve_party_role() == 2);
+    CHECK(g_party_member_calls == 3);
+
+    // menu_character 空/失败：role 0。
     reset_character_stub();
     g_menu_character_null = true;
-    CHECK(i18n::overview_resolve_character() == g_party_character);
-    CHECK(g_menu_character_calls == 1 && g_party_member_calls == 1);
-
+    CHECK(i18n::overview_resolve_party_role() == 0);
     reset_character_stub();
     g_menu_character_ok = false;
-    CHECK(i18n::overview_resolve_character() == g_party_character);
-    CHECK(g_menu_character_calls == 1 && g_party_member_calls == 1);
+    CHECK(i18n::overview_resolve_party_role() == 0);
 
+    // party_index 越界且指针不匹配：role 0。
     reset_character_stub();
-    g_menu_character_ok = false;
-    g_party_member_ok = false;
-    CHECK(i18n::overview_resolve_character() == nullptr);
-    CHECK(g_menu_character_calls == 1 && g_party_member_calls == 1);
-
-    reset_character_stub();
-    g_menu_character_null = true;
-    g_party_member_ok = false;
-    CHECK(i18n::overview_resolve_character() == nullptr);
+    g_party_index_value = 9;
+    CHECK(i18n::overview_resolve_party_role() == 0);
 
     i18n::overview_bind_context(nullptr, nullptr);
-    CHECK(i18n::overview_resolve_character() == nullptr);
+    CHECK(i18n::overview_resolve_party_role() == 0);
+}
+
+// 页面数据由 character.attributes 驱动：snapshot/derived/attr，attr_valid=0 → `--`。
+void test_attributes_driven_rows() {
+    qol::contracts::QolCharacterExtrasPort port{};
+    port.read.menu_character = &stub_menu_character;
+    port.read.party_index = &stub_party_index;
+    port.read.party_member = &stub_party_member;
+    qol::contracts::QolGameHost game{};
+    game.character_read.group_skill_learned = &stub_group_skill_learned;
+    qol::contracts::CharacterAttributesApi api{};
+    api.struct_size = sizeof(api);
+    api.snapshot = &stub_attributes_snapshot;
+    api.derived = &stub_attributes_derived;
+    api.attr = &stub_attributes_attr;
+    i18n::overview_bind_context(&game, &port);
+    i18n::overview_bind_attributes(&api);
+
+    reset_character_stub();
+    reset_attributes_stub();
+    g_party_index_value = 0;
+    g_attributes_main_stats[0] = 55;
+    g_attributes_values[42] = 4242;
+    g_attributes_valid[42] = 1;
+    g_attributes_values[43] = 0;
+    g_attributes_valid[43] = 0;
+    g_attributes_team_values[0] = 100;
+    g_attributes_attr_notfound[1] = true;  // role1 空槽跳过
+    g_attributes_team_values[2] = 50;
+
+    i18n::overview_refresh_snapshot();
+    i18n::OverviewRowProbe probe{};
+    CHECK(g_attributes_snapshot_role == 0);
+    CHECK(i18n::overview_probe_row(0, 0, &probe) && probe.ok == 1 && probe.value == 55);
+    CHECK(i18n::overview_probe_row(1, 0, &probe) && probe.ok == 1 && probe.value == 100);
+    CHECK(i18n::overview_probe_row(2, 42, &probe) && probe.ok == 1 && probe.value == 4242);
+    CHECK(i18n::overview_probe_row(2, 43, &probe) && probe.ok == 0);
+    CHECK(i18n::overview_probe_row(3, 0, &probe) && probe.ok == 1 && probe.value == 150);
+    CHECK(i18n::overview_probe_row(3, 1, &probe) && probe.ok == 1 && probe.value == 1 &&
+          probe.learned == 1);
+
+    // present=0：角色行全部 `--`，全队行仍可用。
+    g_attributes_present = false;
+    i18n::overview_refresh_snapshot();
+    CHECK(i18n::overview_probe_row(0, 0, &probe) && probe.ok == 0);
+    CHECK(i18n::overview_probe_row(2, 42, &probe) && probe.ok == 0);
+    CHECK(i18n::overview_probe_row(3, 0, &probe) && probe.ok == 1 && probe.value == 150);
+
+    // 快照失败：同样只降级角色行。
+    g_attributes_present = true;
+    g_attributes_snapshot_ok = false;
+    i18n::overview_refresh_snapshot();
+    CHECK(i18n::overview_probe_row(0, 0, &probe) && probe.ok == 0);
+    CHECK(i18n::overview_probe_row(1, 0, &probe) && probe.ok == 0);
+
+    // 全队倍率非 NotFound 失败：整行 `--`。
+    g_attributes_snapshot_ok = true;
+    g_attributes_attr_ok = false;
+    i18n::overview_refresh_snapshot();
+    CHECK(i18n::overview_probe_row(3, 0, &probe) && probe.ok == 0);
+
+    i18n::overview_bind_attributes(nullptr);
+    i18n::overview_bind_context(nullptr, nullptr);
+    reset_attributes_stub();
 }
 
 // PopupState 装配：acquire 必须传非空 enter/event；enter wrapper 转发原 enter；
@@ -816,6 +987,7 @@ int main() {
     test_overview_row_model();
     test_attr_names();
     test_selected_character_priority();
+    test_attributes_driven_rows();
     test_overview_format_value();
     test_character_info_tap_inside();
     test_popup_assembly();

@@ -64,6 +64,18 @@
 
 `ATTRINITBASE` 的 22 条记录是「有默认值的属性」，不是数组长度；数组长度见 §1 的 115 槽。
 
+### 3.1 `CHAR_GetAttr` 的读取副作用
+
+`CHAR_GetAttr(ch, id)` 不是纯读：脏位命中时只读单槽；脏位未命中时会重算并把结果写回该槽。具体副作用：
+
+- **attr30（HP 上限）**：`HP > maxHP` 时把当前 HP 写回为 maxHP（钳制）。
+- **attr31（MP 上限）**：`[ch+0x1f4] > [ch+0xa0]` 时把当前 MP 写回为 maxMP（与 attr30 同构）。
+- **attr20（盾牌格挡/副手）**：装备槽 6 为空时可能清零自身。
+- **attr113（总攻击）**：写入总攻击并递归重算 4/5/8/9/106/109。
+- **attr11 / attr12**：结果夹到 980；其它 id 负值清零；91/93 同槽写回。
+
+结论：只读接口必须绕开 30/31（直读 `C_MAX_HP`/`C_MAX_MP` 缓存），其余 id 按同槽重算处理；不得把 `CHAR_GetAttr` 当作无副作用 getter 在非游戏主线程调用。
+
 ## 4. 隐藏属性：attr ≥ 32 扩展区
 
 同一数组、同一 getter，面板与 `/stats` 都不暴露。按功能分组：
@@ -263,6 +275,8 @@
 |---|---|
 | 属性数组基址、getter、主属性偏移 | `module/app/src/main/cpp/game/symbols/game_symbols.h:19,70-87,493` |
 | 属性数组 115 槽（id 0..114） | `CHAR_ResetAttrUpdatedAll`（`0xd9f0c`）清零循环 `cmp w19,#0x73`；id113=总攻击缓存，id114 语义未知 |
+| `CHAR_GetAttr` 分支与副作用 | `CHAR_GetAttr`（`0xdfd18`）id 分派自 `0xdfd6c` 起；30/31 钳制写回、20/113/11/12 副作用见 §3.1 |
+| HP/MP 上限缓存字段 | `C_MAX_HP = C_ATTR + 0x1e*4 = [ch+0x9c]`、`C_MAX_MP = C_ATTR + 0x1f*4 = [ch+0xa0]`（`game/symbols/game_symbols.h:76-77`） |
 | 默认值记录口径 | `apk/static-data/json/tables/ATTRINITBASE.json` 22 条 = 有默认值的属性，不是数组长度 |
 | 面板选中角色 | `PARTY_GetMenuCharacter`（`0x120338`）、`PARTY_nMenuIndex`（`0x728ed8`） |
 | 32 项属性读取与契约 | `module/app/src/main/cpp/game/ops/character_state_read.cpp:107-118`、`contracts/game_ports/character_state_port.h:13` |

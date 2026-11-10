@@ -7,6 +7,7 @@
 // 游戏侧只以 fake QolCharacterHttpPort/QolCharacterPort 注入；富化拼装在 legacy
 // game_system.cpp，本测试只验证快照/切片/组合接缝。
 
+#include "contracts/character_attributes.h"
 #include "contracts/game_ports/character_http_port.h"
 #include "contracts/game_ports/character_port.h"
 #include "contracts/game_ports/character_state_port.h"
@@ -23,6 +24,7 @@
 #include "test_snapshot_sdk.h"
 
 #include <cstdint>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -31,11 +33,31 @@
 
 static int g_pass = 0;
 static int g_fail = 0;
-
 #define CHECK(cond) do { \
     if (cond) ++g_pass; \
     else { ++g_fail; std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
 } while (0)
+
+// character.attributes 契约与私有端口 v1.1 的 ABI/版本门禁（host 端口转发由 gamebridge 编译覆盖）。
+static_assert(qol::contracts::kCharacterAttributesVersion.major == 1 &&
+                  qol::contracts::kCharacterAttributesVersion.minor == 0,
+              "character.attributes contract must be v1.0");
+static_assert(qol::contracts::kQolPortCharacterStateVersion.major == 2 &&
+                  qol::contracts::kQolPortCharacterStateVersion.minor == 0,
+              "character.state port must be v2.0");
+static_assert(qol::contracts::kQolCharacterAttrSlotCount == 115 &&
+                  qol::contracts::kQolCharacterMainStatCount == 5,
+              "character attribute slot/main-stat counts changed");
+static_assert(sizeof(qol::contracts::QolCharacterRef) == 8,
+              "QolCharacterRef ABI size changed");
+static_assert(sizeof(qol::contracts::QolCharacterAttributeSnapshot) == 612,
+              "QolCharacterAttributeSnapshot ABI size changed");
+static_assert(offsetof(qol::contracts::QolCharacterStatePortReadApi, attributes) >
+                  offsetof(qol::contracts::QolCharacterStatePortReadApi, skills),
+              "attributes must append after skills");
+static_assert(offsetof(qol::contracts::QolCharacterStatePortReadApi, derived) >
+                  offsetof(qol::contracts::QolCharacterStatePortReadApi, attributes),
+              "derived must append after attributes");
 
 namespace {
 
@@ -60,7 +82,7 @@ constexpr char kParty[] =
     "[{\"name\":\"凯恩\",\"class_name\":\"黑暗骑士\",\"level\":10,\"hp\":50,\"max_hp\":60,"
     "\"mp\":5,\"max_mp\":6,\"exp\":1,\"exp_next\":2,\"status_point\":3,"
     "\"equipment\":[null,{\"slot\":1,\"name\":\"钢铁 剑\"}],\"type\":0,\"class_idx\":0,"
-    "\"name_id\":7,\"stats\":{\"0\":1}},null]";
+    "\"name_id\":7},null]";
 constexpr char kSkills[] =
     "[{\"role\":0,\"skills\":[{\"action_id\":10,\"level\":1,\"skill_name\":\"火球\"}],"
     "\"unlock_bitmap\":0,\"active_skill_id\":-1,\"skill_points\":4},null]";
@@ -70,18 +92,18 @@ constexpr char kMember0[] =
     "{\"name\":\"凯恩\",\"class_name\":\"黑暗骑士\",\"level\":10,\"hp\":50,\"max_hp\":60,"
     "\"mp\":5,\"max_mp\":6,\"exp\":1,\"exp_next\":2,\"status_point\":3,"
     "\"equipment\":[null,{\"slot\":1,\"name\":\"钢铁 剑\"}],\"type\":0,\"class_idx\":0,"
-    "\"name_id\":7,\"stats\":{\"0\":1}}";
+    "\"name_id\":7}";
 constexpr char kNotInGame[] = "{\"error\":\"not in game\"}";
 constexpr char kMember1[] =
     "{\"name\":\"佣兵B\",\"class_name\":\"忍者\",\"level\":8,\"hp\":30,"
     "\"max_hp\":40,\"mp\":4,\"max_mp\":5,\"exp\":2,\"exp_next\":3,"
     "\"status_point\":1,\"equipment\":[null],\"type\":1,\"class_idx\":1,"
-    "\"name_id\":8,\"stats\":{\"0\":2}}";
+    "\"name_id\":8}";
 constexpr char kMember2[] =
     "{\"name\":\"佣兵C\",\"class_name\":\"黑魔导\",\"level\":6,\"hp\":20,"
     "\"max_hp\":25,\"mp\":8,\"max_mp\":10,\"exp\":3,\"exp_next\":4,"
     "\"status_point\":0,\"equipment\":[null],\"type\":1,\"class_idx\":2,"
-    "\"name_id\":9,\"stats\":{\"0\":3}}";
+    "\"name_id\":9}";
 
 bool g_not_in_game = false;
 int32_t g_failed_http_kind = -1;
@@ -356,9 +378,49 @@ QolResult fake_state_skills(qol::contracts::QolCharacterStateSkills* out) {
     }
     return qol::contracts::ok();
 }
+QolResult fake_state_attributes(qol::contracts::QolCharacterRef ref,
+                               qol::contracts::QolCharacterAttributeSnapshot* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    if (ref.kind != qol::contracts::kQolCharacterRefParty || ref.index != 0) {
+        return qol::contracts::error(kQolErrNotFound, "character not found", 21);
+    }
+    *out = {};
+    out->struct_size = sizeof(*out);
+    out->ref = ref;
+    out->present = 1;
+    for (int32_t i = 0; i < qol::contracts::kQolCharacterMainStatCount; ++i) {
+        out->main_stats[i] = i + 1;
+    }
+    for (int32_t id = 0; id < qol::contracts::kQolCharacterAttrSlotCount; ++id) {
+        out->attrs[id] = id + 100;
+        out->attr_valid[id] = 1;
+    }
+    return qol::contracts::ok();
+}
+QolResult fake_state_derived(qol::contracts::QolCharacterRef, int32_t kind, int32_t* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    *out = kind;
+    return qol::contracts::ok();
+}
+QolResult fake_state_attr(qol::contracts::QolCharacterRef, int32_t attr_id, int32_t* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    *out = attr_id;
+    return qol::contracts::ok();
+}
+QolResult fake_state_main_stat(qol::contracts::QolCharacterRef, int32_t index, int32_t* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    *out = index;
+    return qol::contracts::ok();
+}
+QolResult fake_state_present(qol::contracts::QolCharacterRef, int32_t* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad out", 7);
+    *out = 1;
+    return qol::contracts::ok();
+}
 const qol::contracts::QolCharacterStatePort kFakeStatePort{
     qol::contracts::kQolPortCharacterStateVersion,
-    {&fake_state_party, &fake_state_player, &fake_state_skills}};
+    {&fake_state_party, &fake_state_player, &fake_state_skills, &fake_state_attributes,
+     &fake_state_derived, &fake_state_attr, &fake_state_main_stat, &fake_state_present}};
 
 QolResult fake_item_state_json(int32_t kind, char* out, uint32_t capacity, uint32_t* out_size) {
     if (out_size != nullptr) *out_size = 0;
@@ -1062,7 +1124,27 @@ void test_lifecycle_and_responses() {
     CHECK(dispatch_get("/api/character/party/0/status") ==
           "{\"status\":{\"hp\":50,\"max_hp\":60,\"mp\":5,\"max_mp\":6,\"exp\":1,\"exp_next\":2,"
           "\"attribute_points\":3,\"skill_points\":4}}");
-    CHECK(dispatch_get("/api/character/party/0/stats") == "{\"stats\":{\"0\":1}}");
+    uint16_t attributes_status = 0;
+    const std::string old_stats_body =
+        dispatch_get("/api/character/party/0/stats", &attributes_status);
+    CHECK(attributes_status == 404);
+    CHECK(old_stats_body.find("not found") != std::string::npos);
+    std::string expected_attributes = "{\"attributes\":{\"role\":0,\"present\":1,"
+                                      "\"main_stats\":[1,2,3,4,5],\"attrs\":[";
+    for (int32_t id = 0; id < qol::contracts::kQolCharacterAttrSlotCount; ++id) {
+        if (id != 0) expected_attributes.push_back(',');
+        expected_attributes += std::to_string(id + 100);
+    }
+    expected_attributes += "],\"attr_valid\":[";
+    for (int32_t id = 0; id < qol::contracts::kQolCharacterAttrSlotCount; ++id) {
+        if (id != 0) expected_attributes.push_back(',');
+        expected_attributes.push_back('1');
+    }
+    expected_attributes += "]}}";
+    CHECK(dispatch_get("/api/character/party/0/attributes", &attributes_status) ==
+          expected_attributes);
+    CHECK(attributes_status == 200);
+    CHECK(dispatch_get("/api/character/party/1/attributes") == "{\"attributes\":null}");
     CHECK(dispatch_get("/api/character/party/0/equipment") ==
           "{\"equipment\":[null,{\"slot\":1,\"name\":\"钢铁 剑\"}]}");
     CHECK(dispatch_get("/api/character/party/0/equipment/1") == "{\"slot\":1,\"name\":\"钢铁 剑\"}");
@@ -1093,7 +1175,7 @@ void test_lifecycle_and_responses() {
     // 404 语义：null 成员、越界成员、equipment 空槽、leader 指向 null、无匹配佣兵槽。
     (void)dispatch_get("/api/character/party/1", &status);
     CHECK(status == 404);
-    CHECK(dispatch_get("/api/character/party/1/stats") == "{\"stats\":null}");
+
     (void)dispatch_get("/api/character/party/9", &status);
     CHECK(status == 404);
     (void)dispatch_get("/api/character/party/0/equipment/0", &status);
