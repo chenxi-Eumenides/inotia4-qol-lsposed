@@ -21,18 +21,19 @@ constexpr int64_t kPanelW = 960;
 constexpr int64_t kPanelH = 640;
 
 // 主体装饰框：左右各留 24 内边距；框内两列各 400 宽、列间距 24，正好铺满框内宽度。
+// 高度按 5 行加上下各 5 的留白收紧，框底 494 与翻页按钮（y=540）之间仍有余量。
 constexpr int32_t kBodyX = 44;
 constexpr int32_t kBodyY = 104;
 constexpr int64_t kBodyW = 872;
-constexpr int64_t kBodyH = 412;
+constexpr int32_t kRowHeight = 76;
+constexpr int32_t kRowsPerColumn = 5;
+constexpr int64_t kBodyH = static_cast<int64_t>(kRowsPerColumn) * kRowHeight + 10;
+constexpr int32_t kRowTop = 5;
 constexpr UiRect kBody{kBodyX, kBodyY, kBodyW, kBodyH};
 constexpr int32_t kColumnInset = 24;
 constexpr int32_t kColumnLeft = kBodyX + kColumnInset;
 constexpr int32_t kColumnW = 400;
 constexpr int32_t kColumnGap = 24;
-constexpr int32_t kRowTop = 16;
-constexpr int32_t kRowHeight = 76;
-constexpr int32_t kRowsPerColumn = 5;
 constexpr uint32_t kRowsPerPage = 10;
 
 // 列内布局：名称靠左，数值居中于左右箭头之间，箭头与数值同一行。
@@ -179,6 +180,16 @@ uint32_t page_end_row() {
     const uint32_t first = page_first_row();
     const uint32_t end = first + kRowsPerPage;
     return end < kRowCount ? end : kRowCount;
+}
+
+// 当前页某列实际可见的行数；用于跳过该列最后一行的下分隔线。
+uint32_t column_visible_rows(uint32_t column) {
+    const uint32_t column_first = page_first_row() + column * kRowsPerColumn;
+    const uint32_t end = page_end_row();
+    if (column_first >= end) return 0;
+    const uint32_t remaining = end - column_first;
+    const uint32_t per_column = static_cast<uint32_t>(kRowsPerColumn);
+    return remaining < per_column ? remaining : per_column;
 }
 
 void draw_row(uint32_t index, int32_t column_x, int32_t row_y) {
@@ -354,6 +365,8 @@ void build_panel() {
     }
     if (g_ui->load_image_unit != nullptr) {
         (void)g_ui->load_image_unit(0x0f);
+        (void)g_ui->load_image_unit(0x4f);
+        (void)g_ui->load_image_unit(0x50);
     }
     const int32_t center_x = static_cast<int32_t>(kPanelW / 2);
     for (int i = 0; i < 2; ++i) {
@@ -410,6 +423,12 @@ void panel_process() {
     const bool have_origin =
         contracts::succeeded(g_ui->control_absolute_origin(g_root, &root_x, &root_y));
     if (have_origin) {
+        if (g_ui->draw_image_part != nullptr) {
+            (void)g_ui->draw_image_part(0x4f, 0, root_x + kPanelW / 2 - 300,
+                                        root_y + kPanelH / 2, 2, 1);
+            (void)g_ui->draw_image_part(0x50, 0, root_x + kPanelW / 2 + 300,
+                                        root_y + kPanelH / 2, 2, 1);
+        }
         const UiRect body{root_x + kBody.x, root_y + kBody.y, kBody.w, kBody.h};
         const contracts::UiContainerStyleDesc body_style{
             body, contracts::ui_theme::kPanelBgRgb565, contracts::ui_theme::kPanelAlpha, 1};
@@ -419,9 +438,14 @@ void panel_process() {
     const uint32_t end = page_end_row();
     for (uint32_t row = first; row < end; ++row) {
         const uint32_t slot = row - first;
+        const uint32_t column = slot / kRowsPerColumn;
+        const uint32_t line = slot % kRowsPerColumn;
         const int32_t column_x = column_local_x(slot);
-        const int32_t row_y = row_local_y(slot % kRowsPerColumn);
-        if (have_origin) draw_divider(root_x, root_y, column_x, row_y);
+        const int32_t row_y = row_local_y(line);
+        // 每列最后一个可见行不画下分隔线，避免在框底 5px 留白处多一条线。
+        if (have_origin && line + 1 < column_visible_rows(column)) {
+            draw_divider(root_x, root_y, column_x, row_y);
+        }
         draw_row(row, column_x, row_y);
         for (auto& handle : g_arrows[row]) {
             if (handle != nullptr) (void)g_components->arrow_button_draw(handle);
