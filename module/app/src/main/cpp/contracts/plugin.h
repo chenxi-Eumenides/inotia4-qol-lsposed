@@ -52,11 +52,14 @@ enum class ResourceFailure : uint8_t {
 };
 
 // 资源占用状态（§4.2）：free 可分配 / disabled 空转透传 / live 已服务 / tombstone 保留占用。
+// skipped 是「入口已由变体自建、本资源按声明不参与」的终态：既不安装也不重试，
+// 只用于 require_original_entry 的资源。
 enum class ResourceState : uint8_t {
     kFree = 0,
     kDisabled = 1,
     kLive = 2,
     kTombstone = 3,
+    kSkipped = 4,
 };
 
 // 稳定英文名，供诊断接口输出；越界返回 "unknown"。
@@ -70,6 +73,8 @@ inline const char* resource_state_name(ResourceState state) {
             return "live";
         case ResourceState::kTombstone:
             return "tombstone";
+        case ResourceState::kSkipped:
+            return "skipped";
     }
     return "unknown";
 }
@@ -111,6 +116,11 @@ struct ResourceClaim {
     // opt-in：即使首条不是 b/cbz/tbz，也优先使用 4 字节短补丁（适合不依赖入口寄存器的
     // 隐藏段 VM 体）。短补丁不支持的首条指令会安装失败并交由资源失败策略处理。
     bool short_hook = false;
+    // opt-in：只守卫游戏原版入口。解析到的入口是无条件 b 跳板（变体把整个函数改写成
+    // 自己的隐藏段路径）时跳过安装，登记为 skipped，不调用 on_resource_ready，
+    // 也不交还 backup；声明者必须让 on_enabled/wrapper 容忍该资源不可用。
+    // 与 follow_trampoline 互斥；指令级补丁按自身点位校验，不使用本字段。
+    bool require_original_entry = false;
 };
 
 // JNI 绑定元数据（§7.2）：三向校验（Kotlin external ↔ native 导出 ↔ 本表）

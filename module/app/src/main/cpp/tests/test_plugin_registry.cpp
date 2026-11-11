@@ -88,6 +88,7 @@ struct FakeBackend {
     const char* last_symbol = nullptr;
     const char* resolved_symbols[128] = {};
     uint32_t resolved_symbol_count = 0;
+    const char* trampoline_symbol = nullptr;  // 该符号的入口报告为无条件 b 跳板
     uintptr_t follow_target = 0;  // 非 0 = follow 解析器返回的目标地址
     int follow_calls = 0;
     void* last_target = nullptr;
@@ -98,7 +99,10 @@ FakeBackend g_backend;
 
 uintptr_t fake_resolve(const char* symbol, bool* out_followed) {
     g_backend.last_symbol = symbol;
-    if (out_followed != nullptr) *out_followed = false;
+    if (out_followed != nullptr) {
+        *out_followed = g_backend.trampoline_symbol != nullptr && symbol != nullptr &&
+                        std::strcmp(symbol, g_backend.trampoline_symbol) == 0;
+    }
     if (symbol != nullptr && g_backend.unresolved_symbol != nullptr &&
         std::strcmp(symbol, g_backend.unresolved_symbol) == 0) return 0;
     if (symbol != nullptr && g_backend.alias_target != 0 &&
@@ -409,6 +413,19 @@ void test_duplicate_and_invalid_registration() {
     null_install.install = nullptr;
     CHECK(!register_plugin(null_install));
 
+    // require_original_entry 只允许用于不跟随的入口 hook。
+    ResourceClaim bad_flag = claim("hook:bad:flag", "bad_flag", nullptr);
+    bad_flag.require_original_entry = true;
+    bad_flag.mechanism = ResourceMechanism::kInsnPatch;
+    PluginDescriptor bad_flag_desc = make_descriptor("bad_flag", &bad_flag, 1, nullptr, 0);
+    CHECK(!register_plugin(bad_flag_desc));
+
+    ResourceClaim bad_follow = claim("hook:bad:follow", "bad_follow", nullptr);
+    bad_follow.require_original_entry = true;
+    bad_follow.follow_trampoline = true;
+    PluginDescriptor bad_follow_desc = make_descriptor("bad_follow", &bad_follow, 1, nullptr, 0);
+    CHECK(!register_plugin(bad_follow_desc));
+
     CHECK(plugin_count() == 1);
 }
 
@@ -538,6 +555,53 @@ void test_feature_mode_installs_all_resources_in_one_step() {
     CHECK(g_probe.enabled_calls == 1);
     // 成功终态不得留下瞬态重试标记。
     CHECK(!qol::host::feature_registry_pop_transient_failure("fm_three"));
+}
+
+ResourceClaim skip_variant_claim(const char* id, const char* owner) {
+    ResourceClaim c = claim(id, owner, nullptr);
+    c.atomic = true;
+    c.require_original_entry = true;
+    return c;
+}
+
+ResourceClaim atomic_claim(const char* id, const char* owner) {
+    ResourceClaim c = claim(id, owner, nullptr);
+    c.atomic = true;
+    return c;
+}
+
+ResourceClaim fm_skip_hooks[] = {
+    skip_variant_claim("hook:skip:a", "fm_skip"),
+    atomic_claim("hook:skip:b", "fm_skip"),
+};
+
+// require_original_entry：入口为 b 跳板（变体自建路径）的原子成员登记 skipped，
+// 不安装、不通知 owner，但整组仍满足 enabled；同组原版入口照常安装。
+void test_feature_mode_variant_entry_skipped() {
+    reset_feature_mode("fm_skip", fm_skip_hooks, 2);
+    g_backend.trampoline_symbol = "hook:skip:a";
+    CHECK(qol::host::feature_registry_transition("fm_skip", true));
+    drive_feature_steps();
+    CHECK(feature_state_is("fm_skip", FeatureState::kEnabled));
+    CHECK(qol::hooks::state_of("hook:skip:a") == ResourceState::kSkipped);
+    CHECK(qol::hooks::state_of("hook:skip:b") == ResourceState::kLive);
+    CHECK(g_probe.ready_calls == 1);
+    CHECK(g_backend.hook_calls == 1);
+    CHECK(!feature_degraded("fm_skip"));
+
+    // 停用/重启：skipped 保持终态，不因整组停用而丢失，也不触发重新安装。
+    CHECK(qol::host::feature_registry_transition("fm_skip", false));
+    drive_feature_steps();
+    CHECK(feature_state_is("fm_skip", FeatureState::kInactive));
+    CHECK(qol::hooks::state_of("hook:skip:a") == ResourceState::kSkipped);
+    CHECK(qol::hooks::state_of("hook:skip:b") == ResourceState::kFree);
+
+    CHECK(qol::host::feature_registry_transition("fm_skip", true));
+    drive_feature_steps();
+    CHECK(feature_state_is("fm_skip", FeatureState::kEnabled));
+    CHECK(qol::hooks::state_of("hook:skip:a") == ResourceState::kSkipped);
+    CHECK(qol::hooks::state_of("hook:skip:b") == ResourceState::kLive);
+    CHECK(g_backend.hook_calls == 2);  // 仅 b 重新安装；skipped 不参与
 }
 
 ResourceClaim follow_hook_resource() {
@@ -1140,6 +1204,7 @@ int main() {
     test_elf_export_prefix_rejected_for_other_mechanisms();
     test_feature_mode_core_hook_failure_rolls_back();
     test_feature_mode_installs_all_resources_in_one_step();
+    test_feature_mode_variant_entry_skipped();
     test_follow_trampoline_uses_followed_entry();
     test_feature_mode_soft_middle_keeps_degraded_reason();
     test_feature_mode_soft_last_keeps_degraded_reason();

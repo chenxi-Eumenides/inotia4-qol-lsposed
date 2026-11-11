@@ -326,8 +326,9 @@ bool install_step(Tx& tx, TxStep* out) {
     tx.budget = budget_of(claim);
 
     const contracts::ResourceState state = state_of(claim.id);
-    if (state == contracts::ResourceState::kLive || state == contracts::ResourceState::kDisabled) {
-        // 幂等跳过：资源已安装，本步无副作用。
+    if (state == contracts::ResourceState::kLive || state == contracts::ResourceState::kDisabled ||
+        state == contracts::ResourceState::kSkipped) {
+        // 幂等跳过：资源已安装（或按声明不参与），本步无副作用。
         ++tx.step;
         out->resource_id = claim.id;
         out->ok = 0;
@@ -353,6 +354,23 @@ bool install_step(Tx& tx, TxStep* out) {
     }
     if (entry_target_conflicts(entry, claim.id)) {
         return fail_install_resource(tx, claim, 1, "entry target already occupied", out);
+    }
+    if (claim_skips_variant_entry(claim, followed)) {
+        // 变体自建入口：本资源不参与，保持变体原路径；不计失败、不置重试。
+        set_state(claim.id, contracts::ResourceState::kSkipped);
+        runtime_clear(claim.id);
+        retry_pending_set(claim.id, false);
+        ++tx.step;
+        out->resource_id = claim.id;
+        out->ok = 0;
+        out->backup = nullptr;
+        out->error = nullptr;
+        out->finished = tx.step >= tx.total;
+        if (out->finished) {
+            tx.state = TxState::kSucceeded;
+            finalize_terminal(tx);
+        }
+        return !out->finished;
     }
 
     // gate 为 nullptr 视为开；gate_on 未注入时一切 gate 视为开。

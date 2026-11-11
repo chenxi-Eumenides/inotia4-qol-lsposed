@@ -969,6 +969,10 @@ bool descriptor_valid(const contracts::PluginDescriptor& plugin) {
             std::strncmp(claim.symbol, "elf-export:", 11) == 0 &&
             (claim.mechanism != contracts::ResourceMechanism::kEntryHook ||
              claim.symbol[11] == '\0')) return false;
+        // 只对「不跟随的入口 hook」有意义；跟随解析本身就以变体目标为安装点。
+        if (claim.require_original_entry &&
+            (claim.mechanism != contracts::ResourceMechanism::kEntryHook ||
+             claim.follow_trampoline)) return false;
     }
     if (plugin.http_query_count > 0 && plugin.http_queries == nullptr) return false;
     if (plugin.requires_count > 0 && plugin.requires == nullptr) return false;
@@ -1231,7 +1235,11 @@ bool plugin_has_atomic_claims(const contracts::PluginDescriptor& plugin) {
 bool atomic_group_satisfied(const contracts::PluginDescriptor& plugin) {
     for (uint32_t i = 0; i < plugin.resources_count; ++i) {
         const contracts::ResourceClaim& claim = plugin.resources[i];
-        if (claim.atomic && hooks::state_of(claim.id) != contracts::ResourceState::kLive) {
+        if (!claim.atomic) continue;
+        const contracts::ResourceState state = hooks::state_of(claim.id);
+        // skipped：入口由变体自建，本插件按声明不参与该路径，不阻塞整组可用。
+        if (state != contracts::ResourceState::kLive &&
+            state != contracts::ResourceState::kSkipped) {
             return false;
         }
     }
@@ -1329,6 +1337,11 @@ bool install_atomic_group(const contracts::PluginDescriptor& plugin,
                 error = "entry target already occupied";
                 break;
             }
+            if (hooks::claim_skips_variant_entry(claim, followed)) {
+                hooks::set_state(claim.id, contracts::ResourceState::kSkipped);
+                hooks::retry_pending_set(claim.id, false);
+                continue;
+            }
             const hooks::InstallOutcome outcome = hooks::install_claim_entry_hook(
                 claim, entry, deps.hook_fn, deps.unhook_fn, false);
             if (outcome.ok != 0) {
@@ -1413,6 +1426,12 @@ const char* retry_resident_claim(const contracts::PluginDescriptor& plugin,
         const uintptr_t entry = resolve_claim_entry(claim, deps, &followed);
         if (entry == 0) return "symbol unresolved";
         if (hooks::entry_target_conflicts(entry, claim.id)) return "entry target already occupied";
+        if (hooks::claim_skips_variant_entry(claim, followed)) {
+            hooks::set_state(claim.id, contracts::ResourceState::kSkipped);
+            hooks::retry_pending_set(claim.id, false);
+            if (out_code != nullptr) *out_code = 0;
+            return nullptr;
+        }
         const hooks::InstallOutcome outcome =
             hooks::install_claim_entry_hook(claim, entry, deps.hook_fn, deps.unhook_fn, true);
         if (outcome.ok != 0) {
@@ -1551,12 +1570,14 @@ bool feature_stop(uint32_t index, bool failed_cleanup) {
     return true;
 }
 
-// 全部声明资源是否都已物理安装（kLive/kDisabled）；软失败保持 kFree 时返回 false。
+// 全部声明资源是否都已物理安装（kLive/kDisabled）或按声明不参与（kSkipped）；
+// 软失败保持 kFree 时返回 false。
 bool plugin_resources_all_installed(const contracts::PluginDescriptor& plugin) {
     for (uint32_t i = 0; i < plugin.resources_count; ++i) {
         const contracts::ResourceState state = hooks::state_of(plugin.resources[i].id);
         if (state != contracts::ResourceState::kLive &&
-            state != contracts::ResourceState::kDisabled) {
+            state != contracts::ResourceState::kDisabled &&
+            state != contracts::ResourceState::kSkipped) {
             return false;
         }
     }
@@ -2000,6 +2021,11 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
         }
         if (hooks::entry_target_conflicts(entry, claim.id)) {
             if (handle_claim_failure(claim, "entry target already occupied")) break;
+            continue;
+        }
+        if (hooks::claim_skips_variant_entry(claim, followed)) {
+            hooks::set_state(claim.id, contracts::ResourceState::kSkipped);
+            hooks::retry_pending_set(claim.id, false);
             continue;
         }
 
@@ -2977,10 +3003,11 @@ void feature_registry_notify_save_ready() {
     }
 }
 
-// 资源是否已处于「已安装」终态（live/disabled）。
+// 资源是否已处于「已安装」终态（live/disabled），或按声明不参与（skipped）。
 bool resource_installed(contracts::ResourceState state) {
     return state == contracts::ResourceState::kLive ||
-           state == contracts::ResourceState::kDisabled;
+           state == contracts::ResourceState::kDisabled ||
+           state == contracts::ResourceState::kSkipped;
 }
 
 // 第一条仍未安装（free/tombstone）的资源；全部安装时返回 nullptr。

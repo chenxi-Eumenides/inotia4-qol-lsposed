@@ -45,6 +45,23 @@ int32_t fake_critical_backup(void*, void*, int32_t damage) {
 int main() {
     using namespace qol::features::damage_widen;
 
+    // 所有入口 hook 只守卫游戏原版入口：变体把整个函数改写成 b 跳板时由宿主登记
+    // skipped，保持变体自己的路径；指令级补丁按点位校验，不使用该字段。
+    const qol::contracts::PluginDescriptor& descriptor = plugin_descriptor();
+    int32_t entry_claims = 0;
+    for (uint32_t i = 0; i < descriptor.resources_count; ++i) {
+        const qol::contracts::ResourceClaim& claim = descriptor.resources[i];
+        if (claim.mechanism == qol::contracts::ResourceMechanism::kEntryHook) {
+            ++entry_claims;
+            check(claim.require_original_entry,
+                  "damage_widen entry hook requires original entry");
+        } else {
+            check(!claim.require_original_entry,
+                  "damage_widen insn patch does not use original-entry gate");
+        }
+    }
+    check(entry_claims == 6, "damage_widen declares six entry hooks");
+
     qol::contracts::QolCharacterReadApi read_api{};
     read_api.attr = &fake_attr;
     read_api.physical_defense_calculate = &fake_physical_defense;

@@ -4,6 +4,8 @@
 
 一期 4 个 wrapper 与二期物防 wrapper 是私有、可选、fail-soft entry hook；六个新增指令区域和 2a 三个既有区域为 gated、optional、fail-soft `kInsnPatch`。`damage_widen.enabled` 关闭时资源物理归还，原生函数/指令恢复。符号和指令点位分别由 `game/access/symbols.cpp` 与 `game/access/insn_sites.cpp` 解析。
 
+全部 entry hook 声明 `require_original_entry`：解析到的入口是无条件 `b` 跳板时（变体把整个函数改写成隐藏段路径），宿主不安装该资源、登记为 `skipped`，不调用 `on_resource_ready`。这样 damage_widen 只守卫游戏原版函数体；变体自建路径及其后处理（例如 monster v29 的 `CHAR_CalcPhysicalDefense`/`CHAR_CalcMagicalDefense` 最低伤害保底）原样生效。当前四变体逐项核对：只有 monster 的这两个防御入口是 `b` 跳板；`CHAR_Act_DD`、`CHAR_GetNormalDamage`、`CHAR_GetNormalMagicDamage`、`CHAR_GetCriticalDamage` 的入口与原版一致。指令级补丁仍按点位校验原指令并只安装在已知变体（`INSN_ACT_M_DD_*` 仅 monster v29）；这些点位的原指令在 c18/monster/overhaul 与原版逐字一致。
+
 ## 安全千分比运算
 
 `safe_scale(X,N)` 统一计算 `(X / D) * N + ((X % D) * N) / D`（D 为点位除数，100 或 1000）；两次除法均为有符号向零截断，与 `trunc0(X*N/D)` 精确等价。输入为游戏 int32 值及其有限和；分解后的中间值在 int64 范围内。普通/魔法攻击、暴击、魔防与物防 wrapper 使用该 inline helper。kind4 thunk 对全部千分比/百分比点执行对应的 `sxtw`、`sdiv`、`msub`、低余数乘法与加和（除数参数化，÷100 与 ÷1000 同构），不做原始 32 位乘积，也不使用 64 位完整乘积。区域重放按原顺序排在分解式之后（分解式已消费源寄存器，重放可安全改写它们）；BL 占位在安装期按实际词位重定位；置标志指令最后重放（区域外分支消费最终标志）。

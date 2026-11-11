@@ -353,6 +353,7 @@ void test_resource_state_name() {
     CHECK(std::strcmp(resource_state_name(ResourceState::kDisabled), "disabled") == 0);
     CHECK(std::strcmp(resource_state_name(ResourceState::kLive), "live") == 0);
     CHECK(std::strcmp(resource_state_name(ResourceState::kTombstone), "tombstone") == 0);
+    CHECK(std::strcmp(resource_state_name(ResourceState::kSkipped), "skipped") == 0);
     CHECK(std::strcmp(resource_state_name(static_cast<ResourceState>(99)), "unknown") == 0);
 }
 

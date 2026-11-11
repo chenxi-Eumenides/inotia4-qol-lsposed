@@ -70,6 +70,7 @@ int g_handler_b = 0;
 
 // 假机制原语全局状态。
 uintptr_t g_resolve_value = 0x1000;
+bool g_resolve_followed = false;
 int g_resolve_calls = 0;
 const char* g_alias_symbol_a = nullptr;
 const char* g_alias_symbol_b = nullptr;
@@ -89,7 +90,7 @@ int g_gate_calls = 0;
 uintptr_t fake_resolve(const char* symbol, bool* out_followed) {
     ++g_resolve_calls;
     if (out_followed != nullptr) {
-        *out_followed = false;
+        *out_followed = g_resolve_followed;
     }
     if (g_resolve_value == 0 || symbol == nullptr) return 0;
     if (g_alias_target != 0 &&
@@ -217,6 +218,7 @@ void reset_all() {
     registry_reset_for_test();
     tx_reset_for_test();
     g_resolve_value = 0x1000;
+    g_resolve_followed = false;
     g_resolve_calls = 0;
     g_alias_symbol_a = nullptr;
     g_alias_symbol_b = nullptr;
@@ -1384,6 +1386,46 @@ void test_install_null_backup_unhook_fail_hard_even_fail_soft() {
     CHECK(rt.backup == nullptr);
 }
 
+// require_original_entry：入口被变体改写成无条件 b 跳板（followed=true）时本资源不安装，
+// 登记 skipped；不调用 hook、不置重试；再次安装与还原均按已终态幂等跳过。
+void test_install_skips_variant_entry() {
+    reset_all();
+    set_deps();
+    g_resolve_followed = true;
+    ResourceClaim a = make_claim("hook:variant", "variant_plugin", "gateOn");
+    a.require_original_entry = true;
+    CHECK(register_claim(a));
+
+    const uint64_t tx = tx_begin("variant_plugin", TxKind::kInstall);
+    CHECK(tx != 0);
+    TxStep step{};
+    CHECK(!tx_step(tx, &step));
+    CHECK(step.finished);
+    CHECK(step.ok == 0);
+    CHECK(step.backup == nullptr);
+    CHECK(state_of("hook:variant") == ResourceState::kSkipped);
+    CHECK(g_hook_calls == 0);
+    ResourceRuntime rt{};
+    CHECK(!runtime_of("hook:variant", &rt));
+    CHECK(!qol::hooks::retry_pending_get("hook:variant"));
+
+    // 已 skipped：再次安装幂等跳过，不重复 hook。
+    const uint64_t again = tx_begin("variant_plugin", TxKind::kInstall);
+    CHECK(again != 0);
+    CHECK(!tx_step(again, &step));
+    CHECK(step.finished && step.ok == 0);
+    CHECK(state_of("hook:variant") == ResourceState::kSkipped);
+    CHECK(g_hook_calls == 0);
+
+    // 还原：skipped 不是 live/disabled，直接跳过，不调用 unhook。
+    const uint64_t restore = tx_begin("variant_plugin", TxKind::kRelease);
+    CHECK(restore != 0);
+    CHECK(!tx_step(restore, &step));
+    CHECK(step.finished && step.ok == 0);
+    CHECK(state_of("hook:variant") == ResourceState::kSkipped);
+    CHECK(g_unhook_calls == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -1398,6 +1440,7 @@ int main() {
     test_install_live_is_idempotent_skip();
     test_install_null_backup_unhook_success_soft_fail();
     test_install_null_backup_unhook_fail_hard_even_fail_soft();
+    test_install_skips_variant_entry();
     test_query_terminal_and_reset();
     test_install_anchor_failures();
     test_release_anchors();

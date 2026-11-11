@@ -36,6 +36,13 @@ struct InstallOutcome {
     void* backup;
 };
 
+// opt-in 语义：资源只守卫游戏原版入口。resolved 入口被变体改写成无条件 b 跳板时
+// （followed=true）不安装，由调用方登记 kSkipped 并保持变体自建路径。
+// 该判定只看解析层已给出的 followed 标记，不再读取入口内存。
+inline bool claim_skips_variant_entry(const contracts::ResourceClaim& claim, bool followed) {
+    return claim.require_original_entry && followed;
+}
+
 // 宿主注入的 unhook 原语：func 为原函数入口（resolved_entry），成功返回 0。
 using NativeUnhookFn = int (*)(void* func);
 
