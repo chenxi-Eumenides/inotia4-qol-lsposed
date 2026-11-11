@@ -4,7 +4,7 @@
 
 一期 4 个 wrapper 与二期物防 wrapper 是私有、可选、fail-soft entry hook；六个新增指令区域和 2a 三个既有区域为 gated、optional、fail-soft `kInsnPatch`。`damage_widen.enabled` 关闭时资源物理归还，原生函数/指令恢复。符号和指令点位分别由 `game/access/symbols.cpp` 与 `game/access/insn_sites.cpp` 解析。
 
-全部 entry hook 声明 `require_original_entry`：解析到的入口是无条件 `b` 跳板时（变体把整个函数改写成隐藏段路径），宿主不安装该资源、登记为 `skipped`，不调用 `on_resource_ready`。这样 damage_widen 只守卫游戏原版函数体；变体自建路径及其后处理（例如 monster v29 的 `CHAR_CalcPhysicalDefense`/`CHAR_CalcMagicalDefense` 最低伤害保底）原样生效。当前四变体逐项核对：只有 monster 的这两个防御入口是 `b` 跳板；`CHAR_Act_DD`、`CHAR_GetNormalDamage`、`CHAR_GetNormalMagicDamage`、`CHAR_GetCriticalDamage` 的入口与原版一致。指令级补丁仍按点位校验原指令；`INSN_ACT_M_DD_*` 三点是 `CHAR_Act_M_DD` 的原版内联乘除点位，在 orig/c18/monster/overhaul 与原版逐字一致，因此在全部已知变体安装。安装期对这三段区域做**整段指令指纹**比对（`InsnPatchSpec.expected_region`）：只要变体改写其中任一指令，补丁整体 fail-soft 拒绝，不会把原版重放套到变体计算上。
+全部 entry hook 声明 `require_original_entry`：解析到的入口是无条件 `b` 跳板时（变体把整个函数改写成隐藏段路径），宿主不安装该资源、登记为 `skipped`，不调用 `on_resource_ready`。这样 damage_widen 只守卫游戏原版函数体；变体自建路径及其后处理（例如 monster v29 的 `CHAR_CalcPhysicalDefense`/`CHAR_CalcMagicalDefense` 最低伤害保底）原样生效。当前四变体逐项核对：只有 monster 的这两个防御入口是 `b` 跳板；`CHAR_Act_DD`、`CHAR_GetNormalDamage`、`CHAR_GetNormalMagicDamage`、`CHAR_GetCriticalDamage` 的入口与原版一致。指令级补丁仍按点位校验原指令；`INSN_ACT_M_DD_*` 三点是 `CHAR_Act_M_DD` 的原版内联乘除点位，在 orig/c18/monster/overhaul 与原版逐字一致，因此在全部已知变体安装。全部 9 个 damage_widen 指令点位都带**整段指令指纹**（`InsnPatchSpec.expected_region`）：安装期逐字比对 `[site, ret)` 的原版指令，只要变体改写其中任一指令，补丁整体 fail-soft 拒绝，不会把原版重放套到变体计算上。未知/未审计变体即使入口可解析，也会因指纹不匹配自动跳过。
 
 ## 安全千分比运算
 
