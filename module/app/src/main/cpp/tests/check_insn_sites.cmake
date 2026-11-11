@@ -11,7 +11,7 @@ file(READ "${CPP_DIR}/game/access/insn_sites.cpp" content)
 
 set(expected
     "{\"INSN_ACT_M_DD_WRAP_A\", F_CHAR_ACT_M_DD_WRAP_A_VMA, 0, 23, 0, 2, 1000,"
-    "{\"INSN_ACT_M_DD_WRAP_B\", F_CHAR_ACT_M_DD_WRAP_B_VMA, 1, 21, 2, 21, 0, 0}"
+    "{\"INSN_ACT_M_DD_WRAP_B\", F_CHAR_ACT_M_DD_WRAP_B_VMA, 1, 21, 2, 21, 0, 0,"
     "{\"INSN_ACT_M_DD_WRAP_BC\", F_CHAR_ACT_M_DD_WRAP_BC_VMA, 3, 21, 0, 2, 1000,"
     "{\"INSN_ACT_DD_EF20C\", 0xef20c, 4, 27, 22, 22, 1000, 0xef234,"
     "{\"INSN_ACT_DD_EF4D0\", 0xef4d0, 4, 27, 0, 0, 1000, 0xef4e8,"

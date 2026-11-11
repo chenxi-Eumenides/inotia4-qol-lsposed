@@ -17,6 +17,8 @@ struct InsnSite {
     uint32_t expected_d_reg = 0;
     uint32_t expected_word = 0;
     uint32_t threshold_cap = 0;
+    uint32_t expected_region_count = 0;
+    uint32_t expected_region[12]{};
 };
 
 // Audited exact instruction layouts are registered per supported game series.

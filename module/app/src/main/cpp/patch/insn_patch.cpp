@@ -265,6 +265,15 @@ bool insn_patch_install(uintptr_t site, const InsnPatchSpec* spec, void** backup
     }
     if (g_count == g_entries.size()) return false;
     const uint32_t original = *reinterpret_cast<const uint32_t*>(site);
+    // 区域指纹（opt-in）：原版点位的整段指令必须逐字匹配；只匹配首条不足以证明
+    // 后续除法/重放仍属原版，变体改写时在此整体拒绝，避免把原版重放套到变体计算上。
+    if (spec->expected_region_count != 0) {
+        if (spec->expected_region_count > 12) return false;
+        for (uint32_t i = 0; i < spec->expected_region_count; ++i) {
+            const uint32_t actual = *reinterpret_cast<const uint32_t*>(site + i * 4);
+            if (actual != spec->expected_region[i]) return false;
+        }
+    }
     std::array<uint32_t, 40> code{};
     uint32_t words = 0;
     if (!generate(*spec, code.data(), code.size(), &words)) return false;

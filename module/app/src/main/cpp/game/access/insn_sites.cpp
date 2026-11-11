@@ -13,13 +13,19 @@ struct SiteDef {
     uint32_t replay_count = 0; uint32_t replay[4]{}; uintptr_t replay_bl = 0;
     uint32_t expected_d = 0;
     uint32_t expected_word = 0; uint32_t threshold_cap = 0;
+    // opt-in 区域指纹：原版点位逐字校验，变体改写后安装期拒绝。
+    uint32_t region_count = 0; uint32_t region[12]{};
 };
 constexpr SiteDef kSites[] = {
     {"INSN_ACT_M_DD_WRAP_A", F_CHAR_ACT_M_DD_WRAP_A_VMA, 0, 23, 0, 2, 1000,
-     F_CHAR_ACT_M_DD_WRAP_A_RET_VMA},
-    {"INSN_ACT_M_DD_WRAP_B", F_CHAR_ACT_M_DD_WRAP_B_VMA, 1, 21, 2, 21, 0, 0},
+     F_CHAR_ACT_M_DD_WRAP_A_RET_VMA, 0, {}, 0, 0, 0, 0, 5,
+     {0x1b007ef7u, 0x9b357ef5u, 0xd360feb5u, 0x13067eb5u, 0x4b977ea2u}},
+    {"INSN_ACT_M_DD_WRAP_B", F_CHAR_ACT_M_DD_WRAP_B_VMA, 1, 21, 2, 21, 0, 0,
+     0, {}, 0, 0, 0, 0, 1, {0x1b027eb5u}},
     {"INSN_ACT_M_DD_WRAP_BC", F_CHAR_ACT_M_DD_WRAP_BC_VMA, 3, 21, 0, 2, 1000,
-     F_CHAR_ACT_M_DD_WRAP_BC_RET_VMA},
+     F_CHAR_ACT_M_DD_WRAP_BC_RET_VMA, 0, {}, 0, 0, 0, 0, 10,
+     {0x9b217ea1u, 0x72a20c42u, 0xd360fc21u, 0x13067c21u, 0x4b957c35u,
+      0x1b007eb5u, 0x9b227ea2u, 0xd360fc42u, 0x13067c42u, 0x4b957c42u}},
     {"INSN_ACT_DD_EF20C", 0xef20c, 4, 27, 22, 22, 1000, 0xef234,
      4, {0x39400000u, 0xf9400042u, 0x1b007ee0u, 0x93407c00u}, 0, 22},
     {"INSN_ACT_DD_EF4D0", 0xef4d0, 4, 27, 0, 0, 1000, 0xef4e8,
@@ -96,7 +102,10 @@ bool insn_site_resolve(const char* site_id, InsnSite* out) {
                         def.replay_count,
                         {def.replay[0], def.replay[1], def.replay[2], def.replay[3]},
                         def.replay_bl == 0 ? 0 : g_base + def.replay_bl, def.expected_d,
-                        def.expected_word, threshold_cap};
+                        def.expected_word, threshold_cap, def.region_count,
+                        {def.region[0], def.region[1], def.region[2], def.region[3],
+                         def.region[4], def.region[5], def.region[6], def.region[7],
+                         def.region[8], def.region[9], def.region[10], def.region[11]}};
         return true;
     }
     return false;

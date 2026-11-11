@@ -18,6 +18,10 @@ struct InsnPatchSpec {
     uintptr_t helper;
     uint32_t expected_word;
     uint32_t threshold_cap;
+    // opt-in 区域指纹：安装前逐字比对 [site, site + count*4) 与游戏内存；
+    // 任一不等即拒绝安装（fail-soft），用于把「原版计算点位」与变体改写隔开。
+    uint32_t expected_region_count = 0;
+    uint32_t expected_region[12]{};
 };
 
 bool insn_patch_install(uintptr_t site, const InsnPatchSpec* spec, void** backup);

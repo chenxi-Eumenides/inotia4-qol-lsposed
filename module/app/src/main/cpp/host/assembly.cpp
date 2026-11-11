@@ -309,7 +309,14 @@ MechanismOutcome dispatch_install(const contracts::ResourceClaim& claim, uintptr
                                    site.replay_words[2], site.replay_words[3]},
                                   site.replay_bl_target, site.expected_d_reg,
                                   reinterpret_cast<uintptr_t>(claim.handler),
-                                  site.expected_word, site.threshold_cap};
+                                  site.expected_word, site.threshold_cap,
+                                  site.expected_region_count,
+                                  {site.expected_region[0], site.expected_region[1],
+                                   site.expected_region[2], site.expected_region[3],
+                                   site.expected_region[4], site.expected_region[5],
+                                   site.expected_region[6], site.expected_region[7],
+                                   site.expected_region[8], site.expected_region[9],
+                                   site.expected_region[10], site.expected_region[11]}};
         void* backup = nullptr;
         if (!insn_patch_install(site.addr, &spec, &backup))
             return MechanismOutcome{1, "instruction patch rejected"};

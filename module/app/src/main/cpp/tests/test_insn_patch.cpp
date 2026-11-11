@@ -525,6 +525,24 @@ int main(int argc, char** argv) {
         }
         check(insn_patch_release(site) && code[0] == 0x1b167f76u,
               "region release restores original instruction");
+        // 区域指纹：首条匹配但后续字被变体改写时必须整体拒绝。
+        {
+            code[0] = 0x1b167f76u;
+            code[1] = 0x39400000u;
+            code[2] = 0x72a20c41u;
+            InsnPatchSpec fp_patch{4, 27, 22, 22, 1000, site + 0x10, 0, {}, 0, 22};
+            fp_patch.expected_region_count = 3;
+            fp_patch.expected_region[0] = 0x1b167f76u;
+            fp_patch.expected_region[1] = 0x39400000u;
+            fp_patch.expected_region[2] = 0x72a20c41u;
+            check(insn_patch_install(site, &fp_patch, &backup),
+                  "install with matching region fingerprint");
+            check(insn_patch_release(site) && code[0] == 0x1b167f76u,
+                  "fingerprinted release restores original instruction");
+            code[2] = 0x72a20c42u;
+            check(!insn_patch_install(site, &fp_patch, &backup),
+                  "reject mismatched region fingerprint");
+        }
         code[0] = 0x1b167f75u;
         check(!insn_patch_install(site, &region_patch, &backup),
               "reject mismatched region start instruction");
