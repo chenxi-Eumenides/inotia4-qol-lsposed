@@ -650,7 +650,7 @@ void test_descriptor() {
     assert(std::strcmp(descriptor.requires[0].id, kCharacterFactsCapabilityId) == 0);
     assert(descriptor.optional_count == 3);
     assert(descriptor.validate_config == &validate_rates_config);
-    assert(descriptor.resources_count == 12);
+    assert(descriptor.resources_count == 16);
     assert(descriptor.provides_count == 0);
     assert(descriptor.provides == nullptr);
     assert(std::strcmp(descriptor.resources[0].id, kResourceIdAddDamage) == 0);
@@ -698,11 +698,31 @@ void test_descriptor() {
         assert(claim.failure == ResourceFailure::kFailSoft);
         assert(claim.handler == reinterpret_cast<void*>(&drop_threshold_patch_helper));
     }
+    const char* const drop_pool_ids[] = {
+        kResourceIdDropPoolSlotCap, kResourceIdDropPoolCreate,
+        kResourceIdDropPoolInit, kResourceIdDropPoolUnload,
+    };
+    const char* const drop_pool_sites[] = {
+        "P_MAPITEMSYSTEM_ALLOCATE_SLOT_CAP", "P_MAPITEMSYSTEM_CREATE_POOL_SIZE",
+        "P_MAPITEMSYSTEM_INITIALIZE_POOL_LIMIT", "P_MAPITEMSYSTEM_UNLOAD_POOL_LIMIT",
+    };
+    for (uint32_t i = 0; i < 4; ++i) {
+        const ResourceClaim& claim = descriptor.resources[12 + i];
+        assert(std::strcmp(claim.id, drop_pool_ids[i]) == 0);
+        assert(std::strcmp(claim.symbol, drop_pool_sites[i]) == 0);
+        assert(claim.mechanism == ResourceMechanism::kCallPatch);
+        assert(claim.requirement == ResourceRequirement::kOptional);
+        assert(claim.failure == ResourceFailure::kFailSoft);
+        assert(claim.handler == nullptr);
+    }
     setup_fake_interfaces();
     const size_t log_count = g_log_messages.size();
     for (const char* id : drop_patch_ids) {
         assert(descriptor.on_resource_ready(g_context, id,
                                             reinterpret_cast<void*>(uintptr_t{0x6b00039f})) == 0);
+    }
+    for (const char* id : drop_pool_ids) {
+        assert(descriptor.on_resource_ready(g_context, id, nullptr) == 0);
     }
     for (size_t i = log_count; i < g_log_messages.size(); ++i) {
         assert(g_log_messages[i].find("unknown resource id") == std::string::npos);

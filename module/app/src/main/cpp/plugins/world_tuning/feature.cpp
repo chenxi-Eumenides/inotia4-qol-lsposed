@@ -806,6 +806,12 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
         std::strcmp(resource_id, kResourceIdDropReroll460) == 0) {
         return 0;
     }
+    if (std::strcmp(resource_id, kResourceIdDropPoolSlotCap) == 0 ||
+        std::strcmp(resource_id, kResourceIdDropPoolCreate) == 0 ||
+        std::strcmp(resource_id, kResourceIdDropPoolInit) == 0 ||
+        std::strcmp(resource_id, kResourceIdDropPoolUnload) == 0) {
+        return 0;
+    }
     log_warn("unknown resource id: %s", resource_id);
     return 0;
 }

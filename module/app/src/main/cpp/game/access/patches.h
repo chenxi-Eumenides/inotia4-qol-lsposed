@@ -37,6 +37,7 @@ struct PatchSite {
     uint32_t tail_word = 0;
     std::array<uint32_t, 2> word_replace_alternates{};  // 固定容量精确白名单；0 表示未登记
     std::array<uint32_t, 2> word_replace_alternate_replacements{};  // 与备用原字同索引；0 沿用默认替换字
+    uint32_t drop_pool_slots = 0;  // >0：安装该字前先确保地面掉落池容量（游戏主线程）
 };
 
 // 按登记名解析 patch 点；未登记或 g_base==0 → false。

@@ -25,6 +25,7 @@ struct SiteEntry {
     uint32_t tail_word = 0;
     std::array<uint32_t, 2> word_replace_alternates{};
     std::array<uint32_t, 2> word_replace_alternate_replacements{};
+    uint32_t drop_pool_slots = 0;
 };
 
 constexpr SiteEntry kSites[] = {
@@ -166,6 +167,23 @@ constexpr SiteEntry kSites[] = {
      PatchKind::kBlRedirect},
     {"P_EXT_MIX_BAG_DRAW", F_UIMIX_DRAW_INVEN_BAG_GROUP_CALL_VMA, 0, 0x97fffe5e, 0,
      PatchKind::kBlRedirect},
+    // 四条必须同组：只改 cap 会写穿 0x400 池，只改循环界会在切图时越过池尾；安装事务先换池。
+    {"P_MAPITEMSYSTEM_ALLOCATE_SLOT_CAP", F_MAPITEMSYSTEM_ALLOCATE_SLOT_VMA,
+     MAPITEMSYSTEM_ALLOCATE_SLOT_CAP_OFF, MAPITEMSYSTEM_ALLOCATE_SLOT_CAP_WORD,
+     MAPITEMSYSTEM_ALLOCATE_SLOT_CAP_127_WORD, PatchKind::kWordReplace, nullptr, 0, 0, 0, {}, {},
+     MAPITEMSYSTEM_POOL_MAX_SLOTS},
+    {"P_MAPITEMSYSTEM_CREATE_POOL_SIZE", F_MAPITEMSYSTEM_CREATE_VMA,
+     MAPITEMSYSTEM_CREATE_POOL_SIZE_OFF, MAPITEMSYSTEM_CREATE_POOL_SIZE_WORD,
+     MAPITEMSYSTEM_CREATE_POOL_SIZE_127_WORD, PatchKind::kWordReplace, nullptr, 0, 0, 0, {}, {},
+     MAPITEMSYSTEM_POOL_MAX_SLOTS},
+    {"P_MAPITEMSYSTEM_INITIALIZE_POOL_LIMIT", F_MAPITEMSYSTEM_INITIALIZE_VMA,
+     MAPITEMSYSTEM_INITIALIZE_POOL_LIMIT_OFF, MAPITEMSYSTEM_POOL_LIMIT_WORD,
+     MAPITEMSYSTEM_POOL_LIMIT_127_WORD, PatchKind::kWordReplace, nullptr, 0, 0, 0, {}, {},
+     MAPITEMSYSTEM_POOL_MAX_SLOTS},
+    {"P_MAPITEMSYSTEM_UNLOAD_POOL_LIMIT", F_MAPITEMSYSTEM_UNLOAD_VMA,
+     MAPITEMSYSTEM_UNLOAD_POOL_LIMIT_OFF, MAPITEMSYSTEM_POOL_LIMIT_WORD,
+     MAPITEMSYSTEM_POOL_LIMIT_127_WORD, PatchKind::kWordReplace, nullptr, 0, 0, 0, {}, {},
+     MAPITEMSYSTEM_POOL_MAX_SLOTS},
 };
 
 // 测试覆盖表：仅 host 测试经 patch_site_override_for_test 写入，生产路径容量恒为 0。
@@ -210,6 +228,7 @@ bool patch_site(const char* name, PatchSite* out) {
         out->return_addr = entry.return_vma == 0 ? 0 :
             g_base + entry.vma + entry.return_vma;
         out->tail_word = entry.tail_word;
+        out->drop_pool_slots = entry.drop_pool_slots;
         if (entry.kind == PatchKind::kBlRedirectToSymbol) {
             // 目标缺失即视为站点登记无效（fail-closed），不猜测符号。
             if (entry.target_macro == nullptr || entry.target_vma == 0) {

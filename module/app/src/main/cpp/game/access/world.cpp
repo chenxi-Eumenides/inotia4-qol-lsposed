@@ -2,7 +2,63 @@
 
 #include "game/access/game_access.h"
 
+#include <cstddef>
+#include <cstring>
+
 namespace qol::game {
+
+namespace {
+// 池容量补丁只对四个点位都仍是「原字或已是本插件替换字」的构建生效。变体布局不符时
+// 不得触碰 GOT 槽：错误构建里这些槽可能指向无关全局，替换/释放会破坏游戏内存。
+bool drop_pool_sites_match() {
+    struct Site {
+        uintptr_t vma;
+        size_t offset;
+        uint32_t original;
+        uint32_t patched;
+    };
+    constexpr Site kSites[] = {
+        {F_MAPITEMSYSTEM_ALLOCATE_SLOT_VMA, MAPITEMSYSTEM_ALLOCATE_SLOT_CAP_OFF,
+         MAPITEMSYSTEM_ALLOCATE_SLOT_CAP_WORD, MAPITEMSYSTEM_ALLOCATE_SLOT_CAP_127_WORD},
+        {F_MAPITEMSYSTEM_CREATE_VMA, MAPITEMSYSTEM_CREATE_POOL_SIZE_OFF,
+         MAPITEMSYSTEM_CREATE_POOL_SIZE_WORD, MAPITEMSYSTEM_CREATE_POOL_SIZE_127_WORD},
+        {F_MAPITEMSYSTEM_INITIALIZE_VMA, MAPITEMSYSTEM_INITIALIZE_POOL_LIMIT_OFF,
+         MAPITEMSYSTEM_POOL_LIMIT_WORD, MAPITEMSYSTEM_POOL_LIMIT_127_WORD},
+        {F_MAPITEMSYSTEM_UNLOAD_VMA, MAPITEMSYSTEM_UNLOAD_POOL_LIMIT_OFF,
+         MAPITEMSYSTEM_POOL_LIMIT_WORD, MAPITEMSYSTEM_POOL_LIMIT_127_WORD},
+    };
+    for (const Site& site : kSites) {
+        const auto* word = reinterpret_cast<const uint32_t*>(g_base + site.vma + site.offset);
+        if (!game_memory_accessible(word, sizeof(uint32_t), 'r')) return false;
+        if (*word != site.original && *word != site.patched) return false;
+    }
+    return true;
+}
+}  // namespace
+
+bool drop_pool_ensure_capacity(uint32_t slots) {
+    if (slots <= 32) return true;
+    if (g_base == 0 || fn_mem_malloc == nullptr || fn_mem_free == nullptr) return false;
+    if (!drop_pool_sites_match()) return false;
+    void** pool_slot = *reinterpret_cast<void***>(g_base + G_DROP_ARRAY_GOT_VMA);
+    int8_t* count = *reinterpret_cast<int8_t**>(g_base + G_DROP_COUNT_GOT_VMA);
+    if (pool_slot == nullptr || count == nullptr) return false;
+    if (*pool_slot == nullptr) return true;
+    // 不记录上次结果：内存分配器可能复用地址，指针相等不能证明当前池容量；
+    // 每次调用都换到新池，代价是一次 0xfe0 分配与拷贝。
+    const size_t bytes = static_cast<size_t>(slots) * GROUND_ITEM_SIZE;
+    void* fresh = fn_mem_malloc(bytes);
+    if (fresh == nullptr) return false;
+    memset(fresh, 0, bytes);
+    int existing = static_cast<int>(*count);
+    if (existing < 0) existing = 0;
+    if (static_cast<uint32_t>(existing) > slots) existing = static_cast<int>(slots);
+    memcpy(fresh, *pool_slot, static_cast<size_t>(existing) * GROUND_ITEM_SIZE);
+    fn_mem_free(*pool_slot);
+    *pool_slot = fresh;
+    *count = static_cast<int8_t>(existing);
+    return true;
+}
 
 bool world_ready() {
     return g_base != 0;

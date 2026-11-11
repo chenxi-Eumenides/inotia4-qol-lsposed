@@ -21,6 +21,7 @@
 #include "contracts/ownership.h"
 #include "core/native/game_cache.h"
 #include "game/access/inventory_legacy_read.h"
+#include "game/access/world.h"
 #include "game/access/player_shortcut.h"
 #include "game/access/save_transaction.h"
 #include "game/adapter_ports/lifecycle_participant_facade.h"
@@ -320,6 +321,10 @@ MechanismOutcome dispatch_install(const contracts::ResourceClaim& claim, uintptr
     qol::game::PatchSite site{};
     if (!qol::game::patch_site(claim.symbol, &site)) {
         return MechanismOutcome{1, "site not found"};
+    }
+    if (site.drop_pool_slots != 0 &&
+        !qol::game::drop_pool_ensure_capacity(site.drop_pool_slots)) {
+        return MechanismOutcome{1, "drop pool grow failed"};
     }
     const qol::patch::Outcome outcome = qol::patch::install_claim(claim, site.addr);
     return MechanismOutcome{outcome.ok, outcome.error};

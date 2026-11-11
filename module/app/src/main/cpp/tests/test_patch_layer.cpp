@@ -1092,6 +1092,40 @@ void test_stack_limit_clamp_registration_and_roundtrip() {
     }
 }
 
+void test_drop_pool_patch_registration() {
+    g_base = kBase;
+    struct DropPoolCase {
+        const char* name;
+        uintptr_t vma;
+        uintptr_t offset;
+        uint32_t expected;
+        uint32_t replacement;
+    };
+    constexpr DropPoolCase kDropPoolPatches[] = {
+        {"P_MAPITEMSYSTEM_ALLOCATE_SLOT_CAP", F_MAPITEMSYSTEM_ALLOCATE_SLOT_VMA,
+         MAPITEMSYSTEM_ALLOCATE_SLOT_CAP_OFF, MAPITEMSYSTEM_ALLOCATE_SLOT_CAP_WORD,
+         MAPITEMSYSTEM_ALLOCATE_SLOT_CAP_127_WORD},
+        {"P_MAPITEMSYSTEM_CREATE_POOL_SIZE", F_MAPITEMSYSTEM_CREATE_VMA,
+         MAPITEMSYSTEM_CREATE_POOL_SIZE_OFF, MAPITEMSYSTEM_CREATE_POOL_SIZE_WORD,
+         MAPITEMSYSTEM_CREATE_POOL_SIZE_127_WORD},
+        {"P_MAPITEMSYSTEM_INITIALIZE_POOL_LIMIT", F_MAPITEMSYSTEM_INITIALIZE_VMA,
+         MAPITEMSYSTEM_INITIALIZE_POOL_LIMIT_OFF, MAPITEMSYSTEM_POOL_LIMIT_WORD,
+         MAPITEMSYSTEM_POOL_LIMIT_127_WORD},
+        {"P_MAPITEMSYSTEM_UNLOAD_POOL_LIMIT", F_MAPITEMSYSTEM_UNLOAD_VMA,
+         MAPITEMSYSTEM_UNLOAD_POOL_LIMIT_OFF, MAPITEMSYSTEM_POOL_LIMIT_WORD,
+         MAPITEMSYSTEM_POOL_LIMIT_127_WORD},
+    };
+    for (const DropPoolCase& patch : kDropPoolPatches) {
+        PatchSite site{};
+        CHECK(qol::game::patch_site(patch.name, &site));
+        CHECK(site.addr == g_base + patch.vma + patch.offset);
+        CHECK(site.expected_word == patch.expected);
+        CHECK(site.replacement_word == patch.replacement);
+        CHECK(site.kind == qol::game::PatchKind::kWordReplace);
+        CHECK(site.drop_pool_slots == MAPITEMSYSTEM_POOL_MAX_SLOTS);
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -1128,6 +1162,7 @@ int main() {
     test_ptr_slot_release_success_and_idempotent();
     test_ptr_slot_release_failure_keeps_owner();
     test_stack_limit_clamp_registration_and_roundtrip();
+    test_drop_pool_patch_registration();
     std::printf("patch_layer: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

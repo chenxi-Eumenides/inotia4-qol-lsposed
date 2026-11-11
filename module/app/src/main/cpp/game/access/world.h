@@ -39,6 +39,9 @@ inline constexpr int kWorldStaticMaxMapId = MAPINFOBASE_STATIC_MAX_MAP_ID;
 // g_base 是否已定位（其余世界访问器的总前置）。未就绪时各函数返回明确失败值。
 bool world_ready();
 
+// 仅游戏主线程调用；确保现有地面掉落池可容纳 slots 项，Create 尚未建池时视为成功。
+bool drop_pool_ensure_capacity(uint32_t slots);
+
 // g_state 指向的当前 state（u16）；未就绪返回 -1。世界态值由调用方判定。
 int world_state();
 

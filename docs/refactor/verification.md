@@ -541,3 +541,16 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | 修复 | **已实现**：链方向改为调用者 FP 必须大于当前 FP；每帧按 `/proc/self/maps` 校验 FP 落在崩溃线程栈映射内、返回地址落在可执行映射内，任一不满足即截断（不输出伪造帧）；maps 解析失败时退化为「8 字节对齐 + 严格递增」；帧记录缺失（叶函数沿用调用者 FP / FP 被复用）时退回写 `bt0=x30`；上限仍 64 帧 | `infra/log/qol_crash.cpp`；崩溃文件四段顺序与 `key=value` 契约不变，新增内容仍在寄存器段与 `--- maps ---` 之间 |
 | 工具/文档 | **已同步**：`symbolize_crash.py` 的 `btN` 改为按帧号自然排序（原字符串序会排成 bt0/bt1/bt10/bt11/bt2）；`docs/reference/logging.md` §7 更新方向、maps 校验与 LR 回退语义；`qol_crash.h` 头部「不展开调用栈」更正为 FP 链回溯 | 符号名还原仍是离线步骤（`llvm-symbolizer`），崩溃处理器内不做符号化 |
 | 验证 | **PASS（Host/编译/构建）**：`qol_log_tests` 119 passed / 0 failed（新增非 arm64 `backtrace=unavailable` 断言）；`clang++ --target=aarch64-linux-android24 -fsyntax-only -Wall -Wextra` 零告警；`scripts/build-debug.sh` → `output/inotia4_qol_lsposed_debug_2611101105_798dbb4fabf8.apk`（SHA-256 `798dbb4f…`） | **NOT_ACCEPTED（真机未验）**：需要一次真实崩溃确认 `bt1..btN` 连续、无伪造帧。本轮无可用崩溃样本，样本复现依赖 §5.34 之外的 c18 打怪路径 |
+
+### 5.35 world_tuning 地面掉落上限 32→127（2026-11-11；Host/静态/构建通过，真机待验）
+
+范围：`world_tuning` 启用期间把 `MAPITEMSYSTEM` 地面掉落池从 32 槽扩到 127 槽；不新增配置项或面板行。
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 机制 | **代码事实**：`MAPITEMSYSTEM_Create` 原 `MEM_Malloc(0x400)`（32×0x20），`AllocateSlot` 在 count>0x1f 时销毁最旧槽，count 为 int8。四条 `kWordReplace`（`AllocateSlot` cap、`Create` 池大小、`Initialize`/`Unload` 循环界）把池改为 127×0x20=0xfe0。`PatchSite.drop_pool_slots` 让安装事务先调用 `game::drop_pool_ensure_capacity`：现有池经 `MEM_Malloc(0xfe0)`＋拷贝条目＋`MEM_Free` 旧池换新；池未创建则等补丁后的 `Create`；失败即四条 claim 同败，不会只扩 cap。 | 停用时四条字补丁物理还原而扩大后的池保留；停用时地面 >32 件会在下一次切图时由原版 `Unload` 只清前 32 槽，其余物品对象残留 ITEMPOOL（已写入插件参考）。 |
+| 变体一致性 | **静态 PASS**：逐 APK 抽取 arm64 `libgame.so`，variant table 35 个登记构建中 34 个（除 Original v1.4.0）四个 VMA 与四个指令字逐字一致；v1.4.0 布局整体偏移（`cmp w8,#0x1f` 等），按 expected 字 fail-soft 跳过。 | 仅核对 arm64；`lib/armeabi-v7a` 目录内文件实际也是 ELF64 aarch64。 |
+| Host | **PASS**：`cmake --build build --target world_tuning_feature_tests patch_layer_tests -j4` 成功；定向 ctest 2/2；全量 `ctest --test-dir build` **164/164**。新增 patch 站点/资源断言与 `on_resource_ready` 无未知 id 告警。 | 未覆盖 `drop_pool_ensure_capacity` 的内存换池路径（依赖游戏符号，host 无 fixture）。 |
+| 静态检查 | **PASS**：`git diff --check` 通过；`check_arch.py --only check_layers/offsets/jni/resources/symbols/http_routes/log_policy` 结果 PASS（0 error，69 条既有 warn）。 | — |
+| 构建 | **PASS**：`scripts/build-debug.sh` → `output/inotia4_qol_lsposed_debug_2611111725_5d054bf87168.apk`，SHA-256 `5d054bf871685d59bd96383a64d709905f0a7a31521c3dddbe47e4b938689a95`（含四字校验：布局不符的变体不触碰 GOT 槽）。 | — |
+| 真机 | **NOT_ACCEPTED（未执行）**：未安装本轮 Debug 包。 | 待核验：启用 world_tuning 前后地面同屏堆叠 >32 件不吞旧掉落、切换地图/退出无崩溃与泄漏、`/api/world/map/drops` 数量可超过 32；停用后恢复 32 上限。 |
