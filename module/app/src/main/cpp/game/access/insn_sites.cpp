@@ -79,9 +79,9 @@ bool drop_threshold_cap(const GameVariant& variant, bool equip_site, uint32_t* o
 bool insn_site_resolve(const char* site_id, InsnSite* out) {
     if (site_id == nullptr || out == nullptr || g_base == 0 || !game_variant_init() ||
         !game_variant().known || game_variant().series == GameSeries::kUnknown) return false;
-    if (std::strncmp(site_id, "INSN_ACT_M_DD_", 13) == 0 &&
-        (game_variant().series != GameSeries::kMonster || game_variant().version_label == nullptr ||
-         std::strcmp(game_variant().version_label, "v29") != 0)) return false;
+    // INSN_ACT_M_DD_* 三点是 CHAR_Act_M_DD 的原版内联乘除点位，在 orig/c18/monster/overhaul
+    // 逐字一致；按原版点位在全部已知变体安装。安装期校验原指令字，变体若改写过该点位会
+    // fail-soft 跳过，不会把原版重放套到变体计算上。
     for (const SiteDef& def : kSites) {
         if (std::strcmp(site_id, def.id) != 0) continue;
         uint32_t threshold_cap = 0;
