@@ -246,7 +246,7 @@ Kotlin postAndAwait
 ### 6.7 与公共存储交换
 
 - 导出：面板确认后用 `describe_backup`/自动备份路径解析出的绝对路径调用 `QolPublicExportApi::export_backup`；Host 转 JNI 到 Kotlin，复制到 `Download/qol/backups/<原文件名>`（同名覆盖，不产生 `(1)` 副本）。调用只入队，面板不等待结果。
-- 导入：`QolPublicExportApi::pick_import_file` 拉起 `ACTION_OPEN_DOCUMENT`；宿主 `onActivityResult` 取回 URI 后由 Kotlin 流式复制到 `qol/backups/.incoming/`，校验 magic `QSB1`、版本 v1–v4 与尾部 CRC32，通过后原子移入 `qol/backups/` 并调用 `nativeSaveBackupUiRefresh()` 刷新列表。**不自动导入**，仍需用户选中条目后走 6.2 的导入流程。
+- 导入：`QolPublicExportApi::pick_import_file` 拉起系统选择器——常规机型用 `ACTION_OPEN_DOCUMENT`（`type="*/*"`，起始目录 `Download`，不设 `EXTRA_MIME_TYPES`）；华为/荣耀（EMUI、HarmonyOS）的 DocumentsUI 只有图片/视频/音频根、没有文件系统入口，这类机型改用 `ACTION_GET_CONTENT` 交给文件管理器，两者互为兜底。宿主 `onActivityResult` 取回 URI 后由 Kotlin 流式复制到 `qol/backups/.incoming/`，校验 magic `QSB1`、版本 v1–v4 与尾部 CRC32，通过后原子移入 `qol/backups/` 并调用 `nativeSaveBackupUiRefresh()` 刷新列表。**不自动导入**，仍需用户选中条目后走 6.2 的导入流程。
 - 设置页「基础设置 → 导出日志」导出上一会话的四件套：`qol.log.prev`、`qol.log.prev.1`、`qol-crash.log.prev`、`java-crash.log.prev`，目标同为 `Download/qol/`。
 - 两条链路都不需要任何存储权限；`Download/` 写入走 `MediaStore.Downloads`（API 29+），低于 API 29 直接失败。
 

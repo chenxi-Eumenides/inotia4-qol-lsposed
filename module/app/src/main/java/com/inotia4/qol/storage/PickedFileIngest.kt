@@ -60,28 +60,60 @@ object PickedFileIngest {
             toast(StaticData.context(), "当前没有可用界面，稍后再试")
             return
         }
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+        // 两套 intent 的取舍：
+        // - 华为 EMUI / HarmonyOS 的 DocumentsUI 在 ACTION_OPEN_DOCUMENT 下只呈现 MediaStore 的
+        //   图片/视频/音频根，既无「下载」也无「内部存储」，未知扩展名文件（.qol.bak）因此完全
+        //   选不到（HUAWEI LYA-AL00 / API 29 实测：选择器拉起后无 onActivityResult，用户找不到
+        //   文件直接返回）。这类机型改用 GET_CONTENT，交给文件管理器按目录浏览。
+        // - 其余机型保持 OPEN_DOCUMENT + Download 起始目录；GET_CONTENT 仅作无处理者时的兜底。
+        val getContentIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
-            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/octet-stream", "*/*"))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val documentIntent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            // 不设 EXTRA_MIME_TYPES：它一旦存在就完全取代 type 成为过滤条件，部分定制选择器
+            // 会因此只保留媒体入口，未知扩展名文件被隐藏。
+            type = "*/*"
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         // 备份文件通常就在 Download；从该目录起浏览，避免用户在根目录逐层翻找。
         // EXTRA_INITIAL_URI 自 API 26 起生效；不支持的 provider 会回退到默认位置。
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            intent.putExtra(
+            documentIntent.putExtra(
                 DocumentsContract.EXTRA_INITIAL_URI,
                 DocumentsContract.buildDocumentUri(
                     "com.android.externalstorage.documents", "primary:Download"
                 ),
             )
         }
-        try {
+        val documentFirst = !isHuaweiFamily()
+        val first = if (documentFirst) documentIntent else getContentIntent
+        val second = if (documentFirst) getContentIntent else documentIntent
+        if (launch(activity, first)) return
+        if (launch(activity, second)) return
+        LogFile.error(LogDomain.PLATFORM, "saf pick failed: no documents handler")
+        toast(activity, "没有可用的文件选择器")
+    }
+
+    /** 华为 / 荣耀（EMUI、HarmonyOS）的 DocumentsUI 缺文件系统根，需要走文件管理器。 */
+    private fun isHuaweiFamily(): Boolean {
+        val manufacturer = Build.MANUFACTURER ?: ""
+        val brand = Build.BRAND ?: ""
+        return manufacturer.equals("HUAWEI", true) || brand.equals("HUAWEI", true) ||
+            brand.equals("HONOR", true)
+    }
+
+    /** 拉起一次选择器；无处理者时写日志并返回 false，由调用方换下一种 intent。 */
+    private fun launch(activity: Activity, intent: Intent): Boolean {
+        return try {
             activity.startActivityForResult(intent, REQUEST_CODE_PICK_BACKUP)
-            LogFile.info(LogDomain.PLATFORM, "saf pick launched")
+            LogFile.info(LogDomain.PLATFORM, "saf pick launched: ${intent.action}")
+            true
         } catch (t: ActivityNotFoundException) {
-            LogFile.error(LogDomain.PLATFORM, "saf pick failed: no documents provider", t)
-            toast(activity, "没有可用的文件选择器")
+            LogFile.warn(LogDomain.PLATFORM, "saf pick no handler: ${intent.action}")
+            false
         }
     }
 
@@ -252,6 +284,8 @@ object PickedFileIngest {
 
     /** 读 DISPLAY_NAME；查询异常吞掉并回退固定名（provider 可能拒绝查询）。 */
     private fun queryDisplayName(context: Context, uri: Uri): String {
+        // 部分文件管理器以 file:// 回应 GET_CONTENT，这类 URI 没有 OpenableColumns 游标。
+        if (uri.scheme == "file") return uri.lastPathSegment ?: ""
         val name = try {
             context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
                 ?.use { cursor ->
