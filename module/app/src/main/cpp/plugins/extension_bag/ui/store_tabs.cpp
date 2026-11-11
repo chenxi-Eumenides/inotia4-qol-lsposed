@@ -207,6 +207,10 @@ QolResult store_tab_anchor_create(void* parent, qol::contracts::UiRect rect, voi
     std::memset(data, 0, 0x10);
     *reinterpret_cast<void**>(data) = qol::extension_bag::ui_state().store.tab_bag_items[ctx->index];
     if (!extension_bag_ui_set_control_data(control, data)) return fail("data-set", ctx->index);
+    // 取证：自建页签挂在商店袋容器上，记录控件/data/父指针，崩溃时可核对
+    // 游戏 UIStore_DrawInvenItemGroup 走到的子控件是否来自这里。
+    VIRTBAG_LOG_DEBUG("store tab create index=%d control=%p parent=%p data=%p item=%p", ctx->index,
+                      control, parent, data, *reinterpret_cast<void**>(data));
     *out_control = control;
     return qol::contracts::ok();
 }
@@ -265,10 +269,13 @@ void store_install_tab_buttons_locked() {
     if (changed || created_any) {
         ++qol::extension_bag::ui_state().store.tab_generation;
         qol::extension_bag::ui_state().store.tab_root = bag_container;
-        VIRTBAG_LOG("store tabs installed root=%p generation=%llu complete=%d created=%d",
+        int child_count_after = 0;
+        const bool recounted = extension_bag_ui_child_count(bag_container, &child_count_after);
+        VIRTBAG_LOG("store tabs installed root=%p generation=%llu complete=%d created=%d children_before=%d children_after=%d recounted=%d",
                     bag_container,
                     static_cast<unsigned long long>(qol::extension_bag::ui_state().store.tab_generation),
-                    complete ? 1 : 0, created_any ? 1 : 0);
+                    complete ? 1 : 0, created_any ? 1 : 0, bag_child_count, child_count_after,
+                    recounted ? 1 : 0);
     }
 }
 void store_commit_pending_tab_locked() {

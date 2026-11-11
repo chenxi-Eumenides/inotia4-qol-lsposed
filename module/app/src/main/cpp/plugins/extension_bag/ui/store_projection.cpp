@@ -55,6 +55,57 @@ void store_request_item_refresh_locked() {
     ++qol::extension_bag::ui_state().store.refresh_generation;
 }
 
+// 商店道具格取证：原版 UIStore_DrawInvenItemGroup 按 INVEN_GetBagSize 的返回值
+// 逐个 ControlObject_GetChild + ControlObject_GetAbsoluteRect 画格子，绘制前会
+// 沿控件 +0xa0 的父链求绝对坐标。真机崩溃现场是子控件的父链被写成非对象指针
+// （0x6d00000031），因此安装、游戏重建道具格之后、还原三个状态点各回读一次
+// 道具格控件链，逐帧路径只在控件或父指针变化时记一条，避免绘制开销。
+thread_local std::array<void*, virtual_bag::kSlotCount> g_store_snapshot_controls{};
+thread_local std::array<void*, virtual_bag::kSlotCount> g_store_snapshot_parents{};
+
+void store_log_item_snapshot_locked(const char* tag) {
+    auto& store = qol::extension_bag::ui_state().store;
+    const int bag = store.view_bag;
+    void* root = store.projected_item_root;
+    if (root == nullptr) root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreItemRoot);
+    int count = 0;
+    const bool counted = extension_bag_ui_child_count(root, &count);
+    // 绘制循环的格子数来自被投影的 INVEN_GetBagSize(current_bag)：把当前袋和
+    // 它的容量字一起记下来，才能判断「格子数 > 实际子控件数」这类越界。
+    const int window_bag = original_bag_locked();
+    uint32_t window_word = 0;
+    const bool read_word = bag_size_word_locked(window_bag, &window_word);
+    VIRTBAG_LOG(
+        "store snapshot tag=%s root=%p count=%d counted=%d bag=%d generation=%llu window=%d window_word=%#x word_read=%d",
+        tag, root, count, counted ? 1 : 0, bag,
+        static_cast<unsigned long long>(store.view_generation), window_bag, window_word,
+        read_word ? 1 : 0);
+    if (root == nullptr || !counted) return;
+    int limit = count < virtual_bag::kSlotCount ? count : virtual_bag::kSlotCount;
+    const int capacity =
+        virtual_bag::valid_index(bag) ? ::qol::extension_bag::access::bag().capacities[bag] : 0;
+    if (capacity > 0 && limit > capacity) limit = capacity;
+    for (int slot = 0; slot < limit; ++slot) {
+        void* control = extension_bag_ui_child_at(root, slot);
+        if (control == nullptr) {
+            VIRTBAG_LOG("store snapshot tag=%s slot=%d control=null", tag, slot);
+            continue;
+        }
+        void* parent = extension_bag_ui_parent(control);
+        void* data = extension_bag_ui_data(control);
+        void* item = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
+        void* expected = virtual_bag::valid_index(bag)
+                             ? qol::extension_bag::ui_state().objects.module_objects[bag][slot]
+                             : nullptr;
+        VIRTBAG_LOG(
+            "store snapshot tag=%s slot=%d control=%p parent=%p root_match=%d type=%d data=%p item=%p expected=%p",
+            tag, slot, control, parent, parent == root ? 1 : 0,
+            extension_bag_ui_user_type(control), data, item, expected);
+        g_store_snapshot_controls[slot] = control;
+        g_store_snapshot_parents[slot] = parent;
+    }
+}
+
 void store_refresh_item_after_unlock() {
     ::qol::extension_bag::ReentryLock lock;
     if (!qol::extension_bag::ui_state().store.refresh_pending) return;
@@ -71,13 +122,18 @@ void store_refresh_item_after_unlock() {
         if (refresh_generation == qol::extension_bag::ui_state().store.refresh_generation) store_request_item_refresh_locked();
         return;
     }
-    qol::features::extension_bag::BagSizeProjectionScope capacity_projection;
+    // 原版 refresh_store_item 会重建道具格控件树。重建前留一份基线（此处在容量
+    // 投影作用域内，即游戏重建时看到的容量），退出作用域后再回读重建结果。
     QolResult refresh_result{};
-    if (suppress_display) {
-        qol::features::extension_bag::DisplaySubstitutionSuppressScope suppress;
-        refresh_result = api->ui.refresh_store_item();
-    } else {
-        refresh_result = api->ui.refresh_store_item();
+    {
+        qol::features::extension_bag::BagSizeProjectionScope capacity_projection;
+        store_log_item_snapshot_locked("pre-refresh");
+        if (suppress_display) {
+            qol::features::extension_bag::DisplaySubstitutionSuppressScope suppress;
+            refresh_result = api->ui.refresh_store_item();
+        } else {
+            refresh_result = api->ui.refresh_store_item();
+        }
     }
     if (!qol::contracts::succeeded(refresh_result)) {
         VIRTBAG_LOG("store item refresh failed code=%d", refresh_result.code);
@@ -102,6 +158,8 @@ void store_refresh_item_after_unlock() {
         return;
     }
     qol::extension_bag::ui_state().store.projected_item_root = live_root;
+    // 原版 refresh_store_item 会重建道具格控件树：这里回读重建后的子控件与父链。
+    store_log_item_snapshot_locked("post-refresh");
     store_refresh_projection_locked();
 }
 int store_original_bag_button_index(int64_t x, int64_t y) {
@@ -155,7 +213,20 @@ void store_refresh_projection_locked() {
         }
         void* data = extension_bag_ui_data(control);
         void* current = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
-        if (current != expected) (void)extension_bag_ui_set_control_item(control, expected);
+        if (current != expected && !extension_bag_ui_set_control_item(control, expected)) {
+            // 绑定失败通常意味着控件或其 data 已被回收：落一条，配合快照定位。
+            VIRTBAG_LOG_WARN("store item bind failed slot=%d control=%p data=%p item=%p", slot,
+                             control, data, expected);
+        }
+        // 取证：控件重建或父链被改写时立即落一条；稳定帧只做指针比对。
+        void* parent = extension_bag_ui_parent(control);
+        if (g_store_snapshot_controls[slot] != control || g_store_snapshot_parents[slot] != parent) {
+            VIRTBAG_LOG("store item retarget slot=%d control=%p parent=%p prev_control=%p prev_parent=%p",
+                        slot, control, parent, g_store_snapshot_controls[slot],
+                        g_store_snapshot_parents[slot]);
+            g_store_snapshot_controls[slot] = control;
+            g_store_snapshot_parents[slot] = parent;
+        }
     }
 }
 void store_install_module_view_locked(int bag) {
@@ -231,6 +302,7 @@ void store_install_module_view_locked(int bag) {
     store_request_item_refresh_locked();
     VIRTBAG_LOG("store view installed bag=%d window=%d capacity=%d", bag, original_bag,
                 ::qol::extension_bag::access::bag().capacities[bag]);
+    store_log_item_snapshot_locked("install");
 }
 
 void store_restore_module_view_locked() {
@@ -256,6 +328,8 @@ void store_restore_module_view_locked() {
         }
     }
     store_clear_desc_locked();
+    // 还原前回读一次：投影期最后一帧的控件/父链状态是崩溃对比的基线。
+    store_log_item_snapshot_locked("restore");
     if (qol::extension_bag::ui_state().store.hidden_equip_bag_root != nullptr) {
         (void)extension_bag_ui_set_control_show(
             qol::extension_bag::ui_state().store.hidden_equip_bag_root, true);
