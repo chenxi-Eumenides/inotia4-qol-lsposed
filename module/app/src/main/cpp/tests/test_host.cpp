@@ -2759,6 +2759,33 @@ static void test_ownership_ledger_p43() {
     }
     CHECK(ownership::release(&mixed, h3) == ownership::Outcome::kOk);
     CHECK_EQ(ownership::audit(mixed).live_handles, 0u);  // h2 交接槽已回收
+
+    // 容量覆盖所有扩展袋槽位；槽号超过旧 8 位编码范围时句柄仍可往返。
+    CHECK(ownership::kLedgerCapacity >=
+          virtual_bag::kMaxExtensionBags * virtual_bag::kSlotCount);
+    ownership::Ledger wide{};
+    uint32_t wide_handles[300] = {};
+    for (int i = 0; i < 300; ++i) {
+        CHECK(ownership::allocate(&wide, &wide_handles[i]) == ownership::Outcome::kOk);
+        CHECK_EQ(ownership::handle_slot(wide_handles[i]), i);
+    }
+    const uint32_t high = wide_handles[299];
+    CHECK_EQ(ownership::handle_slot(high), 299);
+    CHECK(ownership::handle_generation(high) != 0u);
+    CHECK(ownership::live_state(wide, high, ownership::State::kModuleOwned));
+    CHECK(ownership::release(&wide, high) == ownership::Outcome::kOk);
+    CHECK(ownership::live_state(wide, high, ownership::State::kModuleOwned) == false);
+    // 同槽再分配必须换 generation，旧句柄失效。
+    uint32_t reused = 0;
+    CHECK(ownership::allocate(&wide, &reused) == ownership::Outcome::kOk);
+    CHECK_EQ(ownership::handle_slot(reused), 299);
+    CHECK(ownership::handle_generation(reused) != ownership::handle_generation(high));
+    CHECK(ownership::release(&wide, reused) == ownership::Outcome::kOk);
+    for (int i = 0; i < 299; ++i) {
+        CHECK(ownership::release(&wide, wide_handles[i]) == ownership::Outcome::kOk);
+    }
+    CHECK(ownership::audit(wide).balanced);
+    CHECK_EQ(ownership::audit(wide).outstanding_objects, 0u);
 }
 
 static void test_unequip_bag() {

@@ -862,20 +862,25 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
 
 ### R-62 所有权账本容量必须覆盖扩展物品上限，交接终态槽必须回收
 
-- **规则一句话**：`ownership::kLedgerCapacity` 必须 ≥ 扩展背包物品上限（5 袋 ×16 = 80）加事务
-  余量（当前 128）；`handover_to_inventory` 交接后必须**立即回收槽位**（`slot.state = kNone` +
-  generation 递增使旧句柄失效），终态信息仅由 `total_handed_over` 累计记录，`Audit.inventory_owned`
-  由该累计值派生。
-- **为什么**：账本对**每个已物化扩展物品**占一个 `module-owned` 句柄，且 `kInventoryOwned` 原为
-  **永不释放**的终态槽（`handover` 只递增 generation、不置空闲）。原容量 32 在 28 件物品 + 4 个
-  终态槽时即耗尽（真机 `module materialize rejected ownership ledger exhausted` →
-  `txn committed but destination materialize failed` → `txn abort`），表现为**拖动可解析落点但
-  不产生结果**；且 ext→orig 操作次数无上限，任何有限容量若不回收终态槽都终将耗尽。
-- **典型破坏方式**：只调大容量当修复（终态槽仍累积，治标）；让 `allocate` 复用 `kInventoryOwned`
-  而不回收（两次分配之间连续交接仍会累积）；交接后仍按句柄报告 `kInventoryOwned`。
-- **验证锚**：Host `test_ownership_ledger`（池耗尽/槽位复用、交接后 `live_handles` 归零、
-  `inventory_owned` 为累计值）；真机：连续「扩展→原版」移动/装备后仍可继续拖动、无
-  `ownership ledger exhausted`（`VM-46`）。
+- **规则一句话**：`ownership::kLedgerCapacity` 必须 ≥ 扩展背包物品上限
+  （`kMaxExtensionBags × kSlotCount` = 128 袋 × 16 槽 = 2048）加事务余量（当前
+  `kMaxExtensionBags * kSlotCount + 64`）；句柄槽位字段（`kHandleSlotBits`）必须能容纳该容量，
+  `live_state` 必须按 generation 位掩码比较；`handover_to_inventory` 交接后必须**立即回收槽位**
+  （`slot.state = kNone` + generation 递增使旧句柄失效），终态信息仅由 `total_handed_over` 累计记录，
+  `Audit.inventory_owned` 由该累计值派生。
+- **为什么**：账本对**每个已物化扩展物品**占一个 `module-owned` 句柄，且句柄跨视图切换常驻
+  （切页签不释放重分配），所以容量口径是「所有扩展袋槽位总数」，不是「当前可见窗口槽位数」。
+  `kInventoryOwned` 原为**永不释放**的终态槽（`handover` 只递增 generation、不置空闲），任何有限容量
+  若不回收终态槽都终将耗尽。原容量 32 在 28 件物品 + 4 个终态槽时即耗尽；容量提到 128 而未随
+  bagCount 可配置（5–20 页签，插件侧 0–128 袋）同步后，15 袋存档在 128 件物品时再次耗尽——真机表现为
+  `module materialize rejected ownership ledger exhausted` → `INVEN_SaveItem` 返回 0 →
+  **袋内仍有空位但拾取/拖入提示背包已满**。
+- **典型破坏方式**：只调大容量当修复（终态槽仍累积，治标）；容量按「5 袋 × 16」或可见窗口估算；
+  让 `allocate` 复用 `kInventoryOwned` 而不回收；交接后仍按句柄报告 `kInventoryOwned`；
+  扩容不同步句柄位宽（槽号越过掩码后不同槽共用同一句柄）。
+- **验证锚**：Host `test_ownership_ledger_p43`（池耗尽/槽位复用、交接后 `live_handles` 归零、
+  `inventory_owned` 为累计值、容量 ≥ 全袋槽位、槽号 ≥ 256 的句柄往返）；真机：连续「扩展→原版」
+  移动/装备后仍可继续拖动、扩展物品超过 128 件后拾取仍成功、无 `ownership ledger exhausted`（`VM-46`）。
 
 ### R-63 佣兵徽章使用必须函数级接管并复用原版 MakeMercenary 链
 

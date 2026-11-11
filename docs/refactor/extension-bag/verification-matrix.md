@@ -663,15 +663,15 @@
 
 ### VM-46 所有权账本容量与交接终态槽回收（R-62）
 
-- **操作**：在含约 28+ 件扩展物品的存档上反复拖动（交换/跨袋移动）并执行「扩展→原版」移动/装备，确认不再出现 `ownership ledger exhausted`。
+- **操作**：在扩展物品数量接近账本容量、且多扩展袋（≥15 袋）的存档上重复拾取/拖入，确认不再出现 `ownership ledger exhausted`。
 - **设备/APK/快照前置**：真机 `<设备序列号>`、最新 debug APK SHA-256。
 - **原版链(VMA)**：无（纯模块侧账本）。
-- **扩展接管点(文件:函数)**：`model/ownership_ledger.h`（`kLedgerCapacity`、`handover_to_inventory`、`allocate`、`audit`）；`extension_bag_ownership.inc:handover_tracked_item_locked`。
+- **扩展接管点(文件:函数)**：`model/ownership_ledger.h`（`kLedgerCapacity`、`make_handle`/`handle_slot`/`handle_generation`、`handover_to_inventory`、`allocate`、`audit`）；`extension_bag_ownership.inc:handover_tracked_item_locked`。
 - **共享状态读写**：`g_ownership_ledger`（`slots[]`、`total_allocated/total_released/total_handed_over`）。
-- **必须保持的不变式(引 R-xx)**：容量 ≥ 80 + 事务余量；交接即回收槽位（`kNone` + generation 递增）；`balanced` 不变式成立；`Audit.inventory_owned` 为累计交接数（R-62）。
-- **失败语义**：池耗尽 → `module materialize rejected ownership ledger exhausted` → `txn committed but destination materialize failed` → `txn abort`（拖动可解析落点但不产生结果）。
-- **Host 测试名(现有或「缺口」)**：`test_ownership_ledger`（池耗尽/槽位复用、过期句柄、交接后 `live_handles` 归零、`inventory_owned` 累计）。
-- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-46`：①`ownership audit` 的 `live` 仅随活跃物品数变化、不随 ext→orig 交接累积；②连续 ext→orig 移动/装备 ≥ 数次后拖动仍提交成功；③`logcat` 无 `ownership ledger exhausted`。
+- **必须保持的不变式(引 R-xx)**：容量 ≥ `kMaxExtensionBags × kSlotCount`（2048）+ 事务余量，句柄槽位字段必须能容纳该容量；交接即回收槽位（`kNone` + generation 递增）；`balanced` 不变式成立；`Audit.inventory_owned` 为累计交接数（R-62）。
+- **失败语义**：池耗尽 → `module materialize rejected ownership ledger exhausted` → `INVEN_SaveItem` 返回 0 → 游戏提示背包已满（即使袋内仍有空位）。
+- **Host 测试名(现有或「缺口」)**：`test_ownership_ledger_p43`（池耗尽/槽位复用、过期句柄、交接后 `live_handles` 归零、`inventory_owned` 累计、容量 ≥ 全袋槽位、槽号 ≥ 256 的句柄往返）。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-46`：①`ownership counters` 的在持数仅随扩展袋物品数变化，不随视图切换或 ext→orig 交接累积；②连续 ext→orig 移动/装备 ≥ 数次后拖动仍提交成功；③扩展袋物品总数超过 128 后拾取/拖入仍成功，`logcat` 无 `ownership ledger exhausted`。
 - **证据锚类型**：真机日志 + Host 断言 + 源码。
 
 ### VM-47 扩展袋 UI 佣兵徽章使用（R-63）
@@ -887,7 +887,7 @@
 | R-59 | VM-43 | `apply_monster_item_count_compat` 按特征字节 `1F 89 01 71 68 00 00 54` 在可执行映射内把 `cmp w8,#0x62` 改写为 `#0x7F`；非 monster 版无操作（`no target`）。真机 monster v23 归 VM-43（`enter_slot 0` 不崩）。 |
 | R-60 | VM-44 | save gate 改为 `native_hook_func()` hook `SAVE_SaveInventory` 函数入口，wrapper 经 `g_backup_save_inventory` 调原函数；不依赖调用点原指令字。真机 monster v23 归 VM-44（`save gate hook installed`、`patch mismatch`=0、注入链完整、保存成功）。 |
 | R-61 | VM-45 | `clear_stale_projected_moving_locked` 空闲态早退（`moving`/`drop_source` 均空即返回；会话 idle 且非捕获时不清原版 `MOVING_CTRL`）。Host 无（依赖控件树/触摸状态机），真机归 VM-45（`stale projected moving cleared`=0、拖动可持续、`0x18` 正常）。 |
-| R-62 | VM-46 | `kLedgerCapacity` 32→128、`handover_to_inventory` 交接即回收槽位（`kNone` + generation 递增）、`Audit.inventory_owned` 改为累计 `total_handed_over`；Host `test_ownership_ledger` 覆盖。真机归 VM-46（无 `ownership ledger exhausted`、ext→orig 后仍可拖动）。 |
+| R-62 | VM-46 | `kLedgerCapacity` 32→128、`handover_to_inventory` 交接即回收槽位（`kNone` + generation 递增）、`Audit.inventory_owned` 改为累计 `total_handed_over`；Host `test_ownership_ledger_p43` 覆盖。后续修正：容量改为 `kMaxExtensionBags × kSlotCount + 64`（2048+64），句柄槽位 8→12 bit、generation 20 bit 并按掩码比较（旧 128 容量在多扩展袋存档 128 件物品时耗尽，表现为有空位但提示背包已满）；Host 补「容量 ≥ 全袋槽位」「槽号 ≥ 256 句柄往返」。真机归 VM-46（无 `ownership ledger exhausted`、ext→orig 后仍可拖动、>128 件仍可拾取）。 |
 | R-63 | VM-47 / VM-48 | H-24 函数级 Hook `UIEquip_ButtonUseMercenarySealExe@0xb8144` → `extension_use_mercenary_seal`（原版顺序 SAVE_IsOK→IsEmptyManagerSlot→MakeMercenary，消耗经 H-04）；API `data_op_use_item`/`extension_bag_api_use_item_impl` 对 `IsMercenarySeal` 豁免 `fn_is_use` 并走 `MakeMercenary`。Host 缺口 `test_mercenary_seal_takeover_token`；真机归 VM-47（UI）/VM-48（API）。 |
 | R-64 | 取证任务（无 VM 卡） | **已落地（2026-10-18）**：Host SDK v1.27 `QolDescHookApi` 按 button/data/execute-slot resolve，按 execute slot 去重；EB 回调先 validate 绑定 id。真机 monster v29 详情安装 index=1/7，index=8 `duplicate_execute_slot` 跳过，点击 index=1 正确路由 bag0 slot2；证据见 `docs/refactor/audits/plugin-audit/extension-bag-20261018/` §3。残余 ABA（控件地址复用）保留。 |
 | R-65 | VM-49 | `s2_writeback_gate` 改经 `item_count_codec::writeback_needed(ext, stack)`，写侧门控与读侧 `stack_limit_enabled()` 同源；Host `stage4_hook_tests::test_s2_writeback_gate` 断言四组合真值表；真机 VM-49（堆叠开+扩展关 99+99→198）。 |

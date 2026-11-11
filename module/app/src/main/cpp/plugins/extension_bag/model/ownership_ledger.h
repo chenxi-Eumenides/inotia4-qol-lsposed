@@ -11,13 +11,18 @@
 #include <cstdint>
 #include <cstring>
 
+#include "plugins/extension_bag/model/bag_catalog.h"
+
 namespace ownership {
 
-// 容量口径：扩展背包最多 5 袋 × 16 槽 = 80 个可物化物品（每个占一个 module-owned
-// 句柄），另需容纳 kInventoryOwned 终态槽（每次 ext→orig 交接占用且不复用）与事务期
-// 临时物化，故须显著大于 80。原值 32 在物品数接近上限时直接池耗尽，使拖放事务的
-// 目标物化失败（真机实证：28 件物品 + 4 个终态槽 = 32 即耗尽）。
-constexpr int kLedgerCapacity = 128;
+// 容量口径：账本对每个已物化扩展物品占一个 module-owned 句柄，且句柄跨视图切换
+// 常驻（切页签不释放重分配），因此容量必须覆盖所有扩展袋的槽位总数
+// （kMaxExtensionBags × kSlotCount = 2048），另加事务期临时物化余量。
+// 旧常量 128 按「5 袋 × 16」估算；bagCount 可配置到 kMaxExtensionBags 后，
+// 多袋存档在 128 件物品时池耗尽，表现为「有空位但拾取/拖入提示背包已满」。
+constexpr int kTransactionSlack = 64;
+constexpr int kLedgerCapacity =
+    virtual_bag::kMaxExtensionBags * virtual_bag::kSlotCount + kTransactionSlack;
 
 enum class State : uint8_t {
     kNone = 0,
@@ -56,11 +61,27 @@ struct Ledger {
     uint32_t total_handed_over = 0;
 };
 
+// 句柄布局：低 kHandleSlotBits 位为槽位，高位为 generation。槽位数上限由
+// kLedgerCapacity 决定（2048 → 12 bit），句柄仍是 32 位，避免全体调用方改类型。
+// generation 只有 32-kHandleSlotBits 位可用：live_state 必须按位掩码比较，
+// 否则超过 2^20 次分配后同一个槽位的旧句柄会永久无法匹配（而不是被拒绝）。
+constexpr int kHandleSlotBits = 12;
+constexpr uint32_t kHandleSlotMask = (1u << kHandleSlotBits) - 1u;
+constexpr uint32_t kHandleGenerationMask = 0xFFFFFFFFu >> kHandleSlotBits;
+
+static_assert(kLedgerCapacity <= static_cast<int>(kHandleSlotMask) + 1,
+              "ledger capacity must fit the handle slot field");
+
 inline uint32_t make_handle(int slot, uint32_t generation) {
-    return static_cast<uint32_t>(slot) | (generation << 8);
+    return (static_cast<uint32_t>(slot) & kHandleSlotMask) |
+           ((generation & kHandleGenerationMask) << kHandleSlotBits);
 }
 
-inline int handle_slot(uint32_t handle) { return static_cast<int>(handle & 0xFF); }
+inline int handle_slot(uint32_t handle) { return static_cast<int>(handle & kHandleSlotMask); }
+
+inline uint32_t handle_generation(uint32_t handle) {
+    return (handle & ~kHandleSlotMask) >> kHandleSlotBits;
+}
 
 // 唯一转移方约定（P3 接线时的调用点）：
 //   allocate = 扩展物品重建为原版对象（module-owned 入口）
@@ -85,7 +106,8 @@ inline bool live_state(const Ledger& ledger, uint32_t handle, State expected) {
     const int slot = handle_slot(handle);
     if (slot < 0 || slot >= kLedgerCapacity) return false;
     const Slot& entry = ledger.slots[slot];
-    return entry.generation == (handle >> 8) && entry.state == expected;
+    return (entry.generation & kHandleGenerationMask) == handle_generation(handle) &&
+           entry.state == expected;
 }
 
 inline Outcome borrow_for_view(Ledger* ledger, uint32_t handle) {

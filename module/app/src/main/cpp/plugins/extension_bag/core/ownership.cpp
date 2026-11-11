@@ -86,7 +86,7 @@ uint64_t module_object_generation_locked(void* item, uint32_t handle) {
             }
         }
     }
-    return static_cast<uint64_t>(handle >> 8);
+    return static_cast<uint64_t>(ownership::handle_generation(handle));
 }
 
 bool enqueue_deferred_item_free_locked(void* item, uint32_t handle, uint64_t generation) {
