@@ -51,7 +51,22 @@ void test_descriptor() {
     assert(qol::contracts::qol_inventory_transfer_api_valid(
         static_cast<const qol::contracts::QolInventoryTransferApi*>(
             descriptor.provides[2].iface)));
-    assert(descriptor.feature_count == 1);
+    assert(descriptor.feature_count == 2 && descriptor.features != nullptr);
+    assert(std::strcmp(descriptor.features[0].id, "core.inventory.enabled") == 0);
+    assert(descriptor.features[0].category == qol::contracts::FeatureCategory::kHidden);
+    assert(std::strcmp(descriptor.features[1].id, "core.inventory.same_bag_priority") == 0);
+    assert(descriptor.features[1].default_enabled == 0);
+    assert(descriptor.features[1].category == qol::contracts::FeatureCategory::kGameplay);
+    assert(descriptor.features[1].type == qol::contracts::FeatureType::kToggle);
+    assert(std::strcmp(descriptor.features[1].name, "物品同袋优先") == 0);
+    assert(std::strcmp(descriptor.features[1].description,
+                       "物品优先放入有同类型物品的背包") == 0);
+    assert(descriptor.features[1].on_toggle != nullptr);
+    qol::contracts::PluginContext toggle_ctx{};
+    assert(descriptor.features[1].on_toggle(toggle_ctx, 0).ok == kQolOk);
+    assert(!qol::features::core_inventory::g_same_bag_priority);
+    assert(descriptor.features[1].on_toggle(toggle_ctx, 1).ok == kQolOk);
+    assert(qol::features::core_inventory::g_same_bag_priority);
     assert(descriptor.port_count == 3);
     assert(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
     assert(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE);

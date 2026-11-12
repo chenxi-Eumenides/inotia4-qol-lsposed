@@ -341,6 +341,8 @@ bool resolve_placement(const contracts::QolBagTransfer& transfer, bool stackable
         return false;
     }
     if (scope_bag >= 0 && scope_space < 0) return false;
+    // 第 4 步「同物品袋空槽」受 feature 开关控制；关闭时直接进入后续空槽步骤。
+    const bool same_bag_priority = qol::features::core_inventory::g_same_bag_priority;
 
     if (scope_space < 0) {
         // 全局严格七步：原生合并 → 注册源合并（注册序）→ C18 合并 →
@@ -358,13 +360,18 @@ bool resolve_placement(const contracts::QolBagTransfer& transfer, bool stackable
             scan_native_merge(qol::contracts::kQolBagSpaceVariant, transfer, -1, out)) {
             return true;
         }
-        // 同物品袋空槽：第一个同身份袋满时继续下一个同身份袋，全部无处可放才继续。
-        if (scan_native_same_item_empty(qol::contracts::kQolBagSpaceOriginal, transfer, -1,
+        // 同物品袋空槽（第 4 步）：第一个同身份袋满时继续下一个同身份袋，全部无处可放才继续。
+        // 本步骤受 core.inventory.same_bag_priority 开关控制；关闭时跳过。
+        if (same_bag_priority &&
+            scan_native_same_item_empty(qol::contracts::kQolBagSpaceOriginal, transfer, -1,
                                         out)) {
             return true;
         }
-        if (scan_registered_sources_same_item_empty(transfer, -1, -1, out)) return true;
-        if (c18_auto &&
+        if (same_bag_priority &&
+            scan_registered_sources_same_item_empty(transfer, -1, -1, out)) {
+            return true;
+        }
+        if (c18_auto && same_bag_priority &&
             scan_native_same_item_empty(qol::contracts::kQolBagSpaceVariant, transfer, -1,
                                         out)) {
             return true;
@@ -378,7 +385,7 @@ bool resolve_placement(const contracts::QolBagTransfer& transfer, bool stackable
     if (scope_space == qol::contracts::kQolBagSpaceOriginal ||
         scope_space == qol::contracts::kQolBagSpaceVariant) {
         if (stackable && scan_native_merge(scope_space, transfer, scope_bag, out)) return true;
-        if (scope_bag < 0 &&
+        if (same_bag_priority && scope_bag < 0 &&
             scan_native_same_item_empty(scope_space, transfer, -1, out)) {
             return true;
         }
@@ -388,7 +395,7 @@ bool resolve_placement(const contracts::QolBagTransfer& transfer, bool stackable
         const auto* source = find_bag_source(scope_space);
         if (source == nullptr) return false;
         if (stackable && scan_registered_merge(source, transfer, scope_bag, out)) return true;
-        if (scope_bag < 0 &&
+        if (same_bag_priority && scope_bag < 0 &&
             scan_registered_same_item_empty(source, transfer, -1, out)) {
             return true;
         }

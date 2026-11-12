@@ -25,6 +25,10 @@ extern const contracts::QolItemMoneyWritePort* g_item_money_write;
 // attach 时经模块已有的 game_identity 接口判定（series=c18 且 version=v603）后关闭；
 // 其余变体与未知后续版本保持 true。只影响自动落槽与空槽统计，显式 move/transfer 不受影响。
 extern bool g_c18_native_bag_auto_save;
+// 自动落槽是否优先在已有同身份物品的袋内新开堆（全局七步中的第 4 步）。
+// 由 feature core.inventory.same_bag_priority 驱动，默认关闭；
+// 关闭时第 4 步整体跳过，其余六步顺序不变。
+extern bool g_same_bag_priority;
 
 namespace bags {
 

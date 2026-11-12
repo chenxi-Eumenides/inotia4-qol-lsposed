@@ -823,6 +823,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 | `craft_ui.custom_crafting` | `true` | 自定义合成界面（hidden，随 `custom_recipe.recipes` 级联） |
 | `extension_bag.extended_bag` | `true` | 额外背包 |
 | `save_backup.open_manager` | `true` | 存档备份并支持跨设备导入导出（entry） |
+| `core.inventory.same_bag_priority` | `false` | 物品优先放入有同类型物品的背包 |
 | `stack_limit.limit_999` | `false` | 可堆叠物品999上限 |
 | `world_teleport.map_jump` | `true` | 地图边界传送点跳转 |
 

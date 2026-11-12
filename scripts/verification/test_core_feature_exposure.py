@@ -25,7 +25,7 @@ def feature_initializer(source: str, feature_id: str) -> str:
 class CoreFeatureExposureTests(unittest.TestCase):
     def test_all_core_features_are_hidden_and_have_no_player_description(self):
         sources = sorted(PLUGINS.glob("core.*/plugin.cpp"))
-        self.assertEqual(len(sources), 12)
+        self.assertEqual(len(sources), 13)
         for source in sources:
             with self.subTest(plugin=source.parent.name):
                 feature_source = (PLUGINS / "core.item" / "runtime" / "lifecycle.cpp"
@@ -37,10 +37,29 @@ class CoreFeatureExposureTests(unittest.TestCase):
                     provider = by_id["core.item.provider"]
                     self.assertEqual(provider[2], "kHidden")
                     self.assertEqual(provider[5], "")
-                    drag_merge = by_id["move_merge.drag_merge"]
-                    self.assertEqual(drag_merge[2], "kBasicOptimization")
-                    self.assertTrue(drag_merge[5])
+                    # move_merge.drag_merge 已迁往 extension_bag。
+                    self.assertNotIn("move_merge.drag_merge", by_id)
                     continue
+                if source.parent.name == "core.inventory":
+                    by_id = {feature[0]: feature for feature in features}
+                    public = by_id.pop("core.inventory.same_bag_priority")
+                    self.assertEqual(
+                        public[1:6],
+                        ("0", "kGameplay", "kToggle", "物品同袋优先",
+                         "物品优先放入有同类型物品的背包"),
+                    )
+                    self.assertEqual(by_id["core.inventory.enabled"][2], "kHidden")
+                    # 该 hidden 项的 description 是内部占位说明，不是玩家可见文案。
+                    continue
+                if source.parent.name == "core.feature":
+                    by_id = {feature[0]: feature for feature in features}
+                    public = by_id.pop("core.feature.mask_crit_effects")
+                    self.assertEqual(
+                        public[1:6],
+                        ("1", "kBasicOptimization", "kToggle", "屏蔽暴击特效",
+                         "拦截暴击闪白、横向打击条、震屏与震动，保留暴击光效"),
+                    )
+                    features = list(by_id.values())
                 for feature_id, _, category, _, _, description in features:
                     if source.parent.name == "core.api" and feature_id == "api.enabled":
                         self.assertEqual(category, "kGeneral")
@@ -78,7 +97,7 @@ class CoreFeatureExposureTests(unittest.TestCase):
             "move_merge.drag_merge": ("1", "kBasicOptimization", "kToggle", "拖动合并"),
             "push_all.push": ("0", "kGameplay", "kToggle", "推怪"),
             "custom_recipe.recipes": ("0", "kGameplay", "kToggle", "自定义合成"),
-            "extension_bag.extended_bag": ("1", "kGameplay", "kToggle", "额外背包"),
+            "damage_widen.enabled": ("1", "kBasicOptimization", "kToggle", "数值守卫"),
             "stack_limit.limit_999": ("0", "kGameplay", "kToggle", "堆叠上限"),
             "popup_blocker.enabled": ("1", "kBasicOptimization", "kToggle", "禁用弹窗"),
             "custom_map.load": ("1", "kBasicOptimization", "kToggle", "自定义地图"),
@@ -88,10 +107,12 @@ class CoreFeatureExposureTests(unittest.TestCase):
             "character_panel.i18n": ("1", "kBasicOptimization", "kToggle", "属性面板汉化"),
             "character_panel.overview": ("1", "kBasicOptimization", "kToggle", "属性总览"),
             "world_teleport.map_jump": ("1", "kBasicOptimization", "kToggle", "更好的传送"),
+            "core.inventory.same_bag_priority": ("0", "kGameplay", "kToggle", "物品同袋优先"),
         }
         sources = [source for source in PLUGINS.glob("*/plugin.cpp")
                    if not source.parent.name.startswith("core.")]
         sources.append(PLUGINS / "core.item" / "runtime" / "lifecycle.cpp")
+        sources.append(PLUGINS / "core.inventory" / "plugin.cpp")
         sources.append(ROOT / "module/app/src/main/cpp/host/features/platform.cpp")
         actual = {
             feature_id: (default, category, kind, name)
@@ -101,7 +122,7 @@ class CoreFeatureExposureTests(unittest.TestCase):
             feature_id not in {"api.enabled", "op.enabled"}
         }
         self.assertEqual(actual, expected)
-        self.assertEqual(len(actual), 14)
+        self.assertEqual(len(actual), 15)
 
     def test_basic_optimization_metadata_and_defaults(self):
         expected = {
@@ -109,7 +130,7 @@ class CoreFeatureExposureTests(unittest.TestCase):
             "character_panel": ("character_panel.i18n", "属性面板汉化"),
             "world_teleport": ("world_teleport.map_jump", "更好的传送"),
             "custom_map": ("custom_map.load", "自定义地图"),
-            "core.item": ("move_merge.drag_merge", "拖动合并"),
+            "extension_bag": ("move_merge.drag_merge", "拖动合并"),
         }
         for plugin, (feature_id, label) in expected.items():
             with self.subTest(plugin=plugin):
@@ -175,7 +196,7 @@ class CoreFeatureExposureTests(unittest.TestCase):
         ))
         # 公共 Download 导出入口与存档备份同属公开目录：General 分类、entry、默认启用。
         self.assertEqual(by_id["save_backup.export_crash_logs"][:5], (
-            "save_backup.export_crash_logs", "1", "kGeneral", "kEntry", "导出崩溃日志",
+            "save_backup.export_crash_logs", "1", "kGeneral", "kEntry", "导出日志",
         ))
 
     def test_platform_controls_remain_public(self):
@@ -208,7 +229,7 @@ class CoreFeatureExposureTests(unittest.TestCase):
             ("core.api/plugin.cpp", "api.enabled"): -5,
             ("host/features/platform.cpp", "op.enabled"): -4,
             ("host/features/platform.cpp", "debug.logging"): -3,
-            ("extension_bag/plugin.cpp", "extension_bag.extended_bag"): -2,
+            ("extension_bag/plugin.cpp", "extension_bag.bagCount"): -2,
             ("autosell/plugin.cpp", "autosell.auto_sell"): -1,
             ("custom_recipe/plugin.cpp", "custom_recipe.recipes"): -1,
             ("save_backup/plugin.cpp", "save_backup.open_manager"): -2,
@@ -220,7 +241,7 @@ class CoreFeatureExposureTests(unittest.TestCase):
             ))
             with self.subTest(feature=feature_id):
                 item = feature_initializer(path.read_text(), feature_id)
-                self.assertRegex(item, rf",\s*{priority}\s*\}}")
+                self.assertRegex(item, rf",\s*{priority}\s*[,}}]")
         self.assertIn("feature display priority out of range",
                       (ROOT / "module/app/src/main/cpp/host/core_settings_config_store.cpp").read_text())
 

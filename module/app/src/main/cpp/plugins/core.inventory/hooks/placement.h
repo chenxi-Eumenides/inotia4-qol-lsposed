@@ -10,6 +10,8 @@ namespace qol::features::core_inventory::hooks::placement {
 //   原生已有堆(space0) → 扩展已有堆(注册源注册序, space>=2) → C18 已有堆(space1)
 //   → 同物品袋空槽(原生→注册源→C18，逐袋尝试) → 原生空槽(space0)
 //   → 扩展空槽(注册序) → C18 空槽(space1)。
+// 第 4 步「同物品袋空槽」受 feature core.inventory.same_bag_priority 控制；关闭时跳过该步，
+// 直接进入原生/注册源/C18 空槽。
 // 同物品袋空槽：袋内已有同身份物品但堆已满（或该类别不可堆叠）时，优先在该袋内新开堆；
 // 第一个同身份袋满则继续下一个同身份袋，全部无处可放才进入原生空槽。身份判据与合并
 // 一致（类别 + I_TYPE + 尾部身份区，排除 UID 与数量位）。
@@ -25,7 +27,8 @@ struct PlacementTarget {
 
 // scope_space < 0 = 全局自动落槽；scope_space >= 0 只扫该空间
 // （空间内 merge → 同物品袋空槽 → empty）；scope_bag >= 0 只扫该 bag（要求
-// scope_space >= 0，此时空槽扫描已限定在该袋，不再单独走同物品袋步骤）。
+// scope_space >= 0，此时空槽扫描已限定在该袋，不再单独走同物品袋步骤）；开关关闭时
+// scope_bag < 0 也不走第 4 步。
 // merge 候选要求 stackable 且 category 相同且 payload 身份相同且堆叠预检不超上限；
 // 同物品袋空槽对可堆叠与不可堆叠类别都生效。
 bool resolve_placement(const contracts::QolBagTransfer& transfer, bool stackable,

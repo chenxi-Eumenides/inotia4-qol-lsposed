@@ -224,10 +224,20 @@ QolResult feature_toggle(contracts::PluginContext&, uint8_t enabled) {
     return contracts::ok();
 }
 
+QolResult same_bag_priority_toggle(contracts::PluginContext&, uint8_t enabled) {
+    g_same_bag_priority = enabled != 0;
+    log_line(1, "plugin=%s: same_bag_priority enabled=%u", kPluginId,
+             static_cast<unsigned>(enabled));
+    return contracts::ok();
+}
+
 const contracts::FeatureDefinition kFeatures[] = {
     {"core.inventory.enabled", 1, contracts::FeatureCategory::kHidden,
      contracts::FeatureType::kToggle, "库存层（骨架）", "存储层占位，暂不提供运行时能力。",
      &feature_toggle, nullptr},
+    {"core.inventory.same_bag_priority", 0, contracts::FeatureCategory::kGameplay,
+     contracts::FeatureType::kToggle, "物品同袋优先", "物品优先放入有同类型物品的背包",
+     &same_bag_priority_toggle, nullptr},
 };
 
 const contracts::CapabilityProvisionRef kProvides[] = {
@@ -290,7 +300,7 @@ const contracts::PluginDescriptor kDescriptor = {
     nullptr,
     0,
     kFeatures,
-    1,
+    2,
     kHttpEndpoints,
     kHttpEndpointCount,
     nullptr,

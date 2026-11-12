@@ -1012,6 +1012,9 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
   `serialize_item`。
 - **边界**：任务袋 5 不参与；C18 第 ④ 步同样只在变体仍提供 C18 背包时参与；显式
   `scope_bag >= 0` 的移动目标仍只扫该袋（空槽扫描本身已限定在该袋，不再单独走第 ④ 步）。
+- **开关**：`core.inventory.same_bag_priority`（「物品同袋优先」，Gameplay、默认关闭）；
+  关闭时第 ④ 步整体跳过，①–③ 与 ⑤–⑦ 的顺序不变。限定袋移动本来不走第 ④ 步，不受该
+  开关影响。
 - **典型破坏方式**：把第 ④ 步只挂在可堆叠类别（宝石/神灯仍散袋）；第 ④ 步只看第一个
   同身份袋、袋满就放弃（应继续下一个同身份袋）；把第 ④ 步放到第 ⑤ 步之后（等于没改）；
   用 category-only 判据把词条/镶嵌不同的装备并到同一袋。
@@ -1021,7 +1024,9 @@ H-18..H-21 为 S2 写侧进位框架追加，其中 H-20 `ITEMSYSTEM_MakeItem` �
   `test_full_same_item_bag_falls_through_to_next_same_item_bag`、
   `test_non_stackable_grouped_into_same_item_bag`、
   `test_same_item_bags_all_full_fall_back_to_native_empty`、
-  `test_stack_limit_uses_count_limit`）；真机待补：满堆拾取落同袋、宝石/神灯同类聚袋。
+  `test_same_bag_priority_toggle_off_falls_back_to_native_empty`、
+  `test_stack_limit_uses_count_limit`）；真机待补：满堆拾取落同袋、宝石/神灯同类聚袋、
+  关闭「物品同袋优先」后回到原生空槽顺序。
 
 ## §6 禁止事项汇总
 

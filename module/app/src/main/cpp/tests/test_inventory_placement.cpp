@@ -729,6 +729,24 @@ void test_full_native_stack_new_slot_in_same_bag() {
     expect_target(target, qol::contracts::kQolBagSpaceOriginal, 3, 0, false);
 }
 
+void test_same_bag_priority_toggle_off_falls_back_to_native_empty() {
+    reset_grid();
+    uint8_t payload[kPayloadSize];
+    make_payload(payload, kPayloadSize, 1, 7);
+    // 原生 bag3 的同类堆已满（100/100），bag0 空：关闭时跳过第 4 步，
+    // 直接落原生空槽 bag0；开启时新堆开在 bag3。
+    place_native(0, 3, 2, 10, 100, payload, kPayloadSize, 100);
+    QolBagTransfer transfer{};
+    make_transfer(&transfer, 10, 3, 1, 7);
+    placement::PlacementTarget target{};
+    qol::features::core_inventory::g_same_bag_priority = false;
+    assert(placement::resolve_placement(transfer, true, -1, -1, &target));
+    expect_target(target, qol::contracts::kQolBagSpaceOriginal, 0, 0, false);
+    qol::features::core_inventory::g_same_bag_priority = true;
+    assert(placement::resolve_placement(transfer, true, -1, -1, &target));
+    expect_target(target, qol::contracts::kQolBagSpaceOriginal, 3, 0, false);
+}
+
 void test_full_same_item_bag_falls_through_to_next_same_item_bag() {
     reset_grid();
     uint8_t payload[kPayloadSize];
@@ -929,6 +947,9 @@ int main() {
     attach_hooks(sdk, port);
     test_attach_maps_c18_v603_identity(sdk, port);
     register_reg_source();
+    // 既有落槽顺序用例验证开关开启时的同袋优先行为；关闭行为由
+    // test_same_bag_priority_toggle_off_falls_back_to_native_empty 单独覆盖。
+    qol::features::core_inventory::g_same_bag_priority = true;
 
     test_global_order_extension_merge_beats_native_empty();
     test_global_order_native_merge_first();
@@ -941,6 +962,7 @@ int main() {
     test_stack_limit_uses_count_limit();
     test_full_registered_stack_new_slot_in_same_bag();
     test_full_native_stack_new_slot_in_same_bag();
+    test_same_bag_priority_toggle_off_falls_back_to_native_empty();
     test_full_same_item_bag_falls_through_to_next_same_item_bag();
     test_non_stackable_grouped_into_same_item_bag();
     test_same_item_bags_all_full_fall_back_to_native_empty();
