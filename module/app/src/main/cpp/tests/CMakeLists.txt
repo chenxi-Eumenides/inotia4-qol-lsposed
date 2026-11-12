@@ -61,6 +61,7 @@ add_executable(item_facts_plugin_tests
     ${CPP_DIR}/plugins/core.item/http/json_lite.cpp
     ${CPP_DIR}/plugins/core.item/http/response.cpp
     ${CPP_DIR}/plugins/core.item/shop/query.cpp
+    ${CPP_DIR}/plugins/core.item/hooks/inventory_logging.cpp
     stubs/core_item_inventory_stub.cpp
 )
 target_include_directories(item_facts_plugin_tests PRIVATE
@@ -335,6 +336,7 @@ add_executable(inventory_action_sell_tests
     ${CPP_DIR}/plugins/core.item/api/native_inventory.cpp
     ${CPP_DIR}/plugins/core.item/usecases/sell_item.cpp
     ${CPP_DIR}/plugins/core.item/usecases/item_action.cpp
+    stubs/item_use_hook_stub.cpp
 )
 target_include_directories(inventory_action_sell_tests PRIVATE ${CPP_DIR})
 target_compile_features(inventory_action_sell_tests PRIVATE cxx_std_17)
@@ -346,6 +348,7 @@ add_executable(inventory_action_lifecycle_tests
     test_inventory_action_lifecycle.cpp
     ${CPP_DIR}/plugins/core.item/api/native_inventory.cpp
     ${CPP_DIR}/plugins/core.item/usecases/item_action.cpp
+    stubs/item_use_hook_stub.cpp
 )
 target_include_directories(inventory_action_lifecycle_tests PRIVATE ${CPP_DIR})
 target_compile_features(inventory_action_lifecycle_tests PRIVATE cxx_std_17)
@@ -1945,6 +1948,7 @@ add_executable(item_facts_dispatch_tests
     ${CPP_DIR}/plugins/core.item/http/json_lite.cpp
     ${CPP_DIR}/plugins/core.item/http/response.cpp
     ${CPP_DIR}/plugins/core.item/shop/query.cpp
+    ${CPP_DIR}/plugins/core.item/hooks/inventory_logging.cpp
     stubs/core_item_inventory_stub.cpp
     ${CPP_DIR}/plugins/core.inventory/plugin.cpp
     ${CPP_DIR}/plugins/core.inventory/api/access.cpp
@@ -2400,11 +2404,45 @@ set_target_properties(core_inventory_store_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME core_inventory_store_tests COMMAND core_inventory_store_tests)
 
+# 统一日志实现：功能级补全后，多个插件/host 路径在测试中会实际调用 qol_log_write，
+# 不能再依赖各测试文件内联空实现。含内联 stub 的测试目标保持原样，避免重复定义。
+add_library(qol_log_host STATIC
+    ${CPP_DIR}/infra/log/qol_log.cpp
+)
+target_include_directories(qol_log_host
+    PUBLIC ${CPP_DIR}
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/stubs ${CMAKE_CURRENT_SOURCE_DIR}/stubs/android)
+set_target_properties(qol_log_host PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+
+set(QOL_LOG_STUB_SOURCES
+    test_inventory_action_sell.cpp
+    test_production_feature_facade.cpp
+    test_config_namespace_api.cpp
+    test_config_platform_degraded_bootstrap.cpp
+    test_hooks_registry.cpp
+)
+
 # Host tests use assert expressions for both setup and checks; keep them active in Release too.
 get_property(HOST_TEST_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(test_target IN LISTS HOST_TEST_TARGETS)
     get_target_property(test_target_type ${test_target} TYPE)
     if(test_target_type STREQUAL "EXECUTABLE")
         target_compile_options(${test_target} PRIVATE -UNDEBUG)
+        get_target_property(test_target_sources ${test_target} SOURCES)
+        set(test_target_has_log_stub FALSE)
+        foreach(test_source IN LISTS test_target_sources)
+            get_filename_component(test_source_name ${test_source} NAME)
+            if(test_source_name STREQUAL "qol_log.cpp")
+                set(test_target_has_log_stub TRUE)
+            endif()
+            foreach(stub_source IN LISTS QOL_LOG_STUB_SOURCES)
+                if(test_source_name STREQUAL stub_source)
+                    set(test_target_has_log_stub TRUE)
+                endif()
+            endforeach()
+        endforeach()
+        if(NOT test_target_has_log_stub)
+            target_link_libraries(${test_target} PRIVATE qol_log_host)
+        endif()
     endif()
 endforeach()

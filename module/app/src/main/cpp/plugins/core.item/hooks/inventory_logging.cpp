@@ -29,22 +29,11 @@ bool inventory_log_debug_enabled() {
            g_sdk->log.debug_enabled() != 0;
 }
 
-bool inventory_log_debug_due(int64_t* last_frame, int64_t every_frames) {
-    if (last_frame == nullptr || every_frames <= 0) {
-        return true;
-    }
-    if (*last_frame + 1 < every_frames) {
-        ++*last_frame;
-        return false;
-    }
-    *last_frame = 0;
-    return true;
-}
-
 void inventory_log_write(int32_t level, const char* file, int line, const char* format, ...) {
     if (g_sdk == nullptr || g_sdk->log.write == nullptr || file == nullptr || format == nullptr) {
         return;
     }
+    if (level == 0 && !inventory_log_debug_enabled()) return;
     std::array<char, qol::contracts::kMessageCap + 1> message{};
     va_list args;
     va_start(args, format);

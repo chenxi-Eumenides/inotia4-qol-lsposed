@@ -120,7 +120,7 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
             virtual_bag::drag_session_generation_current(session, qol::extension_bag::ui_state().ui.extension_tab_generation);
         if (!descriptor_valid || !session_valid || backup == nullptr ||
             !module_use_begin_locked(source_bag, source_slot, source_item, &use_token)) {
-            VIRTBAG_LOG("equip control blocked caller=UIEquip_EquipControlEventProc source=%p/%d/%d target=%p descriptor=%d session=%d",
+            VIRTBAG_LOG_WARN("equip control blocked caller=UIEquip_EquipControlEventProc source=%p/%d/%d target=%p descriptor=%d session=%d",
                         source_item, source_bag, source_slot, target_item,
                         descriptor_valid ? 1 : 0, session_valid ? 1 : 0);
             cancel_projected_drag_session_locked("equip-control-validation-failed");
@@ -147,12 +147,12 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
         if (extension_bag_finish_requires_abort(finished)) {
             const bool aborted = module_use_abort_locked(use_token);
             const bool isolated = aborted || module_use_abort_isolate_locked(use_token);
-            VIRTBAG_LOG_ERROR("ERROR equip control token finish failed source=%p/%d/%d aborted=%d isolated=%d",
+            VIRTBAG_LOG_WARN("ERROR equip control token finish failed source=%p/%d/%d aborted=%d isolated=%d",
                         source_item, source_bag, source_slot, aborted ? 1 : 0,
                         isolated ? 1 : 0);
             cancel_projected_drag_session_locked("equip-control-finish-mismatch");
         } else if (!consumed) {
-            VIRTBAG_LOG("equip control blocked caller=UIEquip_EquipControlEventProc source=%p/%d/%d target=%p finished=%d consumed=%d",
+            VIRTBAG_LOG_WARN("equip control blocked caller=UIEquip_EquipControlEventProc source=%p/%d/%d target=%p finished=%d consumed=%d",
                         source_item, source_bag, source_slot, target_item,
                         finished ? 1 : 0, consumed ? 1 : 0);
             cancel_projected_drag_session_locked("equip-control-not-consumed");
@@ -226,7 +226,7 @@ bool apply_extension_material_to_slot_locked(
         !qol::extension_bag::ui_state().objects.module_view_installed ||
         qol::extension_bag::ui_state().objects.module_view_index != src_bag ||
         qol::extension_bag::ui_state().objects.projected_item_root == nullptr) {
-        VIRTBAG_LOG("apply reject reason=context src=%d/%d dst=%d/%d", src_bag, src_slot,
+        VIRTBAG_LOG_WARN("apply reject reason=context src=%d/%d dst=%d/%d", src_bag, src_slot,
                     dst_bag, dst_slot);
         return false;
     }
@@ -235,7 +235,7 @@ bool apply_extension_material_to_slot_locked(
     void* projected_root = qol::extension_bag::ui_state().objects.projected_item_root;
     void* live_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
     if (src_slot >= capacity || dst_slot >= capacity || live_root != projected_root) {
-        VIRTBAG_LOG("apply reject reason=root src=%d/%d dst=%d/%d", src_bag, src_slot,
+        VIRTBAG_LOG_WARN("apply reject reason=root src=%d/%d dst=%d/%d", src_bag, src_slot,
                     dst_bag, dst_slot);
         return false;
     }
@@ -250,7 +250,7 @@ bool apply_extension_material_to_slot_locked(
     const bool target_handle_ok = item_handle_matches(target_item, target_handle);
     if (!material_ok || material == nullptr || !target_ok || target_item == nullptr ||
         !source_object_ok || !source_handle_ok || !target_object_ok || !target_handle_ok) {
-        VIRTBAG_LOG("apply reject reason=identity src=%d/%d dst=%d/%d", src_bag, src_slot,
+        VIRTBAG_LOG_WARN("apply reject reason=identity src=%d/%d dst=%d/%d", src_bag, src_slot,
                     dst_bag, dst_slot);
         return false;
     }
@@ -263,7 +263,7 @@ bool apply_extension_material_to_slot_locked(
     if (source_data == nullptr || target_data == nullptr ||
         *reinterpret_cast<void**>(source_data) != material ||
         *reinterpret_cast<void**>(target_data) != target_item || !target_is_equip) {
-        VIRTBAG_LOG("apply reject reason=controls src=%d/%d dst=%d/%d", src_bag, src_slot,
+        VIRTBAG_LOG_WARN("apply reject reason=controls src=%d/%d dst=%d/%d", src_bag, src_slot,
                     dst_bag, dst_slot);
         return false;
     }
@@ -273,7 +273,7 @@ bool apply_extension_material_to_slot_locked(
     const bool source_is_scroll = item_type_is(material, qol::contracts::QolItemType::kEnchantScroll);
     const bool source_is_remover = item_type_is(material, qol::contracts::QolItemType::kGemRemover);
     if (!source_is_jewel && !source_is_scroll && !source_is_remover) {
-        VIRTBAG_LOG("apply reject reason=material kind=%d jewel=%d scroll=%d remover=%d",
+        VIRTBAG_LOG_WARN("apply reject reason=material kind=%d jewel=%d scroll=%d remover=%d",
                     source_category, source_is_jewel ? 1 : 0, source_is_scroll ? 1 : 0,
                     source_is_remover ? 1 : 0);
         return false;
@@ -288,7 +288,7 @@ bool apply_extension_material_to_slot_locked(
         host.character_extras->read.can_apply_stuff == nullptr ||
         !qol::contracts::succeeded(host.character_extras->read.can_apply_stuff(
             target_item, material, &apply_allowed)) || apply_allowed == 0) {
-        VIRTBAG_LOG("apply reject reason=not_applicable kind=%s equip=%p material=%p",
+        VIRTBAG_LOG_WARN("apply reject reason=not_applicable kind=%s equip=%p material=%p",
                     kind, target_item, material);
         return false;
     }
@@ -297,19 +297,19 @@ bool apply_extension_material_to_slot_locked(
     const auto* write_api = extension_bag_write_api();
     if (save_facts == nullptr || save_facts->is_ok == nullptr || write_api == nullptr ||
         write_api->equipment.apply_stuff == nullptr) {
-        VIRTBAG_LOG("apply reject reason=symbol_unresolved kind=%s equip=%p material=%p",
+        VIRTBAG_LOG_WARN("apply reject reason=symbol_unresolved kind=%s equip=%p material=%p",
                     kind, target_item, material);
         return false;
     }
 
     ModuleUseToken use_token{};
     if (!module_use_begin_locked(src_bag, src_slot, material, &use_token)) {
-        VIRTBAG_LOG("apply reject reason=stale_token kind=%s equip=%p material=%p",
+        VIRTBAG_LOG_WARN("apply reject reason=stale_token kind=%s equip=%p material=%p",
                     kind, target_item, material);
         return false;
     }
 
-    VIRTBAG_LOG("apply branch kind=%s equip=%p material=%p", kind, target_item, material);
+    VIRTBAG_LOG_DEBUG("apply branch kind=%s equip=%p material=%p", kind, target_item, material);
     ModuleUseToken* previous_use_token = g_active_module_use_token;
     g_active_module_use_token = &use_token;
     lock.unlock();
@@ -322,10 +322,10 @@ bool apply_extension_material_to_slot_locked(
         const bool aborted = module_use_abort_locked(use_token);
         const bool isolated = aborted || module_use_abort_isolate_locked(use_token);
         if (!isolated) {
-            VIRTBAG_LOG_ERROR("ERROR apply token cleanup failed kind=%s equip=%p material=%p",
+            VIRTBAG_LOG_WARN("ERROR apply token cleanup failed kind=%s equip=%p material=%p",
                               kind, target_item, material);
         }
-        VIRTBAG_LOG("apply reject reason=is_ok_failed kind=%s equip=%p material=%p",
+        VIRTBAG_LOG_WARN("apply reject reason=is_ok_failed kind=%s equip=%p material=%p",
                     kind, target_item, material);
         return false;
     }
@@ -342,10 +342,10 @@ bool apply_extension_material_to_slot_locked(
             isolated = aborted || module_use_abort_isolate_locked(use_token);
         }
         if (!isolated) {
-            VIRTBAG_LOG_ERROR("ERROR apply token cleanup failed kind=%s equip=%p material=%p",
+            VIRTBAG_LOG_WARN("ERROR apply token cleanup failed kind=%s equip=%p material=%p",
                               kind, target_item, material);
         }
-        VIRTBAG_LOG("apply reject reason=%s kind=%s equip=%p material=%p",
+        VIRTBAG_LOG_WARN("apply reject reason=%s kind=%s equip=%p material=%p",
                     finished ? "native_apply_failed" : "stale_token",
                     kind, target_item, material);
         return false;
@@ -356,7 +356,7 @@ bool apply_extension_material_to_slot_locked(
         const bool released = module_use_release_native(release_plan);
         lock.lock();
         if (!released || !module_use_finalize_release_locked(release_plan)) {
-            VIRTBAG_LOG("apply reject reason=material_release_failed kind=%s equip=%p material=%p",
+            VIRTBAG_LOG_WARN("apply reject reason=material_release_failed kind=%s equip=%p material=%p",
                         kind, target_item, material);
             return false;
         }
@@ -378,13 +378,13 @@ bool apply_extension_material_to_slot_locked(
         ? extension_bag_ui_data(post_apply_control) : nullptr;
     if (!target_projection_current || post_apply_data == nullptr ||
         *reinterpret_cast<void**>(post_apply_data) != target_item) {
-        VIRTBAG_LOG("apply reject reason=stale_target kind=%s equip=%p material=%p",
+        VIRTBAG_LOG_WARN("apply reject reason=stale_target kind=%s equip=%p material=%p",
                     kind, target_item, material);
         return false;
     }
 
     if (!sync_item_descriptor_from_object_locked(dst_bag, dst_slot, target_item)) {
-        VIRTBAG_LOG("apply reject reason=target_payload_sync_failed kind=%s equip=%p material=%p",
+        VIRTBAG_LOG_WARN("apply reject reason=target_payload_sync_failed kind=%s equip=%p material=%p",
                     kind, target_item, material);
         return false;
     }
@@ -415,7 +415,7 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
     if (!qol::extension_bag::ui_state().objects.module_view_installed || dst_control == nullptr ||
         ::qol::extension_bag::access::host().sdk == nullptr || ::qol::extension_bag::access::host().sdk->ui == nullptr ||
         qol::extension_bag::ui_state().objects.module_view_index != src_bag || qol::extension_bag::ui_state().objects.projected_item_root == nullptr) {
-        VIRTBAG_LOG("drop rejected: extension source view mismatch src=%d/%d view=%d root=%p",
+        VIRTBAG_LOG_WARN("drop rejected: extension source view mismatch src=%d/%d view=%d root=%p",
                     src_bag, src_slot, qol::extension_bag::ui_state().objects.module_view_index, qol::extension_bag::ui_state().objects.projected_item_root);
         return VirtualBagProjectionDropResult::kRejected;
     }
@@ -423,7 +423,7 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
     void* projected_source = valid_child_locked(qol::extension_bag::ui_state().objects.projected_item_root, src_slot);
     if (live_root == nullptr || live_root != qol::extension_bag::ui_state().objects.projected_item_root ||
         projected_source != src_control) {
-        VIRTBAG_LOG("drop rejected: extension source control is not current projection "
+        VIRTBAG_LOG_WARN("drop rejected: extension source control is not current projection "
                     "src=%d/%d source=%p expected=%p root=%p live_root=%p",
                     src_bag, src_slot, src_control, projected_source,
                     qol::extension_bag::ui_state().objects.projected_item_root, live_root);
@@ -443,7 +443,7 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
         valid_child_locked(qol::extension_bag::ui_state().objects.projected_item_root, dst_slot) == dst_control;
     if (!virtual_bag::projection_drop_context_matches(
             qol::extension_bag::ui_state().objects.module_view_index, src_bag, true, true, destination_control_matches)) {
-        VIRTBAG_LOG("drop rejected: extension source invalid projected target src=%d/%d dst=%d",
+        VIRTBAG_LOG_WARN("drop rejected: extension source invalid projected target src=%d/%d dst=%d",
                     src_bag, src_slot, dst_slot);
         return VirtualBagProjectionDropResult::kRejected;
     }
@@ -454,7 +454,7 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
             !virtual_bag::drag_session_source_identity_matches(
                 qol::extension_bag::ui_state().ui.extension_drag_session, src_bag, src_slot,
                 qol::extension_bag::ui_state().objects.module_object_handles[src_bag][src_slot])) {
-            VIRTBAG_LOG("drop rejected: extension source session mismatch src=%d/%d phase=%d",
+            VIRTBAG_LOG_WARN("drop rejected: extension source session mismatch src=%d/%d phase=%d",
                         src_bag, src_slot, static_cast<int>(qol::extension_bag::ui_state().ui.extension_drag_session.phase));
             return VirtualBagProjectionDropResult::kRejected;
         }
@@ -473,7 +473,7 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
                                              qol::extension_bag::ui_state().ui.extension_tab_generation) !=
                  virtual_bag::DragTransition::kAdvanced ||
              !virtual_bag::session_claim_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session)) {
-            VIRTBAG_LOG("drop rejected: extension source session transition failed src=%d/%d",
+            VIRTBAG_LOG_WARN("drop rejected: extension source session transition failed src=%d/%d",
                         src_bag, src_slot);
             return VirtualBagProjectionDropResult::kRejected;
         }
@@ -536,7 +536,7 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
         VIRTBAG_LOG("drop routed ext->ext dst_slot=%d", dst_slot);
         return VirtualBagProjectionDropResult::kHandled;
     }
-    VIRTBAG_LOG("drop rejected: inventory.action move status=%d src=%d/%d dst=%d",
+    VIRTBAG_LOG_WARN("drop rejected: inventory.action move status=%d src=%d/%d dst=%d",
                 static_cast<int>(outcome.status), src_bag, src_slot, dst_slot);
     return VirtualBagProjectionDropResult::kRejected;
 }
@@ -553,7 +553,7 @@ bool virtual_bag_original_item_input_blocked() {
                          (::qol::extension_bag::access::bag().mode == virtual_bag::Mode::kModule ||
                           ::qol::extension_bag::access::bag().mode == virtual_bag::Mode::kExitingModule);
     if (blocked) {
-        VIRTBAG_LOG("original item input blocked mode=%d selected=%d",
+        VIRTBAG_LOG_WARN("original item input blocked mode=%d selected=%d",
                     static_cast<int>(::qol::extension_bag::access::bag().mode), ::qol::extension_bag::access::bag().selected);
     }
     return blocked;
@@ -581,7 +581,7 @@ bool virtual_bag_allow_original_tab_drop(void* control, void* source_control,
     const bool extension_source = item != nullptr &&
                                    module_slot_of_item_locked(item, &source_bag, &source_slot);
     if (extension_source) {
-        VIRTBAG_LOG(
+        VIRTBAG_LOG_WARN(
             "drop rejected: extension source entering original proc item=%p caller=libgame+0x%llx "
             "view=%d session=%d source=%d/%d target_slot=%d",
             item, static_cast<unsigned long long>(caller_offset), qol::extension_bag::ui_state().objects.module_view_index,
@@ -598,7 +598,7 @@ bool virtual_bag_allow_original_tab_drop(void* control, void* source_control,
         const int capacity = ::qol::extension_bag::access::bag().capacities[view_bag];
         for (int slot = 0; slot < capacity; ++slot) {
             if (valid_child_locked(projected_root, slot) == control) {
-                VIRTBAG_LOG(
+                VIRTBAG_LOG_WARN(
                     "original drop blocked for extension target control=%p item=%p target_slot=%d",
                     control, item, target_slot);
                 return false;
@@ -640,7 +640,7 @@ bool virtual_bag_sync_projected_item_control(void* control) {
         if (extension_bag_ui_child_at(qol::extension_bag::ui_state().objects.projected_item_root, slot) == control) {
             if (!extension_bag_ui_set_control_item(
                     control, qol::extension_bag::ui_state().objects.module_objects[qol::extension_bag::ui_state().objects.module_view_index][slot])) {
-                QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
                               "ERROR projected control sync failed bag=%d slot=%d control=%p",
                               qol::extension_bag::ui_state().objects.module_view_index, slot, control);
                 return false;

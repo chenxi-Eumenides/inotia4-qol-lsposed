@@ -26,6 +26,7 @@ std::atomic<bool> g_wait_coord_seen{false};
 std::atomic<bool> g_map_blocking_seen{false};
 // 步长不再来自 world_tuning 订阅：Host 的 better_move.step choice 直接写本地原子值。
 std::atomic<int32_t> g_step{kDefaultStep};
+std::atomic<contracts::QolMovementInputMode> g_mode{contracts::QolMovementInputMode::kDisabled};
 
 using DirectionFn = uint64_t (*)(void*, uint64_t, int64_t*, uint64_t);
 using PressKeyFn = void (*)(int32_t);
@@ -33,9 +34,11 @@ using PortingDrawFn = void (*)();
 using WaitCoordFn = void (*)(void*);
 using MapBlockingFn = int32_t (*)(int32_t, int32_t);
 
-void log_info(const char* format, ...) {
+void log_message(int32_t level, const char* format, ...) {
     const auto* sdk = g_sdk;
     if (sdk == nullptr || sdk->log.write == nullptr || format == nullptr) return;
+    if (level == 0 &&
+        (sdk->log.debug_enabled == nullptr || sdk->log.debug_enabled() == 0)) return;
     char message[contracts::kMessageCap + 1]{};
     va_list args;
     va_start(args, format);
@@ -44,7 +47,27 @@ void log_info(const char* format, ...) {
     if (length < 0) return;
     const uint32_t message_length = static_cast<uint32_t>(
         length < static_cast<int>(contracts::kMessageCap) ? length : contracts::kMessageCap);
-    (void)sdk->log.write(1, 0, "plugins/better_move/feature.cpp", message, message_length);
+    (void)sdk->log.write(level, 0, "plugins/better_move/feature.cpp", message, message_length);
+}
+
+void log_reject(const char* feature, const char* reason) {
+    const auto* sdk = g_sdk;
+    if (sdk == nullptr || sdk->log.write == nullptr) return;
+    char message[160]{};
+    const int length = std::snprintf(message, sizeof(message),
+        "reject feature=%s reason=%s", feature, reason);
+    if (length <= 0) return;
+    const uint32_t message_length = static_cast<uint32_t>(
+        length < static_cast<int>(sizeof(message)) ? length : static_cast<int>(sizeof(message) - 1));
+    (void)sdk->log.write(2, 0, "plugins/better_move/feature.cpp", message, message_length);
+}
+
+void log_first_hook(std::atomic<bool>& seen, const char* hook) {
+    const auto* sdk = g_sdk;
+    if (sdk == nullptr || sdk->log.debug_enabled == nullptr || sdk->log.debug_enabled() == 0)
+        return;
+    if (!seen.exchange(true, std::memory_order_acq_rel))
+        log_message(0, "dispatch hook=%s result=first_hit", hook);
 }
 
 }  // namespace
@@ -67,7 +90,6 @@ namespace {
 void push_step(int32_t step) {
     const auto* port = input_port();
     if (port == nullptr || port->api.set_step == nullptr) return;
-    log_info("movement step=%d", step);
     port->api.set_step(step);
 }
 
@@ -78,6 +100,8 @@ void set_local_step(int32_t step, bool force) {
     const int32_t previous = g_step.exchange(next, std::memory_order_acq_rel);
     if (!force && previous == next) return;
     push_step(next);
+    if (!force && previous != next)
+        log_message(1, "apply feature=better_move.step value=%d result=changed", next);
 }
 
 }  // namespace
@@ -106,7 +130,6 @@ void seed_default_step(const contracts::PluginContext& ctx) {
     contracts::FeatureReceipt receipt{};
     (void)api->request_set_choice(api->context, ctx.owner_token, "better_move",
                                   "better_move.step", "8", &receipt);
-    log_info("movement step seeded default 8");
 }
 
 void set_gate(bool enabled) {
@@ -152,9 +175,7 @@ uint64_t direction_touch_wrapper(void* ctrl, uint64_t event, int64_t* point,
     const auto* port = input_port();
     if (gate_enabled() && port != nullptr && port->api.on_direction_touch != nullptr) {
         port->api.on_direction_touch(ctrl, event, point, param3);
-        if (!g_direction_seen.exchange(true, std::memory_order_acq_rel)) {
-            log_info("direction hook active");
-        }
+        log_first_hook(g_direction_seen, "direction_touch");
     }
     return result;
 }
@@ -188,9 +209,7 @@ void porting_draw_wrapper() {
 int32_t char_move_wrapper(void* ch, int32_t dir, int32_t delta, uint8_t flag) {
     const auto* port = input_port();
     if (port == nullptr || port->api.char_move == nullptr) return 0;
-    if (!g_move_seen.exchange(true, std::memory_order_acq_rel)) {
-        log_info("char_move hook active");
-    }
+    log_first_hook(g_move_seen, "char_move");
     // 端口内部按 enabled 门禁决定透传原 CHAR_Move 或全向双轴移动。
     return port->api.char_move(ch, dir, delta, flag);
 }
@@ -202,9 +221,7 @@ void move_on_wait_coord_wrapper(void* ch) {
     const auto* port = input_port();
     if (gate_enabled() && port != nullptr && port->api.handle_wait_coord != nullptr &&
         port->api.handle_wait_coord(ch) != 0) {
-        if (!g_wait_coord_seen.exchange(true, std::memory_order_acq_rel)) {
-            log_info("wait coord hook active");
-        }
+        log_first_hook(g_wait_coord_seen, "wait_coord");
         return;
     }
     backup(ch);
@@ -216,9 +233,7 @@ int32_t map_blocking_wrapper(int32_t x, int32_t y) {
     if (backup == nullptr) return 1;
     const auto* port = input_port();
     if (gate_enabled() && port != nullptr && port->api.map_blocking_query != nullptr) {
-        if (!g_map_blocking_seen.exchange(true, std::memory_order_acq_rel)) {
-            log_info("map blocking hook active");
-        }
+        log_first_hook(g_map_blocking_seen, "map_blocking");
         return port->api.map_blocking_query(x, y, backup);
     }
     return backup(x, y);
@@ -227,8 +242,10 @@ int32_t map_blocking_wrapper(int32_t x, int32_t y) {
 QolResult on_choice(contracts::PluginContext& ctx, const char* value) {
     (void)ctx;
     const auto* port = input_port();
-    if (!contracts::movement_input_port_supports_mode(port))
+    if (!contracts::movement_input_port_supports_mode(port)) {
+        log_reject("better_move.direction", "mode_unsupported");
         return contracts::error(kQolErrNotReady, nullptr, 0);
+    }
 
     contracts::QolMovementInputMode mode = contracts::QolMovementInputMode::kDisabled;
     if (value != nullptr && value[0] != '\0') {
@@ -237,10 +254,17 @@ QolResult on_choice(contracts::PluginContext& ctx, const char* value) {
         } else if (std::strcmp(value, "omnidirectional") == 0) {
             mode = contracts::QolMovementInputMode::kOmnidirectional;
         } else {
+            log_reject("better_move.direction", "invalid_choice");
             return contracts::error(kQolErrInvalidArgument, nullptr, 0);
         }
     }
+    const auto previous = g_mode.exchange(mode, std::memory_order_acq_rel);
     port->api.set_mode(mode);
+    if (previous != mode) {
+        const char* mode_name = mode == contracts::QolMovementInputMode::kDisabled ? "disabled" :
+            (mode == contracts::QolMovementInputMode::kEightWay ? "eight_way" : "omnidirectional");
+        log_message(1, "apply feature=better_move.direction mode=%s result=changed", mode_name);
+    }
     return contracts::ok();
 }
 
@@ -257,6 +281,7 @@ QolResult on_step_choice(contracts::PluginContext& ctx, const char* value) {
         set_local_step(kStepAmounts[i], false);
         return contracts::ok();
     }
+    log_reject("better_move.step", "invalid_choice");
     return contracts::error(kQolErrInvalidArgument, nullptr, 0);
 }
 

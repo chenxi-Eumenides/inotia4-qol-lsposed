@@ -144,7 +144,7 @@ bool module_cache_clear_preflight_locked() {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
             const ModuleUseState& use = qol::extension_bag::ui_state().objects.module_object_use[bag][slot];
             if (use.active) {
-                VIRTBAG_LOG("module cache clear preflight rejected active object bag=%d slot=%d item=%p generation=%llu",
+                VIRTBAG_LOG_WARN("module cache clear preflight rejected active object bag=%d slot=%d item=%p generation=%llu",
                             bag, slot, use.item,
                             static_cast<unsigned long long>(use.generation));
                 return false;
@@ -162,7 +162,7 @@ bool clear_module_cache_locked() {
             // until an explicit transfer is implemented. Drop them on slot
             // exit instead of retaining stale pointers across saves.
             if (!free_module_object_locked(bag, slot)) {
-                VIRTBAG_LOG("module cache clear aborted; retained object bag=%d slot=%d item=%p",
+                VIRTBAG_LOG_WARN("module cache clear aborted; retained object bag=%d slot=%d item=%p",
                             bag, slot, qol::extension_bag::ui_state().objects.module_objects[bag][slot]);
                 return false;
             }
@@ -228,7 +228,7 @@ void* load_item_payload_locked(const uint8_t* payload, int payload_size, const c
         extension_free_item_payload);
     if (result.item != nullptr) return result.item;
 
-    VIRTBAG_LOG("payload bridge reject context=%s reason=%s validation=%s size=%d",
+    VIRTBAG_LOG_WARN("payload bridge reject context=%s reason=%s validation=%s size=%d",
                 context,
                 virtual_bag::managed_load_failure_reason(result.failure),
                 virtual_bag::payload_validation_reason(result.validation), payload_size);
@@ -303,7 +303,7 @@ void recover_pending_transaction_locked(::qol::extension_bag::ReentryLock& lock)
     if (!virtual_bag::valid_pending_transfer_domain(pending)) {
         isolate_pending_locked(virtual_bag::isolation_reason::kInvalidTransactionDomain,
                                "pending recovery");
-        VIRTBAG_LOG("pending isolated reason=invalid_transaction_domain direction=%u src=%u/%u dst=%u/%u",
+        VIRTBAG_LOG("restore op=pending_recovery result=isolated reason=invalid_transaction_domain direction=%u src=%u/%u dst=%u/%u",
                     static_cast<unsigned int>(pending.direction),
                     static_cast<unsigned int>(pending.src_bag),
                     static_cast<unsigned int>(pending.src_slot),
@@ -329,7 +329,7 @@ void recover_pending_transaction_locked(::qol::extension_bag::ReentryLock& lock)
                                payload_validation != virtual_bag::PayloadValidation::kOk
                                    ? virtual_bag::payload_validation_reason(payload_validation)
                                    : virtual_bag::payload_validation_reason(source_validation));
-        VIRTBAG_LOG("pending isolated reason=invalid_payload payload=%s source_payload=%s src=%u/%u dst=%u/%u",
+        VIRTBAG_LOG("restore op=pending_recovery result=isolated reason=invalid_payload payload=%s source_payload=%s src=%u/%u dst=%u/%u",
                     virtual_bag::payload_validation_reason(payload_validation),
                     virtual_bag::payload_validation_reason(source_validation),
                     static_cast<unsigned int>(pending.src_bag),
@@ -406,7 +406,7 @@ void recover_pending_transaction_locked(::qol::extension_bag::ReentryLock& lock)
             }
             if (loaded && !original_inventory_contains_payload_locked(
                                pending.payload.data(), pending.payload_size, pending.dst_bag)) {
-                VIRTBAG_LOG("pending recovery: target payload not confirmed; retain pending");
+                VIRTBAG_LOG("pending recovery: target payload not confirmed; retain pending reason=target_payload_unconfirmed slot=%d", pending.dst_slot);
                 loaded = false;
             }
             if (loaded) {
@@ -418,7 +418,7 @@ void recover_pending_transaction_locked(::qol::extension_bag::ReentryLock& lock)
                 // 插入结果为假但目标载荷已可见时，目标已接管；不再释放该对象。
                 clear_pending = true;
             } else {
-                VIRTBAG_LOG("pending recovery: extension->original retry retained");
+                VIRTBAG_LOG("pending recovery: extension->original retry retained reason=ext2orig_retry_retained slot=%d", pending.dst_slot);
             }
         }
     } else {
@@ -436,7 +436,7 @@ void recover_pending_transaction_locked(::qol::extension_bag::ReentryLock& lock)
                 std::array<uint8_t, virtual_bag::kSerializedItemBuffer> source_payload{};
                 int source_size = 0;
                 if (!serialize_item_payload_locked(src, &source_payload, &source_size)) {
-                    VIRTBAG_LOG("pending recovery: source serialization rejected");
+                    VIRTBAG_LOG_WARN("pending recovery: source serialization rejected");
                     clear_pending = false;
                 } else {
                     const bool same_source = source_size == pending.source_payload_size &&
@@ -453,11 +453,11 @@ void recover_pending_transaction_locked(::qol::extension_bag::ReentryLock& lock)
                         if (source_removed) {
                             clear_pending = true;
                         } else {
-                            VIRTBAG_LOG("pending recovery: source removal not confirmed; retain pending");
+                            VIRTBAG_LOG("pending recovery: source removal not confirmed; retain pending reason=source_removal_unconfirmed slot=%d", pending.src_slot);
                             clear_pending = false;
                         }
                     } else {
-                        VIRTBAG_LOG("pending recovery: source identity mismatch; retain pending");
+                        VIRTBAG_LOG("pending recovery: source identity mismatch; retain pending reason=source_identity_mismatch slot=%d", pending.src_slot);
                     }
                 }
             }
@@ -470,6 +470,12 @@ void recover_pending_transaction_locked(::qol::extension_bag::ReentryLock& lock)
         }
     }
     if (clear_pending) {
+        VIRTBAG_LOG("restore op=pending_recovery result=recovered count=1 direction=%u src=%u/%u dst=%u/%u",
+                    static_cast<unsigned int>(pending.direction),
+                    static_cast<unsigned int>(pending.src_bag),
+                    static_cast<unsigned int>(pending.src_slot),
+                    static_cast<unsigned int>(pending.dst_bag),
+                    static_cast<unsigned int>(pending.dst_slot));
         runtime_state().objects.bag.pending = {};
         extension_bag_mark_dirty_locked();
     }

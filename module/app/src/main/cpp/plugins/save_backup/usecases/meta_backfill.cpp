@@ -77,13 +77,13 @@ bool backfill_entry_meta_from_plain(const std::string& path,
         // 与删除/导入的 bundle 操作串行，避免 backfill 的 rename 把刚删除的文件重新写回。
         std::lock_guard<std::mutex> lk(save_backup::persistence::file_mutex());
         if (!save_backup::persistence::write_file_bytes_atomic(path, out.data(), out.size())) {
-            SAVE_BACKUP_LOG_WARN("backfill entry meta write failed: %s", path.c_str());
+            SAVE_BACKUP_LOG_WARN("backfill entry meta write failed: %s reason=write_failed", path.c_str());
             return false;
         }
     }
     parsed.meta_json = new_meta;
     parsed.size_bytes = static_cast<long long>(out.size());
-    SAVE_BACKUP_LOG_INFO("backfill entry meta: %s level=%d class=%d", path.c_str(), plain_level,
+    SAVE_BACKUP_LOG_DEBUG("backfill entry meta: %s level=%d class=%d", path.c_str(), plain_level,
                          plain_class);
     return true;
 }

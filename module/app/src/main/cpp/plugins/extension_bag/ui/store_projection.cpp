@@ -75,7 +75,7 @@ void store_log_item_snapshot_locked(const char* tag) {
     const int window_bag = original_bag_locked();
     uint32_t window_word = 0;
     const bool read_word = bag_size_word_locked(window_bag, &window_word);
-    VIRTBAG_LOG(
+    VIRTBAG_LOG_DEBUG(
         "store snapshot tag=%s root=%p count=%d counted=%d bag=%d generation=%llu window=%d window_word=%#x word_read=%d",
         tag, root, count, counted ? 1 : 0, bag,
         static_cast<unsigned long long>(store.view_generation), window_bag, window_word,
@@ -88,7 +88,7 @@ void store_log_item_snapshot_locked(const char* tag) {
     for (int slot = 0; slot < limit; ++slot) {
         void* control = extension_bag_ui_child_at(root, slot);
         if (control == nullptr) {
-            VIRTBAG_LOG("store snapshot tag=%s slot=%d control=null", tag, slot);
+            VIRTBAG_LOG_DEBUG("store snapshot tag=%s slot=%d control=null", tag, slot);
             continue;
         }
         void* parent = extension_bag_ui_parent(control);
@@ -97,7 +97,7 @@ void store_log_item_snapshot_locked(const char* tag) {
         void* expected = virtual_bag::valid_index(bag)
                              ? qol::extension_bag::ui_state().objects.module_objects[bag][slot]
                              : nullptr;
-        VIRTBAG_LOG(
+        VIRTBAG_LOG_DEBUG(
             "store snapshot tag=%s slot=%d control=%p parent=%p root_match=%d type=%d data=%p item=%p expected=%p",
             tag, slot, control, parent, parent == root ? 1 : 0,
             extension_bag_ui_user_type(control), data, item, expected);
@@ -136,7 +136,7 @@ void store_refresh_item_after_unlock() {
         }
     }
     if (!qol::contracts::succeeded(refresh_result)) {
-        VIRTBAG_LOG("store item refresh failed code=%d", refresh_result.code);
+        VIRTBAG_LOG_WARN("store item refresh failed code=%d", refresh_result.code);
         lock.lock();
         if (refresh_generation == qol::extension_bag::ui_state().store.refresh_generation) store_request_item_refresh_locked();
         return;
@@ -153,7 +153,7 @@ void store_refresh_item_after_unlock() {
     if (!qol::extension_bag::ui_state().store.view_installed) return;
     void* live_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreItemRoot);
     if (live_root == nullptr) {
-        VIRTBAG_LOG("store item refresh completed without item root; retry scheduled");
+        VIRTBAG_LOG("store item refresh completed without item root; retry scheduled reason=missing_item_root");
         store_request_item_refresh_locked();
         return;
     }
@@ -215,13 +215,13 @@ void store_refresh_projection_locked() {
         void* current = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
         if (current != expected && !extension_bag_ui_set_control_item(control, expected)) {
             // 绑定失败通常意味着控件或其 data 已被回收：落一条，配合快照定位。
-            VIRTBAG_LOG_WARN("store item bind failed slot=%d control=%p data=%p item=%p", slot,
+            VIRTBAG_LOG_WARN("store item bind failed slot=%d control=%p data=%p item=%p reason=bind_failed", slot,
                              control, data, expected);
         }
         // 取证：控件重建或父链被改写时立即落一条；稳定帧只做指针比对。
         void* parent = extension_bag_ui_parent(control);
         if (g_store_snapshot_controls[slot] != control || g_store_snapshot_parents[slot] != parent) {
-            VIRTBAG_LOG("store item retarget slot=%d control=%p parent=%p prev_control=%p prev_parent=%p",
+            VIRTBAG_LOG_DEBUG("store item retarget slot=%d control=%p parent=%p prev_control=%p prev_parent=%p",
                         slot, control, parent, g_store_snapshot_controls[slot],
                         g_store_snapshot_parents[slot]);
             g_store_snapshot_controls[slot] = control;
@@ -236,7 +236,7 @@ void store_install_module_view_locked(int bag) {
     if (qol::extension_bag::ui_state().ui.backup_control_item_set_item == nullptr ||
         qol::extension_bag::ui_state().ui.backup_control_item_get_item == nullptr ||
         qol::extension_bag::ui_state().ui.backup_get_bag_size == nullptr) {
-        VIRTBAG_LOG("store view rejected display hooks unavailable set=%d get=%d size=%d",
+        VIRTBAG_LOG_WARN("store view rejected display hooks unavailable set=%d get=%d size=%d",
                     qol::extension_bag::ui_state().ui.backup_control_item_set_item != nullptr,
                     qol::extension_bag::ui_state().ui.backup_control_item_get_item != nullptr,
                     qol::extension_bag::ui_state().ui.backup_get_bag_size != nullptr);
@@ -244,13 +244,13 @@ void store_install_module_view_locked(int bag) {
     }
     const int original_bag = original_bag_locked();
     if (!virtual_bag::valid_original_transaction_bag(original_bag)) {
-        VIRTBAG_LOG("store view rejected original bag=%d", original_bag);
+        VIRTBAG_LOG_WARN("store view rejected original bag=%d", original_bag);
         return;
     }
     if (qol::extension_bag::ui_state().store.view_installed) store_restore_module_view_locked();
     uint32_t size_word = 0;
     if (!bag_size_word_locked(original_bag, &size_word)) {
-        VIRTBAG_LOG("store view rejected capacity read window=%d", original_bag);
+        VIRTBAG_LOG_WARN("store view rejected capacity read window=%d", original_bag);
         return;
     }
     store_clear_desc_locked();
@@ -300,13 +300,13 @@ void store_install_module_view_locked(int bag) {
         qol::extension_bag::ui_state().store.hidden_equip_bag_root = equip_bag_root;
     }
     store_request_item_refresh_locked();
-    VIRTBAG_LOG("store view installed bag=%d window=%d capacity=%d", bag, original_bag,
-                ::qol::extension_bag::access::bag().capacities[bag]);
+    VIRTBAG_LOG("op=store_view result=installed bag=%d", bag);
     store_log_item_snapshot_locked("install");
 }
 
 void store_restore_module_view_locked() {
     if (!qol::extension_bag::ui_state().store.view_installed) return;
+    const int restored_bag = qol::extension_bag::ui_state().store.view_bag;
     if (qol::extension_bag::ui_state().store.original_current_bag >= 0 &&
         ::qol::extension_bag::access::host().write_port->ui.set_current_bag != nullptr) {
         (void)::qol::extension_bag::access::host().write_port->ui.set_current_bag(
@@ -342,6 +342,7 @@ void store_restore_module_view_locked() {
     qol::extension_bag::ui_state().store.view_bag = -1;
     qol::extension_bag::ui_state().store.view_installed = false;
     ++qol::extension_bag::ui_state().store.view_generation;
+    VIRTBAG_LOG("op=store_view result=restored bag=%d", restored_bag);
     store_request_item_refresh_locked();
 }
 uint64_t store_event_wrapper(uint64_t event, uint64_t param, uint64_t param2) {
@@ -364,14 +365,17 @@ void store_enter_wrapper() {
         ::qol::extension_bag::access::host().sdk == nullptr ? nullptr : &::qol::extension_bag::access::host().sdk->in_flight,
         {"own:popup.store"});
     if (qol::extension_bag::ui_state().ui.store_original_enter != nullptr) qol::extension_bag::ui_state().ui.store_original_enter();
+    bool opened = false;
     {
         ::qol::extension_bag::ReentryLock lock;
+        opened = !qol::extension_bag::ui_state().store.frame_active;
         store_teardown_locked();
         set_original_bag_locked(0);
         qol::extension_bag::ui_state().store.frame_active = true;
         store_install_tab_buttons_locked();
         store_request_item_refresh_locked();
     }
+    if (opened) VIRTBAG_LOG("open panel=store result=entered");
     store_refresh_item_after_unlock();
 }
 
@@ -380,12 +384,15 @@ void store_f3_wrapper() {
         ::qol::extension_bag::access::host().sdk == nullptr ? nullptr : &::qol::extension_bag::access::host().sdk->in_flight,
         {"own:popup.store"});
     StoreSceneNoArgFn original = nullptr;
+    bool closed = false;
     {
         ::qol::extension_bag::ReentryLock lock;
+        closed = qol::extension_bag::ui_state().store.frame_active;
         store_teardown_locked();
         qol::extension_bag::ui_state().store.frame_active = false;
         original = qol::extension_bag::ui_state().ui.store_original_f3;
     }
+    if (closed) VIRTBAG_LOG("close panel=store result=closed");
     store_refresh_item_after_unlock();
     if (original != nullptr) original();
 }
@@ -422,14 +429,31 @@ void store_make_desc_gate(void* ctrl, void* arg) {
     // UIStore_SellItem 函数入口按 cursor item 识别，原版面板/确认/取消全部保留。
     if (ctrl == nullptr || ::qol::extension_bag::access::host().game == nullptr ||
         ::qol::extension_bag::access::host().write_port->ui.make_item_description == nullptr) return;
+    void* item = extension_bag_ui_item(ctrl);
+    int bag = -1;
+    int slot = -1;
+    bool module_item = false;
+    {
+        ::qol::extension_bag::ReentryLock lock;
+        module_item = item != nullptr && module_slot_of_item_locked(item, &bag, &slot);
+    }
+    QolResult result{};
     if (::qol::extension_bag::access::host().write_port->ui.make_store_item_description != nullptr) {
         // Store detail must be built by UIStore_MakeDesc so its sell button is
         // UIStore_ButtonSellExe. UIEquip_MakeDesc would install the EB detail
         // sell path, bypassing the store quantity dialog.
-        (void)::qol::extension_bag::access::host().write_port->ui.make_store_item_description(ctrl, arg);
-        return;
+        result = ::qol::extension_bag::access::host().write_port->ui.make_store_item_description(ctrl, arg);
+    } else {
+        result = ::qol::extension_bag::access::host().write_port->ui.make_item_description(ctrl);
     }
-    (void)::qol::extension_bag::access::host().write_port->ui.make_item_description(ctrl);
+    if (module_item) {
+        if (qol::contracts::succeeded(result)) {
+            VIRTBAG_LOG("open panel=store_detail item=%p bag=%d slot=%d result=opened", item, bag, slot);
+        } else {
+            VIRTBAG_LOG_WARN("fail op=store_detail item=%p bag=%d slot=%d reason=description_failed code=%d",
+                             item, bag, slot, result.code);
+        }
+    }
 }
 void store_teardown_locked() {
     store_restore_module_view_locked();

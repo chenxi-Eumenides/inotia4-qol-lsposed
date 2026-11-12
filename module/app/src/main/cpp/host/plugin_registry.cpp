@@ -1652,7 +1652,7 @@ void publish_capability_changed(const char* plugin_id,
     try {
         infra::publish(contracts::kEventCapabilityChanged, &event);
     } catch (...) {
-        QOL_LOG_ERROR(QolDomain::kCore,
+        QOL_LOG_WARN(QolDomain::kCore,
                       "plugin %s capability event handler threw id=%s available=%u",
                       plugin_id != nullptr ? plugin_id : "?",
                       ref.id != nullptr ? ref.id : "?", static_cast<unsigned>(available));
@@ -1671,7 +1671,7 @@ void register_provided_capabilities(uint32_t index) {
     if (g_cap_registration[index] == CapRegistration::kRegistered) return;
     if (plugin.provides_count > kMaxRecordedProvides) {
         // 无法逐位追踪归属就不能声明注册成功：否则停用时可能误删其他 provider 的能力。
-        QOL_LOG_ERROR(QolDomain::kCore,
+        QOL_LOG_WARN(QolDomain::kCore,
                       "plugin %s declares %u provided capabilities; limit is %u", plugin.id,
                       static_cast<unsigned>(plugin.provides_count),
                       static_cast<unsigned>(kMaxRecordedProvides));
@@ -1702,7 +1702,7 @@ void register_provided_capabilities(uint32_t index) {
         g_cap_registered_mask[index] = 0;
         g_cap_registration[index] = CapRegistration::kNone;
         QOL_LOG_WARN(QolDomain::kCore,
-                     "plugin %s capability registration failed; retrying on next enable",
+                     "plugin %s capability registration failed; retrying on next enable reason=capability_register_failed",
                      plugin.id);
     }
     refresh_http_provider_availability();
@@ -1897,7 +1897,7 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
     const char* preflight_error =
         preflight_plugin_resources(plugin, deps, &preflight_claim);
     if (preflight_error != nullptr) {
-        QOL_LOG_ERROR(QolDomain::kCore,
+        QOL_LOG_WARN(QolDomain::kCore,
                       "plugin %s install unsupported resource=%s: %s", plugin.id,
                       preflight_claim != nullptr ? preflight_claim : "?", preflight_error);
         infra::status_update(plugin.id, infra::FeatureState::kUnsupported, false,
@@ -1907,7 +1907,7 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
     }
 
     if (plugin.install(ctx) != 0) {
-        QOL_LOG_ERROR(QolDomain::kCore,
+        QOL_LOG_WARN(QolDomain::kCore,
                       "plugin %s install failed: plugin install returned nonzero", plugin.id);
         infra::status_update(plugin.id, infra::FeatureState::kFailed, false, "install failed",
                              infra::FeatureFailureStage::kInstall);
@@ -2110,8 +2110,9 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
         // 记录由本路径置位，供安装事务成功终态清除标记。
         g_gate_degraded[index] = true;
         refresh_degraded_status(index);
-        QOL_LOG_WARN(QolDomain::kCore, "plugin %s degraded on %s: %s", plugin.id,
-                     degraded_claim_id != nullptr ? degraded_claim_id : "?", status_error);
+        QOL_LOG_WARN(QolDomain::kCore,
+                     "degrade op=feature_transition plugin=%s state=degraded result=degraded reason=resource_install_failed",
+                     plugin.id);
     }
     infra::status_update(plugin.id,
                          enabled ? infra::FeatureState::kEnabled
@@ -2192,7 +2193,7 @@ static bool lifecycle_apply_actual(const char* plugin_id, int32_t action) {
     const contracts::PluginDescriptor* plugin = find_plugin(plugin_id);
     if (plugin == nullptr) return false;
     if (action == contracts::kFeatureLifecycleDeactivate && !plugin->deactivate_allowed) {
-        QOL_LOG_ERROR(QolDomain::kCore,
+        QOL_LOG_WARN(QolDomain::kCore,
                       "lifecycle: deactivate rejected id=%s reason=legacy consumers",
                       plugin->id);
         return false;
@@ -2320,7 +2321,7 @@ static bool lifecycle_apply_actual(const char* plugin_id, int32_t action) {
             const char* preflight_error =
                 preflight_plugin_resources(*plugin, g_install_deps, &preflight_claim);
             if (preflight_error != nullptr) {
-                QOL_LOG_ERROR(QolDomain::kCore,
+                QOL_LOG_WARN(QolDomain::kCore,
                               "plugin %s install unsupported resource=%s: %s", plugin->id,
                               preflight_claim != nullptr ? preflight_claim : "?",
                               preflight_error);
@@ -2342,7 +2343,7 @@ static bool lifecycle_apply_actual(const char* plugin_id, int32_t action) {
             const int32_t install_code = plugin->install != nullptr ? plugin->install(ctx) : 0;
             if (install_code != 0) {
                 g_last_failure_code[index] = install_code;
-                QOL_LOG_ERROR(QolDomain::kCore,
+                QOL_LOG_WARN(QolDomain::kCore,
                               "plugin %s install failed: plugin install returned nonzero",
                               plugin->id);
                 infra::status_update(plugin->id, infra::FeatureState::kFailed, false,
@@ -2404,7 +2405,7 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
     const contracts::PluginDescriptor* plugin = find_plugin(plugin_id);
     if (action == contracts::kFeatureLifecycleDeactivate &&
         plugin != nullptr && !plugin->deactivate_allowed) {
-        QOL_LOG_ERROR(QolDomain::kCore,
+        QOL_LOG_WARN(QolDomain::kCore,
                       "lifecycle: deactivate rejected id=%s reason=legacy consumers",
                       plugin->id);
         return false;
@@ -2418,18 +2419,18 @@ bool feature_registry_prepare(const HostDeps& deps) {
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
         const auto& plugin = g_plugins[i].descriptor;
         if (!plugin.features || !plugin.feature_count) {
-            QOL_LOG_ERROR(QolDomain::kCore, "feature prepare: missing features id=%s", plugin.id);
+            QOL_LOG_WARN(QolDomain::kCore, "feature prepare: missing features id=%s", plugin.id);
             return false;
         }
         if (plugin_has_active_tx(plugin.id)) {
-            QOL_LOG_ERROR(QolDomain::kCore, "feature prepare: active tx id=%s", plugin.id);
+            QOL_LOG_WARN(QolDomain::kCore, "feature prepare: active tx id=%s", plugin.id);
             return false;
         }
         for (uint32_t r = 0; r < plugin.resources_count; ++r) {
             // A migrated descriptor has no second gate truth or preinstalled resources.
             const auto state = hooks::state_of(plugin.resources[r].id);
             if (plugin.resources[r].gate || state != contracts::ResourceState::kFree) {
-                QOL_LOG_ERROR(QolDomain::kCore, "feature prepare: resource not free id=%s resource=%s state=%d gate=%d",
+                QOL_LOG_WARN(QolDomain::kCore, "feature prepare: resource not free id=%s resource=%s state=%d gate=%d",
                               plugin.id, plugin.resources[r].id,
                               static_cast<int>(state), plugin.resources[r].gate ? 1 : 0);
                 return false;
@@ -2437,7 +2438,7 @@ bool feature_registry_prepare(const HostDeps& deps) {
         }
         infra::FeatureStatus status{};
         if (infra::status_get(plugin.id, &status) && status.state != infra::FeatureState::kRegistered) {
-            QOL_LOG_ERROR(QolDomain::kCore, "feature prepare: status not registered id=%s state=%d",
+            QOL_LOG_WARN(QolDomain::kCore, "feature prepare: status not registered id=%s state=%d",
                           plugin.id, static_cast<int>(status.state));
             return false;
         }
@@ -2456,7 +2457,7 @@ bool feature_registry_prepare(const HostDeps& deps) {
         owner_suspend_begin(&g_plugins[i]);
         (void)owner_suspend_poll(&g_plugins[i]);
         if (g_dependency_invalid[i]) {
-            QOL_LOG_ERROR(QolDomain::kCore, "plugin %s blocked at assembly: %s",
+            QOL_LOG_WARN(QolDomain::kCore, "plugin %s blocked at assembly: %s",
                           g_plugins[i].descriptor.id,
                           g_error_text[i][0] != '\0' ? g_error_text[i]
                                                       : "dependency invalid");
@@ -2703,7 +2704,7 @@ static uint32_t lifecycle_step_engine() {
                                  "plugin %s resource install deferred resource=%s code=%d: %s",
                                  plugin.id, out.resource_id, out.ok, step_error);
                 } else {
-                    QOL_LOG_ERROR(QolDomain::kCore,
+                    QOL_LOG_WARN(QolDomain::kCore,
                                   "plugin %s resource install failed resource=%s code=%d: %s",
                                   plugin.id, out.resource_id, out.ok, step_error);
                 }
@@ -2867,6 +2868,9 @@ static uint32_t lifecycle_step_engine() {
                                 : infra::FeatureState::kInstalledDisabled,
                         enabled, terminal_error);
                     if (enabled) {
+                         QOL_LOG_INFO(QolDomain::kCore,
+                                      "apply op=feature_transition plugin=%s state=enabled result=ok",
+                                      plugin.id);
                         if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
                         bind_http_endpoints(plugin);
                         // §3.4.4：install 成功后进入 enabled 时注册能力。
@@ -2893,6 +2897,11 @@ static uint32_t lifecycle_step_engine() {
                                           false, slot.failed_cleanup ? "activation failed; cleaned up" : nullptr,
                                           slot.failed_cleanup ? infra::FeatureFailureStage::kActivation
                                                               : infra::FeatureFailureStage::kNone);
+                    if (!slot.failed_cleanup) {
+                        QOL_LOG_INFO(QolDomain::kCore,
+                                     "stop op=feature_transition plugin=%s state=inactive result=ok",
+                                     plugin.id);
+                    }
                     publish_runtime_actual(plugin.id, false);
                 }
             } else {
@@ -2907,12 +2916,9 @@ static uint32_t lifecycle_step_engine() {
                             g_transient_retry_pending[index] = true;
                         }
                         // 安装事务失败：插件置 Failed，清逐资源 degraded 记录避免残留误报。
-                        QOL_LOG_ERROR(QolDomain::kCore, "plugin %s activation failed: %s",
-                                      plugin.id,
-                                      g_resource_error_present[index] &&
-                                              g_resource_error_text[index][0] != '\0'
-                                          ? g_resource_error_text[index]
-                                          : "resource install transaction failed");
+                        QOL_LOG_WARN(QolDomain::kCore,
+                                     "fail op=feature_transition plugin=%s state=failed result=degraded reason=activation_failed",
+                                     plugin.id);
                         clear_resource_install_error(index);
                         refresh_degraded_status(index);
                     }
@@ -2937,6 +2943,10 @@ static uint32_t lifecycle_step_engine() {
                         : (have_status && status.failed_resource_id != nullptr
                                ? status.failed_resource_id
                                : "lifecycle transaction failed");
+                const char* failed_resource =
+                    have_status && status.failed_resource_id != nullptr
+                        ? status.failed_resource_id
+                        : "unknown";
                 const contracts::ResourceClaim* failed_atomic =
                     plugin_has_atomic_claims(plugin)
                         ? atomic_claim_by_id(plugin, have_status ? status.failed_resource_id : nullptr)
@@ -2952,14 +2962,16 @@ static uint32_t lifecycle_step_engine() {
                         refresh_degraded_status(slot.plugin_index);
                         infra::status_update(plugin.id, infra::FeatureState::kInstalledDisabled,
                                              false, g_error_text[slot.plugin_index]);
-                        QOL_LOG_WARN(QolDomain::kCore, "plugin %s atomic group deferred: %s", plugin.id,
-                                     g_error_text[slot.plugin_index]);
+                        QOL_LOG_WARN(QolDomain::kCore,
+                                     "degrade op=feature_transition plugin=%s state=degraded result=degraded resource=%s reason=resource_install_deferred",
+                                     plugin.id, failed_atomic->id);
                     } else {
                         infra::status_update(plugin.id, infra::FeatureState::kFailed, false, error,
                                              infra::FeatureFailureStage::kOther);
                         publish_runtime_actual(plugin.id, false);
-                        QOL_LOG_WARN(QolDomain::kCore, "plugin %s lifecycle failed: %s", plugin.id,
-                                     error);
+                        QOL_LOG_WARN(QolDomain::kCore,
+                                     "fail op=feature_transition plugin=%s state=failed result=degraded resource=%s reason=atomic_rollback_failed",
+                                     plugin.id, failed_atomic->id);
                     }
                 } else {
                     infra::status_update(plugin.id, infra::FeatureState::kFailed, false, error,
@@ -2967,8 +2979,12 @@ static uint32_t lifecycle_step_engine() {
                                              ? infra::FeatureFailureStage::kActivation
                                              : infra::FeatureFailureStage::kOther);
                     publish_runtime_actual(plugin.id, false);
-                    QOL_LOG_WARN(QolDomain::kCore, "plugin %s lifecycle failed: %s", plugin.id,
-                                 error);
+                    QOL_LOG_WARN(QolDomain::kCore,
+                                 "fail op=feature_transition plugin=%s state=failed result=degraded resource=%s reason=%s",
+                                 plugin.id, failed_resource,
+                                 slot.kind == hooks::TxKind::kInstall
+                                     ? "resource_install_failed"
+                                     : "resource_release_failed");
                 }
             }
             slot.in_use = false;

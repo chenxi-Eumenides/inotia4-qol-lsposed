@@ -110,7 +110,9 @@ void finish_config_receipt_callback(
 
 void clear_receipt_java_exception(JNIEnv* env, const char* operation) {
     if (env == nullptr || !env->ExceptionCheck()) return;
-    QOL_LOG_ERROR(QolDomain::kCore, "config receipt callback JNI failure during %s", operation);
+    QOL_LOG_WARN(QolDomain::kCore,
+                 "config receipt callback JNI failure during %s op=config_receipt reason=jni_exception",
+                 operation);
     env->ExceptionDescribe();
     env->ExceptionClear();
 }
@@ -123,7 +125,8 @@ void deliver_config_receipt(void* raw_context,
     try {
         context = raw->shared_from_this();
     } catch (const std::bad_weak_ptr&) {
-        QOL_LOG_ERROR(QolDomain::kCore, "config receipt callback context expired");
+        QOL_LOG_WARN(QolDomain::kCore,
+                     "config receipt callback context expired op=config_receipt reason=context_expired");
         return;
     }
 
@@ -131,7 +134,8 @@ void deliver_config_receipt(void* raw_context,
     bool attached = false;
     if (context->vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
         if (context->vm->AttachCurrentThread(&env, nullptr) != JNI_OK) {
-            QOL_LOG_ERROR(QolDomain::kCore, "config receipt callback thread attach failed");
+            QOL_LOG_WARN(QolDomain::kCore,
+                         "config receipt callback thread attach failed op=config_receipt reason=thread_attach_failed");
             finish_config_receipt_callback(context);
             return;
         }
@@ -142,7 +146,8 @@ void deliver_config_receipt(void* raw_context,
     try {
         receipt_json = qol::host::feature_receipt_json(receipt);
     } catch (const std::bad_alloc&) {
-        QOL_LOG_ERROR(QolDomain::kCore, "config receipt callback JSON allocation failed");
+        QOL_LOG_WARN(QolDomain::kCore,
+                     "config receipt callback JSON allocation failed op=config_receipt reason=json_alloc_failed");
         if (attached) context->vm->DetachCurrentThread();
         finish_config_receipt_callback(context);
         return;
@@ -280,10 +285,13 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         // 结果层 custom_recipe 插件 provides `craft_result`，动态配方重建在插件 install 内注册。
         if (!qol::host::assembly_init()) {
             QOL_LOG_ERROR(QolDomain::kCore,
-                          "nativeInit: assembly failed; native bootstrap remains unavailable");
+                          "fail op=native_init reason=assembly_failed");
             return JNI_FALSE;
         }
         // 特殊装备解锁已迁移为 special_equip 插件（assembly 注册，宿主声明式安装两个入口 hook）。
+    }
+    if (ok) {
+        QOL_LOG_INFO(QolDomain::kCore, "op=native_init result=ready");
     }
     return ok ? JNI_TRUE : JNI_FALSE;
 }
@@ -342,7 +350,8 @@ Java_com_inotia4_qol_NativeBridge_nativePluginConfigSubscribeReceipt(
     try {
         context = std::make_shared<ConfigReceiptCallbackContext>();
     } catch (const std::bad_alloc&) {
-        QOL_LOG_ERROR(QolDomain::kCore, "config receipt callback context allocation failed");
+        QOL_LOG_WARN(QolDomain::kCore,
+                     "config_receipt result=failed reason=context_alloc_failed");
         return 0;
     }
     if (env->GetJavaVM(&context->vm) != JNI_OK) return 0;
@@ -367,7 +376,8 @@ Java_com_inotia4_qol_NativeBridge_nativePluginConfigSubscribeReceipt(
         context->jni_subscription_id = id;
         g_config_receipt_callbacks.emplace(id, context);
     } catch (const std::bad_alloc&) {
-        QOL_LOG_ERROR(QolDomain::kCore, "config receipt callback registration allocation failed");
+        QOL_LOG_WARN(QolDomain::kCore,
+                     "config receipt callback registration allocation failed op=config_receipt reason=registration_alloc_failed");
         return 0;
     }
 
@@ -378,11 +388,13 @@ Java_com_inotia4_qol_NativeBridge_nativePluginConfigSubscribeReceipt(
             context->request_id, &deliver_config_receipt, context.get(),
             &controller_subscription_id);
     } catch (const std::bad_alloc&) {
-        QOL_LOG_ERROR(QolDomain::kCore, "config receipt observer registration allocation failed");
+        QOL_LOG_WARN(QolDomain::kCore,
+                     "config receipt observer registration allocation failed op=config_receipt reason=observer_registration_alloc_failed");
         erase_config_receipt_context(context);
         return 0;
     } catch (...) {
-        QOL_LOG_ERROR(QolDomain::kCore, "config receipt observer registration failed");
+        QOL_LOG_WARN(QolDomain::kCore,
+                     "config receipt observer registration failed op=config_receipt reason=observer_registration_failed");
         erase_config_receipt_context(context);
         return 0;
     }

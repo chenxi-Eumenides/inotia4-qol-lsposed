@@ -126,21 +126,23 @@ bool PopupHost::ensure_popup(const contracts::PanelProviderSpec& provider) {
     if (acquired_) return true;
     if (!has_callbacks(provider)) return true;
     if (popup_symbol_ == nullptr || hooks_.resolve == nullptr || hooks_.acquire == nullptr ||
-        hooks_.restore == nullptr || hooks_.set_process_info == nullptr) return false;
+        hooks_.restore == nullptr || hooks_.set_process_info == nullptr) {
+        log_open_failure(provider, "popup_hooks_unavailable");
+        return false;
+    }
     popup_entry_ = {};
     popup_entry_.state_id = -1;
     const bool resolved = hooks_.resolve(hooks_.context, popup_symbol_, &popup_entry_) &&
                           popup_entry_.slot != nullptr;
     if (!resolved) {
-        log_message("ensure_popup resolve=failed");
+        log_open_failure(provider, "popup_resolve_failed");
         popup_entry_ = {};
         popup_entry_.state_id = -1;
         return false;
     }
     const bool acquired = hooks_.acquire(hooks_.context, &popup_entry_, &kDispatchers);
-    log_message(acquired ? "ensure_popup resolve=ok acquire=ok" :
-                            "ensure_popup resolve=ok acquire=failed");
     if (!acquired) {
+        log_open_failure(provider, "popup_acquire_failed");
         popup_entry_ = {};
         popup_entry_.state_id = -1;
         return false;
@@ -158,14 +160,17 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
                       "open conditions main_thread=%d deactivating=%d close_pending=%d stack_size=%d",
                       main_thread ? 1 : 0, deactivating_ ? 1 : 0, close_pending_ ? 1 : 0,
                       stack_size_);
-        log_message(message);
+        log_message_level(0, message);
         last_open_main_thread_ = main_thread;
         last_open_deactivating_ = deactivating_;
         last_open_close_pending_ = close_pending_;
         last_open_stack_size_ = stack_size_;
     }
     if (!main_thread || deactivating_ || provider.panel_id == nullptr || provider.open == nullptr ||
-        provider.close == nullptr || close_pending_) return false;
+        provider.close == nullptr || close_pending_) {
+        log_open_failure(provider, "open_precondition_rejected");
+        return false;
+    }
     if (stack_size_ > 0 && std::strcmp(stack_[stack_size_ - 1].provider->panel_id,
                                        provider.panel_id) == 0) {
         const auto* top = stack_[stack_size_ - 1].provider;
@@ -173,12 +178,21 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
         // Provider 已失效但宿主栈仍残留：先移除不可见栈顶，再允许本次重新打开。
         if (stack_size_ != 1 || !close_top() || close_pending_) return false;
     }
-    if (stack_size_ >= kStackCapacity) return false;
+    if (stack_size_ >= kStackCapacity) {
+        log_open_failure(provider, "stack_capacity");
+        return false;
+    }
     const uint64_t open_generation = allocate_open_generation();
-    if (open_generation == 0) return false;
+    if (open_generation == 0) {
+        log_open_failure(provider, "generation_unavailable");
+        return false;
+    }
     if (!acquired_) {
         original_popup_snapshot_valid_ = snapshot(&original_popup_count_, &original_popup_top_vma_);
-        if (!original_popup_snapshot_valid_) return false;
+        if (!original_popup_snapshot_valid_) {
+            log_open_failure(provider, "baseline_snapshot_unavailable");
+            return false;
+        }
         log_snapshot("open-baseline", original_popup_count_, original_popup_top_vma_);
     }
     if (!ensure_popup(provider)) {
@@ -191,6 +205,7 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
     stack_[stack_size_].open_generation = open_generation;
     ++stack_size_;
     if (!provider.open()) {
+        log_open_failure(provider, "provider_rejected");
         if (provider.active != nullptr && provider.active()) provider.close();
         --stack_size_;
         stack_[stack_size_] = {};
@@ -204,6 +219,7 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
     }
     if (stack_size_ == 1 && has_callbacks(provider) &&
         !hooks_.set_process_info(hooks_.context, 1, popup_entry_.state_id)) {
+        log_open_failure(provider, "process_info_rejected");
         if (provider.close != nullptr) provider.close();
         --stack_size_;
         stack_[stack_size_] = {};
@@ -226,6 +242,7 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
         // 嵌套 enter 是同步的：失败时（如组件回调内创建被拒）不得把非激活面板留在栈顶，
         // 否则它会吞掉输入并让界面看似卡死。顶层面板的 enter 由游戏稍后回调，不能在此判活。
         if (provider.active != nullptr && !provider.active()) {
+            log_open_failure(provider, "provider_inactive_after_enter");
             if (provider.close != nullptr) provider.close();
             --stack_size_;
             stack_[stack_size_] = {};
@@ -237,6 +254,7 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
         }
     }
     if (has_callbacks(provider) && !capture_owned_popup()) {
+        log_open_failure(provider, "owned_snapshot_unavailable");
         provider.close();
         --stack_size_;
         stack_[stack_size_] = {};
@@ -247,6 +265,8 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
     }
     // Newly opened panel: snapshot the pre-panel screen so its first RestoreLCD frame shows it.
     if (hooks_.save_lcd != nullptr) hooks_.save_lcd(hooks_.context);
+    log_message("panel open panel=%s owner=%s result=opened",
+                provider.panel_id, provider.owner == nullptr ? "none" : provider.owner);
     return true;
 }
 
@@ -444,8 +464,11 @@ void PopupHost::force_complete_close() {
     if (acquired_ && popup_entry_.slot != nullptr && hooks_.restore != nullptr) {
         (void)hooks_.restore(hooks_.context, &popup_entry_);
     }
-    log_message("close force-complete panel=%s stall_frames=%u limit=%u pop=%d", panel_name,
-                close_stall_frames_, kCloseStallFrameLimit, popped ? 1 : 0);
+    const char* owner = pending != nullptr && pending->owner != nullptr ? pending->owner :
+        (pending_deactivate_owner_ != nullptr ? pending_deactivate_owner_ : "none");
+    log_message_level(2, "close force-complete panel=%s stall_frames=%u limit=%u pop=%d owner=%s reason=stall_timeout",
+                      panel_name, close_stall_frames_, kCloseStallFrameLimit,
+                      popped ? 1 : 0, owner);
     acquired_ = false;
     close_pending_ = false;
     retry_close_top_ = false;
@@ -467,7 +490,11 @@ void PopupHost::restore_if_idle() {
     if (pending_provider_ != nullptr && pending_provider_->active != nullptr &&
         pending_provider_->active()) return;
     if (!original_popup_snapshot_valid_) {
-        log_message("restore held pending reason=baseline_snapshot_unavailable");
+        const contracts::PanelProviderSpec* pending = pending_provider_;
+        log_message_level(2, "restore held pending reason=baseline_snapshot_unavailable panel=%s owner=%s",
+                          pending != nullptr && pending->panel_id != nullptr ? pending->panel_id : "none",
+                          pending != nullptr && pending->owner != nullptr ? pending->owner :
+                              (pending_deactivate_owner_ != nullptr ? pending_deactivate_owner_ : "none"));
         return;
     }
     uint32_t game_count = 0;
@@ -486,17 +513,21 @@ void PopupHost::restore_if_idle() {
     if (!at_original_target && !pop_issued_) {
         if (!owned_popup_snapshot_valid_ || game_count != owned_popup_count_ ||
             game_top_vma != owned_popup_top_vma_) {
-            log_message("restore held pending reason=game_stack_unexpected current=%u/0x%lx owned_valid=%d owned=%u/0x%lx",
+            const contracts::PanelProviderSpec* pending = pending_provider_;
+            log_message_level(2, "restore held pending reason=game_stack_unexpected current=%u/0x%lx owned_valid=%d owned=%u/0x%lx panel=%s owner=%s",
                         game_count, static_cast<unsigned long>(game_top_vma),
                         owned_popup_snapshot_valid_ ? 1 : 0, owned_popup_count_,
-                        static_cast<unsigned long>(owned_popup_top_vma_));
+                        static_cast<unsigned long>(owned_popup_top_vma_),
+                        pending != nullptr && pending->panel_id != nullptr ? pending->panel_id : "none",
+                        pending != nullptr && pending->owner != nullptr ? pending->owner :
+                            (pending_deactivate_owner_ != nullptr ? pending_deactivate_owner_ : "none"));
             return;
         }
         pop_issued_ = hooks_.set_process_info != nullptr &&
                       hooks_.set_process_info(hooks_.context, 3, 0);
         if (!pop_issued_) return;
         idle_baseline_pumps_ = 0;
-        log_message("pop issued; restore deferred to a later frame");
+        log_message_level(0, "pop issued; restore deferred to a later frame");
         return;
     }
     if (game_count != original_popup_count_ || game_top_vma != original_popup_top_vma_ ||
@@ -525,7 +556,7 @@ bool PopupHost::snapshot(uint32_t* count, uintptr_t* top_enter_vma) {
     if (!main_thread_ || count == nullptr || top_enter_vma == nullptr ||
         hooks_.popup_stack_snapshot == nullptr) {
         if (!last_snapshot_log_valid_ || last_snapshot_log_ok_) {
-            log_message("popup snapshot unavailable main_thread=%d hook=%d",
+            log_message_level(0, "popup snapshot unavailable main_thread=%d hook=%d",
                         main_thread_ ? 1 : 0, hooks_.popup_stack_snapshot != nullptr ? 1 : 0);
         }
         last_snapshot_log_valid_ = true;
@@ -537,7 +568,7 @@ bool PopupHost::snapshot(uint32_t* count, uintptr_t* top_enter_vma) {
     const uintptr_t logged_top = ok ? *top_enter_vma : 0;
     if (!last_snapshot_log_valid_ || last_snapshot_log_ok_ != ok ||
         last_snapshot_log_count_ != logged_count || last_snapshot_log_top_vma_ != logged_top) {
-        log_message("popup snapshot result=%s count=%u top=0x%lx", ok ? "ok" : "failed",
+        log_message_level(0, "popup snapshot result=%s count=%u top=0x%lx", ok ? "ok" : "failed",
                     logged_count, static_cast<unsigned long>(logged_top));
     }
     last_snapshot_log_valid_ = true;
@@ -577,6 +608,16 @@ void PopupHost::log_snapshot(const char* event, uint32_t count, uintptr_t top_en
     hooks_.log(hooks_.context, 1, message);
 }
 
+void PopupHost::log_message_level(int32_t level, const char* format, ...) {
+    if (hooks_.log == nullptr || format == nullptr) return;
+    char message[192]{};
+    va_list args;
+    va_start(args, format);
+    std::vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+    hooks_.log(hooks_.context, level, message);
+}
+
 void PopupHost::log_message(const char* format, ...) {
     if (hooks_.log == nullptr || format == nullptr) return;
     char message[192]{};
@@ -585,6 +626,14 @@ void PopupHost::log_message(const char* format, ...) {
     std::vsnprintf(message, sizeof(message), format, args);
     va_end(args);
     hooks_.log(hooks_.context, 1, message);
+}
+
+void PopupHost::log_open_failure(const contracts::PanelProviderSpec& provider,
+                                 const char* reason) {
+    log_message_level(2, "open panel=%s owner=%s result=failed reason=%s",
+                      provider.panel_id == nullptr ? "none" : provider.panel_id,
+                      provider.owner == nullptr ? "none" : provider.owner,
+                      reason == nullptr ? "unknown" : reason);
 }
 
 const contracts::PanelCallbacks* PopupHost::current_callbacks() const {
@@ -601,7 +650,7 @@ void PopupHost::invoke_enter(const contracts::PanelProviderSpec& provider) {
 
 void PopupHost::dispatch_enter() {
     if (deactivating_ || !main_thread_) return;
-    log_message("dispatch enter panel=%s main_thread=%d count=%u",
+    log_message_level(0, "dispatch enter panel=%s main_thread=%d count=%u",
                 current_panel_for_test() == nullptr ? "none" : current_panel_for_test(),
                 main_thread_ ? 1 : 0, process_dispatch_count_);
     ++dispatch_depth_;
@@ -624,7 +673,7 @@ void PopupHost::dispatch_enter() {
         const auto* provider = stack_[stack_size_ - 1].provider;
         if (provider->active != nullptr && !provider->active()) {
             // enter 失败时不能留下不可见但吞输入的栈顶。
-            log_message("dispatch enter inactive; closing panel=%s", provider->panel_id);
+            log_message_level(2, "dispatch enter inactive; closing panel=%s", provider->panel_id);
             (void)close_top();
         }
     }
@@ -648,7 +697,7 @@ void PopupHost::dispatch_process() {
     }
     ++process_dispatch_count_;
     if (process_dispatch_count_ == 1 || process_dispatch_count_ % 120u == 0) {
-        log_message("dispatch process panel=%s main_thread=%d count=%u",
+        log_message_level(0, "dispatch process panel=%s main_thread=%d count=%u",
                     current_panel_for_test() == nullptr ? "none" : current_panel_for_test(),
                     main_thread_ ? 1 : 0, process_dispatch_count_);
     }

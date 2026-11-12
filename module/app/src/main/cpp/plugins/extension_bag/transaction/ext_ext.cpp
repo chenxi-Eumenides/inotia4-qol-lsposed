@@ -195,10 +195,9 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
     runtime_state().objects.bag.pending = {};
     extension_bag_mark_dirty_locked();
     reset_drag_via_port();
-    QOL_LOG_INFO(QolDomain::kExtensionBag, "txn committed id=%s extension swap %d/%d <-> %d/%d generation=%llu/%llu",
-                txn.transaction_id, src_bag, src_slot, dst_bag, dst_slot,
-                static_cast<unsigned long long>(module_object_slot_port(src_bag, src_slot).use.generation),
-                static_cast<unsigned long long>(module_object_slot_port(dst_bag, dst_slot).use.generation));
+    QOL_LOG_INFO(QolDomain::kExtensionBag,
+                 "apply op=bag_swap result=committed tx=%s src_bag=%d src_slot=%d dst_bag=%d dst_slot=%d",
+                 txn.transaction_id, src_bag, src_slot, dst_bag, dst_slot);
     return true;
 }
 
@@ -475,7 +474,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
         txn_abort_locked(txn, virtual_bag::TxnStage::kLogicalUpdated,
                          "destination materialize failed");
         if (!restore_ext2ext_destination_locked(txn)) {
-            QOL_LOG_ERROR(QolDomain::kExtensionBag,
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
                           "ERROR ext2ext destination view rollback failed id=%s dst=%d/%d",
                           txn.transaction_id, dst_bag, dst_slot);
         }
@@ -488,7 +487,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
             txn_abort_locked(txn, virtual_bag::TxnStage::kLogicalUpdated,
                              "destination view borrow or identity failed");
             if (!restore_ext2ext_destination_locked(txn)) {
-                QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
                               "ERROR ext2ext destination view rollback failed id=%s dst=%d/%d",
                               txn.transaction_id, dst_bag, dst_slot);
             }
@@ -499,7 +498,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
         txn_abort_locked(txn, virtual_bag::TxnStage::kLogicalUpdated,
                          "extension merge source release rejected");
         if (!restore_ext2ext_destination_locked(txn)) {
-            QOL_LOG_ERROR(QolDomain::kExtensionBag,
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
                           "ERROR ext2ext destination view rollback failed id=%s dst=%d/%d",
                           txn.transaction_id, dst_bag, dst_slot);
         }

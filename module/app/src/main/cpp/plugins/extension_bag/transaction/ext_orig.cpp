@@ -132,7 +132,7 @@ bool move_original_to_extension_slot_locked(::qol::extension_bag::ReentryLock& l
 
     const auto* action = ::qol::features::extension_bag::inventory_action_api();
     if (action == nullptr) {
-        QOL_LOG_ERROR(QolDomain::kExtensionBag,
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
                       "cross move reject original->extension inventory.action unavailable");
         return false;
     }
@@ -206,11 +206,16 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
     }
     const int count = static_cast<int>(
         virtual_bag_effective_count(item, static_cast<uint32_t>(descriptor.count)));
-    if (count <= 0) return false;
+    if (count <= 0) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "op=cross_move result=rejected reason=invalid_count count=%d src=%d/%d dst=%d/%d",
+                     count, src_bag, src_slot, target_bag, -1);
+        return false;
+    }
 
     const auto* action = ::qol::features::extension_bag::inventory_action_api();
     if (action == nullptr) {
-        QOL_LOG_ERROR(QolDomain::kExtensionBag,
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
                       "cross move reject extension->original inventory.action unavailable");
         return false;
     }

@@ -591,7 +591,7 @@ int main(int argc, char** argv) {
     assert(log_contains(
         "plugin test.resource_failure resource install failed resource=feature:rollback:second"));
     assert(log_contains(
-        "plugin test.resource_failure activation failed: resource feature:rollback:second"));
+        "fail op=feature_transition plugin=test.resource_failure state=failed"));
     assert(log_contains(
         "plugin test.missing blocked at assembly: missing required capability: test.external"));
     assert(probes["test.resource_failure"].cleanup >= 1);

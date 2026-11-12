@@ -39,6 +39,10 @@ inline void write(const contracts::QolHostSdk* sdk, int32_t level, int32_t domai
     ::qol::features::save_backup::private_log::write(                              \
         save_backup_host_sdk(), 2, 8, __FILE__, __LINE__, \
         __VA_ARGS__)
+#define SAVE_BACKUP_LOG_ERROR(...) \
+    ::qol::features::save_backup::private_log::write(                              \
+        save_backup_host_sdk(), 3, 8, __FILE__, __LINE__, \
+        __VA_ARGS__)
 #define SAVE_BACKUP_LOG_DEBUG(...)                                                   \
     do {                                                                             \
         const auto* _save_backup_sdk =                                              \

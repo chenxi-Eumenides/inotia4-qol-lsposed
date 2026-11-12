@@ -96,7 +96,7 @@ void complete_original_release_cleanup_locked(void* moving_control, int64_t rel_
     if (ui != nullptr && ui->reset_touch_moving != nullptr) {
         (void)ui->reset_touch_moving();
     } else {
-        VIRTBAG_LOG_ERROR("ERROR release_cleanup missing ResetMovingControl ctl=%p",
+        VIRTBAG_LOG_WARN("ERROR release_cleanup missing ResetMovingControl ctl=%p",
                     captured_moving_control);
     }
     if (!handled && ui != nullptr && ui->reset_touch_selected != nullptr) {

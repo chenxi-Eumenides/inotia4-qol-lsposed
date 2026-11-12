@@ -63,6 +63,8 @@ void log_write(int32_t level, const char* file, int line, const char* format, ..
     if (sdk == nullptr || sdk->log.write == nullptr || file == nullptr || format == nullptr) {
         return;
     }
+    if (level == 0 &&
+        (sdk->log.debug_enabled == nullptr || sdk->log.debug_enabled() == 0)) return;
     std::array<char, contracts::kMessageCap + 1> message{};
     va_list args;
     va_start(args, format);
@@ -85,12 +87,22 @@ int32_t clamp_damage_i64(int64_t value) {
 }
 
 bool trace_stage_available(std::atomic<uint32_t>& count) {
+    const auto* sdk = g_sdk.load(std::memory_order_acquire);
+    if (sdk == nullptr || sdk->log.debug_enabled == nullptr || sdk->log.debug_enabled() == 0)
+        return false;
     uint32_t current = count.load(std::memory_order_relaxed);
     while (current < 12) {
         if (count.compare_exchange_weak(current, current + 1, std::memory_order_relaxed))
             return true;
     }
     return false;
+}
+
+const char* attr_resource_name(uint32_t resource_index) {
+    constexpr const char* kNames[] = {
+        kResourceNormal, kResourceMagic, kResourceCritical, kResourceDefense, kResourcePhysical};
+    return resource_index < sizeof(kNames) / sizeof(kNames[0])
+        ? kNames[resource_index] : "unknown";
 }
 
 // 单点读取失败即整体降级：wrapper 透传 backup 原函数（原生数学），避免用残缺属性算出错误伤害。
@@ -103,14 +115,13 @@ bool read_attr(void* character, int32_t attr_id, uint32_t resource_index, int32_
     }
     if (resource_index < 5 && !g_attr_warned[resource_index].exchange(true)) {
         log_write(2, __FILE__, __LINE__,
-                  "damage_widen CHAR_GetAttr failed resource=%u attr=%d; fallback to original",
-                  resource_index, attr_id);
+                  "fallback hook=%s attr=%d reason=character_read_failed fallback=original",
+                  attr_resource_name(resource_index), attr_id);
     }
     return false;
 }
 
 int32_t get_normal_damage_wrapper(void* ch) {
-    const void* caller = __builtin_return_address(0);
     const auto* sdk = g_sdk.load(std::memory_order_acquire);
     const contracts::InFlightGuard guard(sdk == nullptr ? nullptr : &sdk->in_flight,
                                           {kResourceNormal});
@@ -131,7 +142,8 @@ int32_t get_normal_damage_wrapper(void* ch) {
                           (crit_gate > 0 ? crit_extra : 0);
     const int32_t result = clamp_damage_i64(safe_scale(atk, bonus + 1000));
     if (trace_stage_available(g_normal_trace_count)) {
-        log_write(1, __FILE__, __LINE__,
+        const void* caller = __builtin_return_address(0);
+        log_write(0, __FILE__, __LINE__,
                   "[damage_trace] stage=normal character=%p caller=%p attr4=%d attr5=%d attr106=%d attr109=%d base_damage=%d",
                   ch, caller, atk, bonus_base, crit_gate, crit_extra, result);
     }
@@ -157,7 +169,7 @@ int32_t act_dd_entry_wrapper(void* attacker, void* victim, int32_t w2, int32_t a
             read_trace_attr(106, &attr106, 1u << 4);
             read_trace_attr(109, &attr109, 1u << 5);
         }
-        log_write(1, __FILE__, __LINE__,
+        log_write(0, __FILE__, __LINE__,
                   "[damage_trace] stage=act_dd_entry attacker=%p victim=%p w2=%d action_type=%d caller=%p attrs_mask=%u attr5=%d attr6=%d attr71=%d attr81=%d attr106=%d attr109=%d",
                   attacker, victim, w2, action_type, caller, attr_mask, attr5, attr6, attr71,
                   attr81, attr106, attr109);
@@ -186,7 +198,6 @@ int32_t get_normal_magic_damage_wrapper(void* ch) {
 }
 
 int32_t get_critical_damage_wrapper(void* attacker, void* defender, int32_t damage) {
-    const void* caller = __builtin_return_address(0);
     const auto* sdk = g_sdk.load(std::memory_order_acquire);
     const contracts::InFlightGuard guard(sdk == nullptr ? nullptr : &sdk->in_flight,
                                           {kResourceCritical});
@@ -208,7 +219,8 @@ int32_t get_critical_damage_wrapper(void* attacker, void* defender, int32_t dama
     const int64_t result = static_cast<int64_t>(damage) + safe_scale(damage, total);
     const int32_t output = clamp_damage_i64(result);
     if (trace_stage_available(g_critical_trace_count)) {
-        log_write(1, __FILE__, __LINE__,
+        const void* caller = __builtin_return_address(0);
+        log_write(0, __FILE__, __LINE__,
                   "[damage_trace] stage=critical attacker=%p defender=%p caller=%p damage_in=%d attr2=%d attr3=%d damage_out=%d",
                   attacker, defender, caller, damage, resist, bonus_base, output);
     }
@@ -241,7 +253,7 @@ int32_t physical_defense_fallback(void* unused, void* defender, int32_t damage,
                                   DefenseFn backup, const char* reason, const void* caller) {
     const int32_t output = backup == nullptr ? 0 : backup(unused, defender, damage);
     if (trace_stage_available(g_physical_trace_count)) {
-        log_write(1, __FILE__, __LINE__,
+        log_write(0, __FILE__, __LINE__,
                   "[damage_trace] stage=physical_defense defender=%p caller=%p damage_in=%d fallback=%s damage_out=%d",
                   defender, caller, damage, reason, output);
     }
@@ -249,17 +261,17 @@ int32_t physical_defense_fallback(void* unused, void* defender, int32_t damage,
 }
 
 int32_t calc_physical_defense_wrapper(void* unused, void* defender, int32_t damage) {
-    int32_t caller_w22 = 0;
-    int32_t caller_w27 = 0;
-#if defined(__aarch64__)
-    asm volatile("str w22, %0\n\tstr w27, %1"
-                 : "=m"(caller_w22), "=m"(caller_w27)
-                 :
-                 : "memory");
-#endif
-    const void* caller = __builtin_return_address(0);
     if (trace_stage_available(g_physical_caller_trace_count)) {
-        log_write(1, __FILE__, __LINE__,
+        int32_t caller_w22 = 0;
+        int32_t caller_w27 = 0;
+#if defined(__aarch64__)
+        asm volatile("str w22, %0\n\tstr w27, %1"
+                     : "=m"(caller_w22), "=m"(caller_w27)
+                     :
+                     : "memory");
+#endif
+        const void* caller = __builtin_return_address(0);
+        log_write(0, __FILE__, __LINE__,
                   "[damage_trace] stage=physical_caller defender=%p caller=%p damage_arg=%d caller_w22=%d caller_w27=%d",
                   defender, caller, damage, caller_w22, caller_w27);
     }
@@ -268,26 +280,29 @@ int32_t calc_physical_defense_wrapper(void* unused, void* defender, int32_t dama
                                           {kResourcePhysical});
     const auto backup = g_physical_backup.load(std::memory_order_acquire);
     const auto* api = g_character_read.load(std::memory_order_acquire);
+    const void* trace_caller = sdk != nullptr && sdk->log.debug_enabled != nullptr &&
+            sdk->log.debug_enabled() != 0
+        ? __builtin_return_address(0) : nullptr;
     if (!g_enabled.load(std::memory_order_acquire) || api == nullptr ||
         defender == nullptr) {
         return physical_defense_fallback(unused, defender, damage, backup,
-                                         "inactive_or_missing_api", caller);
+                                         "inactive_or_missing_api", trace_caller);
     }
 
     int32_t attr17 = 0, attr18 = 0, attr7 = 0, attr81 = 0;
     if (!read_attr(defender, 17, 4, &attr17) || !read_attr(defender, 18, 4, &attr18))
         return physical_defense_fallback(unused, defender, damage, backup,
-                                         "attr17_or_18", caller);
+                                         "attr17_or_18", trace_caller);
     const int64_t scaled = safe_scale(attr17, static_cast<int64_t>(attr18) + 1000);
     const int32_t cal_arg = clamp_signed_i32(scaled);
     int32_t cal_result = 0;
     if (api->physical_defense_calculate == nullptr ||
         !contracts::succeeded(api->physical_defense_calculate(defender, cal_arg, &cal_result)))
         return physical_defense_fallback(unused, defender, damage, backup,
-                                         "cal_failed", caller);
+                                         "cal_failed", trace_caller);
     if (!read_attr(defender, 7, 4, &attr7) || !read_attr(defender, 81, 4, &attr81))
         return physical_defense_fallback(unused, defender, damage, backup,
-                                         "attr7_or_81", caller);
+                                         "attr7_or_81", trace_caller);
     int64_t rate = static_cast<int64_t>(cal_result) + attr7;
     if (attr81 > 0) {
         const int64_t adjusted = safe_scale(rate, attr81);
@@ -301,9 +316,9 @@ int32_t calc_physical_defense_wrapper(void* unused, void* defender, int32_t dama
     }
     if (damage == 0) {
         if (trace_stage_available(g_physical_trace_count)) {
-            log_write(1, __FILE__, __LINE__,
+            log_write(0, __FILE__, __LINE__,
                       "[damage_trace] stage=physical_defense defender=%p caller=%p damage_in=%d attr17=%d attr18=%d cal_arg=%d cal_result=%d attr7=%d attr81=%d rate=%lld damage_out=0",
-                      defender, caller, damage, attr17, attr18, cal_arg, cal_result, attr7, attr81,
+                      defender, trace_caller, damage, attr17, attr18, cal_arg, cal_result, attr7, attr81,
                       static_cast<long long>(rate));
         }
         return 0;
@@ -314,9 +329,9 @@ int32_t calc_physical_defense_wrapper(void* unused, void* defender, int32_t dama
     if (damage > 0) {
         if (rate >= 1000) {
             if (trace_stage_available(g_physical_trace_count)) {
-                log_write(1, __FILE__, __LINE__,
+                log_write(0, __FILE__, __LINE__,
                           "[damage_trace] stage=physical_defense defender=%p caller=%p damage_in=%d attr17=%d attr18=%d cal_arg=%d cal_result=%d attr7=%d attr81=%d rate=%lld damage_out=0",
-                          defender, caller, damage, attr17, attr18, cal_arg, cal_result, attr7, attr81,
+                          defender, trace_caller, damage, attr17, attr18, cal_arg, cal_result, attr7, attr81,
                           static_cast<long long>(rate));
             }
             return 0;
@@ -324,9 +339,9 @@ int32_t calc_physical_defense_wrapper(void* unused, void* defender, int32_t dama
         if (rate < 1000 - threshold) {
             const int32_t output = std::numeric_limits<int32_t>::max();
             if (trace_stage_available(g_physical_trace_count)) {
-                log_write(1, __FILE__, __LINE__,
+                log_write(0, __FILE__, __LINE__,
                           "[damage_trace] stage=physical_defense defender=%p caller=%p damage_in=%d attr17=%d attr18=%d cal_arg=%d cal_result=%d attr7=%d attr81=%d rate=%lld damage_out=%d",
-                          defender, caller, damage, attr17, attr18, cal_arg, cal_result, attr7, attr81,
+                          defender, trace_caller, damage, attr17, attr18, cal_arg, cal_result, attr7, attr81,
                           static_cast<long long>(rate), output);
             }
             return output;
@@ -334,9 +349,9 @@ int32_t calc_physical_defense_wrapper(void* unused, void* defender, int32_t dama
     } else {
         if (rate <= 1000) {
             if (trace_stage_available(g_physical_trace_count)) {
-                log_write(1, __FILE__, __LINE__,
+                log_write(0, __FILE__, __LINE__,
                           "[damage_trace] stage=physical_defense defender=%p caller=%p damage_in=%d attr17=%d attr18=%d cal_arg=%d cal_result=%d attr7=%d attr81=%d rate=%lld damage_out=0",
-                          defender, caller, damage, attr17, attr18, cal_arg, cal_result, attr7, attr81,
+                          defender, trace_caller, damage, attr17, attr18, cal_arg, cal_result, attr7, attr81,
                           static_cast<long long>(rate));
             }
             return 0;
@@ -344,9 +359,9 @@ int32_t calc_physical_defense_wrapper(void* unused, void* defender, int32_t dama
         if (rate > 1000 + threshold) {
             const int32_t output = std::numeric_limits<int32_t>::max();
             if (trace_stage_available(g_physical_trace_count)) {
-                log_write(1, __FILE__, __LINE__,
+                log_write(0, __FILE__, __LINE__,
                           "[damage_trace] stage=physical_defense defender=%p caller=%p damage_in=%d attr17=%d attr18=%d cal_arg=%d cal_result=%d attr7=%d attr81=%d rate=%lld damage_out=%d",
-                          defender, caller, damage, attr17, attr18, cal_arg, cal_result, attr7, attr81,
+                          defender, trace_caller, damage, attr17, attr18, cal_arg, cal_result, attr7, attr81,
                           static_cast<long long>(rate), output);
             }
             return output;
@@ -354,9 +369,9 @@ int32_t calc_physical_defense_wrapper(void* unused, void* defender, int32_t dama
     }
     const int32_t output = clamp_damage_i64(safe_scale(static_cast<int64_t>(1000) - rate, damage));
     if (trace_stage_available(g_physical_trace_count)) {
-        log_write(1, __FILE__, __LINE__,
+        log_write(0, __FILE__, __LINE__,
                   "[damage_trace] stage=physical_defense defender=%p caller=%p damage_in=%d attr17=%d attr18=%d cal_arg=%d cal_result=%d attr7=%d attr81=%d rate=%lld damage_out=%d",
-                  defender, caller, damage, attr17, attr18, cal_arg, cal_result, attr7, attr81,
+                  defender, trace_caller, damage, attr17, attr18, cal_arg, cal_result, attr7, attr81,
                   static_cast<long long>(rate), output);
     }
     return output;

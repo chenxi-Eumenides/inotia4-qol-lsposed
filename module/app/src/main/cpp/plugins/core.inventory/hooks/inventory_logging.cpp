@@ -27,21 +27,12 @@ bool core_inventory_log_debug_enabled() {
            g_log_sdk->log.debug_enabled() != 0;
 }
 
-bool core_inventory_log_debug_due(int64_t* last_frame, int64_t every_frames) {
-    if (last_frame == nullptr || every_frames <= 0) return true;
-    if (*last_frame + 1 < every_frames) {
-        ++*last_frame;
-        return false;
-    }
-    *last_frame = 0;
-    return true;
-}
-
 void core_inventory_log_write(int32_t level, const char* file, int line, const char* format, ...) {
     if (g_log_sdk == nullptr || g_log_sdk->log.write == nullptr || file == nullptr ||
         format == nullptr) {
         return;
     }
+    if (level == 0 && !core_inventory_log_debug_enabled()) return;
     std::array<char, qol::contracts::kMessageCap + 1> message{};
     va_list args;
     va_start(args, format);

@@ -78,7 +78,9 @@ private:
     bool capture_owned_popup();
     void log_pop_issued();
     void log_snapshot(const char* event, uint32_t count, uintptr_t top_enter_vma);
+    void log_message_level(int32_t level, const char* format, ...);
     void log_message(const char* format, ...);
+    void log_open_failure(const contracts::PanelProviderSpec& provider, const char* reason);
     const contracts::PanelCallbacks* current_callbacks() const;
     bool close_top();
     void restore_if_idle();

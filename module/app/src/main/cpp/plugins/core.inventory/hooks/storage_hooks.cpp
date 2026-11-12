@@ -72,6 +72,7 @@ struct RemoveItemCallFrame {
 thread_local RemoveItemCallFrame* g_remove_item_call_top = nullptr;
 thread_local int g_save_item_depth = 0;
 thread_local int g_save_item_direct_fail_count = 0;
+thread_local void* g_inventory_full_rejected_item = nullptr;
 thread_local std::vector<void*> g_pending_eb_items;
 // 拆分地图 R-7：core.item 的 unequip wrapper 与本插件 FindSaveSlot hook 分属两个
 // 插件，不能跨插件共享 TLS；unequip 作用域信号经 contracts 的 inline thread_local
@@ -106,8 +107,7 @@ private:
 };
 
 void backup_missing(const char* hook_id) {
-    QOL_LOG_ERROR(QolDomain::kInventory, "hook=%s backup missing",
-                  hook_id == nullptr ? "unknown" : hook_id);
+    (void)hook_id;
 }
 
 template <typename Function, typename... Args>
@@ -194,7 +194,7 @@ bool remove_registered_source_item(void* item, int32_t count) {
     const QolResult result = source->remove(ref.item, count, &mutation);
     if (!qol::contracts::succeeded(result)) {
         QOL_LOG_WARN(QolDomain::kInventory,
-                     "registered source consume failed space=%d bag=%d slot=%d count=%d code=%d",
+                     "registered source consume failed space=%d bag=%d slot=%d count=%d code=%d reason=consume_failed",
                      ref.space_id, ref.bag, ref.slot, count, result.code);
     }
     return qol::contracts::succeeded(result);
@@ -484,7 +484,7 @@ void s2_merge_writeback(const S2MergeCapture& cap, const char* op,
     if (post_field != cap.pre_field &&
         !qol::contracts::s2_writeback::original_count_write_confirmed(item_count_api(), cap.pre_field, post_field,
                                                       cap.new_full)) {
-        QOL_LOG_ERROR(QolDomain::kInventory,
+        QOL_LOG_WARN(QolDomain::kInventory,
                             "S2 writeback %s mismatch skip target=%p pre=0x%x post=0x%x expect_full=%u",
                             op, cap.target, cap.pre_field, post_field, cap.new_full);
         return;
@@ -494,7 +494,7 @@ void s2_merge_writeback(const S2MergeCapture& cap, const char* op,
         item_count_write_effective(cap.target, cap.new_full);
     if (write_result == ItemCountWriteResult::kNotReady) return;
     if (write_result == ItemCountWriteResult::kFailed) {
-        QOL_LOG_ERROR(QolDomain::kInventory,
+        QOL_LOG_WARN(QolDomain::kInventory,
                       "S2 writeback %s facade write failed target=%p expect_full=%u",
                       op, cap.target, cap.new_full);
         return;
@@ -585,7 +585,7 @@ void s2_remove_data_writeback(const S2RemoveDataCapture& cap, int32_t category,
         item_count_write_effective(item, plan.remain);
     if (write_result != ItemCountWriteResult::kApplied) return;
     const uint32_t written = read_count_field(item);
-    QOL_LOG_INFO(QolDomain::kInventory,
+    QOL_LOG_DEBUG(QolDomain::kInventory,
                         "S2 writeback RemoveItemData category=%d count=%d item=%p "
                         "%u->%u field=0x%x",
                         category, count, item, cap.pre_full[index], plan.remain, written);
@@ -811,6 +811,48 @@ int64_t count_empty_slots_all(int32_t needed) {
     return empty;
 }
 
+int64_t total_inventory_capacity() {
+    int64_t capacity = 0;
+    if (qol::contracts::qol_inventory_access_api_valid(&inventory_access_api())) {
+        const int32_t last_space = g_c18_native_bag_auto_save
+                                       ? qol::contracts::kQolBagSpaceVariant
+                                       : qol::contracts::kQolBagSpaceOriginal;
+        for (int32_t space = qol::contracts::kQolBagSpaceOriginal; space <= last_space; ++space) {
+            int32_t bag_count = 0;
+            if (!qol::contracts::succeeded(
+                    inventory_access_api().native_bag_count(space, &bag_count)) ||
+                bag_count < 0) {
+                continue;
+            }
+            for (int32_t bag = 0; bag < bag_count; ++bag) {
+                if (space == qol::contracts::kQolBagSpaceOriginal &&
+                    bag == qol::contracts::kQolTaskBagIndex) {
+                    continue;
+                }
+                qol::contracts::QolBagRef ref{space, bag};
+                qol::contracts::QolBagInfo info{};
+                if (qol::contracts::succeeded(inventory_access_api().native_bag_info(&ref, &info)) &&
+                    info.capacity > 0) {
+                    capacity += info.capacity;
+                }
+            }
+        }
+    }
+    for (uint32_t index = 0; index < registered_bag_source_count(); ++index) {
+        const auto* source = registered_bag_source_at(index);
+        if (source == nullptr || source->count == nullptr || source->info == nullptr) continue;
+        const int32_t bag_count = source->count();
+        if (bag_count < 0) continue;
+        for (int32_t bag = 0; bag < bag_count; ++bag) {
+            qol::contracts::QolBagInfo info{};
+            if (qol::contracts::succeeded(source->info(bag, &info)) && info.capacity > 0) {
+                capacity += info.capacity;
+            }
+        }
+    }
+    return capacity;
+}
+
 // 注册源收编的落袋动作：flat 袋号路径与模块 pending 路径共用，保证校验、转移
 // 构造与失败计数语义一致。
 bool import_registered_item_direct(void* item, int32_t space_id, int32_t bag, int32_t slot,
@@ -830,11 +872,16 @@ bool import_registered_item_direct(void* item, int32_t space_id, int32_t bag, in
     const QolResult result = source->import_item(&transfer, bag, slot, &imported);
     if (!qol::contracts::succeeded(result)) {
         ++g_save_item_direct_fail_count;
-        QOL_LOG_ERROR(QolDomain::kInventory,
-                      "SaveItemDirect eb failed origin=%s item=%p space=%d bag=%d slot=%d code=%d category=%d count=%d payload=%u",
-                      origin, item, space_id, bag, slot, static_cast<int32_t>(result.code),
-                      static_cast<int>(transfer.category), static_cast<int>(transfer.count),
-                      static_cast<unsigned int>(transfer.payload_size));
+        if (result.code == kQolErrBlocked) {
+            QOL_LOG_WARN(QolDomain::kInventory,
+                         "reject op=pickup space=%d bag=%d slot=%d category=%d count=%d capacity=%d reason=inventory_full",
+                         space_id, bag, slot, transfer.category, transfer.count, info.capacity);
+        } else {
+            QOL_LOG_WARN(QolDomain::kInventory,
+                         "fail op=save_item space=%d bag=%d slot=%d category=%d count=%d code=%d reason=import_failed",
+                         space_id, bag, slot, transfer.category, transfer.count,
+                         static_cast<int32_t>(result.code));
+        }
         return false;
     }
     g_pending_eb_items.push_back(item);
@@ -850,7 +897,7 @@ void* find_item_wrapper(int32_t category) {
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight, {"hook:INVEN_FindItem"});
     if (g_game == nullptr || g_game->item_abi.find_item_wrapper == nullptr) {
         QOL_LOG_WARN(QolDomain::kInventory,
-                     "INVEN_FindItem Game Host dispatch unavailable category=%d", category);
+                     "INVEN_FindItem Game Host dispatch unavailable category=%d reason=dispatch_unavailable", category);
         return nullptr;
     }
     return g_game->item_abi.find_item_wrapper(category);
@@ -990,7 +1037,7 @@ void consume_item_wrapper(void* item) {
             // 对象已释放，禁止触磁字段，只记 ERROR 供取证。
             QOL_LOG_ERROR(QolDomain::kInventory,
                                 "S2 writeback ConsumeItem borrow item removed unexpectedly "
-                                "item=%p bag=%d slot=%d pre_full=%u",
+                                "item=%p bag=%d slot=%d pre_full=%u reason=unexpected_item_removal",
                                 item, borrow_bag, borrow_slot, borrow_pre_full);
         } else if (s2_writeback_gate(item)) {
             const uint32_t post_field = read_count_field(item);
@@ -1002,7 +1049,7 @@ void consume_item_wrapper(void* item) {
                 if (write_result == ItemCountWriteResult::kNotReady) {
                     s2_write_count_field(item, borrow_pre_field);
                 } else if (write_result == ItemCountWriteResult::kApplied) {
-                    QOL_LOG_INFO(QolDomain::kInventory,
+                    QOL_LOG_DEBUG(QolDomain::kInventory,
                                  "S2 writeback ConsumeItem borrow item=%p %u->%u",
                                  item, borrow_pre_full, new_full);
                 } else {
@@ -1011,7 +1058,7 @@ void consume_item_wrapper(void* item) {
             } else {
                 // 原版未按预期递减：还原预置字段，保持进 hook 前原样。
                 s2_write_count_field(item, borrow_pre_field);
-                QOL_LOG_ERROR(QolDomain::kInventory,
+                    QOL_LOG_WARN(QolDomain::kInventory,
                                     "S2 writeback ConsumeItem borrow mismatch item=%p "
                                     "pre=0x%x post=0x%x restored",
                                     item, borrow_pre_field, post_field);
@@ -1019,7 +1066,7 @@ void consume_item_wrapper(void* item) {
         }
     }
     if (!dispatched && extension_item) {
-        QOL_LOG_ERROR(QolDomain::kInventory,
+        QOL_LOG_WARN(QolDomain::kInventory,
                             "ConsumeItem extension consume failed bag=%d slot=%d item=%p",
                             extension_bag, extension_slot, item);
     }
@@ -1062,7 +1109,7 @@ int remove_item_wrapper(void* item) {
         return result;
     }
     const uint64_t call = g_remove_item_calls.fetch_add(1, std::memory_order_relaxed) + 1;
-    QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
+    QOL_LOG_DEBUG(QolDomain::kInventory,
                             "RemoveItem every_calls=60 call=%llu item=%p recursive=%d backup=%p",
                         static_cast<unsigned long long>(call), item,
                         g_in_remove_item ? 1 : 0,
@@ -1123,7 +1170,17 @@ int find_save_slot_wrapper(void* item, int8_t* out_slot) {
     // 已有堆，否则会退回“只要有空槽就新建堆”的旧行为。
     const bool stackable = hook_item_stackable(item) || transfer.count > 1;
     placement::PlacementTarget target{};
-    if (!placement::resolve_placement(transfer, stackable, -1, -1, &target)) return 0;
+    if (!placement::resolve_placement(transfer, stackable, -1, -1, &target)) {
+        if (g_save_item_depth > 0 && g_inventory_full_rejected_item != item &&
+            count_empty_slots_all(1) == 0) {
+            const int64_t capacity = total_inventory_capacity();
+            g_inventory_full_rejected_item = item;
+            QOL_LOG_WARN(QolDomain::kInventory,
+                         "reject op=pickup space=all category=%d reason=inventory_full count=%d capacity=%lld",
+                         transfer.category, transfer.count, static_cast<long long>(capacity));
+        }
+        return 0;
+    }
     // C18 追加袋号（原生扁平 6..）写不进 SaveItem 的 5 位槽字节，且各变体的
     // SaveItem 是否读 scratch 单元不一致；space1/space>=2 统一由模块 pending
     // 带到 SaveItemDirect，space0 直接记录原生袋/槽。
@@ -1153,9 +1210,12 @@ int save_item_wrapper(void* item) {
     }
     const size_t pending_base = g_pending_eb_items.size();
     const int fail_base = g_save_item_direct_fail_count;
+    g_inventory_full_rejected_item = nullptr;
     ++g_save_item_depth;
     const int result = g_backup_save_item(item);
     --g_save_item_depth;
+    const bool inventory_full_rejected = g_inventory_full_rejected_item == item;
+    g_inventory_full_rejected_item = nullptr;
     bool direct_imported = false;
     while (g_pending_eb_items.size() > pending_base) {
         void* imported_item = g_pending_eb_items.back();
@@ -1180,9 +1240,10 @@ int save_item_wrapper(void* item) {
                             "SaveItem direct_eb_failed item=%p", item);
     }
     if (result != 0 && !direct_failed) return result;
+    if (direct_failed || inventory_full_rejected) return 0;
     int32_t category = -1;
     const bool have_category = hook_item_category(item, &category);
-    QOL_LOG_ERROR(QolDomain::kInventory,
+    QOL_LOG_WARN(QolDomain::kInventory,
                   "INVEN_SaveItem failed category=%d direct_failed=%d backup=%p",
                   have_category ? category : -1, direct_failed ? 1 : 0,
                   reinterpret_cast<void*>(g_backup_save_item));
@@ -1327,7 +1388,7 @@ int move_item_wrapper(void* item, int count, int target_bag, int target_slot) {
     const int result = call_backup("hook:INVEN_MoveItem", g_backup_move_item,
                                    item, count, target_bag, target_slot);
     s2_merge_writeback(move_merge, "MoveItem", &move_source);
-    QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
+    QOL_LOG_DEBUG(QolDomain::kInventory,
                         "MoveItem every_calls=60 passthrough item=%p count=%d target=%d/%d "
                         "result=%d",
                         item, count, target_bag, target_slot, result);
@@ -1433,7 +1494,6 @@ bool attach(const qol::contracts::QolHostSdk* sdk, const qol::contracts::QolGame
     g_c18_native_bag_auto_save = !game_identity_removed_c18_native_bags(game);
     core_inventory_log_bind_sdk(sdk);
     if (g_game->item_abi.bind_find_item_backup == nullptr) return false;
-    QOL_LOG_INFO(QolDomain::kInventory, "storage hooks attached hooks=12");
     return true;
 }
 
@@ -1476,7 +1536,6 @@ int32_t bind_backup(const char* resource_id, void* backup) {
         *slot = backup;
         return 0;
     }
-    QOL_LOG_ERROR(QolDomain::kInventory, "unknown storage resource id=%s", resource_id);
     return 1;
 }
 

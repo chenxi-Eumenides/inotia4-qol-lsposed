@@ -3,7 +3,8 @@
 // game 层日志过渡缝（T2l-w-write，seam 方案 D）：调用点沿用 QOL_LOG_* 形态，后端经
 // contracts 面 QolHostSdk.log 输出（game→contracts 允许，零 infra include）。
 // 先例形态见 plugins/core.item/hooks/inventory_logging（同 contracts 面 + 本地宏重定义）。
-// 未注入 SDK 时静默降级（不输出、不崩溃）；帧节流语义与 infra QolLogThrottle::due 帧分支一致。
+// 未注入 SDK 时静默降级（不输出、不崩溃）；节流与去重由 native 统一 logger 内部负责，
+// 本缝不维护帧号状态。
 
 #include <cstdarg>
 #include <cstdint>
@@ -42,28 +43,6 @@ inline bool qol_seam_debug_enabled() {
     return sdk != nullptr && sdk->log.debug_enabled != nullptr && sdk->log.debug_enabled() != 0;
 }
 
-// 帧节流：与 infra QolLogThrottle::due 的 frame>=0 分支逐行等价（首次放行 / 帧回退重置 /
-// frame-last>=every）。frame<0（帧号未就绪）按首次放行——现状该路径由帧任务体执行、
-// frame 恒 >=0，属不可达防御（登记执行记录）。
-inline bool qol_seam_due(int64_t* last_frame, int64_t every_frames) {
-    if (last_frame == nullptr || every_frames <= 0) return true;
-    const int64_t frame = qol::game::frame_count();
-    if (frame < 0) return true;
-    if (*last_frame == INT64_MIN) {
-        *last_frame = frame;
-        return true;
-    }
-    if (frame < *last_frame) {
-        *last_frame = frame;
-        return true;
-    }
-    if (frame - *last_frame >= every_frames) {
-        *last_frame = frame;
-        return true;
-    }
-    return false;
-}
-
 // src 只保留 basename：NDK 构建的 __FILE__ 可能是绝对路径，96 字节缓冲会把长路径
 // 截成半截文件名（例如 ".../cpp/plugins/core.i"），日志因此无法定位调用点。
 inline const char* qol_seam_basename(const char* path) {
@@ -81,6 +60,8 @@ inline void qol_seam_write(int32_t level, int32_t domain, const char* file, int 
                               const char* fmt, ...) {
     const auto* sdk = qol_seam_sdk_slot();
     if (sdk == nullptr || sdk->log.write == nullptr || file == nullptr || fmt == nullptr) return;
+    // debug 关闭时在格式化前短路，避免为诊断日志付出格式化成本。
+    if (level == kQolLogLevelDebug && !qol_seam_debug_enabled()) return;
     char message[contracts::kMessageCap + 1]{};
     va_list args;
     va_start(args, fmt);
@@ -102,5 +83,14 @@ inline void qol_seam_write(int32_t level, int32_t domain, const char* file, int 
     qol::game::qol_seam_write(qol::game::kQolLogLevelWarn, (dom), __FILE__, __LINE__, __VA_ARGS__)
 #define QOL_LOG_SEAM_ERROR(dom, ...) \
     qol::game::qol_seam_write(qol::game::kQolLogLevelError, (dom), __FILE__, __LINE__, __VA_ARGS__)
+// DEBUG 在宏内先判开关再展开参数，未开启时不为诊断数据付出任何构造成本。
+// dom 参数只为调用点可读，seam 固定写 api 域。
+#define QOL_LOG_SEAM_DEBUG(dom, ...)                                              \
+    do {                                                                          \
+        if (qol::game::qol_seam_debug_enabled())                                  \
+            qol::game::qol_seam_write(qol::game::kQolLogLevelDebug,               \
+                                      qol::game::kQolLogDomainApi,                \
+                                      __FILE__, __LINE__, __VA_ARGS__);           \
+    } while (0)
 
 }  // namespace qol::game

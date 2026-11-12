@@ -95,7 +95,12 @@ int32_t apply_settings_ui_action(int64_t, void*) {
         default: break;
     }
     if (action >= 0) {
-        CORE_UI_LOG_INFO("ui action=%d result=%s", action, result.c_str());
+        const char* action_name = action == kInjectUi ? "inject" :
+            action == kRestoreUi ? "restore" :
+            action == kOpenOptionUi ? "open_option" : "open_panel";
+        const char* result_summary = result.find("\"ok\":true") != std::string::npos
+            ? "ok" : "failed";
+        CORE_UI_LOG_INFO("op=ui_action action=%s result=%s", action_name, result_summary);
     }
     return 1;  // 常驻：回调返回 false 会被调度器自动注销
 }
@@ -174,9 +179,12 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
             contracts::kUiPanelsCapabilityId,
             {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor}, &iface);
         const bool require_ok = contracts::succeeded(require_result) && iface != nullptr;
-        CORE_UI_LOG_INFO("ui_panels require %s requested_version=%u.%u",
-                         require_ok ? "ok" : "failed",
-                         contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor);
+        qol::features::core_ui::private_log::write(
+            ctx.sdk, require_ok ? 1 : 2, 12, __FILE__, __LINE__,
+            "ui_panels require %s requested_version=%u.%u reason=%s",
+            require_ok ? "ok" : "failed",
+            contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor,
+            require_ok ? "none" : "require_failed");
         if (require_ok) {
             const auto* panels = static_cast<const contracts::UiPanelsApi*>(iface);
             const bool deactivated = panels->deactivate_owner != nullptr &&
@@ -185,12 +193,11 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
             CORE_UI_LOG_INFO("deactivate_owner result=%s",
                              deactivated ? (still_active ? "queued" : "complete") : "failed");
         } else {
-            CORE_UI_LOG_INFO("deactivate_owner result=skipped capability_unavailable");
+            CORE_UI_LOG_WARN("deactivate_owner result=skipped capability_unavailable");
         }
     } else {
-        CORE_UI_LOG_INFO("ui_panels require failed requested_version=%u.%u reason=api_unavailable",
+        CORE_UI_LOG_WARN("ui_panels require failed requested_version=%u.%u reason=api_unavailable",
                          contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor);
-        CORE_UI_LOG_INFO("deactivate_owner result=skipped capability_unavailable");
     }
     core_ui::panels_unregister();
     g_sdk = nullptr;

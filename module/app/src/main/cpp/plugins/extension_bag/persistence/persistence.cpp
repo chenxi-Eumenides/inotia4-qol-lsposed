@@ -72,10 +72,15 @@ struct CaptureIdentity {
 };
 CaptureIdentity g_capture{};
 uint64_t g_staged_revision = 0;
+uint64_t g_stage_attempt_revision = 0;
+uint32_t g_stage_attempts = 0;
+constexpr uint32_t kMaxStageAttempts = 3;
 
 void eb_reset_loaded_revision_state_locked() {
     g_capture = CaptureIdentity{};
     g_staged_revision = 0;
+    g_stage_attempt_revision = 0;
+    g_stage_attempts = 0;
     runtime_state().persistence.dirty = false;
     runtime_state().persistence.shortcut_refreshed_revision = -1;
 }
@@ -270,6 +275,11 @@ void eb_sd_complete(void* /*user*/, const QolSlotDataContext* ctx, uint32_t outc
                     extension_bag_state()->pending = {};
                     runtime_state().persistence.dirty = false;
                     g_staged_revision = 0;
+                    g_stage_attempts = 0;
+                    QOL_LOG_INFO(QolDomain::kExtensionBag,
+                                 "save op=slot_data result=committed section=extensionbags.items slot=%d tx=%llu",
+                                 ctx->session.slot,
+                                 static_cast<unsigned long long>(ctx->transaction));
                 } else {
                     QOL_LOG_WARN(QolDomain::kExtensionBag,
                                  "slot data committed skipped clear reason=capture_identity_changed slot=%d",
@@ -284,10 +294,23 @@ void eb_sd_complete(void* /*user*/, const QolSlotDataContext* ctx, uint32_t outc
             break;
         case qol::contracts::QolSlotDataOutcome::kStaged:
             // SlotBound 写完成为 staged：等待原版保存事务，不清 dirty。
+            QOL_LOG_INFO(QolDomain::kExtensionBag,
+                         "save op=slot_data result=staged section=extensionbags.items slot=%d tx=%llu",
+                         ctx->session.slot,
+                         static_cast<unsigned long long>(ctx->transaction));
             break;
         case qol::contracts::QolSlotDataOutcome::kOriginalSaveFailed:
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "fail op=slot_data result=failed section=extensionbags.items slot=%d tx=%llu reason=original_save_failed",
+                         ctx->session.slot,
+                         static_cast<unsigned long long>(ctx->transaction));
+            break;
         case qol::contracts::QolSlotDataOutcome::kCancelled:
             // 未提交：保留 dirty/pending，等待下一次保存。
+            QOL_LOG_INFO(QolDomain::kExtensionBag,
+                         "save op=slot_data result=cancelled section=extensionbags.items slot=%d tx=%llu reason=cancelled",
+                         ctx->session.slot,
+                         static_cast<unsigned long long>(ctx->transaction));
             break;
         case qol::contracts::QolSlotDataOutcome::kPendingRecovery:
         case qol::contracts::QolSlotDataOutcome::kDegraded:
@@ -296,9 +319,12 @@ void eb_sd_complete(void* /*user*/, const QolSlotDataContext* ctx, uint32_t outc
                 g_capture.epoch == ctx->session.epoch) {
                 extension_bag_session_set_blocked(true);
                 QOL_LOG_WARN(QolDomain::kExtensionBag,
-                             "slot data blocked reason=outcome=%u slot=%d tx=%llu",
-                             outcome, ctx->session.slot,
-                             static_cast<unsigned long long>(ctx->transaction));
+                             "degrade op=slot_data result=degraded slot=%d tx=%llu reason=%s outcome=%u",
+                             ctx->session.slot,
+                             static_cast<unsigned long long>(ctx->transaction),
+                             kind == qol::contracts::QolSlotDataOutcome::kPendingRecovery
+                                 ? "pending_recovery" : "provider_degraded",
+                             outcome);
             }
             break;
     }
@@ -348,7 +374,7 @@ bool extension_bag_slot_data_register(qol::contracts::QolOwnerToken owner,
     QolSlotDataRequest initial = 0;
     const auto registered = api->register_section(&spec, &handle, &initial);
     if (!qol::contracts::succeeded(registered) || handle == 0) {
-        QOL_LOG_WARN(QolDomain::kExtensionBag, "slot data register failed code=%d",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "slot data register failed code=%d reason=register_failed",
                      registered.code);
         return false;
     }
@@ -368,7 +394,7 @@ QolSlotDataRequest extension_bag_slot_data_unregister(const QolSlotDataApi* api)
     QolSlotDataRequest request = 0;
     const auto result = api->unregister(handle, &request);
     if (!qol::contracts::succeeded(result)) {
-        QOL_LOG_WARN(QolDomain::kExtensionBag, "slot data unregister failed code=%d", result.code);
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "slot data unregister failed code=%d reason=unregister_failed", result.code);
         return 0;
     }
     return request;
@@ -395,15 +421,36 @@ void extension_bag_flush_dirty_staging(const QolSlotDataApi* api) {
         epoch = extension_bag_session_epoch();
         revision = extension_bag_item_revision_locked();
         if (revision == g_staged_revision) return;
+        if (revision != g_stage_attempt_revision) {
+            g_stage_attempt_revision = revision;
+            g_stage_attempts = 0;
+        }
         g_staged_revision = revision;
     }
     QolSlotDataRequest request = 0;
     const auto result = api->request_write(extension_bag_session_handle(),
                                            epoch, &request);
     if (!qol::contracts::succeeded(result)) {
-        // 非主线程投递失败/epoch 不匹配：保留 dirty，下一安全点重试。
+        // 非主线程投递失败/epoch 不匹配：保留 dirty，最多在后续安全点重试两次。
+        uint32_t attempt = 0;
         ::qol::extension_bag::ReentryLock lock;
-        if (g_staged_revision == revision) g_staged_revision = 0;
+        if (g_staged_revision == revision) {
+            attempt = ++g_stage_attempts;
+            if (attempt >= kMaxStageAttempts) {
+                QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                              "fail op=slot_data attempts=3 epoch=%llu revision=%llu reason=request_write_exhausted code=%d",
+                              static_cast<unsigned long long>(epoch),
+                              static_cast<unsigned long long>(revision), result.code);
+            } else {
+                g_staged_revision = 0;
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "retry op=slot_data attempt=%u/3 epoch=%llu revision=%llu reason=request_write_failed code=%d",
+                             attempt, static_cast<unsigned long long>(epoch),
+                             static_cast<unsigned long long>(revision), result.code);
+            }
+        }
         return;
     }
+    ::qol::extension_bag::ReentryLock lock;
+    if (g_staged_revision == revision) g_stage_attempts = 0;
 }

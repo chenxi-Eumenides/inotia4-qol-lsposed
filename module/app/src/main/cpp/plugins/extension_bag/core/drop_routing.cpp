@@ -104,7 +104,7 @@ bool route_deferred_extension_to_original_locked(::qol::extension_bag::ReentryLo
         virtual_bag::session_begin_transaction(&session, qol::extension_bag::ui_state().ui.extension_tab_generation) ==
             virtual_bag::DragTransition::kIllegal ||
         !virtual_bag::session_claim_transaction(&session)) {
-        QOL_LOG_WARN(QolDomain::kExtensionBag, "drop deferred ext->orig rejected source=%d/%d target_bag=%d phase=%d",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "drop deferred ext->orig rejected source=%d/%d target_bag=%d phase=%d reason=deferred_domain",
                     session.source_bag, session.source_slot, session.target_bag,
                     static_cast<int>(session.phase));
         return false;
@@ -121,7 +121,7 @@ bool route_deferred_extension_to_original_locked(::qol::extension_bag::ReentryLo
                     src_bag, src_slot, target_bag, -1,
                     static_cast<int>(session.target_kind));
     } else {
-        QOL_LOG_WARN(QolDomain::kExtensionBag, "p5 session drop rejected source=%d/%d target=%d/%d kind=%d deferred=1",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "p5 session drop rejected source=%d/%d target=%d/%d kind=%d deferred=1 reason=session_drop_rejected",
                     src_bag, src_slot, target_bag, -1,
                     static_cast<int>(session.target_kind));
     }
@@ -190,9 +190,17 @@ bool handle_bag_drop_release_locked(::qol::extension_bag::ReentryLock& lock, int
                     qol::extension_bag::ui_state().ui.extension_drag.slot, target_bag,
                     target_slot);
             if (handled) refresh_projected_module_view_after_move_locked();
-            QOL_LOG_INFO(QolDomain::kExtensionBag, "drop result direction=extension->extension handled=%d src=%d/%d dst=%d/%d",
-                        handled ? 1 : 0, qol::extension_bag::ui_state().ui.extension_drag.bag, qol::extension_bag::ui_state().ui.extension_drag.slot,
-                        target_bag, target_slot);
+            if (handled) {
+                QOL_LOG_INFO(QolDomain::kExtensionBag,
+                             "commit op=drop direction=extension->extension source_bag=%d source_slot=%d target_bag=%d target_slot=%d",
+                             qol::extension_bag::ui_state().ui.extension_drag.bag,
+                             qol::extension_bag::ui_state().ui.extension_drag.slot, target_bag, target_slot);
+            } else {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "reject op=drop direction=extension->extension source_bag=%d source_slot=%d target_bag=%d target_slot=%d reason=transaction_failed",
+                             qol::extension_bag::ui_state().ui.extension_drag.bag,
+                             qol::extension_bag::ui_state().ui.extension_drag.slot, target_bag, target_slot);
+            }
             return handled;
         }
         for (int index = 0; index < virtual_bag::active_extension_bags(); ++index) {
@@ -211,9 +219,17 @@ bool handle_bag_drop_release_locked(::qol::extension_bag::ReentryLock& lock, int
                           lock, qol::extension_bag::ui_state().ui.extension_drag.bag,
                           qol::extension_bag::ui_state().ui.extension_drag.slot, index, -1);
             if (handled) refresh_projected_module_view_after_move_locked();
-            QOL_LOG_INFO(QolDomain::kExtensionBag, "drop result direction=extension->tab handled=%d equip=%d src=%d/%d dst_bag=%d",
-                        handled ? 1 : 0, should_equip ? 1 : 0, qol::extension_bag::ui_state().ui.extension_drag.bag,
-                        qol::extension_bag::ui_state().ui.extension_drag.slot, index);
+            if (handled) {
+                QOL_LOG_INFO(QolDomain::kExtensionBag,
+                             "commit op=drop direction=extension->tab source_bag=%d source_slot=%d target_bag=%d target_slot=-1 equip=%d",
+                             qol::extension_bag::ui_state().ui.extension_drag.bag,
+                             qol::extension_bag::ui_state().ui.extension_drag.slot, index, should_equip ? 1 : 0);
+            } else {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "reject op=drop direction=extension->tab source_bag=%d source_slot=%d target_bag=%d target_slot=-1 equip=%d reason=transaction_failed",
+                             qol::extension_bag::ui_state().ui.extension_drag.bag,
+                             qol::extension_bag::ui_state().ui.extension_drag.slot, index, should_equip ? 1 : 0);
+            }
             return handled;
         }
         const int original_target_bag = original_bag_button_index(x, y);
@@ -227,14 +243,23 @@ bool handle_bag_drop_release_locked(::qol::extension_bag::ReentryLock& lock, int
             const bool handled = move_extension_to_original_locked(
                 lock, qol::extension_bag::ui_state().ui.extension_drag.bag, qol::extension_bag::ui_state().ui.extension_drag.slot, original_target_bag);
             if (handled) refresh_projected_module_view_after_move_locked();
-            QOL_LOG_INFO(QolDomain::kExtensionBag, "drop result direction=extension->original handled=%d src=%d/%d target_bag=%d",
-                        handled ? 1 : 0, qol::extension_bag::ui_state().ui.extension_drag.bag, qol::extension_bag::ui_state().ui.extension_drag.slot, original_target_bag);
+            if (handled) {
+                QOL_LOG_INFO(QolDomain::kExtensionBag,
+                             "commit op=drop direction=extension->original source_bag=%d source_slot=%d target_bag=%d target_slot=-1",
+                             qol::extension_bag::ui_state().ui.extension_drag.bag,
+                             qol::extension_bag::ui_state().ui.extension_drag.slot, original_target_bag);
+            } else {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "reject op=drop direction=extension->original source_bag=%d source_slot=%d target_bag=%d target_slot=-1 reason=transaction_failed",
+                             qol::extension_bag::ui_state().ui.extension_drag.bag,
+                             qol::extension_bag::ui_state().ui.extension_drag.slot, original_target_bag);
+            }
             return handled;
         }
-        QOL_LOG_WARN(QolDomain::kExtensionBag, "drop reject extension destination not found x=%lld y=%lld",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "drop reject extension destination not found x=%lld y=%lld reason=no_destination",
                     static_cast<long long>(x), static_cast<long long>(y));
     } else if (runtime_state().objects.bag.mode == virtual_bag::Mode::kModule) {
-        QOL_LOG_WARN(QolDomain::kExtensionBag, "drop reject extension no active drag selected=%d",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "drop reject extension no active drag selected=%d reason=no_active_drag",
                     runtime_state().objects.bag.selected);
     }
     return false;
@@ -267,12 +292,17 @@ bool route_projected_session_drop_locked(::qol::extension_bag::ReentryLock& lock
         virtual_bag::session_finish_transaction(
             &qol::extension_bag::ui_state().ui.extension_drag_session, handled);
         if (handled) refresh_projected_module_view_after_move_locked();
-        QOL_LOG_INFO(QolDomain::kExtensionBag,
-                     "drop result direction=extension->native handled=%d src=%d/%d target_bag=%d",
-                     handled ? 1 : 0,
-                     qol::extension_bag::ui_state().ui.extension_drag_session.source_bag,
-                     qol::extension_bag::ui_state().ui.extension_drag_session.source_slot,
-                     native_target_bag);
+        if (handled) {
+            QOL_LOG_INFO(QolDomain::kExtensionBag,
+                         "commit op=drop direction=extension->native source_bag=%d source_slot=%d target_bag=%d target_slot=-1",
+                         qol::extension_bag::ui_state().ui.extension_drag_session.source_bag,
+                         qol::extension_bag::ui_state().ui.extension_drag_session.source_slot, native_target_bag);
+        } else {
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "reject op=drop direction=extension->native source_bag=%d source_slot=%d target_bag=%d target_slot=-1 reason=transaction_failed",
+                         qol::extension_bag::ui_state().ui.extension_drag_session.source_bag,
+                         qol::extension_bag::ui_state().ui.extension_drag_session.source_slot, native_target_bag);
+        }
         return handled;
     }
     // Tab rects and grid rows overlap in the current UI coordinate space; a tab hit is
@@ -310,7 +340,7 @@ bool route_projected_session_drop_locked(::qol::extension_bag::ReentryLock& lock
             break;
         }
         if (target_bag < 0) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "p5 session target miss x=%lld y=%lld source=%d/%d",
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "p5 session target miss x=%lld y=%lld source=%d/%d reason=target_miss",
                         static_cast<long long>(x), static_cast<long long>(y),
                         qol::extension_bag::ui_state().ui.extension_drag_session.source_bag,
                         qol::extension_bag::ui_state().ui.extension_drag_session.source_slot);
@@ -380,10 +410,19 @@ bool route_projected_session_drop_locked(::qol::extension_bag::ReentryLock& lock
         }
     }
     virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, handled);
-    QOL_LOG_INFO(QolDomain::kExtensionBag, "p5 session drop %s source=%d/%d target=%d/%d kind=%d equip=%d",
-                handled ? "committed" : "rejected",
-                qol::extension_bag::ui_state().ui.extension_drag_session.source_bag, qol::extension_bag::ui_state().ui.extension_drag_session.source_slot,
-                target_bag, target_slot, static_cast<int>(target_kind), should_equip ? 1 : 0);
+    if (handled) {
+        QOL_LOG_INFO(QolDomain::kExtensionBag,
+                     "commit op=drop direction=projected source_bag=%d source_slot=%d target_bag=%d target_slot=%d kind=%d equip=%d",
+                     qol::extension_bag::ui_state().ui.extension_drag_session.source_bag,
+                     qol::extension_bag::ui_state().ui.extension_drag_session.source_slot,
+                     target_bag, target_slot, static_cast<int>(target_kind), should_equip ? 1 : 0);
+    } else {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "reject op=drop direction=projected source_bag=%d source_slot=%d target_bag=%d target_slot=%d kind=%d equip=%d reason=transaction_failed",
+                     qol::extension_bag::ui_state().ui.extension_drag_session.source_bag,
+                     qol::extension_bag::ui_state().ui.extension_drag_session.source_slot,
+                     target_bag, target_slot, static_cast<int>(target_kind), should_equip ? 1 : 0);
+    }
     return handled;
 }
 

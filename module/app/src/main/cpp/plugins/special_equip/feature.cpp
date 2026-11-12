@@ -71,6 +71,8 @@ bool item_category(void* item, int32_t* out) {
 void log_write(int32_t level, const char* format, va_list args) {
     const auto* sdk = host_sdk();
     if (sdk == nullptr || sdk->log.write == nullptr || format == nullptr) return;
+    if (level == 0 &&
+        (sdk->log.debug_enabled == nullptr || sdk->log.debug_enabled() == 0)) return;
     char message[contracts::kMessageCap + 1]{};
     const int length = std::vsnprintf(message, sizeof(message), format, args);
     if (length < 0) return;
@@ -188,7 +190,7 @@ bool deps_ready() {
 
 void log_deps_missing() {
     const auto* game = game_host();
-    log_error("symbols unresolved (item_type=%d equip_level=%d can_change_equip=%d "
+    log_warn("symbols unresolved (item_type=%d equip_level=%d can_change_equip=%d "
               "menu_char=%d); not installed",
               g_item_facts != nullptr && g_item_facts->item_type != nullptr,
               game != nullptr && game->read_only.item.equip_level != nullptr,
@@ -326,7 +328,7 @@ int32_t sell_gate_should_block(void* ctx) {
     int32_t desc_type = -1;
     if (game->read_only.item.equip_desc_role_type(&desc_type).ok != kQolOk) return 1;
     if (!sell_gate_decides_block({desc_type, true, true, can_change != 0})) return 0;
-    log_info("sell rejected: menu char cannot change equip ch=%p", ch);
+    log_warn("sell rejected: menu char cannot change equip ch=%p", ch);
     return 1;
 }
 

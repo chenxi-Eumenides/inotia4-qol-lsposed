@@ -31,7 +31,8 @@ constexpr char kTag[] = "Inotia4Qol";
 constexpr char kDefaultPackage[] =
     "com.com2us.inotia4.normal.freefull.google.global.android.common";
 constexpr size_t kMsgCap = 4096;
-constexpr int64_t kFallbackWindowMs = 1000;
+constexpr size_t kDedupCapacity = 512;
+constexpr size_t kDedupProbeLimit = 16;
 
 struct DomainEntry {
     QolDomain domain;
@@ -155,33 +156,98 @@ private:
     size_t len_ = 0;
 };
 
-constexpr size_t kDomainCount = static_cast<size_t>(QolDomain::kSpecialEquip) + 1;
-
-// INFO 单帧单域预算：写入侧强制，避免任何调用点把逐对象/逐帧明细写成 INFO 后刷爆文件。
-struct InfoFrameBudget {
-    std::atomic<int64_t> frame{-1};
-    std::atomic<uint32_t> used{0};
+struct DedupEntry {
+    uint64_t key_hash = 0;
+    uint64_t msg_hash = 0;
+    int64_t last_ms = 0;
+    int64_t last_frame = -1;
+    int64_t window_start_ms = 0;
+    uint32_t window_count = 0;
+    bool occupied = false;
 };
+DedupEntry g_dedup[kDedupCapacity];
+std::mutex g_dedup_mtx;
+#if !defined(__ANDROID__)
+std::atomic<QolLogTestClock> g_test_clock{nullptr};
+#endif
 
-InfoFrameBudget g_info_budget[kDomainCount];
-
-enum class InfoBudgetVerdict { kAllow, kCapMarker, kDrop };
-
-// 帧号未就绪（启动早期、帧源安装前）不限流：该阶段日志量由初始化次数决定。
-InfoBudgetVerdict info_budget_take(QolDomain domain, int64_t frame) {
-    if (frame < 0) return InfoBudgetVerdict::kAllow;
-    const size_t index = static_cast<size_t>(domain);
-    if (index >= kDomainCount) return InfoBudgetVerdict::kAllow;
-    InfoFrameBudget& budget = g_info_budget[index];
-    if (budget.frame.load(std::memory_order_relaxed) != frame) {
-        budget.frame.store(frame, std::memory_order_relaxed);
-        budget.used.store(0, std::memory_order_relaxed);
+uint64_t hash_bytes(uint64_t hash, const char* value) {
+    if (value != nullptr) for (const unsigned char* p = reinterpret_cast<const unsigned char*>(value); *p; ++p) {
+        hash ^= *p;
+        hash *= 1099511628211ULL;
     }
-    const uint32_t used = budget.used.fetch_add(1, std::memory_order_relaxed);
-    if (used < kQolLogInfoPerFrameCap) return InfoBudgetVerdict::kAllow;
-    // 首次超限留一行标记，让读者知道本帧后续 INFO 被丢弃以及丢弃的是哪个域。
-    if (used == kQolLogInfoPerFrameCap) return InfoBudgetVerdict::kCapMarker;
-    return InfoBudgetVerdict::kDrop;
+    return hash;
+}
+
+uint64_t message_hash(const char* msg) { return hash_bytes(14695981039346656037ULL, msg); }
+uint64_t source_hash(const char* src, QolLogLevel level) {
+    uint64_t hash = hash_bytes(14695981039346656037ULL, src);
+    hash ^= static_cast<uint8_t>(level);
+    return hash * 1099511628211ULL;
+}
+
+int64_t log_now_ms() {
+#if !defined(__ANDROID__)
+    const QolLogTestClock clock = g_test_clock.load(std::memory_order_acquire);
+    if (clock != nullptr) return clock();
+#endif
+    return now_ms();
+}
+
+DedupEntry& find_entry(uint64_t key) {
+    size_t oldest = 0;
+    for (size_t probe = 0; probe < kDedupProbeLimit; ++probe) {
+        const size_t index = (key + probe) % kDedupCapacity;
+        DedupEntry& entry = g_dedup[index];
+        if (entry.occupied && entry.key_hash == key) return entry;
+        if (!entry.occupied) return entry;
+        if (g_dedup[oldest].last_ms > entry.last_ms) oldest = index;
+    }
+    return g_dedup[oldest];
+}
+
+// 返回 true 表示抑制；summary 非空时调用方发射该汇总行。
+bool dedup_suppress(QolLogLevel level, QolDomain domain, const char* src, const char* msg, int64_t now,
+                    int64_t frame, char* summary, size_t summary_cap) {
+    if (level == QolLogLevel::kInfo) return false;
+    const uint64_t key = source_hash(src, level);
+    const uint64_t body = message_hash(msg);
+    std::lock_guard<std::mutex> lock(g_dedup_mtx);
+    DedupEntry& entry = find_entry(key);
+    const bool same = entry.occupied && entry.key_hash == key;
+    if (level == QolLogLevel::kDebug && same && entry.msg_hash == body) return true;
+    if (level == QolLogLevel::kDebug && same && frame >= 0 && frame == entry.last_frame) return true;
+    if (level == QolLogLevel::kDebug && same && now - entry.last_ms < kQolLogDebugMinIntervalMs) return true;
+    if (level == QolLogLevel::kWarn && same && entry.msg_hash == body && now - entry.last_ms < kQolLogWarnWindowMs) return true;
+    if (level == QolLogLevel::kError && same && entry.msg_hash == body && now - entry.last_ms < kQolLogErrorWindowMs) return true;
+    if (!same) {
+        entry = DedupEntry{};
+        entry.occupied = true;
+        entry.key_hash = key;
+        entry.window_start_ms = now;
+    }
+    if (level == QolLogLevel::kError) {
+        if (now - entry.window_start_ms >= kQolLogErrorBurstWindowMs || now < entry.window_start_ms) {
+            entry.window_start_ms = now;
+            entry.window_count = 0;
+        }
+        if (entry.window_count >= kQolLogErrorBurstLimit) {
+            if (entry.window_count == kQolLogErrorBurstLimit) {
+                ++entry.window_count;
+                std::snprintf(summary, summary_cap,
+                              "suppressed level=E domain=%s src=%s count=%u window_ms=%lld",
+                              qol_domain_token(domain), src, entry.window_count,
+                              static_cast<long long>(kQolLogErrorBurstWindowMs));
+                return false;
+            }
+            return true;
+        }
+        ++entry.window_count;
+    }
+    entry.msg_hash = body;
+    entry.last_ms = now;
+    entry.last_frame = frame;
+    return false;
 }
 
 #if defined(__ANDROID__)
@@ -211,31 +277,22 @@ void rotate_locked(int* out_fd) {
 #endif
 
 void emit_line(QolLogLevel level, QolDomain domain, const char* src, const char* msg) {
+    if (level == QolLogLevel::kDebug && !qol_log_debug_enabled()) return;
     if (g_in_emit) return;  // 递归门禁：格式化/日志后端重入直接返回
     g_in_emit = true;
 
     const int64_t frame = qol_log_current_frame();
     if (frame >= 0) g_last_known_frame.store(frame, std::memory_order_release);
-    const char* out_msg = msg;
-    char cap_msg[128];
-    if (level == QolLogLevel::kInfo) {
-        const InfoBudgetVerdict verdict = info_budget_take(domain, frame);
-        if (verdict == InfoBudgetVerdict::kDrop) {
-            g_in_emit = false;
-            return;
-        }
-        if (verdict == InfoBudgetVerdict::kCapMarker) {
-            // 保留越限调用点的 src：封顶标记指向真正刷屏的位置，而不是日志实现自己。
-            std::snprintf(cap_msg, sizeof(cap_msg),
-                          "log INFO cap reached domain=%s frame=%lld limit=%u",
-                          qol_domain_token(domain), static_cast<long long>(frame),
-                          static_cast<unsigned>(kQolLogInfoPerFrameCap));
-            out_msg = cap_msg;
-        }
+    const int64_t now = log_now_ms();
+    char summary[256] = {};
+    if (dedup_suppress(level, domain, src, msg, now, frame, summary, sizeof(summary))) {
+        g_in_emit = false;
+        return;
     }
+    const char* out_msg = summary[0] != '\0' ? summary : msg;
 
     char ts[32];
-    qol_log_format_ts(ts, sizeof(ts), now_ms());
+    qol_log_format_ts(ts, sizeof(ts), now);
 
     char line[5120];
     const int required = qol_log_format(line, sizeof(line), ts, frame,
@@ -334,6 +391,9 @@ void qol_log_set_debug_enabled(bool enabled) {
 #if !defined(__ANDROID__)
 void qol_log_set_host_sink(QolLogHostSink sink) {
     g_host_sink.store(sink, std::memory_order_release);
+}
+void qol_log_set_test_clock(QolLogTestClock fn) {
+    g_test_clock.store(fn, std::memory_order_release);
 }
 #endif
 
@@ -453,53 +513,4 @@ void qol_log_write_kotlin(QolLogLevel level, QolDomain domain, const char* src, 
     char source[160];
     qol_log_normalize_src(source, sizeof(source), src);
     emit_line(level, domain, source, msg == nullptr ? "" : msg);
-}
-
-bool QolLogThrottle::due(int64_t every_frames) {
-    if (every_frames <= 0) every_frames = 1;
-    const int64_t frame = qol_log_current_frame();
-    const int64_t now = now_ms();
-    if (frame >= 0) {
-        if (last_frame == INT64_MIN) {  // 首次放行
-            last_frame = frame;
-            last_ms = now;
-            return true;
-        }
-        // 帧号回退（计数器归零/重开档）时 frame - last_frame 为负，旧逻辑会长时间
-        // 不放行；此处重置基准并立即放行一次，随后从新基准起算。
-        if (frame < last_frame) {
-            last_frame = frame;
-            last_ms = now;
-            return true;
-        }
-        if (frame - last_frame >= every_frames) {
-            last_frame = frame;
-            last_ms = now;
-            return true;
-        }
-        return false;
-    }
-    // 无帧 provider：退化为按时间窗口（首次放行）。
-    // 若此前持有有效帧号而当前帧无效，先重置基准并放行一次；之后的连续无效帧
-    // 仍走 1000ms 时间窗口，帧恢复后按“首次调用”重新放行。
-    if (last_frame != INT64_MIN) {
-        last_frame = INT64_MIN;
-        last_ms = now;
-        return true;
-    }
-    if (last_ms == 0) {
-        last_ms = now;
-        return true;
-    }
-    if (now - last_ms >= kFallbackWindowMs) {
-        last_ms = now;
-        return true;
-    }
-    return false;
-}
-
-bool QolLogChangeGate::changed(int64_t value) {
-    if (value == last) return false;
-    last = value;
-    return true;
 }

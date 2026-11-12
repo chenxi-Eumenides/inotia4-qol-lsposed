@@ -34,6 +34,7 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
 };
 
 std::mutex g_catalog_mutex;
+const contracts::QolHostSdk* g_sdk = nullptr;
 std::map<std::string, std::string> g_assets;
 std::map<std::string, std::string> g_staging_assets;
 uint32_t g_staging_expected_files = 0;
@@ -41,7 +42,14 @@ uint32_t g_staging_expected_bytes = 0;
 uint32_t g_staging_bytes = 0;
 bool g_import_in_progress = false;
 bool g_catalog_ready = false;
-const contracts::QolHostSdk* g_sdk = nullptr;
+bool g_catalog_unavailable_warned = false;
+
+void write_log(int level, const char* message) {
+    if (g_sdk == nullptr || g_sdk->log.write == nullptr || message == nullptr) return;
+    uint32_t length = 0;
+    while (message[length] != '\0') ++length;
+    (void)g_sdk->log.write(level, 1, kPluginId, message, length);
+}
 contracts::QolStaticDataApi g_static_data_api{};
 
 // maps/tiles.json 体积较大且 static.data 调用只读，首次调用时整体解码一次后复用，
@@ -81,7 +89,13 @@ QolResult error_response(contracts::HttpRes* response, uint16_t status, const ch
 QolResult not_found(contracts::HttpRes* response) {
     {
         std::lock_guard<std::mutex> lock(g_catalog_mutex);
-        if (!g_catalog_ready) return error_response(response, 503, "{\"ok\":false,\"error\":\"not ready\"}");
+        if (!g_catalog_ready) {
+            if (!g_catalog_unavailable_warned) {
+                write_log(3, "fail op=static_catalog reason=not_ready result=unavailable");
+                g_catalog_unavailable_warned = true;
+            }
+            return error_response(response, 503, "{\"ok\":false,\"error\":\"not ready\"}");
+        }
     }
     return error_response(response, 404, kNotFound);
 }
@@ -610,8 +624,10 @@ const contracts::PluginDescriptor kDescriptor = {
 const contracts::PluginDescriptor& plugin_descriptor() { return kDescriptor; }
 
 QolResult begin_asset_import(uint32_t expected_files, uint32_t expected_bytes) {
-    if (expected_files > kMaxAssetCount || expected_bytes > kMaxTotalAssetBytes)
+    if (expected_files > kMaxAssetCount || expected_bytes > kMaxTotalAssetBytes) {
+        write_log(2, "reject op=static_import reason=limit_exceeded");
         return invalid_argument("static data import exceeds limits");
+    }
     std::lock_guard<std::mutex> lock(g_catalog_mutex);
     g_staging_assets.clear();
     g_staging_expected_files = expected_files;
@@ -624,14 +640,23 @@ QolResult begin_asset_import(uint32_t expected_files, uint32_t expected_bytes) {
 QolResult import_asset(const char* path, uint32_t path_size, const uint8_t* bytes,
                        uint32_t byte_size) {
     if (!valid_asset_name(path, path_size) || byte_size > kMaxAssetBytes ||
-        (bytes == nullptr && byte_size != 0)) return invalid_argument("invalid static asset");
+        (bytes == nullptr && byte_size != 0)) {
+        write_log(2, "reject op=static_asset reason=invalid_or_oversized");
+        return invalid_argument("invalid static asset");
+    }
     std::lock_guard<std::mutex> lock(g_catalog_mutex);
-    if (!g_import_in_progress) return contracts::error(kQolErrNotReady, "static import not started", 25);
+    if (!g_import_in_progress) {
+        write_log(2, "reject op=static_asset reason=import_not_started");
+        return contracts::error(kQolErrNotReady, "static import not started", 25);
+    }
     const std::string name(path, path_size);
     if (g_staging_assets.find(name) != g_staging_assets.end() ||
         g_staging_assets.size() >= kMaxAssetCount ||
         byte_size > kMaxTotalAssetBytes - g_staging_bytes)
+    {
+        write_log(2, "reject op=static_asset reason=import_limit_exceeded");
         return invalid_argument("static asset import limit exceeded");
+    }
     const char* data = byte_size == 0 ? "" : reinterpret_cast<const char*>(bytes);
     g_staging_assets.emplace(name, std::string(data, byte_size));
     g_staging_bytes += byte_size;
@@ -640,13 +665,17 @@ QolResult import_asset(const char* path, uint32_t path_size, const uint8_t* byte
 
 QolResult finish_asset_import() {
     std::lock_guard<std::mutex> lock(g_catalog_mutex);
-    if (!g_import_in_progress) return contracts::error(kQolErrNotReady, "static import not started", 25);
+    if (!g_import_in_progress) {
+        write_log(2, "reject op=static_import reason=import_not_started");
+        return contracts::error(kQolErrNotReady, "static import not started", 25);
+    }
     if (g_staging_assets.size() != g_staging_expected_files ||
         g_staging_bytes != g_staging_expected_bytes) {
         g_staging_assets.clear();
         g_import_in_progress = false;
         g_catalog_ready = false;
         invalidate_map_cache();
+        write_log(3, "fail op=static_import reason=size_mismatch catalog=unavailable");
         return invalid_argument("static asset import size mismatch");
     }
     g_assets.swap(g_staging_assets);
@@ -654,7 +683,9 @@ QolResult finish_asset_import() {
     g_staging_bytes = 0;
     g_import_in_progress = false;
     g_catalog_ready = true;
+    g_catalog_unavailable_warned = false;
     invalidate_map_cache();
+    write_log(1, "load op=static_import result=ready");
     return contracts::ok();
 }
 
@@ -664,6 +695,10 @@ void cancel_asset_import() {
     g_staging_bytes = 0;
     g_import_in_progress = false;
     g_catalog_ready = false;
+    if (!g_catalog_unavailable_warned) {
+        write_log(2, "degrade op=static_catalog reason=import_cancelled");
+        g_catalog_unavailable_warned = true;
+    }
     invalidate_map_cache();
 }
 

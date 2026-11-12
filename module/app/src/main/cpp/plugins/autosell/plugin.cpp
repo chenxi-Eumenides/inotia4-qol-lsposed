@@ -326,7 +326,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 // 有资源（2 条常驻）但无资源 gate：启停只切业务门禁与 UI 门控；资源物理装卸由宿主负责。
 void plugin_on_enabled(contracts::PluginContext& ctx) {
     if (!acquire_runtime_capabilities(ctx)) {
-        AUTOSELL_LOG_WARN("runtime capability acquisition on enable failed");
+        AUTOSELL_LOG_WARN("runtime capability acquisition on enable failed reason=capability_unavailable");
         apply_gate(false);
         return;
     }

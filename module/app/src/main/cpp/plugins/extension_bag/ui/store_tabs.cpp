@@ -134,7 +134,7 @@ void store_delete_tab_buttons_locked() {
             state = {};
         }
         if (live != 0 && handle != nullptr && !extension_bag_ui_delete_control(handle)) {
-            VIRTBAG_LOG("store tab delete failed control=%p", handle);
+            VIRTBAG_LOG_WARN("store tab delete failed control=%p", handle);
         }
         qol::extension_bag::ui_state().store.tab_buttons[static_cast<size_t>(index)] = nullptr;
     }
@@ -186,12 +186,12 @@ QolResult store_tab_anchor_create(void* parent, qol::contracts::UiRect rect, voi
     }
     void* control = nullptr;
     if (!extension_bag_ui_create_control(parent, &control) || control == nullptr) {
-        VIRTBAG_LOG("store tab create failed index=%d", ctx->index);
+        VIRTBAG_LOG_WARN("store tab create failed index=%d", ctx->index);
         return qol::contracts::error(kQolErrNotReady, "store tab create", 16);
     }
     const auto fail = [control](const char* stage, int index) {
         (void)extension_bag_ui_delete_control(control);
-        VIRTBAG_LOG("store tab install failed index=%d stage=%s", index, stage);
+        VIRTBAG_LOG_WARN("store tab install failed index=%d stage=%s", index, stage);
         return qol::contracts::error(kQolErrNotReady, "store tab setup", 15);
     };
     if (!extension_bag_ui_set_control_proc(control, &store_tab_item_proc)) {
@@ -236,7 +236,7 @@ bool store_refresh_tab_anchors_locked(const qol::contracts::QolUiComponents* com
         if (created != 0 && out_created_any != nullptr) *out_created_any = true;
     }
     if (out_created_any != nullptr && *out_created_any) {
-        VIRTBAG_LOG("store tabs re-anchored root=%p", parent);
+        VIRTBAG_LOG_DEBUG("store tabs re-anchored root=%p", parent);
     }
     return all;
 }

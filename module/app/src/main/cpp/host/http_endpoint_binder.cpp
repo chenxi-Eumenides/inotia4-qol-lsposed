@@ -1,4 +1,5 @@
 #include "host/http_endpoint_binder.h"
+#include "infra/log/qol_log.h"
 
 #include <array>
 #include <cstring>
@@ -486,6 +487,10 @@ void http_endpoint_binder_set_provider_available(bool available) {
         std::lock_guard<std::mutex> lock(g_binder_mutex);
         if (g_provider_available == available) return;
         g_provider_available = available;
+        if (!available) {
+            QOL_LOG_WARN(QolDomain::kApi,
+                         "degrade op=http_provider state=degraded reason=provider_unavailable");
+        }
         if (available) {
             for (uint32_t index = 0; index < kMaxOwners; ++index) {
                 OwnerBinding& binding = g_owners[index];

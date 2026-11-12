@@ -192,7 +192,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     if (g_sdk->hooks.set_intercept == nullptr ||
         g_sdk->hooks.set_intercept(kSellGateResourceId, &sell_gate_should_block, nullptr).ok !=
             kQolOk) {
-        log_error("sell gate unavailable: intercept register rejected id=%s", kSellGateResourceId);
+        log_warn("sell gate unavailable: intercept register rejected id=%s", kSellGateResourceId);
         clear_install_globals();
         return 1;
     }

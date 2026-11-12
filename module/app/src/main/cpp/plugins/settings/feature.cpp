@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 #include "../../contracts/panels.h"
@@ -57,9 +58,12 @@ void panels_bind_sdk(const contracts::QolHostSdk* sdk, contracts::QolOwnerToken 
 bool settings_panels_open(const char* panel_id) {
     if (g_panels_api == nullptr || g_panels_api->open == nullptr) {
         if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
-            static const char kMsg[] = "panels_open skipped: ui_panels capability unavailable";
-            (void)g_sdk->log.write(1, 12, "core.settings/feature.cpp", kMsg,
-                                  static_cast<uint32_t>(sizeof(kMsg) - 1));
+            char message[128]{};
+            std::snprintf(message, sizeof(message),
+                          "panels_open skipped: ui_panels capability unavailable panel=%s reason=capability_unavailable",
+                          panel_id == nullptr ? "none" : panel_id);
+            (void)g_sdk->log.write(2, 12, "core.settings/feature.cpp", message,
+                                  static_cast<uint32_t>(std::strlen(message)));
         }
         return false;
     }

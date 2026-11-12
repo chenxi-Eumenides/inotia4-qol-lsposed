@@ -19,6 +19,8 @@ bool g_thread_api_missing_logged = false;
 void entry_log(int32_t level, const char* format, ...) {
     const auto* sdk = runtime_state().host.sdk;
     if (sdk == nullptr || sdk->log.write == nullptr || format == nullptr) return;
+    if (level == 0 &&
+        (sdk->log.debug_enabled == nullptr || sdk->log.debug_enabled() == 0)) return;
     char message[256]{};
     va_list args;
     va_start(args, format);
@@ -50,8 +52,9 @@ bool extension_bag_entry_active() { return g_entry_depth > 0; }
 EntryGuard::EntryGuard(const char* op, ReentryPolicy policy) : op_(op), policy_(policy) {
     if (!extension_bag_on_main_thread()) {
         ++g_stats.main_thread_violations;
-        entry_log(3, "entry off-main thread op=%s policy=%d",
-                  op_ != nullptr ? op_ : "?", static_cast<int>(policy_));
+        entry_log(2, "entry off-main thread op=%s policy=%d entry=%s reason=off_main_thread",
+                  op_ != nullptr ? op_ : "?", static_cast<int>(policy_),
+                  op_ != nullptr ? op_ : "?");
         return;
     }
     if (g_entry_depth > 0) {
@@ -60,8 +63,9 @@ EntryGuard::EntryGuard(const char* op, ReentryPolicy policy) : op_(op), policy_(
         } else {
             ++g_stats.write_reentries;
         }
-        entry_log(2, "entry reentry op=%s policy=%d",
-                  op_ != nullptr ? op_ : "?", static_cast<int>(policy_));
+        entry_log(2, "entry reentry op=%s policy=%d entry=%s reason=reentrant",
+                  op_ != nullptr ? op_ : "?", static_cast<int>(policy_),
+                  op_ != nullptr ? op_ : "?");
         return;
     }
     g_entry_depth = 1;

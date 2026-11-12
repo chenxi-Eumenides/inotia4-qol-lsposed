@@ -311,7 +311,7 @@ TableAcquireStatus table_acquire_core(const TableAccess& access, TableState* sta
     // 3) 游戏重新装载了静态表（指针被改写回原表）→ 用新原表重新注入。
     //    刻意不释放旧缓冲：游戏可能仍持有指向模块缓冲内部的局部指针，泄漏一份远优于悬空访问。
     if (state->recipe_buffer != nullptr) {
-        core_log(log_fn, 2, "recipe table replaced by game, re-inject count=%u",
+        core_log(log_fn, 1, "recipe table replaced by game, re-inject count=%u",
                  *access.recipe_count_slot);
         state->recipe_buffer = nullptr;
         state->mixture_buffer = nullptr;
@@ -332,7 +332,7 @@ TableAcquireStatus table_acquire_core(const TableAccess& access, TableState* sta
     const uint32_t book_bytes_after =
         recipe_book_bytes(book_count + static_cast<uint32_t>(catalog_len));
     if (book_bytes_before != book_bytes_after) {
-        core_log(log_fn, 3,
+        core_log(log_fn, 2,
                  "recipe book byte size would change (%u -> %u, bit5=%u n=%u); injection refused",
                  book_bytes_before, book_bytes_after, book_count,
                  static_cast<unsigned>(catalog_len));
@@ -361,8 +361,8 @@ TableAcquireStatus table_acquire_core(const TableAccess& access, TableState* sta
             if (new_recipe != nullptr) release(new_recipe);
             if (new_mixture != nullptr) release(new_mixture);
         }
-        core_log(log_fn, 3, "table alloc failed bytes=%zu/%zu", new_recipe_bytes,
-                 new_mixture_bytes);
+        core_log(log_fn, 2, "table alloc failed bytes=%zu/%zu reason=alloc_failed",
+                 new_recipe_bytes, new_mixture_bytes);
         return TableAcquireStatus::kInternal;
     }
 

@@ -343,6 +343,9 @@ QolResult source_import_item(const contracts::QolBagTransfer* transfer, int32_t 
         out->ref = contracts::QolBagRef{kExtensionBagSpaceId, bag};
         out->item = handle;
         out->count = transfer->count;
+        QOL_LOG_INFO(QolDomain::kExtensionBag,
+                     "apply op=bag_source action=import result=committed bag=%d slot=%d count=%d",
+                     bag, slot, transfer->count);
         return contracts::ok();
     }
     if (!module_slot_is_assignable_locked(bag, slot)) {
@@ -379,6 +382,9 @@ QolResult source_import_item(const contracts::QolBagTransfer* transfer, int32_t 
     out->ref = contracts::QolBagRef{kExtensionBagSpaceId, bag};
     out->item = handle;
     out->count = transfer->count;
+    QOL_LOG_INFO(QolDomain::kExtensionBag,
+                 "apply op=bag_source action=import result=committed bag=%d slot=%d count=%d",
+                 bag, slot, transfer->count);
     return contracts::ok();
 }
 
@@ -454,6 +460,9 @@ QolResult source_remove(contracts::QolItemHandle expected, int32_t count,
             qol::extension_bag::ui_state().objects.module_view_index == bag) {
             refresh_module_item_area_locked(bag);
         }
+        QOL_LOG_INFO(QolDomain::kExtensionBag,
+                     "apply op=bag_source action=remove result=committed bag=%d slot=%d count=%d",
+                     bag, slot, count);
         out->ref = contracts::QolBagRef{kExtensionBagSpaceId, bag};
         out->item = expected;
         out->count = count;
@@ -501,6 +510,9 @@ QolResult source_remove(contracts::QolItemHandle expected, int32_t count,
         qol::extension_bag::ui_state().objects.module_view_index == bag) {
         refresh_module_item_area_locked(bag);
     }
+    QOL_LOG_INFO(QolDomain::kExtensionBag,
+                 "apply op=bag_source action=remove result=committed bag=%d slot=%d count=%d",
+                 bag, slot, count);
     out->ref = contracts::QolBagRef{kExtensionBagSpaceId, bag};
     out->item = expected;
     out->count = count;
@@ -597,8 +609,8 @@ QolResult source_replace_item(contracts::QolItemHandle expected,
         refresh_module_item_area_locked(bag);
     }
     QOL_LOG_INFO(QolDomain::kExtensionBag,
-                 "bag source replace bag=%d slot=%d category=%d count=%d",
-                 bag, slot, candidate.category, candidate.count);
+                 "apply op=bag_source action=replace result=committed bag=%d slot=%d count=%d",
+                 bag, slot, candidate.count);
     out->ref = contracts::QolBagRef{kExtensionBagSpaceId, bag};
     out->item = expected;
     out->count = replacement->count;
@@ -644,7 +656,7 @@ QolResult source_use(contracts::QolBagRef ref, int32_t slot) {
         extension_bag_mark_dirty_locked();
         return contracts::ok();
     }
-    VIRTBAG_LOG("bag source use rejected bag=%d slot=%d body=%s", ref.bag, slot, body.c_str());
+    VIRTBAG_LOG_WARN("bag source use rejected bag=%d slot=%d body=%s", ref.bag, slot, body.c_str());
     if (body.find("not in game") != std::string::npos ||
         body.find("slot data not ready") != std::string::npos) {
         return source_error(kQolErrNotReady, "extension bag not ready");

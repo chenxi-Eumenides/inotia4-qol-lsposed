@@ -167,7 +167,7 @@ void log_container_frame_result(bool succeeded, const char* stage) {
     if (g_container_frame_result_logged) return;
     g_container_frame_result_logged = true;
     if (succeeded) {
-        QOL_LOG_SEAM_INFO(kQolLogDomainUi, "container frame first result=ok");
+        QOL_LOG_SEAM_DEBUG(kQolLogDomainUi, "container frame first result=ok");
     } else {
         QOL_LOG_SEAM_WARN(kQolLogDomainUi, "container frame first result=failed stage=%s", stage);
     }

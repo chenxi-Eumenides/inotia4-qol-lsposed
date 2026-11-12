@@ -58,8 +58,7 @@ struct UnequipHostCapacityGuard {
     ~UnequipHostCapacityGuard() {
         if (!active) return;
         if (!set_bag_size_word_locked(bag, projected_word)) {
-            QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                          "ERROR unequip host capacity restore failed bag=%d word=0x%x",
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "ERROR unequip host capacity restore failed bag=%d word=0x%x",
                           bag, projected_word);
         }
     }
@@ -85,21 +84,21 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(::qol::extension_bag::Ree
     }
     if (::qol::extension_bag::access::host().game == nullptr || ::qol::extension_bag::access::host().write_port->inventory.create_item == nullptr ||
         ::qol::extension_bag::access::host().write_port->inventory.save_item_on_empty == nullptr) {
-        VIRTBAG_LOG("extension unequip symbols unavailable bag=%d", internal_bag);
+        VIRTBAG_LOG_WARN("extension unequip symbols unavailable bag=%d", internal_bag);
         return ExtensionBagUnequipResult::kFailed;
     }
     void* item = nullptr;
     if (!qol::contracts::succeeded(::qol::extension_bag::access::host().write_port->inventory.create_item(
             static_cast<int32_t>(::qol::extension_bag::access::bag().types[internal_bag]), 0, 0, 0, &item)) ||
         item == nullptr) {
-        VIRTBAG_LOG("extension unequip create item failed bag=%d", internal_bag);
+        VIRTBAG_LOG_WARN("extension unequip create item failed bag=%d", internal_bag);
         return ExtensionBagUnequipResult::kFailed;
     }
     // P4.3：全新对象立即入账本；分配失败立即真释放（尚未暴露，安全）。
     uint32_t item_handle = 0;
     if (ownership::allocate(&qol::extension_bag::ui_state().objects.ownership_ledger, &item_handle) != ownership::Outcome::kOk) {
         release_temporary_item_locked(item);
-        VIRTBAG_LOG("extension unequip ledger exhausted bag=%d", internal_bag);
+        VIRTBAG_LOG_WARN("extension unequip ledger exhausted bag=%d", internal_bag);
         return ExtensionBagUnequipResult::kFailed;
     }
     // 袋对象 +0x10 的 bit0..24 是容量，ITEMSYSTEM_CreateItem（0x10be9c）已按
@@ -115,7 +114,7 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(::qol::extension_bag::Ree
             !qol::contracts::succeeded(count_api->write_encoded_field(
                 item, ::qol::features::extension_bag::write_native_bag_object_marker(flags)))) {
             release_temporary_item_locked(item);
-            VIRTBAG_LOG("extension unequip bag marker write failed bag=%d", internal_bag);
+            VIRTBAG_LOG_WARN("extension unequip bag marker write failed bag=%d", internal_bag);
             return ExtensionBagUnequipResult::kFailed;
         }
     }
@@ -132,7 +131,7 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(::qol::extension_bag::Ree
             const uint32_t real_word = (projected_word & ~kCapacityMask) | real_capacity;
             if (!set_bag_size_word_locked(host_bag, real_word)) {
                 release_tracked_item_locked(item_handle, item, "unequip host capacity");
-                VIRTBAG_LOG("extension unequip host capacity write failed bag=%d", host_bag);
+                VIRTBAG_LOG_WARN("extension unequip host capacity write failed bag=%d", host_bag);
                 return ExtensionBagUnequipResult::kFailed;
             }
             host_capacity_guard.bag = host_bag;
@@ -218,13 +217,11 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(::qol::extension_bag::Ree
             if (qol::extension_bag::ui_state().objects.module_view_installed && qol::extension_bag::ui_state().objects.module_view_index == adopt_bag) {
                 refresh_module_item_area_locked(adopt_bag);
             }
-            VIRTBAG_LOG("extension unequip adopt bag=%d type=%d dst=%d/%d", internal_bag,
-                        static_cast<int>(adopted_type), adopt_bag, adopt_slot);
             return ExtensionBagUnequipResult::kOk;
         }
         // persist 失败：回滚收编与袋装备态，对象真释放。
         if (!module_object_generation_advance_locked(adopt_bag, adopt_slot, "unequip rollback")) {
-            VIRTBAG_LOG("extension unequip rollback blocked by active object bag=%d slot=%d",
+            VIRTBAG_LOG_WARN("extension unequip rollback blocked by active object bag=%d slot=%d",
                         adopt_bag, adopt_slot);
             return ExtensionBagUnequipResult::kPersistFailed;
         }
@@ -238,7 +235,7 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(::qol::extension_bag::Ree
         virtual_bag::normalize(&::qol::extension_bag::access::bag());
         release_tracked_item_locked(item_handle, item, "unequip adopt rollback");
         persist_state_locked();
-        VIRTBAG_LOG("extension unequip adopt persist failed bag=%d dst=%d/%d", internal_bag,
+        VIRTBAG_LOG_WARN("extension unequip adopt persist failed bag=%d dst=%d/%d", internal_bag,
                     adopt_bag, adopt_slot);
         return ExtensionBagUnequipResult::kPersistFailed;
     }
@@ -253,8 +250,6 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(::qol::extension_bag::Ree
     if (persist_state_locked()) {
         // P4.3：persist 成功 = 提交点，此刻才移交原版库存（终态）。
         handover_tracked_item_locked(item_handle, item, "unequip handover");
-        VIRTBAG_LOG("extension unequip ok bag=%d type=%d receiving=%d", internal_bag,
-                    static_cast<int>(saved_type), receiving_bag);
         return ExtensionBagUnequipResult::kOk;
     }
     bool rolled_back = false;
@@ -277,13 +272,10 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(::qol::extension_bag::Ree
         ::qol::extension_bag::access::bag().isolation_now_ms = isolation_now_ms_locked();
         virtual_bag::normalize(&::qol::extension_bag::access::bag());
         persist_state_locked();
-        VIRTBAG_LOG("extension unequip persist failed; rolled back bag=%d", internal_bag);
         return ExtensionBagUnequipResult::kPersistFailed;
     }
     // 回滚未确认：对象去向不明，按 handover 记账（inventory-owned 终态，审计可见）。
     handover_tracked_item_locked(item_handle, item, "unequip rollback uncertain");
-    VIRTBAG_LOG("extension unequip rollback failed bag=%d receiving=%d", internal_bag,
-                receiving_bag);
     return ExtensionBagUnequipResult::kFailed;
 }
 
@@ -299,11 +291,27 @@ bool extension_handle_original_bag_unequip() {
                            ::qol::extension_bag::access::bag().selected == ext_bag &&
                            ::qol::extension_bag::access::bag().info_bag == ext_bag;
     if (!owns_desc) {
-        VIRTBAG_LOG("extension desc unequip stale rejected ext_bag=%d", ext_bag);
+        VIRTBAG_LOG_WARN("extension desc unequip stale rejected ext_bag=%d", ext_bag);
         return true;
     }
     const ExtensionBagUnequipResult result = unequip_extension_bag_locked(lock, ext_bag);
-    VIRTBAG_LOG("extension desc unequip bag=%d result=%d", ext_bag, static_cast<int>(result));
+    if (result == ExtensionBagUnequipResult::kOk) {
+        QOL_LOG_INFO(QolDomain::kExtensionBag,
+                     "commit op=bag_unequip bag=%d result=committed", ext_bag);
+    } else {
+        const char* reason = "failed";
+        switch (result) {
+            case ExtensionBagUnequipResult::kNotEquipped: reason = "not_equipped"; break;
+            case ExtensionBagUnequipResult::kNotEmpty: reason = "not_empty"; break;
+            case ExtensionBagUnequipResult::kNoSpace: reason = "no_space"; break;
+            case ExtensionBagUnequipResult::kPersistFailed: reason = "persist_failed"; break;
+            case ExtensionBagUnequipResult::kFailed: reason = "operation_failed"; break;
+            case ExtensionBagUnequipResult::kOk: break;
+        }
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "reject op=bag_unequip bag=%d result=rejected reason=%s",
+                     ext_bag, reason);
+    }
     if (result == ExtensionBagUnequipResult::kNotEmpty ||
         result == ExtensionBagUnequipResult::kNoSpace) {
         const auto* sdk = ::qol::extension_bag::access::host().sdk;
@@ -340,7 +348,8 @@ bool extension_handle_character_equip() {
     const bool equipped = equip_module_item_on_character_locked(
         lock, character, item, source_bag, source_slot);
     if (!equipped) {
-        VIRTBAG_LOG("extension character equip rejected bag=%d slot=%d", source_bag, source_slot);
+        VIRTBAG_LOG_WARN("op=equip_detail result=rejected bag=%d slot=%d item=%p reason=%s",
+                         source_bag, source_slot, item, "equip_rejected");
         const auto* sdk = ::qol::extension_bag::access::host().sdk;
         if (sdk != nullptr && sdk->ui != nullptr && sdk->ui->show_text_popup != nullptr) {
             (void)sdk->ui->show_text_popup(6);
@@ -393,7 +402,7 @@ bool extension_handle_backpack_equip() {
         (!virtual_bag::valid_index(source_bag) || source_slot < 0 ||
          source_slot >= virtual_bag::kSlotCount ||
          qol::extension_bag::ui_state().objects.module_objects[source_bag][source_slot] != item)) {
-        QOL_LOG_INFO(QolDomain::kExtensionBag,
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
                      "backpack equip probe rejected stale identity bag=%d slot=%d item=%p",
                      source_bag, source_slot, item);
         return false;
@@ -412,7 +421,7 @@ bool extension_handle_backpack_equip() {
     int category = 0;
     (void)read_item_category(item, &category);
     if (!item_type_is(item, qol::contracts::QolItemType::kBackpack)) {
-        QOL_LOG_INFO(QolDomain::kExtensionBag,
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
                      "backpack equip probe rejected category=%d bag=%d slot=%d",
                      category, source_bag, source_slot);
         return false;
@@ -432,7 +441,7 @@ bool extension_handle_backpack_equip() {
         if (extras == nullptr || extras->read.empty_bag_slot == nullptr ||
             !qol::contracts::succeeded(extras->read.empty_bag_slot(&native_slot)) ||
             native_slot < 1 || native_slot > 4) {
-            QOL_LOG_INFO(QolDomain::kExtensionBag,
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
                          "backpack native equip fallback stage=slot_unavailable src=%d/%d slot=%d",
                          source_bag, source_slot, native_slot);
         } else if (payload_size <= 0 ||

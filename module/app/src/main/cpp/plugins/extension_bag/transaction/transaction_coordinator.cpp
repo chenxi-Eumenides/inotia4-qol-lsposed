@@ -23,12 +23,12 @@ bool txn_record_pending_locked(virtual_bag::TransactionContext* txn) {
     virtual_bag::txn_build_pending(txn);
     if (!virtual_bag::valid_pending_transfer_domain(txn->pending) ||
         !virtual_bag::valid_pending_transfer_payload(txn->pending)) {
-        VIRTBAG_LOG("txn pending reject id=%s reason=invalid_domain", txn->transaction_id);
+        VIRTBAG_LOG_WARN("txn pending reject id=%s reason=invalid_domain", txn->transaction_id);
         return false;
     }
     runtime_state().objects.bag.pending = txn->pending;
     extension_bag_mark_dirty_locked();
-    VIRTBAG_LOG("txn stage=pending-recorded durable=false id=%s direction=%u src=%u/%u dst=%u/%u",
+    VIRTBAG_LOG_DEBUG("txn stage=pending-recorded durable=false id=%s direction=%u src=%u/%u dst=%u/%u",
                 txn->transaction_id, static_cast<unsigned int>(txn->direction),
                 static_cast<unsigned int>(txn->src_bag),
                 static_cast<unsigned int>(txn->src_slot),
@@ -95,12 +95,10 @@ void txn_abort_locked(const virtual_bag::TransactionContext& txn,
                       virtual_bag::TxnStage failed_at, const char* reason) {
     virtual_bag::txn_rollback_logical(&runtime_state().objects.bag, txn, failed_at);
     extension_bag_mark_dirty_locked();
-    VIRTBAG_LOG("txn abort stage=%d id=%s reason=%s direction=%u src=%u/%u dst=%u/%u",
-                static_cast<int>(failed_at), txn.transaction_id, reason,
-                static_cast<unsigned int>(txn.direction),
-                static_cast<unsigned int>(txn.src_bag),
-                static_cast<unsigned int>(txn.src_slot),
-                static_cast<unsigned int>(txn.dst_bag),
-                static_cast<unsigned int>(txn.dst_slot));
+    QOL_LOG_INFO(QolDomain::kExtensionBag,
+                 "op=tx result=rolled_back tx=%s src=%u/%u dst=%u/%u reason=%s",
+                 txn.transaction_id, static_cast<unsigned int>(txn.src_bag),
+                 static_cast<unsigned int>(txn.src_slot), static_cast<unsigned int>(txn.dst_bag),
+                 static_cast<unsigned int>(txn.dst_slot), reason);
 }
 

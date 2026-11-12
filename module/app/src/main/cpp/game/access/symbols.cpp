@@ -245,7 +245,7 @@ uintptr_t resolve_hook_entry_follow(const char* symbol_name, bool* out_followed)
         if (!g_follow_refused_logged.exchange(true)) {
             QOL_LOG_SEAM_WARN(kQolLogDomainCore,
                               "hook entry follow refused symbol=%s entry=0x%llx target=0x%llx "
-                              "reason=target not distinct/executable",
+                              "reason=target not distinct/executable reason=target_not_distinct_or_executable",
                               symbol_name, static_cast<unsigned long long>(entry),
                               static_cast<unsigned long long>(target));
         }
@@ -260,7 +260,7 @@ uintptr_t resolve_hook_entry_follow(const char* symbol_name, bool* out_followed)
         if (!g_follow_refused_logged.exchange(true)) {
             QOL_LOG_SEAM_WARN(kQolLogDomainCore,
                               "hook entry follow refused symbol=%s entry=0x%llx target=0x%llx "
-                              "reason=stub first instruction",
+                              "reason=stub first instruction reason=stub_first_instruction",
                               symbol_name, static_cast<unsigned long long>(entry),
                               static_cast<unsigned long long>(target));
         }
@@ -269,9 +269,9 @@ uintptr_t resolve_hook_entry_follow(const char* symbol_name, bool* out_followed)
 
     if (out_followed != nullptr) *out_followed = true;
     QOL_LOG_SEAM_INFO(kQolLogDomainCore,
-                      "hook entry followed symbol=%s entry=0x%llx target=0x%llx",
-                      symbol_name, static_cast<unsigned long long>(entry),
-                      static_cast<unsigned long long>(target));
+                      "op=follow_hook symbol=%s entry=%p target=%p",
+                      symbol_name, reinterpret_cast<void*>(entry),
+                      reinterpret_cast<void*>(target));
     return target;
 }
 
@@ -294,32 +294,32 @@ uintptr_t resolve_hook_entry(const char* symbol_name, bool* out_followed) {
     if (export_name != nullptr) {
         *followed = false;
         if (export_name[0] == '\0') {
-            QOL_LOG_SEAM_ERROR(kQolLogDomainCore,
-                               "hook entry resolve failed elf-export=<empty> claim=%s",
+            QOL_LOG_SEAM_WARN(kQolLogDomainCore,
+                               "hook entry resolve failed elf-export=<empty> claim=%s reason=empty_elf_export",
                                symbol_name);
             return 0;
         }
         const uintptr_t offset = g_resolver.resolveFunctionByName(export_name);
         if (offset == 0) {
-            QOL_LOG_SEAM_ERROR(kQolLogDomainCore,
-                               "hook entry resolve failed elf-export=%s reason=export not found",
+            QOL_LOG_SEAM_WARN(kQolLogDomainCore,
+                               "hook entry resolve failed elf-export=%s reason=export not found reason=export_not_found",
                                export_name);
             return 0;
         }
         const uintptr_t address = g_base + offset;
         if ((address & 0x3u) != 0 ||
             !game_memory_accessible(reinterpret_cast<void*>(address), 4, 'x')) {
-            QOL_LOG_SEAM_ERROR(kQolLogDomainCore,
+            QOL_LOG_SEAM_WARN(kQolLogDomainCore,
                                "hook entry resolve failed elf-export=%s reason=not executable "
-                               "address=0x%llx",
+                               "address=0x%llx reason=address_not_executable",
                                export_name,
                                static_cast<unsigned long long>(address));
             return 0;
         }
         const uintptr_t entry = hookable_entry(address, followed);
         if (entry == 0) {
-            QOL_LOG_SEAM_ERROR(kQolLogDomainCore,
-                               "hook entry resolve failed elf-export=%s reason=hookable check",
+            QOL_LOG_SEAM_WARN(kQolLogDomainCore,
+                               "hook entry resolve failed elf-export=%s reason=hookable check reason=hookable_check_failed",
                                export_name);
         }
         return entry;
@@ -329,18 +329,18 @@ uintptr_t resolve_hook_entry(const char* symbol_name, bool* out_followed) {
         const uintptr_t symbol_entry = g_base + fn_resolve(entry.name, entry.vma);
         const uintptr_t resolved = hookable_entry(symbol_entry, followed);
         if (resolved == 0) {
-            QOL_LOG_SEAM_ERROR(kQolLogDomainCore,
+            QOL_LOG_SEAM_WARN(kQolLogDomainCore,
                                "hook entry resolve failed symbol=%s vma=0x%llx "
-                               "reason=not executable (check game/access/symbols registration)",
+                               "reason=not executable (check game/access/symbols registration) reason=symbol_not_executable",
                                symbol_name,
                                static_cast<unsigned long long>(symbol_entry));
         }
         return resolved;
     }
     *followed = false;
-    QOL_LOG_SEAM_ERROR(kQolLogDomainCore,
+    QOL_LOG_SEAM_WARN(kQolLogDomainCore,
                        "hook entry resolve failed symbol=%s reason=not registered in "
-                       "game/access/symbols kHookEntrySymbols",
+                       "game/access/symbols kHookEntrySymbols reason=symbol_not_registered",
                        symbol_name);
     return 0;
 }

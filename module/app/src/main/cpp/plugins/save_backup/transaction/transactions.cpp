@@ -349,7 +349,7 @@ bool parse_trash_index(const std::string& index_path, std::vector<TrashEntry>& o
         if (line.empty()) continue;
         const size_t tab = line.find('\t');
         if (tab == std::string::npos || tab == 0 || tab + 1 >= line.size()) {
-            SB_LOG_WARN("delete recovery: invalid index entry in %s", index_path.c_str());
+            SB_LOG_WARN("delete recovery: invalid index entry in %s reason=invalid_index", index_path.c_str());
             return false;
         }
         const std::string trash_dir = line.substr(0, tab);
@@ -363,7 +363,7 @@ bool parse_trash_index(const std::string& index_path, std::vector<TrashEntry>& o
         if (trash_dir.empty() || orig_path.empty() || traverses(trash_dir) ||
             traverses(orig_path) || trash_dir.find("/.sb-trash-") == std::string::npos ||
             file_name_of(orig_path).empty()) {
-            SB_LOG_WARN("delete recovery: rejected index entry in %s", index_path.c_str());
+            SB_LOG_WARN("delete recovery: rejected index entry in %s reason=unsafe_index_entry", index_path.c_str());
             return false;
         }
         out.push_back(TrashEntry{trash_dir + "/" + file_name_of(orig_path), orig_path});
@@ -378,13 +378,13 @@ bool restore_trash_entries(const std::vector<TrashEntry>& entries) {
         const TrashEntry& entry = *it;
         if (!file_exists(entry.trash_path)) continue;  // 已删除或已移回
         if (file_exists(entry.orig_path)) {
-            SB_LOG_WARN("delete recovery: target exists, keep trash file: %s",
+            SB_LOG_WARN("delete recovery: target exists, keep trash file: %s reason=target_exists",
                         entry.orig_path.c_str());
             complete = false;
             continue;
         }
         if (::rename(entry.trash_path.c_str(), entry.orig_path.c_str()) != 0) {
-            SB_LOG_WARN("delete recovery: rename back failed: %s", entry.trash_path.c_str());
+            SB_LOG_WARN("delete recovery: rename back failed: %s reason=rename_failed", entry.trash_path.c_str());
             complete = false;
         }
     }
@@ -433,12 +433,12 @@ void recover_orphan_sidecar_trash(const std::string& saves_dir) {
         for (const std::string& name : names) {
             const std::string orig = saves_dir + "/" + name;
             if (file_exists(orig)) {
-                SB_LOG_WARN("delete recovery: target exists, keep trash file: %s", orig.c_str());
+                SB_LOG_WARN("delete recovery: target exists, keep trash file: %s reason=target_exists", orig.c_str());
                 complete = false;
                 continue;
             }
             if (::rename((trash_dir + "/" + name).c_str(), orig.c_str()) != 0) {
-                SB_LOG_WARN("delete recovery: rename back failed: %s", orig.c_str());
+                SB_LOG_WARN("delete recovery: rename back failed: %s reason=rename_failed", orig.c_str());
                 complete = false;
             }
         }
@@ -466,11 +466,11 @@ void recover_deletes() {
         for (const std::string& index_path : indexes) {
             std::vector<TrashEntry> entries;
             if (!parse_trash_index(index_path, entries)) {
-                SB_LOG_WARN("delete recovery: unreadable index: %s", index_path.c_str());
+                SB_LOG_WARN("delete recovery: unreadable index: %s reason=read_failed", index_path.c_str());
                 continue;
             }
             if (!restore_trash_entries(entries)) {
-                SB_LOG_WARN("delete recovery: incomplete, keep index: %s", index_path.c_str());
+                SB_LOG_WARN("delete recovery: incomplete, keep index: %s reason=recovery_incomplete", index_path.c_str());
                 continue;
             }
             for (const TrashEntry& entry : entries) {
@@ -480,7 +480,7 @@ void recover_deletes() {
                 }
             }
             remove_file(index_path);
-            SB_LOG("delete recovery: restored %zu file(s) from %s", entries.size(),
+            SB_LOG("delete recovery: restored %zu file(s) from %s op=restore result=success", entries.size(),
                    index_path.c_str());
         }
     }
@@ -635,7 +635,7 @@ void slot_deleted_sync(int32_t slot) {
             remove_file(index_path);
             cleanup_trash_dirs();
         } else {
-            SB_LOG_WARN("slot delete hook: rollback incomplete, keep %s", index_path.c_str());
+            SAVE_BACKUP_LOG_ERROR("slot delete hook: rollback incomplete, keep %s", index_path.c_str());
         }
         slot_operation_release(&guard);
         save_backup::port::mark_stale();
@@ -674,6 +674,7 @@ std::string import_bundle_file(const std::string& path, int slot) {
             meta_checksum != save_backup::compute_checksum(parsed.bundle_version, parsed.orig_plain,
                                                            parsed.module, parsed.warehouse_blob,
                                                            parsed.c18_native_bag_blob)) {
+            SAVE_BACKUP_LOG_ERROR("fail op=verify reason=checksum_mismatch");
             return result_error("backup checksum mismatch");
         }
         // module_state：新备份显式 0/1；旧备份无字段时按 module 是否为空推断。
@@ -698,7 +699,7 @@ std::string import_bundle_file(const std::string& path, int slot) {
             (target_c18_layout == save_backup::C18NativeBagLayout::kLegacy192 ||
              target_c18_layout == save_backup::C18NativeBagLayout::kModern96);
         if (parsed.has_c18_native_bag && !target_has_c18_bag) {
-            SB_LOG("save backup import: slot%d C18 bag image skipped: layout=%d reason=%s",
+            SAVE_BACKUP_LOG_DEBUG("save backup import: slot%d C18 bag image skipped: layout=%d reason=%s",
                    slot, static_cast<int>(target_c18_layout),
                    c18_target_known ? "target_layout_has_no_native_bag"
                                     : identity_error.c_str());
@@ -710,7 +711,7 @@ std::string import_bundle_file(const std::string& path, int slot) {
                 return result_error("C18 bag image invalid");
             }
             parsed.has_c18_native_bag = true;
-            SB_LOG("save backup import: slot%d missing C18 bag image, materialized empty image (%s)",
+            SB_LOG("save backup import: slot%d missing C18 bag image, materialized empty image (%s) fallback=empty_c18_bag",
                    slot, target_c18_version.c_str());
         }
     }
@@ -798,7 +799,7 @@ std::string import_bundle_file(const std::string& path, int slot) {
                 }
             }
         } else {
-            SB_LOG("save backup import: slot%d warehouse companion skipped: state=%s files=%zu",
+            SB_LOG("save backup import: slot%d warehouse companion skipped: state=%s files=%zu fallback=skip_warehouse",
                    slot, save_backup::port::warehouse_state_name(target_state),
                    parsed.warehouse.size());
         }
@@ -1074,7 +1075,7 @@ std::string import_bundle_file(const std::string& path, int slot) {
     save_backup::entry_from_bundle(name, parsed, entry);
     entry.map_name = save_backup::state::mapName(entry.map_id);
     entry.class_name = save_backup_class_name(entry.class_idx);
-    SB_LOG("save backup imported: %s -> slot%d", name.c_str(), slot);
+    SB_LOG("save backup imported: %s -> slot%d op=restore result=success", name.c_str(), slot);
     // 目标槽文件已被覆盖：槽区结构不再代表磁盘状态，下一次读取必须重载。
     save_backup::port::mark_stale();
     return save_backup::api::entry_response(entry);
@@ -1103,13 +1104,14 @@ std::string delete_json(const char* checksum) {
          meta_checksum != save_backup::compute_checksum(parsed.bundle_version, parsed.orig_plain,
                                                         parsed.module, parsed.warehouse_blob,
                                                         parsed.c18_native_bag_blob)) {
+        SAVE_BACKUP_LOG_ERROR("fail op=verify reason=checksum_mismatch");
         return result_error("backup checksum mismatch");
     }
     if (::unlink(path.c_str()) != 0) {
-        SB_LOG("save backup delete failed: %s", path.c_str());
+        SB_LOG_WARN("save backup delete failed: %s reason=delete_failed", path.c_str());
         return result_error("delete failed");
     }
-    SB_LOG("save backup deleted: %s", path.c_str());
+    SB_LOG("save backup deleted: %s op=delete_backup result=success", path.c_str());
     return save_backup::api::delete_response();
 }
 
@@ -1211,7 +1213,7 @@ std::string delete_slot_json(int slot) {
             remove_file(index_path);
             cleanup_trash_dirs();
         } else {
-            SB_LOG_WARN("slot delete rollback incomplete, keep %s", index_path.c_str());
+            SAVE_BACKUP_LOG_ERROR("slot delete rollback incomplete, keep %s", index_path.c_str());
         }
         slot_operation_release(&guard);
         return result_error(message);
@@ -1250,14 +1252,14 @@ std::string delete_slot_json(int slot) {
                 if (sidecar_existed) {
                     if (guard.api->abi.minor < 1 ||
                         guard.api->delete_container_to_trash == nullptr) {
-                        SB_LOG_WARN("save slot delete: trash api unavailable slot=%d", slot);
+                        SB_LOG_WARN("save slot delete: trash api unavailable slot=%d reason=api_unavailable", slot);
                         return fail_after_moves("delete sidecar failed");
                     }
                     const QolResult status = guard.api->delete_container_to_trash(
                         guard.api->host_ctx, save_backup::state::snapshot().owner, &guard.lease, slot,
                         sidecar_trash.c_str());
                     if (!qol::contracts::succeeded(status)) {
-                        SB_LOG("save slot delete sidecar move failed: slot=%d", slot);
+                        SB_LOG_WARN("save slot delete sidecar move failed: slot=%d reason=move_failed", slot);
                         return fail_after_moves("delete sidecar failed");
                     }
                 }
@@ -1267,7 +1269,7 @@ std::string delete_slot_json(int slot) {
                     const std::string source = save_dir + "/" + wh_name;
                     const std::string target = dat_trash + "/" + wh_name;
                     if (::rename(source.c_str(), target.c_str()) != 0) {
-                        SB_LOG("save slot delete wh4 move failed: %s", source.c_str());
+                        SB_LOG_WARN("save slot delete wh4 move failed: %s reason=move_failed", source.c_str());
                         return fail_after_moves("delete save failed");
                     }
                 }
@@ -1278,7 +1280,7 @@ std::string delete_slot_json(int slot) {
     for (const std::string& c18_path : c18_paths) {
         const std::string target = dat_trash + "/" + file_name_of(c18_path);
         if (::rename(c18_path.c_str(), target.c_str()) != 0) {
-            SB_LOG("save slot delete c18 move failed: %s", c18_path.c_str());
+            SB_LOG_WARN("save slot delete c18 move failed: %s reason=move_failed", c18_path.c_str());
             return fail_after_moves("delete save failed");
         }
     }
@@ -1287,12 +1289,12 @@ std::string delete_slot_json(int slot) {
     for (const TrashEntry& entry : entries) {
         if (!file_exists(entry.trash_path)) continue;
         if (unlink_file(entry.trash_path) != 0 && errno != ENOENT) {
-            SB_LOG("save slot delete unlink failed: %s", entry.trash_path.c_str());
+            SB_LOG_WARN("save slot delete unlink failed: %s reason=unlink_failed", entry.trash_path.c_str());
             if (restore_trash_entries(entries)) {
                 remove_file(index_path);
                 cleanup_trash_dirs();
             } else {
-                SB_LOG_WARN("slot delete rollback incomplete, keep %s", index_path.c_str());
+                SAVE_BACKUP_LOG_ERROR("slot delete rollback incomplete, keep %s", index_path.c_str());
             }
             slot_operation_release(&guard);
             return result_error("delete incomplete");

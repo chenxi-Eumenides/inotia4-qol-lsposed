@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -66,7 +67,10 @@ static void note_thread_contract(const char* entry) {
     if (g_game->thread.is_main_thread() != 0) return;
     static std::atomic<bool> reported{false};
     if (reported.exchange(true)) return;
-    table_log_line(2, entry);
+    char message[128]{};
+    std::snprintf(message, sizeof(message),
+                  "wrong thread entry=%s reason=main_thread_contract", entry);
+    table_log_line(2, message);
 }
 
 QolResult custom_recipe_table_acquire() {
@@ -88,7 +92,18 @@ void custom_recipe_table_deactivate() {
     note_thread_contract("wrong thread entry=recipe_table deactivate");
     const TableAccess access = resolve_access();
     if (access.base == 0) return;
-    (void)table_deactivate_core(access, &g_state);
+    const bool injected_table_active =
+        g_state.recipe_buffer != nullptr && access.recipe_ptr_slot != nullptr &&
+        *access.recipe_ptr_slot == g_state.recipe_buffer && access.recipe_count_slot != nullptr &&
+        *access.recipe_count_slot != g_state.base_record_count_cache;
+    const TableAcquireStatus status = table_deactivate_core(access, &g_state);
+    if (injected_table_active && status == TableAcquireStatus::kOk) {
+        char message[128]{};
+        std::snprintf(message, sizeof(message),
+                      "restore op=recipe_table result=restored records=%u",
+                      static_cast<unsigned int>(g_state.base_record_count_cache));
+        table_log_line(1, message);
+    }
 }
 
 }  // namespace custom_recipe

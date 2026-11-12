@@ -66,17 +66,17 @@ const contracts::CapabilityRequirement kOptionalHttpRequires[] = {
                                              contracts::kHttpDispatchVersion.minor}},
 };
 
-void log_message(const contracts::QolHostSdk* sdk, const char* message) {
+void log_message(const contracts::QolHostSdk* sdk, const char* message, int level = 1) {
     if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
     uint32_t length = 0;
     while (message[length] != '\0') ++length;
-    (void)sdk->log.write(1, 1, kPluginId, message, length);
+    (void)sdk->log.write(level, 1, kPluginId, message, length);
 }
 
 void warn_snapshot_failure() {
     if (!g_snapshot_failure_warned) {
         constexpr char kMessage[] =
-            "[core.system] snapshot read failed or exceeded capacity; keeping previous snapshot";
+            "fail op=snapshot_read kind=system reason=read_failed_or_capacity keep=previous";
         if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
             (void)g_sdk->log.write(2, 1, kPluginId, kMessage, sizeof(kMessage) - 1);
         }
@@ -121,9 +121,11 @@ void update_snapshot() {
         warn_snapshot_failure();
         return;
     }
+    const bool recovered = g_snapshot_failure_warned;
     next.state = SnapshotState::kReady;
     g_snapshot.publish(next);
     g_snapshot_failure_warned = false;
+    if (recovered) log_message(g_sdk, "restore op=snapshot_read kind=system result=ready");
 }
 
 int32_t frame_tick(int64_t, void*) {
@@ -242,21 +244,20 @@ int plugin_install(contracts::PluginContext& ctx) {
     SystemSnapshot empty_snapshot{};
     g_snapshot.publish(empty_snapshot);
     g_snapshot_failure_warned = false;
-    log_message(g_sdk, "[core.system] provider install");
+    log_message(g_sdk, "op=install provider=core.system result=ok");
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     stop_frame_task(ctx.sdk);
     g_snapshot.destroy();
-    log_message(ctx.sdk, "[core.system] provider deactivate");
     g_port = nullptr;
     g_sdk = nullptr;
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
+    (void)ctx;
     if (!g_snapshot.initialize(g_sdk)) {
-        log_message(ctx.sdk, "[core.system] snapshot unavailable");
         return;
     }
     SystemSnapshot empty_snapshot{};
@@ -268,16 +269,13 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
                 1, &frame_tick, nullptr, kSnapshotIntervalFrames, 0, &task))) {
             g_frame_task = task;
         } else {
-            log_message(ctx.sdk, "[core.system] snapshot scheduler unavailable");
         }
     }
-    log_message(ctx.sdk, "[core.system] provider enabled: http queries");
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     stop_frame_task(ctx.sdk);
     g_snapshot.destroy();
-    log_message(ctx.sdk, "[core.system] provider disabled: http queries withdrawn");
 }
 
 void plugin_fill_status(contracts::PluginStatusOut& out) {

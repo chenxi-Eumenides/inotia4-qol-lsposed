@@ -29,6 +29,15 @@ QolResult unsupported(const char* message, uint32_t size) {
     return contracts::error(kQolErrUnsupported, message, size);
 }
 
+void log_transfer_failure(const contracts::QolBagRef& from, int32_t from_slot,
+                         const contracts::QolBagRef& to, int32_t to_slot,
+                         contracts::QolItemHandle item, int32_t count, const char* reason) {
+    QOL_LOG_WARN(QolDomain::kInventory,
+                 "fail op=transfer from=%d/%d/%d to=%d/%d/%d item=%u/%u count=%d reason=%s",
+                 from.space_id, from.bag, from_slot, to.space_id, to.bag, to_slot,
+                 item.slot, item.generation, count, reason);
+}
+
 QolResult internal_error() {
     static constexpr char kMessage[] = "item transfer rollback failed";
     return contracts::error(kQolErrInternal, kMessage,
@@ -167,12 +176,16 @@ QolResult move_item(const contracts::QolBagRef& from, int32_t from_slot, int32_t
                                    : &source_transport::export_item;
     const QolResult exported = export_source(from.space_id, source_item.item, count, &transfer);
     if (!contracts::succeeded(exported)) {
+        log_transfer_failure(from, from_slot, to, to_slot, source_item.item, count,
+                             "serialize_failed");
         return exported;
     }
     if (transfer.category != source_item.category || transfer.count != count ||
         transfer.payload_size == 0 ||
         transfer.payload_size > contracts::kQolBagTransferPayloadMaxSize) {
         static constexpr char kMessage[] = "source returned invalid transfer payload";
+        log_transfer_failure(from, from_slot, to, to_slot, source_item.item, count,
+                             "invalid_payload");
         return contracts::error(kQolErrInternal, kMessage,
                                 static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
@@ -201,12 +214,20 @@ QolResult move_item(const contracts::QolBagRef& from, int32_t from_slot, int32_t
                 // 同袋移动时 resolver 会命中源槽本身（同槽身份恒等）；回退纯空槽
                 // 扫描，禁止把自己并进自己。
                 const QolResult selected = find_empty_slot(to, &target_slot);
-                if (!contracts::succeeded(selected)) return selected;
+                if (!contracts::succeeded(selected)) {
+                    log_transfer_failure(from, from_slot, to, to_slot, source_item.item, count,
+                                         "inventory_full");
+                    return selected;
+                }
             }
         } else {
             // resolver 无目标（scope 已满）时回退纯空槽扫描，保持原错误语义。
             const QolResult selected = find_empty_slot(to, &target_slot);
-            if (!contracts::succeeded(selected)) return selected;
+            if (!contracts::succeeded(selected)) {
+                log_transfer_failure(from, from_slot, to, to_slot, source_item.item, count,
+                                     "inventory_full");
+                return selected;
+            }
         }
     }
 
@@ -217,15 +238,14 @@ QolResult move_item(const contracts::QolBagRef& from, int32_t from_slot, int32_t
     const QolResult imported =
         import_target(transfer, to.space_id, to.bag, target_slot, &target_result);
     if (!contracts::succeeded(imported)) {
+        log_transfer_failure(from, from_slot, to, target_slot, source_item.item, count,
+                             "import_failed");
         return imported;
     }
     if (!valid_handle(target_result.item) || target_result.ref.space_id != to.space_id ||
         target_result.ref.bag != to.bag || target_result.count != count) {
-        QOL_LOG_ERROR(QolDomain::kInventory,
-                      "transfer target mismatch to=%d/%d/%d item=%u/%u count=%d expected=%d",
-                      target_result.ref.space_id, target_result.ref.bag, to_slot,
-                      target_result.item.slot, target_result.item.generation,
-                      target_result.count, count);
+        log_transfer_failure(from, from_slot, to, target_slot, source_item.item, count,
+                             "target_mismatch");
         return internal_error();
     }
 
@@ -243,12 +263,14 @@ QolResult move_item(const contracts::QolBagRef& from, int32_t from_slot, int32_t
         const QolResult compensated = remove_target(to.space_id, target_result.item, count,
                                                      &compensation);
         if (contracts::succeeded(compensated)) {
+            log_transfer_failure(from, from_slot, to, target_slot, source_item.item, count,
+                                 "source_remove_failed");
             return removed;
         }
         QOL_LOG_ERROR(QolDomain::kInventory,
-                      "transfer rollback failed from=%d/%d/%d to=%d/%d/%d "
-                      "source=%u/%u target=%u/%u count=%d",
-                      from.space_id, from.bag, from_slot, to.space_id, to.bag, to_slot,
+                      "fail op=transfer from=%d/%d/%d to=%d/%d/%d source=%u/%u "
+                      "target=%u/%u count=%d reason=rollback_failed",
+                      from.space_id, from.bag, from_slot, to.space_id, to.bag, target_slot,
                       source_item.item.slot, source_item.item.generation,
                       target_result.item.slot, target_result.item.generation, count);
         return internal_error();

@@ -159,7 +159,7 @@ void draw_tab_buttons_in_frame_locked() {
     static int last_rendered_cap_count = 0;
     if (active > virtual_bag::kMaxRenderedExtensionBagTabs &&
         last_rendered_cap_count != active) {
-        VIRTBAG_LOG("tab layout rendered cap reached count=%d", active);
+        VIRTBAG_LOG_DEBUG("tab layout rendered cap reached count=%d", active);
         last_rendered_cap_count = active;
     } else if (active <= virtual_bag::kMaxRenderedExtensionBagTabs) {
         last_rendered_cap_count = 0;
@@ -377,7 +377,7 @@ void virtual_bag_draw_end_locked(int inventory_state, ::qol::extension_bag::Reen
     static int previous_state = -1;
     const int old_state = previous_state;
     if (old_state != inventory_state) {
-        VIRTBAG_LOG("draw-end state edge previous=%d current=%d gen=%llu", old_state,
+        VIRTBAG_LOG_DEBUG("draw-end state edge previous=%d current=%d gen=%llu", old_state,
                     inventory_state, static_cast<unsigned long long>(qol::extension_bag::ui_state().ui.inventory_generation));
     }
     previous_state = inventory_state;

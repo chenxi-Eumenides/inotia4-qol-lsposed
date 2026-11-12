@@ -69,7 +69,8 @@ bool transition_dispatch_init() {
         g_tick_registered.store(false, std::memory_order_release);  // 允许后续重试
         return false;
     }
-    QOL_LOG_INFO(QolDomain::kPlatform, "logic-pre consumer registered");
+    QOL_LOG_INFO(QolDomain::kPlatform,
+                 "op=register_consumer consumer=logic_pre result=ok");
     return true;
 }
 
@@ -109,7 +110,8 @@ bool transition_run(std::function<void(std::string*)> fn, int timeout_ms, std::s
             g_pending.reset();  // 尚未被消费：安全取消
             g_in_flight.store(false, std::memory_order_release);
             lock.unlock();
-            QOL_LOG_WARN(QolDomain::kPlatform, "transition timeout (cancelled)");
+            QOL_LOG_WARN(QolDomain::kPlatform,
+                         "transition timeout (cancelled) reason=timeout");
             if (result != nullptr) *result = "transition timeout";
             return false;
         }

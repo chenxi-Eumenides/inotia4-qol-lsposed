@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 #include "../../contracts/character_attributes.h"
 #include "../../contracts/game_host.h"
@@ -65,6 +66,19 @@ std::atomic<bool> g_active{false};
 std::atomic<bool> g_overview_enabled{true};
 uint32_t g_page = 0;
 uint32_t g_page_count = 1;  // enter 前也安全（绘制不会发生）
+
+void log_panel_event(int32_t level, const char* message) {
+    const contracts::QolHostSdk* sdk = host_sdk();
+    if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
+    (void)sdk->log.write(level, 1, "character_panel", message,
+                         static_cast<uint32_t>(std::strlen(message)));
+}
+
+void set_panel_active(bool active) {
+    if (g_active.exchange(active, std::memory_order_acq_rel) == active) return;
+    log_panel_event(1, active ? "open panel=character_overview result=entered"
+                              : "close panel=character_overview result=closed");
+}
 
 // 每行一次的读取快照：ok=false 时该行显示 `--`，不影响其它行。
 struct Snapshot {
@@ -185,6 +199,9 @@ void read_snapshot_impl() {
         contracts::succeeded(g_attributes->snapshot(ref, &attributes)) &&
         attributes.present != 0) {
         snapshot_ok = true;
+    }
+    if (!snapshot_ok) {
+        log_panel_event(2, "fail op=snapshot_read panel=character_overview result=failed reason=snapshot_unavailable");
     }
     for (uint32_t section = 0; section < kSectionCount; ++section) {
         const SectionSpec& spec = kSections[section];
@@ -418,7 +435,7 @@ bool overview_provider_open() {
 
 void overview_provider_close() {
     destroy_controls();
-    g_active.store(false, std::memory_order_release);
+    set_panel_active(false);
 }
 
 bool overview_provider_active() { return g_active.load(std::memory_order_acquire); }
@@ -435,7 +452,7 @@ void overview_panel_enter() {
     g_page_count = kPageCount;
     g_page = 0;
     read_snapshot_impl();
-    g_active.store(true, std::memory_order_release);
+    set_panel_active(true);
 }
 
 void overview_panel_process() {
@@ -459,7 +476,7 @@ void overview_panel_process() {
 void overview_panel_f3() {
     // 游戏侧主动终止：只销毁本页控件，pop/restore 仍由 PopupHost 处理。
     destroy_controls();
-    g_active.store(false, std::memory_order_release);
+    set_panel_active(false);
 }
 
 void overview_panel_f4() {}

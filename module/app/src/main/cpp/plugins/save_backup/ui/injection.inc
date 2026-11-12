@@ -28,7 +28,7 @@ static void execute_export(int slot) {
         refresh_panel_data();
     } else {
         char error[96];
-        SB_UI_LOG("export failed: slot=%d error=%s", slot,
+        SAVE_BACKUP_LOG_WARN("export failed: slot=%d error=%s", slot,
                   response_error_text(response, error, sizeof(error), "未知错误"));
     }
 }
@@ -40,7 +40,7 @@ static void open_export_dialog() {
         if (g_selected_slot >= 0 && g_slots[g_selected_slot].exists) slot = g_selected_slot;
     }
     if (slot < 0) {
-        SB_UI_LOG("export unavailable: no occupied slot selected");
+        SAVE_BACKUP_LOG_WARN("export unavailable: no occupied slot selected");
         return;
     }
     {
@@ -100,7 +100,7 @@ static bool open_confirmation(const std::string& message) {
 static void reject_confirmation_open() {
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
     clear_pending_locked();
-    SB_UI_LOG("confirmation open failed");
+    SAVE_BACKUP_LOG_WARN("confirmation open failed");
 }
 
 static void open_import_dialog() {
@@ -109,7 +109,7 @@ static void open_import_dialog() {
         const BackupEntry* entry = g_selected_auto ? (g_auto_backup_valid ? &g_auto_backup : nullptr)
                                                    : selected_manual_backup();
         if (g_selected_slot < 0 || entry == nullptr) {
-            SB_UI_LOG("import unavailable: selected slot or backup is invalid");
+            SAVE_BACKUP_LOG_WARN("import unavailable: selected slot or backup is invalid");
             return;
         }
         g_dialog = DialogKind::kImport;
@@ -134,7 +134,7 @@ static void open_delete_dialog() {
         const bool slot_selected = g_selected_slot >= 0;
         const BackupEntry* entry = selected_manual_backup();
         if (slot_selected == (entry != nullptr) || g_selected_auto) {
-            SB_UI_LOG("delete unavailable: selection is invalid");
+            SAVE_BACKUP_LOG_WARN("delete unavailable: selection is invalid");
             return;
         }
         g_dialog = slot_selected ? DialogKind::kDeleteSlot : DialogKind::kDeleteBackup;
@@ -160,7 +160,7 @@ static void open_delete_dialog() {
 static void open_export_download_dialog() {
     const auto* api = contracts::public_export_if_available(save_backup_host_sdk());
     if (api == nullptr) {
-        SB_UI_LOG("export to download unavailable: public_export api not ready");
+        SAVE_BACKUP_LOG_WARN("export to download unavailable: public_export api not ready");
         return;
     }
     std::string path;
@@ -172,7 +172,7 @@ static void open_export_download_dialog() {
             std::string dir;
             if (!::save_backup::persistence::backup_dir(
                     ::save_backup::state::snapshot().external_dir, dir)) {
-                SB_UI_LOG("export to download unavailable: backup dir unresolved");
+                SAVE_BACKUP_LOG_WARN("export to download unavailable: backup dir unresolved");
                 return;
             }
             path = dir + "/" + manual->name;
@@ -181,13 +181,13 @@ static void open_export_download_dialog() {
             const std::optional<std::string> auto_path = ::save_backup::persistence::auto_backup_path(
                 ::save_backup::state::snapshot().external_dir, g_selected_slot);
             if (!auto_path.has_value()) {
-                SB_UI_LOG("export to download unavailable: auto backup file missing");
+                SAVE_BACKUP_LOG_DEBUG("export to download unavailable: auto backup file missing");
                 return;
             }
             path = *auto_path;
             name = g_auto_backup.name;
         } else {
-            SB_UI_LOG("export to download unavailable: no backup selected");
+            SAVE_BACKUP_LOG_WARN("export to download unavailable: no backup selected");
             return;
         }
         g_dialog = DialogKind::kExportDownload;
@@ -204,11 +204,11 @@ static void open_export_download_dialog() {
 static void pick_import_file_via_host() {
     const auto* api = contracts::public_export_if_available(save_backup_host_sdk());
     if (api == nullptr) {
-        SB_UI_LOG("import from file unavailable: public_export api not ready");
+        SAVE_BACKUP_LOG_WARN("import from file unavailable: public_export api not ready");
         return;
     }
     if (!contracts::succeeded(api->pick_import_file())) {
-        SB_UI_LOG("import from file failed: picker unavailable");
+        SAVE_BACKUP_LOG_WARN("import from file failed: picker unavailable");
     }
 }
 
@@ -239,9 +239,9 @@ static void execute_dialog_confirm() {
         // Download 副本不在本面板列表内，无需刷新面板数据。
         const auto* api = contracts::public_export_if_available(save_backup_host_sdk());
         if (api == nullptr || !contracts::succeeded(api->export_backup(path.c_str(), name.c_str()))) {
-            SB_UI_LOG("export to download failed: %s", name.c_str());
+            SAVE_BACKUP_LOG_WARN("reject op=backup_export reason=enqueue_failed name=%s", name.c_str());
         } else {
-            SB_UI_LOG("export to download queued: %s", name.c_str());
+            SAVE_BACKUP_LOG_INFO("dispatch op=backup_export result=queued name=%s", name.c_str());
         }
         return;
     }
@@ -264,7 +264,7 @@ static void execute_dialog_confirm() {
         SB_UI_LOG("%s succeeded", kind == DialogKind::kImport ? "import" : "delete");
     } else {
         char error[96];
-        SB_UI_LOG("%s failed: %s", kind == DialogKind::kImport ? "import" : "delete",
+        SAVE_BACKUP_LOG_WARN("%s failed: %s", kind == DialogKind::kImport ? "import" : "delete",
                   response_error_text(response, error, sizeof(error), "未知错误"));
     }
     if (ok) {

@@ -483,17 +483,17 @@ QolResult write_character_state_json(contracts::QolCharacterStateKind kind, char
     return contracts::ok();
 }
 
-void log_message(const contracts::QolHostSdk* sdk, const char* message) {
+void log_message(const contracts::QolHostSdk* sdk, const char* message, int level = 1) {
     if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
     uint32_t length = 0;
     while (message[length] != '\0') ++length;
-    (void)sdk->log.write(1, 1, kPluginId, message, length);
+    (void)sdk->log.write(level, 1, kPluginId, message, length);
 }
 
 void warn_snapshot_read_failure() {
     if (g_snapshot_read_warning_active) return;
     g_snapshot_read_warning_active = true;
-    constexpr char kMessage[] = "[core.character] snapshot read failed; keeping last snapshot";
+    constexpr char kMessage[] = "fail op=snapshot_read kind=character reason=read_failed keep=previous";
     if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
         (void)g_sdk->log.write(2, 1, kPluginId, kMessage, sizeof(kMessage) - 1);
     }
@@ -529,6 +529,7 @@ void update_snapshot() {
         warn_snapshot_read_failure();
         return;
     }
+    const bool recovered = g_snapshot_read_warning_active;
     g_snapshot_read_warning_active = false;
     // 非 world 态四类原生体均为 {"error":"not in game"}；任意一类报错即整轮不可用。
     if (is_error_body(next.player, next.player_size) ||
@@ -537,10 +538,12 @@ void update_snapshot() {
         is_error_body(next.mercenaries, next.mercenaries_size)) {
         next.state = SnapshotState::kNotInGame;
         g_snapshot.publish(next);
+        if (recovered) log_message(g_sdk, "restore op=snapshot_read kind=character result=not_in_game");
         return;
     }
     next.state = SnapshotState::kReady;
     g_snapshot.publish(next);
+    if (recovered) log_message(g_sdk, "restore op=snapshot_read kind=character result=ready");
 }
 
 int32_t frame_tick(int64_t, void*) {
@@ -1840,7 +1843,9 @@ bool char_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
                 body += "," + role_result + "}";
             }
         }
-        return write_truncated_result(out, capacity, out_size, body);
+        const bool completed = write_truncated_result(out, capacity, out_size, body);
+        if (completed) log_message(g_sdk, "apply op=character_write kind=batch result=committed");
+        return completed;
     }
 
     QolResult result = contracts::ok();
@@ -2045,7 +2050,16 @@ bool char_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
         default:
             return false;
     }
-    return write_truncated_result(out, capacity, out_size, body);
+    const bool completed = write_truncated_result(out, capacity, out_size, body);
+    if (completed) {
+        char message[96] = {};
+        std::snprintf(message, sizeof(message), "apply op=character_write kind=%d role=%d result=committed",
+                      p.kind, p.i0);
+        log_message(g_sdk, message);
+    } else {
+        log_message(g_sdk, "fail op=character_write reason=result_buffer_too_small", 2);
+    }
+    return completed;
 }
 
 bool initialize_http_routes() {
@@ -2124,7 +2138,7 @@ void stop_frame_task(const contracts::QolHostSdk* sdk) {
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     if (!initialize_http_routes()) {
-        log_message(g_sdk, "[core.character] http route table mismatch");
+        log_message(g_sdk, "fail op=install provider=core.character reason=route_table_mismatch", 2);
         g_sdk = nullptr;
         return 1;
     }
@@ -2211,14 +2225,13 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         return 1;
     }
-    log_message(g_sdk, "[core.character] provider install");
+    log_message(g_sdk, "install provider=core.character result=ok");
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     stop_frame_task(ctx.sdk);
     g_snapshot.destroy();
-    log_message(ctx.sdk, "[core.character] provider deactivate");
     if (g_sdk != nullptr && g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
         (void)g_sdk->ticket_result.unregister_typed_result_handler(kCharWriteHandlerId);
     }
@@ -2230,8 +2243,8 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
+    (void)ctx;
     if (!g_snapshot.initialize(g_sdk)) {
-        log_message(ctx.sdk, "[core.character] snapshot unavailable");
         return;
     }
     CharacterSnapshot empty_snapshot{};
@@ -2242,16 +2255,13 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
                 g_sdk->scheduler.add(1, &frame_tick, nullptr, kSnapshotIntervalFrames, 0, &task))) {
             g_frame_task = task;
         } else {
-            log_message(ctx.sdk, "[core.character] snapshot scheduler unavailable");
         }
     }
-    log_message(ctx.sdk, "[core.character] provider enabled: capability + http queries");
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     stop_frame_task(ctx.sdk);
     g_snapshot.destroy();
-    log_message(ctx.sdk, "[core.character] provider disabled: capability + http queries withdrawn");
 }
 
 void plugin_fill_status(contracts::PluginStatusOut& out) {

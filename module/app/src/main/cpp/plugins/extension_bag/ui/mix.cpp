@@ -140,7 +140,7 @@ void mix_delete_tab_buttons_locked() {
             state = {};
         }
         if (live != 0 && handle != nullptr && !extension_bag_ui_delete_control(handle)) {
-            VIRTBAG_LOG("mix tab delete failed control=%p", handle);
+            VIRTBAG_LOG_WARN("mix tab delete failed control=%p", handle);
         }
         qol::extension_bag::ui_state().mix.tab_buttons[static_cast<size_t>(index)] = nullptr;
     }
@@ -202,12 +202,12 @@ QolResult mix_tab_anchor_create(void* parent, qol::contracts::UiRect rect, void*
     }
     void* control = nullptr;
     if (!extension_bag_ui_create_control(parent, &control) || control == nullptr) {
-        VIRTBAG_LOG("mix tab create failed index=%d", ctx->index);
+        VIRTBAG_LOG_WARN("mix tab create failed index=%d", ctx->index);
         return qol::contracts::error(kQolErrNotReady, "mix tab create", 14);
     }
     const auto fail = [control](const char* stage, int index) {
         (void)extension_bag_ui_delete_control(control);
-        VIRTBAG_LOG("mix tab install failed index=%d stage=%s", index, stage);
+        VIRTBAG_LOG_WARN("mix tab install failed index=%d stage=%s", index, stage);
         return qol::contracts::error(kQolErrNotReady, "mix tab setup", 13);
     };
     if (!extension_bag_ui_set_control_proc(control, &mix_tab_item_proc)) {
@@ -248,7 +248,7 @@ bool mix_refresh_tab_anchors_locked(const qol::contracts::QolUiComponents* compo
         if (created != 0 && out_created_any != nullptr) *out_created_any = true;
     }
     if (out_created_any != nullptr && *out_created_any) {
-        VIRTBAG_LOG("mix tabs re-anchored root=%p", parent);
+        VIRTBAG_LOG_DEBUG("mix tabs re-anchored root=%p", parent);
     }
     return all;
 }
@@ -349,7 +349,7 @@ void mix_refresh_item_after_unlock() {
 
     const auto* api = extension_bag_write_api();
     if (api == nullptr || api->ui.refresh_mix_item == nullptr) {
-        VIRTBAG_LOG("mix item refresh failed reason=missing-adapter");
+        VIRTBAG_LOG_WARN("mix item refresh failed reason=missing-adapter");
         lock.lock();
         if (refresh_generation == qol::extension_bag::ui_state().mix.refresh_generation) mix_request_item_refresh_locked();
         return;
@@ -363,7 +363,7 @@ void mix_refresh_item_after_unlock() {
         refresh_result = api->ui.refresh_mix_item();
     }
     if (!qol::contracts::succeeded(refresh_result)) {
-        VIRTBAG_LOG("mix item refresh failed code=%d", refresh_result.code);
+        VIRTBAG_LOG_WARN("mix item refresh failed code=%d", refresh_result.code);
         lock.lock();
         if (refresh_generation == qol::extension_bag::ui_state().mix.refresh_generation) mix_request_item_refresh_locked();
         return;
@@ -384,7 +384,7 @@ void mix_refresh_item_after_unlock() {
     if (!qol::extension_bag::ui_state().mix.view_installed) return;
     void* live_root = mix_item_root_locked();
     if (live_root == nullptr) {
-        VIRTBAG_LOG("mix item refresh completed without item root; retry scheduled");
+        VIRTBAG_LOG_WARN("mix item refresh completed without item root; retry scheduled reason=missing_item_root");
         mix_request_item_refresh_locked();
         return;
     }
@@ -399,7 +399,7 @@ void mix_install_module_view_locked(int bag) {
     if (qol::extension_bag::ui_state().ui.backup_control_item_set_item == nullptr ||
         qol::extension_bag::ui_state().ui.backup_control_item_get_item == nullptr ||
         qol::extension_bag::ui_state().ui.backup_get_bag_size == nullptr) {
-        VIRTBAG_LOG("mix view rejected display hooks unavailable set=%d get=%d size=%d",
+        VIRTBAG_LOG_WARN("mix view rejected display hooks unavailable set=%d get=%d size=%d",
                     qol::extension_bag::ui_state().ui.backup_control_item_set_item != nullptr,
                     qol::extension_bag::ui_state().ui.backup_control_item_get_item != nullptr,
                     qol::extension_bag::ui_state().ui.backup_get_bag_size != nullptr);
@@ -411,7 +411,7 @@ void mix_install_module_view_locked(int bag) {
     if (qol::extension_bag::ui_state().mix.view_installed) mix_restore_module_view_locked();
     uint32_t size_word = 0;
     if (!bag_size_word_locked(host, &size_word)) {
-        VIRTBAG_LOG("mix view rejected host bag=%d", host);
+        VIRTBAG_LOG_WARN("mix view rejected host bag=%d", host);
         return;
     }
 
@@ -440,12 +440,12 @@ void mix_install_module_view_locked(int bag) {
     qol::extension_bag::ui_state().mix.view_installed = true;
     ++qol::extension_bag::ui_state().mix.view_generation;
     mix_request_item_refresh_locked();
-    VIRTBAG_LOG("mix view installed bag=%d window=%d capacity=%d", bag, host,
-                ::qol::extension_bag::access::bag().capacities[bag]);
+    VIRTBAG_LOG("op=mix_view result=installed bag=%d", bag);
 }
 
 void mix_restore_module_view_locked() {
     if (!qol::extension_bag::ui_state().mix.view_installed) return;
+    const int restored_bag = qol::extension_bag::ui_state().mix.view_bag;
     VIRTBAG_LOG("mix restore view bag=%d window=%d current=%d state=%d",
                 qol::extension_bag::ui_state().mix.view_bag, qol::extension_bag::ui_state().mix.window_original_bag, original_bag_locked(), mix_state_locked());
     if (virtual_bag::valid_index(qol::extension_bag::ui_state().mix.view_bag)) {
@@ -464,6 +464,7 @@ void mix_restore_module_view_locked() {
     qol::extension_bag::ui_state().mix.view_bag = -1;
     qol::extension_bag::ui_state().mix.view_installed = false;
     ++qol::extension_bag::ui_state().mix.view_generation;
+    VIRTBAG_LOG("op=mix_view result=restored bag=%d", restored_bag);
     mix_request_item_refresh_locked();
 }
 
@@ -604,7 +605,7 @@ void mix_draw_end_wrapper() {
             static int last_mix_state = -2;
             if (last_mix_state != mix_state) {
                 last_mix_state = mix_state;
-                VIRTBAG_LOG("mix state edge state=%d installed=%d bag=%d window=%d current=%d",
+                VIRTBAG_LOG_DEBUG("mix state edge state=%d installed=%d bag=%d window=%d current=%d",
                             mix_state, qol::extension_bag::ui_state().mix.view_installed ? 1 : 0, qol::extension_bag::ui_state().mix.view_bag,
                             qol::extension_bag::ui_state().mix.window_original_bag, original_bag_locked());
             }

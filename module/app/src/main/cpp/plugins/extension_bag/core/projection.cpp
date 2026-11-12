@@ -144,8 +144,7 @@ void* module_item_locked(int bag, int slot) {
         // to provider ownership; the fallback registers truly fresh items.
         if (!extension_bag_rebind_item_handle(item)) {
             (void)extension_free_item(item);
-            QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                          "module materialize rejected item handle registration bag=%d slot=%d",
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "module materialize rejected item handle registration bag=%d slot=%d",
                           bag, slot);
             return nullptr;
         }
@@ -370,8 +369,7 @@ bool install_module_view_locked(int bag) {
                 void* control = controls[static_cast<size_t>(slot)];
                 if (control != nullptr && valid_child_locked(live_root, slot) == control &&
                     !extension_bag_ui_set_control_item(control, nullptr)) {
-                    QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                                  "ERROR module view rollback control clear failed bag=%d slot=%d control=%p",
+                    QOL_LOG_WARN(QolDomain::kExtensionBag, "ERROR module view rollback control clear failed bag=%d slot=%d control=%p",
                                   bag, slot, control);
                 }
             }
@@ -383,8 +381,7 @@ bool install_module_view_locked(int bag) {
             const uint32_t handle = borrowed_handles[static_cast<size_t>(index)];
             if (ownership::return_from_view(&qol::extension_bag::ui_state().objects.ownership_ledger, handle) !=
                 ownership::Outcome::kOk) {
-                QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                              "ERROR module view rollback ownership return failed bag=%d handle=%u",
+                QOL_LOG_WARN(QolDomain::kExtensionBag, "ERROR module view rollback ownership return failed bag=%d handle=%u",
                               bag, handle);
             }
         }
@@ -395,8 +392,7 @@ bool install_module_view_locked(int bag) {
         qol::extension_bag::ui_state().objects.projected_item_root = nullptr;
         qol::extension_bag::ui_state().objects.module_view_installed = false;
         qol::extension_bag::ui_state().objects.module_view_index = -1;
-        QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                      "ERROR module view install rejected bag=%d reason=%s",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "ERROR module view install rejected bag=%d reason=%s",
                       bag, reason);
         return false;
     };
@@ -470,7 +466,9 @@ bool install_module_view_locked(int bag) {
     qol::extension_bag::ui_state().objects.module_view_installed = true;
     qol::extension_bag::ui_state().objects.module_view_index = bag;
     qol::features::extension_bag::extension_bag_display_commit();
-    QOL_LOG_DEBUG(QolDomain::kExtensionBag, "module view installed bag=%d window=%d capacity=%d", bag, original_bag, capacity);
+    QOL_LOG_INFO(QolDomain::kExtensionBag,
+                 "install op=module_view result=installed bag=%d window=%d capacity=%d",
+                 bag, original_bag, capacity);
     return true;
 }
 
@@ -491,8 +489,7 @@ bool ensure_module_view_root_current_locked() {
     restore_module_view_locked();
     if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) return false;
     if (!install_module_view_locked(bag)) {
-        QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                      "ERROR module view root reinstallation failed bag=%d", bag);
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "ERROR module view root reinstallation failed bag=%d", bag);
         return false;
     }
     return true;
@@ -510,23 +507,20 @@ void refresh_projection_if_overwritten_locked() {
         void* item = qol::extension_bag::ui_state().objects.module_objects[bag][slot];  // 空槽为 nullptr，同样需要清空控件
         void* ctrl = valid_child_locked(qol::extension_bag::ui_state().objects.projected_item_root, slot);
         if (ctrl == nullptr) {
-            QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                          "ERROR projection refresh child disappeared bag=%d slot=%d",
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "ERROR projection refresh child disappeared bag=%d slot=%d",
                           bag, slot);
             return;
         }
         void* data = extension_bag_ui_data(ctrl);
         if (data == nullptr) {
-            QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                          "ERROR projection refresh control data missing bag=%d slot=%d control=%p",
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "ERROR projection refresh control data missing bag=%d slot=%d control=%p",
                           bag, slot, ctrl);
             return;
         }
         void* current = *reinterpret_cast<void**>(data);
         if (current != item) {
             if (!extension_bag_ui_set_control_item(ctrl, item)) {
-                QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                              "ERROR projection refresh binding failed bag=%d slot=%d control=%p item=%p",
+                QOL_LOG_WARN(QolDomain::kExtensionBag, "ERROR projection refresh binding failed bag=%d slot=%d control=%p item=%p",
                               bag, slot, ctrl, item);
                 return;
             }
@@ -616,6 +610,7 @@ struct RefreshRestoreSuppressScope {
 
 void restore_module_view_locked() {
     if (!qol::extension_bag::ui_state().objects.module_view_installed) return;
+    const int restored_bag = qol::extension_bag::ui_state().objects.module_view_index;
     RefreshRestoreSuppressScope suppress_refresh;
     // P4.3：视图借出逐槽归还（安装时借出的槽位必须成对归还，窗口外借用为零）。
     if (virtual_bag::valid_index(qol::extension_bag::ui_state().objects.module_view_index)) {
@@ -641,6 +636,8 @@ void restore_module_view_locked() {
     qol::extension_bag::ui_state().objects.projected_item_root = nullptr;
     qol::extension_bag::ui_state().objects.module_view_installed = false;
     qol::extension_bag::ui_state().objects.module_view_index = -1;
+    QOL_LOG_INFO(QolDomain::kExtensionBag,
+                 "restore op=module_view result=restored bag=%d", restored_bag);
     log_exit_trace_locked("write_restore", 0, 0, 0);
 }
 bool complete_original_exit_locked() {

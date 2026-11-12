@@ -21,7 +21,8 @@ void bind_api(const NativeAPIEntries* entries) {
     }
     std::lock_guard<std::mutex> lock(g_hook_mutex);
     if (entries->version < kNativeApiVersion) {
-        QOL_LOG_ERROR(QolDomain::kCore, "native_init rejected version=%u required=%u",
+        QOL_LOG_ERROR(QolDomain::kCore,
+                      "native_init rejected version=%u required=%u reason=api_version_unsupported",
                       entries->version, kNativeApiVersion);
         return;
     }

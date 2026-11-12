@@ -48,7 +48,8 @@ QolResult save_transition_begin(uint32_t kind, int32_t requested_slot, uint64_t*
 // 后续回调/事件、保持阻断。
 QolResult save_transition_confirm(uint64_t token_id, int32_t observed_slot);
 // 取消选角：只释放 token 与 lease，不伪装恢复已删 dat。
-QolResult save_transition_cancel(uint64_t token_id);
+QolResult save_transition_cancel(uint64_t token_id, const char* load_result = "cancelled",
+                                 const char* reason = "transition_cancelled");
 // 私有结果查询：只按 token 身份查询，不依赖全局 ready 或当前槽。
 QolResult save_transition_query(uint64_t token_id, TransitionResult* out);
 // 确认序成功发布 ready 之后才发布事件状态 ready；新转换开始即撤销。

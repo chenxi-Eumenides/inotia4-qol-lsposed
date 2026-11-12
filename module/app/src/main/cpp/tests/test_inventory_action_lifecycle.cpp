@@ -717,7 +717,6 @@ void inventory_native_hook_set_support(bool) {}
 bool inventory_native_hook_support_enabled() { return true; }
 void inventory_log_bind_sdk(const qol::contracts::QolHostSdk*) {}
 bool inventory_log_debug_enabled() { return false; }
-bool inventory_log_debug_due(int64_t*, int64_t) { return false; }
 void inventory_log_write(int32_t, const char*, int, const char*, ...) {}
 
 void qol_log_write(QolLogLevel, QolDomain, const char*, int, const char*, ...) {}

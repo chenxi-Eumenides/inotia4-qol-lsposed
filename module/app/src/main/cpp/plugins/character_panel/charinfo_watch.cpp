@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 #include "../../contracts/host_sdk.h"
@@ -21,8 +22,6 @@ constexpr const char* kCharacterInfoPopupSymbol = "F_PANEL_CHARACTER_INFO_ENTER"
 constexpr uint64_t kEventPress = 0x17;
 constexpr uint64_t kEventRelease = 0x18;
 constexpr uint64_t kEventMove = 0x19;
-constexpr const char* kOpenRejectedMessage = "character overview open rejected";
-
 using PopupEnterFn = void (*)();
 using PopupEventFn = uint32_t (*)(uint64_t, uint64_t, uint64_t);
 
@@ -38,7 +37,7 @@ int64_t g_press_y = 0;
 void log_warn(const char* message) {
     const contracts::QolHostSdk* sdk = host_sdk();
     if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
-    (void)sdk->log.write(1, 1, "character_panel", message,
+    (void)sdk->log.write(2, 1, "character_panel", message,
                          static_cast<uint32_t>(std::strlen(message)));
 }
 
@@ -67,8 +66,9 @@ bool read_tap(uint64_t param, int64_t* x, int64_t* y, contracts::UiRect* rect) {
     return contracts::succeeded(ui->character_info_content_rect(rect));
 }
 
-bool open_overview() {
+bool open_overview(const char** reason) {
     const contracts::QolHostSdk* sdk = host_sdk();
+    if (reason != nullptr) *reason = "capability_missing";
     if (sdk == nullptr || sdk->capabilities.require == nullptr) return false;
     const void* iface = nullptr;
     if (!contracts::succeeded(sdk->capabilities.require(
@@ -80,7 +80,13 @@ bool open_overview() {
         return false;
     }
     const auto* panels = static_cast<const contracts::UiPanelsApi*>(iface);
-    return panels->open != nullptr && panels->open(kOverviewPanelId);
+    if (panels->open == nullptr) {
+        if (reason != nullptr) *reason = "open_unavailable";
+        return false;
+    }
+    if (panels->open(kOverviewPanelId)) return true;
+    if (reason != nullptr) *reason = "open_rejected";
+    return false;
 }
 
 PopupEnterFn backup_enter(const contracts::QolPopupStateEntry& entry) {
@@ -131,7 +137,7 @@ void character_info_popup_release(const char* id) {
     // 还原用副本：失败时保留唯一重试 token（与 extension_bag 同口径）。
     contracts::QolPopupStateEntry restore_entry = g_entry;
     if (!contracts::succeeded(sdk->hooks.popup_restore(&restore_entry))) {
-        log_warn("character info popup restore failed");
+        log_warn("character info popup restore failed reason=restore_rejected");
         return;
     }
     g_entry = {};
@@ -178,9 +184,14 @@ uint32_t character_info_event_wrapper(uint64_t event, uint64_t param, uint64_t p
 int32_t character_info_open_tick(int64_t frame, void* ctx) {
     (void)frame;
     (void)ctx;
-    if (g_pending_open.exchange(false, std::memory_order_acq_rel) && overview_enabled() &&
-        !open_overview()) {
-        log_warn(kOpenRejectedMessage);
+    if (g_pending_open.exchange(false, std::memory_order_acq_rel) && overview_enabled()) {
+        const char* reason = nullptr;
+        if (!open_overview(&reason)) {
+            char message[96]{};
+            std::snprintf(message, sizeof(message), "character overview open rejected reason=%s",
+                          reason == nullptr ? "open_rejected" : reason);
+            log_warn(message);
+        }
     }
     // 常驻任务：返回 0 会被 scheduler 注销；只在 deactivate 里显式 remove。
     return 1;

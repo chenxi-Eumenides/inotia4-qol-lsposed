@@ -16,6 +16,7 @@ using AddOptionFn = void (*)(void* builder, int type, int option_index, int valu
 using MakeItemFn = uintptr_t (*)(void* item, void* character, void* arg2);
 
 std::atomic<bool> g_active{false};
+std::atomic<bool> g_unavailable_reported{false};
 const contracts::QolHostSdk* g_sdk = nullptr;
 void* g_backup_add_option = nullptr;
 void* g_backup_make_item = nullptr;
@@ -208,8 +209,17 @@ void set_context(const contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
 }
 
+void log_hook_state(int32_t level, const char* message) {
+    const auto* sdk = g_sdk;
+    if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
+    if (level == 0 && (sdk->log.debug_enabled == nullptr || sdk->log.debug_enabled() == 0)) return;
+    (void)sdk->log.write(level, 11, "attribute_range_display", message,
+                         static_cast<uint32_t>(std::strlen(message)));
+}
+
 void set_active(bool active_value) {
     g_active.store(active_value, std::memory_order_release);
+    if (active_value) g_unavailable_reported.store(false, std::memory_order_release);
 }
 
 bool active() { return g_active.load(std::memory_order_acquire); }
@@ -220,14 +230,22 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
     if (std::strcmp(resource_id, kResourceIdAddOption) == 0) {
         if (backup == nullptr) {
             g_backup_add_option = nullptr;
-            set_active(false);
+            const bool was_active = g_active.exchange(false, std::memory_order_acq_rel);
+            log_hook_state(0, "skip feature=attribute_range_display hook=uidesc_add_option reason=optional_backup_missing");
+            if (was_active && !g_unavailable_reported.exchange(true, std::memory_order_acq_rel)) {
+                log_hook_state(2, "degrade feature=attribute_range_display hook=uidesc_add_option reason=feature_unavailable");
+            }
             return 1;
         }
         g_backup_add_option = backup;
     } else if (std::strcmp(resource_id, kResourceIdMakeItem) == 0) {
         if (backup == nullptr) {
             g_backup_make_item = nullptr;
-            set_active(false);
+            const bool was_active = g_active.exchange(false, std::memory_order_acq_rel);
+            log_hook_state(0, "skip feature=attribute_range_display hook=uidesc_make_item reason=optional_backup_missing");
+            if (was_active && !g_unavailable_reported.exchange(true, std::memory_order_acq_rel)) {
+                log_hook_state(2, "degrade feature=attribute_range_display hook=uidesc_make_item reason=feature_unavailable");
+            }
             return 1;
         }
         g_backup_make_item = backup;

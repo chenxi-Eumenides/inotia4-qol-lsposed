@@ -14,6 +14,22 @@ bool g_primitives_set = false;
 // BL imm26 可达范围（±128MB）；本层在安装前收口，避免落到近址 thunk 路径。
 constexpr int64_t kBlRange = 0x08000000LL;
 
+void log_saved_word_unavailable(const char* kind, uintptr_t addr) {
+    QOL_LOG_WARN(QolDomain::kPlatform,
+                 "call patch saved word unavailable kind=%s addr=%p",
+                 kind, reinterpret_cast<void*>(addr));
+}
+
+void log_patch_install_success(const contracts::ResourceClaim& claim, uintptr_t site_addr) {
+    if (claim.id != nullptr) {
+        QOL_LOG_INFO(QolDomain::kPlatform, "patch install result=installed hook=%s", claim.id);
+    } else {
+        QOL_LOG_INFO(QolDomain::kPlatform,
+                     "patch install result=installed patch=%p",
+                     reinterpret_cast<void*>(site_addr));
+    }
+}
+
 Outcome failure(const char* error) {
     return Outcome{1, error};
 }
@@ -121,6 +137,7 @@ Outcome install_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
             current_word != word_replacement_for_original(site, saved_word)) {
             return failure("primitive rejected");
         }
+        log_patch_install_success(claim, site.addr);
         return Outcome{0, nullptr};
     }
     if (!claim_point(site.addr, claim.id)) {
@@ -157,12 +174,12 @@ Outcome install_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
             return failure("branch target out of BL range");
         }
         if (!set_saved_word(site.addr, observed_word)) {
-            QOL_LOG_WARN(QolDomain::kPlatform, "call patch saved word unavailable addr=%p",
-                         reinterpret_cast<void*>(site.addr));
+            log_saved_word_unavailable("branch", site.addr);
             (void)g_primitives.revert_branch(site.addr, observed_word);
             release_point(site.addr);
             return failure("saved word unavailable");
         }
+        log_patch_install_success(claim, site.addr);
         return Outcome{0, nullptr};
     }
 
@@ -176,13 +193,13 @@ Outcome install_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
             return failure("primitive rejected");
         }
         if (!set_saved_word(site.addr, observed_word)) {
-            QOL_LOG_WARN(QolDomain::kPlatform, "call patch saved word unavailable addr=%p",
-                         reinterpret_cast<void*>(site.addr));
+            log_saved_word_unavailable("branch_return", site.addr);
             (void)g_primitives.revert_branch_with_return(
                 site.addr, site.expected_word, site.alternate_expected_word);
             release_point(site.addr);
             return failure("saved word unavailable");
         }
+        log_patch_install_success(claim, site.addr);
         return Outcome{0, nullptr};
     }
 
@@ -206,11 +223,12 @@ Outcome install_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
         return failure("primitive rejected");
     }
     if (!set_saved_word(site.addr, observed_word)) {
-        QOL_LOG_WARN(QolDomain::kPlatform, "call patch saved word unavailable addr=%p",
-                     reinterpret_cast<void*>(site.addr));
+        log_saved_word_unavailable(site.kind == qol::game::PatchKind::kWordReplace ? "word" : "bl",
+                                   site.addr);
         release_point(site.addr);
         return failure("saved word unavailable");
     }
+    log_patch_install_success(claim, site.addr);
     return Outcome{0, nullptr};
 }
 
@@ -244,7 +262,7 @@ Outcome release_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
     bool applied = false;
     uint32_t saved_word = 0;
     if (!get_saved_word(site.addr, &saved_word)) {
-        QOL_LOG_WARN(QolDomain::kPlatform, "call patch saved word missing addr=%p",
+        QOL_LOG_WARN(QolDomain::kPlatform, "call patch saved word missing addr=%p reason=word_missing",
                      reinterpret_cast<void*>(site.addr));
         return failure("saved word missing");
     }
@@ -266,6 +284,8 @@ Outcome release_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
         return failure("primitive rejected");
     }
     release_point(site.addr);
+    QOL_LOG_INFO(QolDomain::kPlatform, "patch restore result=restored patch=%p",
+                 reinterpret_cast<void*>(site.addr));
     return Outcome{0, nullptr};
 }
 

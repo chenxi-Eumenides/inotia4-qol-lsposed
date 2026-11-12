@@ -54,6 +54,14 @@ struct UiSnapshotState {
 
 std::mutex g_snapshot_mutex;
 UiSnapshotState g_snapshot{};
+bool g_snapshot_read_warning_active = false;
+
+void write_log(int level, const char* message) {
+    if (g_sdk == nullptr || g_sdk->log.write == nullptr || message == nullptr) return;
+    uint32_t length = 0;
+    while (message[length] != '\0') ++length;
+    (void)g_sdk->log.write(level, 1, kPluginId, message, length);
+}
 
 const contracts::CapabilityRequirement kOptionalHttpRequires[] = {
     {
@@ -112,7 +120,8 @@ QolResult publish_custom_panels(const contracts::UiCustomPanelsSnapshot* snapsho
     if (snapshot == nullptr || snapshot->sequence == 0 ||
         snapshot->count > contracts::kUiStateMaxCustomPanels ||
         (snapshot->count > 0 && snapshot->panel_ids == nullptr)) {
-        return state_error(kQolErrInvalidArgument, "invalid custom panel snapshot");
+        { write_log(2, "reject op=ui_publish kind=custom_panels reason=invalid_snapshot");
+          return state_error(kQolErrInvalidArgument, "invalid custom panel snapshot"); }
     }
     if (!main_thread_now()) return state_error(kQolErrBlocked, "wrong thread");
 
@@ -126,7 +135,8 @@ QolResult publish_custom_panels(const contracts::UiCustomPanelsSnapshot* snapsho
 
     std::lock_guard<std::mutex> lock(g_snapshot_mutex);
     if (snapshot->sequence <= g_snapshot.custom_panel_sequence) {
-        return state_error(kQolErrConflict, "stale custom panel snapshot");
+        { write_log(2, "reject op=ui_publish kind=custom_panels reason=stale_sequence");
+          return state_error(kQolErrConflict, "stale custom panel snapshot"); }
     }
     g_snapshot.custom_panel_sequence = snapshot->sequence;
     g_snapshot.custom_panel_count = snapshot->count;
@@ -144,7 +154,8 @@ QolResult publish_custom_dialog(const contracts::UiCustomDialogSnapshot* snapsho
         !valid_type_id(snapshot->type_id) ||
         snapshot->option_count > kCustomOptionCount ||
         (snapshot->option_count > 0 && snapshot->option_labels == nullptr)) {
-        return state_error(kQolErrInvalidArgument, "invalid custom dialog snapshot");
+        { write_log(2, "reject op=ui_publish kind=custom_dialog reason=invalid_snapshot");
+          return state_error(kQolErrInvalidArgument, "invalid custom dialog snapshot"); }
     }
     if (!main_thread_now()) return state_error(kQolErrBlocked, "wrong thread");
 
@@ -167,7 +178,8 @@ QolResult publish_custom_dialog(const contracts::UiCustomDialogSnapshot* snapsho
     std::lock_guard<std::mutex> lock(g_snapshot_mutex);
     if (snapshot->sequence <= g_snapshot.custom_dialog_sequence ||
         snapshot->generation <= g_snapshot.custom_dialog_last_generation) {
-        return state_error(kQolErrConflict, "stale custom dialog snapshot");
+        { write_log(2, "reject op=ui_publish kind=custom_dialog reason=stale_sequence");
+          return state_error(kQolErrConflict, "stale custom dialog snapshot"); }
     }
     g_snapshot.custom_dialog_sequence = snapshot->sequence;
     g_snapshot.custom_dialog_last_generation = snapshot->generation;
@@ -237,6 +249,10 @@ const contracts::CapabilityProvisionRef kProvides[] = {
 int32_t native_snapshot_tick(int64_t, void*) {
     auto invalidate_snapshot = [] {
         std::lock_guard<std::mutex> lock(g_snapshot_mutex);
+        if (!g_snapshot_read_warning_active) {
+            write_log(2, "fail op=ui_snapshot reason=read_failed keep=invalid");
+            g_snapshot_read_warning_active = true;
+        }
         g_snapshot.native_snapshot_valid = false;
         ++g_snapshot.native_snapshot_epoch;
     };
@@ -260,6 +276,10 @@ int32_t native_snapshot_tick(int64_t, void*) {
         return 1;
     }
     std::lock_guard<std::mutex> lock(g_snapshot_mutex);
+    if (g_snapshot_read_warning_active) {
+        write_log(1, "restore op=ui_snapshot result=ready");
+        g_snapshot_read_warning_active = false;
+    }
     std::memcpy(g_snapshot.screen, screen, screen_size + 1);
     std::memcpy(g_snapshot.native_panel, panel, panel_size + 1);
     std::memcpy(g_snapshot.native_dialog, dialog, dialog_size + 1);
@@ -821,6 +841,7 @@ QolResult unregister_state(uint32_t type, const char* key) {
 
 QolResult publish_external_ui(const contracts::QolUiExternalSnapshot* snapshot) {
     if (snapshot == nullptr || snapshot->struct_size < sizeof(*snapshot)) {
+        write_log(2, "reject op=ui_publish kind=external reason=invalid_snapshot");
         return state_error(kQolErrInvalidArgument, "invalid external ui snapshot");
     }
     std::lock_guard<std::mutex> lock(g_external_mutex);
@@ -829,6 +850,7 @@ QolResult publish_external_ui(const contracts::QolUiExternalSnapshot* snapshot) 
         if (snapshot->name[0] == '\0' ||
             std::memchr(snapshot->name, '\0', sizeof(snapshot->name)) == nullptr) {
             g_external_active = false;
+            write_log(2, "reject op=ui_publish kind=external reason=invalid_name");
             return state_error(kQolErrInvalidArgument, "external ui name required");
         }
         std::snprintf(g_external_name, sizeof(g_external_name), "%s", snapshot->name);

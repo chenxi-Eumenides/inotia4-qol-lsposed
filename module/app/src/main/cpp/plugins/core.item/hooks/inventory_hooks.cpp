@@ -161,6 +161,8 @@ ItemSystemDivideFn g_backup_item_system_divide = nullptr;
 
 thread_local bool g_in_unequip_item_to_inven = false;
 thread_local uint64_t g_active_shortcut_trace = 0;
+thread_local bool g_action_item_use_active = false;
+thread_local bool g_action_item_use_hook_failed = false;
 // 单条 CHAR_ProcessShortcut 汇总行所需的中间观测：GetState 在 begin/end 之间被原版
 // 调用多次，只记录次数与最后一次结果，避免每次回调各占一行。
 thread_local uint32_t g_active_shortcut_state_calls = 0;
@@ -170,8 +172,7 @@ thread_local bool g_in_equip_destroy_button = false;
 thread_local bool g_has_vanilla_sell_preview_context = false;
 thread_local qol::contracts::QolItemDetailContext g_vanilla_sell_preview_context{};
 void backup_missing(const char* hook_id) {
-    QOL_LOG_ERROR(QolDomain::kInventory, "hook=%s backup missing",
-                  hook_id == nullptr ? "unknown" : hook_id);
+    (void)hook_id;
 }
 
 template <typename Function, typename... Args>
@@ -359,12 +360,15 @@ int unequip_item_to_inven_wrapper(void* character, int32_t equip_slot) {
                                                     extension_unequip_to_registered_source,
                                                     g_in_unequip_item_to_inven);
     (void)unequip_scope;
-    QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
+    QOL_LOG_DEBUG(QolDomain::kInventory,
                         "UnequipItemToInven every_calls=60 equip_slot=%d result=%d recursive=%d",
                         equip_slot, result, g_in_unequip_item_to_inven ? 1 : 0);
     if (result == 0) {
-        QOL_LOG_ERROR(QolDomain::kInventory,
+        QOL_LOG_WARN(QolDomain::kInventory,
                       "UnequipItemToInven failed equip_slot=%d", equip_slot);
+    } else {
+        QOL_LOG_INFO(QolDomain::kInventory,
+                     "apply op=unequip result=committed equip_slot=%d", equip_slot);
     }
     return result;
 }
@@ -627,11 +631,11 @@ void* item_system_divide_wrapper(void* item, int32_t count) {
             const ItemCountWriteResult write_result =
                 item_count_write_effective(item, remain);
             if (write_result == ItemCountWriteResult::kFailed) return new_item;
-            QOL_LOG_INFO(QolDomain::kInventory,
+            QOL_LOG_DEBUG(QolDomain::kInventory,
                                 "S2 writeback Divide source item=%p %u-%u->%u",
                                 item, pre_full, count, remain);
         } else if (post_field != pre_field) {
-            QOL_LOG_ERROR(QolDomain::kInventory,
+            QOL_LOG_WARN(QolDomain::kInventory,
                                 "S2 writeback Divide source mismatch skip item=%p "
                                 "pre=0x%x post=0x%x expect_full=%u",
                                 item, pre_field, post_field, remain);
@@ -642,7 +646,7 @@ void* item_system_divide_wrapper(void* item, int32_t count) {
         const ItemCountWriteResult write_result =
             item_count_write_effective(new_item, new_full);
         if (write_result == ItemCountWriteResult::kFailed) return new_item;
-        QOL_LOG_INFO(QolDomain::kInventory,
+        QOL_LOG_DEBUG(QolDomain::kInventory,
                             "S2 writeback Divide new item=%p count=%u", new_item, new_full);
     }
     return new_item;
@@ -861,9 +865,13 @@ int equip_item_from_inven_to_slot_wrapper(void* character, int32_t bag, int32_t 
     if (bag >= qol::contracts::kQolBagFlatRegisteredBase) {
         const int provider_result = provider_equip_item(character, bag, slot);
         if (provider_result == 0) {
-            QOL_LOG_ERROR(QolDomain::kInventory,
-                          "provider equip failed flat_bag=%d slot=%d equip_slot=%d",
-                          bag, slot, equip_slot);
+            QOL_LOG_WARN(QolDomain::kInventory,
+                         "provider equip failed flat_bag=%d slot=%d equip_slot=%d reason=provider_equip_failed",
+                         bag, slot, equip_slot);
+        } else {
+            QOL_LOG_INFO(QolDomain::kInventory,
+                         "apply op=equip result=committed bag=%d slot=%d equip_slot=%d",
+                         bag, slot, equip_slot);
         }
         return provider_result;
     }
@@ -883,9 +891,14 @@ int equip_item_from_inven_to_slot_wrapper(void* character, int32_t bag, int32_t 
         character, bag, slot, equip_slot, inventory_item_at, nullptr, nullptr,
         g_backup_equip_item_from_inven_to_slot,
         nullptr);
-    QOL_LOG_INFO(QolDomain::kInventory,
+    QOL_LOG_DEBUG(QolDomain::kInventory,
                         "EquipItemFromInvenToSlot bag=%d slot=%d equip_slot=%d result=%d",
                         bag, slot, equip_slot, result);
+    if (result != 0) {
+        QOL_LOG_INFO(QolDomain::kInventory,
+                     "apply op=equip result=committed bag=%d slot=%d equip_slot=%d",
+                     bag, slot, equip_slot);
+    }
     return result;
 }
 
@@ -1022,7 +1035,7 @@ void button_destroy_exe_wrapper(void* button) {
     }
     if (g_sdk != nullptr && g_sdk->hooks.intercept_blocks != nullptr &&
         g_sdk->hooks.intercept_blocks("hook:UIEquip_ButtonDestroyExe", nullptr) > 0) {
-        QOL_LOG_INFO(QolDomain::kInventory, "sell button blocked by gate button=%p", button);
+        QOL_LOG_DEBUG(QolDomain::kInventory, "sell button blocked by gate button=%p", button);
         return;
     }
     // The desc observation hook can be stale after UIEquip recreates the button.
@@ -1219,7 +1232,7 @@ uint64_t ok_destroy_item_wrapper() {
     if (!qol::contracts::succeeded(g_item_facts->category(item_handle, &category)) ||
         !qol::contracts::succeeded(g_item_facts->is_no_sell(category, &no_sell)) ||
         category <= 0 || no_sell != 0) {
-        QOL_LOG_INFO(QolDomain::kInventory,
+        QOL_LOG_DEBUG(QolDomain::kInventory,
                             "vanilla sell backup reason=no_sell bag=%d slot=%d category=%d", bag,
                             slot, category);
         g_has_vanilla_sell_preview_context = false;
@@ -1236,7 +1249,7 @@ uint64_t ok_destroy_item_wrapper() {
             g_item_facts->quote(item_handle, qol::contracts::kDetailSell, &quote)) ||
         quote.struct_size < sizeof(quote) || quote.count <= 0 || quote.price < 0 ||
         quote.multiplier_den == 0 || quote.multiplier_num > quote.multiplier_den) {
-        QOL_LOG_INFO(QolDomain::kInventory,
+        QOL_LOG_DEBUG(QolDomain::kInventory,
             "vanilla sell backup reason=quote_unavailable bag=%d slot=%d category=%d canonical=%u",
             bag, slot, category, canonical);
         g_has_vanilla_sell_preview_context = false;
@@ -1263,7 +1276,7 @@ uint64_t ok_destroy_item_wrapper() {
         return run_backup();
     }
     if (!qol::contracts::succeeded(g_game->world_action.add_money(price))) {
-        QOL_LOG_ERROR(QolDomain::kInventory,
+        QOL_LOG_WARN(QolDomain::kInventory,
                             "vanilla sell credit failed bag=%d slot=%d price=%lld", bag, slot,
                             static_cast<long long>(price));
         return 0;
@@ -1272,7 +1285,7 @@ uint64_t ok_destroy_item_wrapper() {
     if (s2_physical_slot_item(bag, slot) != item) {
         const QolResult refund = g_game->world_action.minus_money(price);
         if (qol::contracts::succeeded(refund)) {
-            QOL_LOG_ERROR(QolDomain::kInventory,
+            QOL_LOG_WARN(QolDomain::kInventory,
                           "vanilla sell stale before remove bag=%d slot=%d refunded=1", bag, slot);
         } else {
             QOL_LOG_ERROR(QolDomain::kInventory,
@@ -1285,7 +1298,7 @@ uint64_t ok_destroy_item_wrapper() {
     if (s2_physical_slot_item(bag, slot) == item) {
         const QolResult refund = g_game->world_action.minus_money(price);
         if (qol::contracts::succeeded(refund)) {
-            QOL_LOG_ERROR(QolDomain::kInventory,
+            QOL_LOG_WARN(QolDomain::kInventory,
                           "vanilla sell remove failed bag=%d slot=%d refunded=1", bag, slot);
         } else {
             QOL_LOG_ERROR(QolDomain::kInventory,
@@ -1426,6 +1439,15 @@ int char_use_item_ex_wrapper(void* character, void* item, int flag) {
     item_use_event.flag = flag;
     item_use_event.result = result;
     qol::features::core_item::item_use_dispatch(item_use_event);
+    if (result == 0) {
+        qol::contracts::QolInventoryItemRef source_ref{};
+        const bool located = source_for_hook_item(item, &source_ref) != nullptr;
+        QOL_LOG_WARN(QolDomain::kInventory,
+                     "reject op=item_use space=%d bag=%d slot=%d item=%p reason=native_use_failed",
+                     located ? source_ref.space_id : -1, located ? source_ref.bag : -1,
+                     located ? source_ref.slot : -1, item);
+        if (g_action_item_use_active) g_action_item_use_hook_failed = true;
+    }
     const uint64_t trace_id = g_active_shortcut_trace;
     if (trace_id != 0 && inventory_log_debug_enabled()) {
         inventory_log_write(0, __FILE__, __LINE__,
@@ -1544,16 +1566,8 @@ int32_t inventory_hooks_bind_backup(const char* resource_id, void* backup) {
         void** slot = backup_slot_for_handler(claim.handler);
         if (slot == nullptr) return 1;
         *slot = backup;
-        if (std::strcmp(claim.id, "hook:CHAR_ProcessShortcut") == 0 ||
-            std::strcmp(claim.id, "hook:SHORTCUT_GetState") == 0 ||
-            std::strcmp(claim.id, "hook:CHAR_UseItemEx") == 0) {
-            QOL_LOG_INFO(QolDomain::kInventory,
-                         "diagnostic hook bound resource=%s backup=%p", claim.id, backup);
-        }
         return 0;
     }
-    QOL_LOG_ERROR(QolDomain::kInventory,
-                  "inventory_hooks bind backup: unknown resource id %s", resource_id);
     return 1;
 }
 
@@ -1617,6 +1631,18 @@ bool inventory_native_hook_bind_game(const qol::contracts::QolGameHost* game) {
 bool inventory_native_hook_bind_item_facts(const qol::contracts::ItemFactsApi* facts) {
     g_item_facts = facts;
     return facts != nullptr;
+}
+
+void inventory_native_hook_begin_item_use() {
+    g_action_item_use_hook_failed = false;
+    g_action_item_use_active = true;
+}
+
+bool inventory_native_hook_end_item_use() {
+    const bool hook_failed = g_action_item_use_hook_failed;
+    g_action_item_use_active = false;
+    g_action_item_use_hook_failed = false;
+    return hook_failed;
 }
 
 namespace qol::features::inventory_hooks {

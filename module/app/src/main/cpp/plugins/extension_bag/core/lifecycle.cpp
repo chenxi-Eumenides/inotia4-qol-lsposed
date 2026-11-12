@@ -594,7 +594,7 @@ int32_t extension_bag_lifecycle_tick(int64_t frame, void* ctx) {
         } else if (!prepare_main_menu_locked()) {
             qol::extension_bag::ui_state().aux.main_menu_cleanup_dirty.store(true, std::memory_order_release);
             QOL_LOG_WARN(QolDomain::kExtensionBag,
-                         "lifecycle main-menu cleanup failed; retry scheduled");
+                         "lifecycle main-menu cleanup failed; retry scheduled reason=cleanup_failed_retry");
         } else {
             qol::extension_bag::ui_state().aux.main_menu_cleanup_dirty.store(false, std::memory_order_release);
         }
@@ -699,16 +699,16 @@ void remove_lifecycle_task() {
 bool prepare_main_menu_locked() {
     if (!extension_bag_session_admitted_locked()) {
         QOL_LOG_WARN(QolDomain::kExtensionBag,
-                     "prepare main-menu rejected: slot data session not admitted");
+                     "prepare main-menu rejected: slot data session not admitted reason=session_not_admitted");
         return false;
     }
     if (!module_cache_clear_preflight_locked()) {
-        QOL_LOG_WARN(QolDomain::kExtensionBag, "prepare main-menu preflight failed");
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "prepare main-menu preflight failed reason=preflight_failed");
         return false;
     }
     teardown_extension_bag_hosts_locked();
     if (!clear_module_cache_locked()) {
-        QOL_LOG_WARN(QolDomain::kExtensionBag, "prepare main-menu blocked by active module object");
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "prepare main-menu blocked by active module object reason=active_module_object");
         return false;
     }
     // The pool is recycled when the next save is loaded; free what is safe now, then

@@ -49,6 +49,8 @@ struct SlotTx {
     QolSaveOriginalResult original{};       // 本次事务的原版真实返回（SAVE_Save 入口透传）。
     // true：由 hook 入口发起，pending 由生产帧任务推进；HTTP 票据不重复推进该 tx。
     bool frame_retry = false;
+    bool recovery_restore = false;
+    bool exhaustion_logged = false;
 };
 
 struct Runtime {
@@ -96,6 +98,29 @@ void finish_capture(SlotTx& tx, uint32_t outcome) {
 QolStoreSection journal_section(const std::vector<uint8_t>& bytes) {
     return QolStoreSection{kSaveJournalSection, kSaveJournalVersion, bytes.data(),
                            static_cast<uint32_t>(bytes.size())};
+}
+
+void log_retry_failure(SlotTx& tx, int32_t slot, uint64_t transaction, const char* reason,
+                       int32_t code) {
+    const uint32_t attempt = tx.recovery.retries();
+    if (attempt >= 3) {
+        if (!tx.exhaustion_logged) {
+            CS_LOG_ERROR(kCoreSaveLogDomain,
+                         "degrade op=save attempts=3 slot=%d tx=%llu reason=retries_exhausted",
+                         slot, static_cast<unsigned long long>(transaction));
+            tx.exhaustion_logged = true;
+        }
+        return;
+    }
+    CS_LOG_WARN(kCoreSaveLogDomain,
+                "retry op=save attempt=%u/3 slot=%d tx=%llu reason=%s code=%d", attempt, slot,
+                static_cast<unsigned long long>(transaction), reason, code);
+}
+
+bool mark_degraded(SlotTx& tx) {
+    if (tx.recovery.health() == SlotHealth::kDegraded) return false;
+    tx.recovery.degrade();
+    return true;
 }
 
 // 条件清理：仅当盘上 journal 是本事务的 prepared（确认未写盘且身份匹配）才删除；
@@ -150,6 +175,8 @@ ExecuteResult save_execute_impl(int32_t slot, uint64_t frame, bool frame_retry) 
     tx.confirmed_bytes.clear();
     tx.phase = TxPhase::kIdle;
     tx.frame_retry = frame_retry;
+    tx.recovery_restore = false;
+    tx.exhaustion_logged = false;
     const uint64_t transaction = g.next_tx < UINT64_MAX ? g.next_tx++ : 0;
     if (transaction == 0) {
         CS_LOG_WARN(kCoreSaveLogDomain, "save abort slot=%d reason=transaction_id_exhausted", slot);
@@ -274,12 +301,11 @@ ExecuteResult save_execute_impl(int32_t slot, uint64_t frame, bool frame_retry) 
     if (!succeeded(invoked) || original.invoked == 0) {
         // Adapter 未执行原版：按原版前失败处理（条件清理 + cancelled）。
         if (!cleanup_prepared_journal_if_ours(tx, slot)) {
-            tx.recovery.degrade();
+            (void)mark_degraded(tx);
             finish_capture(tx, value(QolSlotDataOutcome::kDegraded));
-            CS_LOG_WARN(kCoreSaveLogDomain,
-                        "save abort slot=%d tx=%llu step=original_save invoked=%d result_valid=%d original=%d journal=preserved health=degraded code=%d",
-                        slot, static_cast<unsigned long long>(transaction), original.invoked,
-                        original.result_valid, original.original_result, invoked.code);
+            CS_LOG_ERROR(kCoreSaveLogDomain,
+                        "degrade op=save slot=%d tx=%llu reason=prepared_journal_preserved code=%d",
+                        slot, static_cast<unsigned long long>(transaction), invoked.code);
             return {SaveSettle::kFailed, "original save not invoked; journal preserved"};
         }
         finish_capture(tx, value(QolSlotDataOutcome::kCancelled));
@@ -294,12 +320,11 @@ ExecuteResult save_execute_impl(int32_t slot, uint64_t frame, bool frame_retry) 
     if (original.result_valid != 0 && original.original_result == 0) {
         // 原版有效返回 0：不替换正式 sections；条件清理 journal，否则保留证据转 degraded。
         if (!cleanup_prepared_journal_if_ours(tx, slot)) {
-            tx.recovery.degrade();
+            (void)mark_degraded(tx);
             finish_capture(tx, value(QolSlotDataOutcome::kDegraded));
-            CS_LOG_WARN(kCoreSaveLogDomain,
-                        "save abort slot=%d tx=%llu step=original_save_result invoked=%d result_valid=%d original=%d journal=preserved health=degraded code=%d",
-                        slot, static_cast<unsigned long long>(transaction), original.invoked,
-                        original.result_valid, original.original_result, invoked.code);
+            CS_LOG_ERROR(kCoreSaveLogDomain,
+                        "degrade op=save slot=%d tx=%llu reason=prepared_journal_preserved code=%d",
+                        slot, static_cast<unsigned long long>(transaction), invoked.code);
             return {SaveSettle::kFailed, "original save failed; journal preserved"};
         }
         finish_capture(tx, value(QolSlotDataOutcome::kOriginalSaveFailed));
@@ -319,7 +344,7 @@ ExecuteResult save_execute_impl(int32_t slot, uint64_t frame, bool frame_retry) 
         tx.phase = TxPhase::kAwaitingEvidence;
         tx.recovery.begin_pending();  // 原版已成功：占住 pending 窗口，重试帧重新读取 evidence。
         slot_data_save_mark_pending(tx.tx_id);
-        CS_LOG_INFO(kCoreSaveLogDomain, "save pending slot=%d tx=%llu step=evidence code=%d", slot,
+        CS_LOG_WARN(kCoreSaveLogDomain, "save pending slot=%d tx=%llu step=evidence code=%d", slot,
                     static_cast<unsigned long long>(transaction), evidence_read.code);
         (void)frame;
         return {SaveSettle::kPending, "evidence unavailable"};
@@ -327,10 +352,10 @@ ExecuteResult save_execute_impl(int32_t slot, uint64_t frame, bool frame_retry) 
     tx.journal.stage = JournalStage::kOriginalConfirmed;
     tx.journal.evidence = evidence;
     if (!encode_save_journal(tx.journal, &tx.confirmed_bytes)) {
-        tx.recovery.degrade();
+        (void)mark_degraded(tx);
         finish_capture(tx, value(QolSlotDataOutcome::kDegraded));
-        CS_LOG_WARN(kCoreSaveLogDomain,
-                    "save abort slot=%d tx=%llu step=confirmed_journal_encode health=degraded", slot,
+        CS_LOG_ERROR(kCoreSaveLogDomain,
+                    "degrade op=save slot=%d tx=%llu reason=confirmed_journal_encode_failed", slot,
                     static_cast<unsigned long long>(transaction));
         return {SaveSettle::kFailed, "confirmed journal encode failed"};
     }
@@ -344,7 +369,7 @@ ExecuteResult save_execute_impl(int32_t slot, uint64_t frame, bool frame_retry) 
         tx.phase = TxPhase::kAwaitingConfirmed;
         (void)tx.recovery.original_confirmed(tx.journal);
         slot_data_save_mark_pending(tx.tx_id);
-        CS_LOG_INFO(kCoreSaveLogDomain, "save pending slot=%d tx=%llu step=confirmed_write code=%d", slot,
+        CS_LOG_WARN(kCoreSaveLogDomain, "save pending slot=%d tx=%llu step=confirmed_write code=%d", slot,
                     static_cast<unsigned long long>(transaction), confirmed_written.code);
         return {SaveSettle::kPending, "confirmed journal write deferred"};
     }
@@ -357,7 +382,7 @@ ExecuteResult save_execute_impl(int32_t slot, uint64_t frame, bool frame_retry) 
         tx.phase = TxPhase::kAwaitingReplace;
         (void)tx.recovery.original_confirmed(tx.journal);
         slot_data_save_mark_pending(tx.tx_id);
-        CS_LOG_INFO(kCoreSaveLogDomain, "save pending slot=%d tx=%llu step=final_replace code=%d", slot,
+        CS_LOG_WARN(kCoreSaveLogDomain, "save pending slot=%d tx=%llu step=final_replace code=%d", slot,
                     static_cast<unsigned long long>(transaction), replaced.code);
         return {SaveSettle::kPending, "final replace deferred"};
     }
@@ -454,21 +479,24 @@ void save_coordinator_on_session_enter(int32_t slot, uint64_t frame, const QolSl
         if (read.code == kQolErrNotFound) return;  // 无未决 journal。
         if (!succeeded(read) ||
             decode_save_journal(version, slot, bytes.data(), size, &journal) != JournalDecode::kValid) {
-            slot_tx(slot).recovery.degrade();  // 损坏/v1/未知：保留证据降级。
-            if (!succeeded(read)) {
-                CS_LOG_WARN(kCoreSaveLogDomain,
-                            "journal recovery abort slot=%d step=journal_read code=%d health=degraded",
-                            slot, read.code);
-            } else {
-                CS_LOG_WARN(kCoreSaveLogDomain,
-                            "journal recovery abort slot=%d step=journal_decode health=degraded", slot);
+            if (mark_degraded(slot_tx(slot))) {  // 损坏/v1/未知：保留证据降级。
+                if (!succeeded(read)) {
+                    CS_LOG_ERROR(kCoreSaveLogDomain,
+                                "degrade op=save slot=%d tx=0 reason=journal_read_failed code=%d",
+                                slot, read.code);
+                } else {
+                    CS_LOG_ERROR(kCoreSaveLogDomain,
+                                "degrade op=save slot=%d tx=0 reason=journal_corrupt", slot);
+                }
             }
             return;
         }
         if (journal.stage != JournalStage::kOriginalConfirmed) {
-            slot_tx(slot).recovery.degrade();  // prepared 崩溃窗口不自动提交。
-            CS_LOG_WARN(kCoreSaveLogDomain,
-                        "journal recovery abort slot=%d step=journal_stage_prepared health=degraded", slot);
+            if (mark_degraded(slot_tx(slot))) {  // prepared 崩溃窗口不自动提交。
+                CS_LOG_ERROR(kCoreSaveLogDomain,
+                            "degrade op=save slot=%d tx=%llu reason=prepared_journal_unresolved", slot,
+                            static_cast<unsigned long long>(journal.tx_id));
+            }
             return;
         }
     }
@@ -483,10 +511,9 @@ void save_coordinator_on_session_enter(int32_t slot, uint64_t frame, const QolSl
             tx.lease.size = sizeof(tx.lease);
             const auto acquired = g.operation->acquire(g.operation->host_ctx, g.owner, 1u << slot, &tx.lease);
             if (!succeeded(acquired)) {
-                tx.recovery.degrade();
-                CS_LOG_WARN(kCoreSaveLogDomain,
-                            "journal recovery abort slot=%d step=recovery_acquire code=%d health=degraded",
-                            slot, acquired.code);
+                if (mark_degraded(tx)) CS_LOG_ERROR(kCoreSaveLogDomain,
+                            "degrade op=save slot=%d tx=%llu reason=recovery_acquire_failed code=%d",
+                            slot, static_cast<unsigned long long>(journal.tx_id), acquired.code);
                 return;
             }
             tx.lease_held = true;
@@ -499,10 +526,9 @@ void save_coordinator_on_session_enter(int32_t slot, uint64_t frame, const QolSl
                                                               &reservation);
         if (!succeeded(reserved)) {
             release_credentials(tx);
-            tx.recovery.degrade();
-            CS_LOG_WARN(kCoreSaveLogDomain,
-                        "journal recovery abort slot=%d step=recovery_reserve code=%d health=degraded",
-                        slot, reserved.code);
+            if (mark_degraded(tx)) CS_LOG_ERROR(kCoreSaveLogDomain,
+                        "degrade op=save slot=%d tx=%llu reason=recovery_reserve_failed code=%d",
+                        slot, static_cast<unsigned long long>(journal.tx_id), reserved.code);
             return;
         }
         tx.reservation = reservation;
@@ -513,10 +539,9 @@ void save_coordinator_on_session_enter(int32_t slot, uint64_t frame, const QolSl
         // 证据不匹配：保留 journal 与降级健康；凭据保留给显式恢复，或直接释放由人工处理。
         // 冻结语义：不自动提升；这里选择释放新签发的凭据并保留证据。
         release_credentials(tx);
-        tx.recovery.degrade();
-        CS_LOG_WARN(kCoreSaveLogDomain,
-                    "journal recovery abort slot=%d step=evidence_mismatch code=%d health=degraded",
-                    slot, evidence.code);
+        if (mark_degraded(tx)) CS_LOG_ERROR(kCoreSaveLogDomain,
+                    "degrade op=save slot=%d tx=%llu reason=evidence_mismatch code=%d",
+                    slot, static_cast<unsigned long long>(journal.tx_id), evidence.code);
         tx.captured = captured_from_journal(journal);
         tx.journal = journal;
         return;
@@ -524,6 +549,8 @@ void save_coordinator_on_session_enter(int32_t slot, uint64_t frame, const QolSl
     tx.captured = captured_from_journal(journal);
     tx.journal = journal;
     tx.tx_id = journal.tx_id;
+    tx.recovery_restore = true;
+    tx.exhaustion_logged = false;
     tx.phase = TxPhase::kAwaitingReplace;
     tx.frame_retry = true;  // 进档恢复：pending 由生产帧任务推进，不占 HTTP 票据。
     tx.recovery.begin_pending();  // 自动重试窗口：帧驱动推进，不重新 capture。
@@ -549,9 +576,12 @@ SaveSettle save_coordinator_retry_frame(int32_t slot, uint64_t frame, std::strin
         if (tx.phase != TxPhase::kIdle && tx.recovery.health() == SlotHealth::kDegraded) {
             finish_capture(tx, value(QolSlotDataOutcome::kDegraded));  // 收敛捕获事务（保留证据）。
             tx.frame_retry = false;
-            CS_LOG_WARN(kCoreSaveLogDomain,
-                        "save abort slot=%d tx=%llu reason=retries_exhausted health=degraded", slot,
-                        static_cast<unsigned long long>(tx.journal.tx_id));
+            if (tx.recovery.retries() >= 3 && !tx.exhaustion_logged) {
+                CS_LOG_ERROR(kCoreSaveLogDomain,
+                             "degrade op=save attempts=3 slot=%d tx=%llu reason=retries_exhausted",
+                             slot, static_cast<unsigned long long>(tx.journal.tx_id));
+                tx.exhaustion_logged = true;
+            }
             if (out_error != nullptr) *out_error = "recovery retries exhausted";
             return SaveSettle::kFailed;
         }
@@ -564,14 +594,12 @@ SaveSettle save_coordinator_retry_frame(int32_t slot, uint64_t frame, std::strin
             g.adapter->read_evidence(g.adapter->adapter_ctx, &tx.lease, slot, &current);
         if (!succeeded(evidence)) {
             const auto action = tx.recovery.retry_result(false);
+            log_retry_failure(tx, slot, tx.journal.tx_id, "evidence_read_failed", evidence.code);
             if (action == LeaseAction::kRelease ||
                 tx.recovery.health() == SlotHealth::kDegraded) {
                 // Degraded 收敛消费者引用，但保留 operation lease、reservation 与 journal。
                 if (action == LeaseAction::kRelease) tx.recovery.degrade();
                 finish_capture(tx, value(QolSlotDataOutcome::kDegraded));
-                CS_LOG_WARN(kCoreSaveLogDomain,
-                            "save abort slot=%d tx=%llu step=retry_evidence code=%d health=degraded",
-                            slot, static_cast<unsigned long long>(tx.journal.tx_id), evidence.code);
                 if (out_error != nullptr) *out_error = "evidence unavailable; degraded";
                 return SaveSettle::kFailed;
             }
@@ -582,10 +610,10 @@ SaveSettle save_coordinator_retry_frame(int32_t slot, uint64_t frame, std::strin
         tx.journal.evidence = current;
         std::vector<uint8_t> confirmed;
         if (!encode_save_journal(tx.journal, &confirmed)) {
-            tx.recovery.degrade();
-            CS_LOG_WARN(kCoreSaveLogDomain,
-                        "save abort slot=%d tx=%llu step=retry_confirmed_encode health=degraded", slot,
-                        static_cast<unsigned long long>(tx.journal.tx_id));
+            (void)mark_degraded(tx);
+            CS_LOG_ERROR(kCoreSaveLogDomain,
+                         "degrade op=save slot=%d tx=%llu reason=confirmed_journal_encode_failed",
+                         slot, static_cast<unsigned long long>(tx.journal.tx_id));
             if (out_error != nullptr) *out_error = "confirmed journal encode failed; degraded";
             return SaveSettle::kFailed;
         }
@@ -600,13 +628,11 @@ SaveSettle save_coordinator_retry_frame(int32_t slot, uint64_t frame, std::strin
         tx.reservation = credential;
         if (!succeeded(written)) {
             const auto action = tx.recovery.retry_result(false);
+            log_retry_failure(tx, slot, tx.journal.tx_id, "confirmed_journal_write_failed", written.code);
             if (action == LeaseAction::kRelease ||
                 tx.recovery.health() == SlotHealth::kDegraded) {
                 if (action == LeaseAction::kRelease) tx.recovery.degrade();
                 finish_capture(tx, value(QolSlotDataOutcome::kDegraded));
-                CS_LOG_WARN(kCoreSaveLogDomain,
-                            "save abort slot=%d tx=%llu step=retry_confirmed_write code=%d health=degraded",
-                            slot, static_cast<unsigned long long>(tx.journal.tx_id), written.code);
                 if (out_error != nullptr) *out_error = "confirmed write failed; degraded";
                 return SaveSettle::kFailed;
             }
@@ -617,10 +643,10 @@ SaveSettle save_coordinator_retry_frame(int32_t slot, uint64_t frame, std::strin
     }
     if (tx.phase == TxPhase::kAwaitingReplace) {
         if (tx.confirmed_bytes.empty() && !encode_save_journal(tx.journal, &tx.confirmed_bytes)) {
-            tx.recovery.degrade();
-            CS_LOG_WARN(kCoreSaveLogDomain,
-                        "save abort slot=%d tx=%llu step=retry_confirmed_encode health=degraded", slot,
-                        static_cast<unsigned long long>(tx.journal.tx_id));
+            (void)mark_degraded(tx);
+            CS_LOG_ERROR(kCoreSaveLogDomain,
+                         "degrade op=save slot=%d tx=%llu reason=confirmed_journal_encode_failed",
+                         slot, static_cast<unsigned long long>(tx.journal.tx_id));
             if (out_error != nullptr) *out_error = "confirmed journal encode failed; degraded";
             return SaveSettle::kFailed;
         }
@@ -638,13 +664,11 @@ SaveSettle save_coordinator_retry_frame(int32_t slot, uint64_t frame, std::strin
         tx.reservation = credential;
         if (!succeeded(replaced)) {
             const auto action = tx.recovery.retry_result(false);
+            log_retry_failure(tx, slot, tx.journal.tx_id, "final_replace_failed", replaced.code);
             if (action == LeaseAction::kRelease ||
                 tx.recovery.health() == SlotHealth::kDegraded) {
                 if (action == LeaseAction::kRelease) tx.recovery.degrade();
                 finish_capture(tx, value(QolSlotDataOutcome::kDegraded));
-                CS_LOG_WARN(kCoreSaveLogDomain,
-                            "save abort slot=%d tx=%llu step=retry_replace code=%d health=degraded", slot,
-                            static_cast<unsigned long long>(tx.journal.tx_id), replaced.code);
                 if (out_error != nullptr) *out_error = "replace failed; degraded";
                 return SaveSettle::kFailed;
             }
@@ -655,12 +679,18 @@ SaveSettle save_coordinator_retry_frame(int32_t slot, uint64_t frame, std::strin
         // 先 reservation 后 operation 释放。
         (void)tx.recovery.retry_result(true);
         finish_capture(tx, value(QolSlotDataOutcome::kCommitted));
+        if (tx.recovery_restore) {
+            CS_LOG_INFO(kCoreSaveLogDomain,
+                        "restore op=recover slot=%d tx=%llu result=committed", slot,
+                        static_cast<unsigned long long>(tx.journal.tx_id));
+        }
         release_credentials(tx);
         tx.captured.clear();
         tx.confirmed_bytes.clear();
         tx.journal = SaveJournal{};
         tx.phase = TxPhase::kIdle;
         tx.frame_retry = false;
+        tx.recovery_restore = false;
         return SaveSettle::kCommitted;
     }
     if (out_error != nullptr) *out_error = "unexpected phase";
@@ -741,7 +771,7 @@ SaveSettle save_coordinator_save_entry(int32_t slot, uint32_t attempt, uint64_t 
         out_original->original_result = 0;
     }
     if (slot < 0 || slot > 2) {
-        CS_LOG_WARN(kCoreSaveLogDomain, "save rejected slot=%d reason=bad_slot", slot);
+        CS_LOG_WARN(kCoreSaveLogDomain, "save rejected slot=%d reason=bad_slot entry=settle", slot);
         if (out_body != nullptr) *out_body = "{\"ok\":false,\"error\":\"bad slot\"}";
         return SaveSettle::kFailed;
     }
@@ -759,17 +789,17 @@ SaveSettle save_coordinator_save_entry(int32_t slot, uint32_t attempt, uint64_t 
     }
     // 前一次 hook 保存仍 pending：本 invocation 未执行原版，不得透传上一事务的原版返回。
     if (has_tx) {
-        CS_LOG_WARN(kCoreSaveLogDomain, "save rejected slot=%d reason=save_in_flight", slot);
+        CS_LOG_WARN(kCoreSaveLogDomain, "save rejected slot=%d reason=save_in_flight entry=settle", slot);
         if (out_body != nullptr) *out_body = "{\"ok\":false,\"error\":\"save in flight\"}";
         return SaveSettle::kFailed;
     }
     if (attempt != 0) {
         if (!healthy) {
-            CS_LOG_WARN(kCoreSaveLogDomain, "save rejected slot=%d reason=slot_degraded", slot);
+            CS_LOG_WARN(kCoreSaveLogDomain, "save rejected slot=%d reason=slot_degraded entry=settle", slot);
             if (out_body != nullptr) *out_body = "{\"ok\":false,\"error\":\"slot degraded\"}";
             return SaveSettle::kFailed;
         }
-        CS_LOG_WARN(kCoreSaveLogDomain, "save rejected slot=%d reason=no_bound_transaction", slot);
+        CS_LOG_WARN(kCoreSaveLogDomain, "save rejected slot=%d reason=no_bound_transaction entry=settle", slot);
         if (out_body != nullptr) *out_body = "{\"ok\":false,\"error\":\"no bound transaction\"}";
         return SaveSettle::kFailed;
     }

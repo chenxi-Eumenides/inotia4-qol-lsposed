@@ -121,7 +121,7 @@ void create_panel_controls_locked() {
         g_ui_components->button_create == nullptr ||
         g_ui_components->nav_button_create == nullptr ||
         g_ui_components->arrow_button_create == nullptr) {
-        SB_UI_LOG("create controls failed at component API validation");
+        SAVE_BACKUP_LOG_WARN("create controls failed at component API validation");
         return;
     }
     const UiRect root_rect = panel_root_rect();
@@ -129,7 +129,7 @@ void create_panel_controls_locked() {
     const contracts::UiPanelDesc root_desc{root_rect, mask, 0, 0};
     void* root = nullptr;
     if (!contracts::succeeded(g_ui_components->panel_create(&root_desc, nullptr, &root)) || root == nullptr) {
-        SB_UI_LOG("create controls failed at root panel_create");
+        SAVE_BACKUP_LOG_WARN("create controls failed at root panel_create");
         return;
     }
     g_root = root;
@@ -140,24 +140,24 @@ void create_panel_controls_locked() {
     };
     for (int i = 0; i < 3; ++i) {
         if (!create_hit(slot_btn_rect(i), 100, i, root, &g_slot_btns[i])) {
-            SB_UI_LOG("create controls failed at slot button %d", i);
+            SAVE_BACKUP_LOG_WARN("create controls failed at slot button %d", i);
             return;
         }
     }
     const contracts::UiArrowButtonDesc export_arrow{ops_btn_rect(0), contracts::kUiArrowRight, 1,
         &component_action_clicked, reinterpret_cast<void*>(400)};
     if (!contracts::succeeded(g_ui_components->arrow_button_create(&export_arrow, root, &g_ops_btns[0]))) {
-        SB_UI_LOG("create controls failed at export arrow");
+        SAVE_BACKUP_LOG_WARN("create controls failed at export arrow");
         return;
     }
     if (!create_hit(ops_btn_rect(1), 401, 0, root, &g_ops_btns[1])) {
-        SB_UI_LOG("create controls failed at delete hit button");
+        SAVE_BACKUP_LOG_WARN("create controls failed at delete hit button");
         return;
     }
     const contracts::UiArrowButtonDesc import_arrow{ops_btn_rect(2), contracts::kUiArrowLeft, 1,
         &component_action_clicked, reinterpret_cast<void*>(402)};
     if (!contracts::succeeded(g_ui_components->arrow_button_create(&import_arrow, root, &g_ops_btns[2]))) {
-        SB_UI_LOG("create controls failed at import arrow");
+        SAVE_BACKUP_LOG_WARN("create controls failed at import arrow");
         return;
     }
     // 屏幕最右列两按钮为纯命中按钮（文本空、DrawProc 手绘）：user 直接用 action id（403/404），
@@ -168,23 +168,23 @@ void create_panel_controls_locked() {
         return contracts::succeeded(g_ui_components->button_create(&desc, root, out)) && *out != nullptr;
     };
     if (!create_side_hit(side_btn_rect(0), 403, &g_side_btns[0])) {
-        SB_UI_LOG("create controls failed at side export button");
+        SAVE_BACKUP_LOG_WARN("create controls failed at side export button");
         return;
     }
     if (!create_side_hit(side_btn_rect(1), 404, &g_side_btns[1])) {
-        SB_UI_LOG("create controls failed at side import button");
+        SAVE_BACKUP_LOG_WARN("create controls failed at side import button");
         return;
     }
     for (int i = 0; i < LIST_COLS_PER_PAGE; ++i) {
         UiRect row = list_btn_rect(i);
         if (row.w <= 0 || row.h <= 0) row = {LIST_COL_X, 0, 1, 1};
         if (!create_hit(row, 200, i, root, &g_list_btns[i])) {
-            SB_UI_LOG("create controls failed at backup row %d", i);
+            SAVE_BACKUP_LOG_WARN("create controls failed at backup row %d", i);
             return;
         }
     }
     if (!create_hit(auto_btn_rect(), 300, 0, root, &g_auto_btn)) {
-        SB_UI_LOG("create controls failed at auto entry");
+        SAVE_BACKUP_LOG_WARN("create controls failed at auto entry");
         return;
     }
     const contracts::UiArrowButtonDesc left{{LIST_COL_X + 0x04, PAGE_ROW_Y, LIST_PAGE_BTN_W, LIST_PAGE_BTN_H},
@@ -194,12 +194,12 @@ void create_panel_controls_locked() {
         &component_action_clicked, reinterpret_cast<void*>(501)};
     if (!contracts::succeeded(g_ui_components->arrow_button_create(&left, root, &g_prev_btn)) ||
         !contracts::succeeded(g_ui_components->arrow_button_create(&right, root, &g_next_btn))) {
-        SB_UI_LOG("create controls failed at pager arrows");
+        SAVE_BACKUP_LOG_WARN("create controls failed at pager arrows");
         return;
     }
     UiRect root_abs{};
     if (!ui_get_rect(root, &root_abs)) {
-        SB_UI_LOG("create controls failed at navigation root geometry");
+        SAVE_BACKUP_LOG_WARN("create controls failed at navigation root geometry");
         return;
     }
     const UiRect back{contracts::ui_theme::kNavBoxAbsX - root_abs.x,
@@ -207,11 +207,11 @@ void create_panel_controls_locked() {
                       contracts::ui_theme::kNavBoxW, contracts::ui_theme::kNavBoxH};
     const contracts::UiNavButtonDesc nav{back, contracts::kUiNavButtonAuto, nullptr, nullptr};
     if (!contracts::succeeded(g_ui_components->nav_button_create(&nav, root, &g_back_btn))) {
-        SB_UI_LOG("create controls failed at navigation button");
+        SAVE_BACKUP_LOG_WARN("create controls failed at navigation button");
         return;
     }
     sync_list_btn_rects_locked();
-    SB_UI_LOG("create component tree: root=%p", root);
+    SAVE_BACKUP_LOG_DEBUG("create component tree: root=%p", root);
 }
 
 void panel_enter_impl() {
@@ -234,7 +234,7 @@ void panel_enter_impl() {
             sync_list_btn_rects_locked();
             resumed = true;
         } else if (!ui_resolution_ready()) {
-            SB_UI_LOG("savebackup panel enter: symbols not resolved");
+            SAVE_BACKUP_LOG_WARN("savebackup panel enter: symbols not resolved");
             return;
         } else {
             create_panel_controls_locked();
@@ -302,7 +302,7 @@ void panel_process_impl() {
 }
 
 void panel_f3_impl() {
-    SB_UI_LOG("savebackup panel f3 (terminate)");
+    SAVE_BACKUP_LOG_DEBUG("savebackup panel f3 (terminate)");
     close_active_confirmation();
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
     g_panel_active = false;

@@ -69,6 +69,7 @@ const contracts::QolFeatureControlApi* g_control = nullptr;
 QolUiHandle g_root = nullptr, g_left = nullptr, g_right = nullptr, g_back = nullptr;
 QolUiHandle g_pressed_list = nullptr;
 bool g_back_pressed = false;
+bool g_more_games_bind_failure_logged = false;
 std::mutex g_mtx;
 bool g_panel_active = false;
 uint64_t g_generation = 0, g_frame = 0;
@@ -132,6 +133,11 @@ void item_error(uint32_t i, const char* text) {
     std::snprintf(g_states[i].message, sizeof(g_states[i].message), "%s", text);
     std::snprintf(g_status, sizeof(g_status), "%s：%s", g_items[i].label, text);
 }
+void log_setting_request_failure(uint32_t i, const char* reason) {
+    if (i >= g_items.size() || reason == nullptr) return;
+    CORE_UI_LOG_WARN("reject feature=%s section=%d reason=%s", g_items[i].feature_id,
+                     static_cast<int>(g_items[i].category), reason);
+}
 void clear_entry_continuation() { g_entry_continuation = EntryContinuation{}; }
 bool feature_control_has_read_actual() {
     return g_control != nullptr && g_control->struct_size >= kFeatureControlReadActualSize &&
@@ -158,6 +164,8 @@ void refresh_owner_availability() {
         const auto latest = read_owner_availability(owner.plugin_id.c_str());
         if (latest == owner.availability) continue;
         owner.availability = latest;
+        CORE_UI_LOG_INFO("apply owner=%s result=%d", owner.plugin_id.c_str(),
+                         static_cast<int>(latest));
         for (uint32_t i = 0; i < g_items.size(); ++i)
             if (owner.plugin_id == g_items[i].plugin_id) sync_controls(i);
     }
@@ -480,12 +488,12 @@ bool build_right_list(int category) {
         static_cast<uint32_t>(g_right_indices.size()), -1, &draw_right_row, nullptr, nullptr};
     const QolResult right_create = g_components->scroll_list_create(&list, g_root, &g_right);
     if (!contracts::succeeded(right_create)) {
-        CORE_UI_LOG_INFO("settings right list create failed code=%d", right_create.ok);
+        CORE_UI_LOG_WARN("settings right list create failed code=%d", right_create.ok);
         return false;
     }
     const QolResult selection = g_components->scroll_list_set_selection_enabled(g_right, 0);
     if (!contracts::succeeded(selection)) {
-        CORE_UI_LOG_INFO("settings right list selection failed code=%d", selection.ok);
+        CORE_UI_LOG_WARN("settings right list selection failed code=%d", selection.ok);
         destroy_right_list(); return false;
     }
     g_choice_contexts.resize(g_items.size() * 2);
@@ -494,7 +502,7 @@ bool build_right_list(int category) {
         QolUiHandle handle = nullptr;
         const QolResult row_result = g_components->scroll_list_get_row(g_right, row, &handle);
         if (!contracts::succeeded(row_result)) {
-            CORE_UI_LOG_INFO("settings row get failed row=%u code=%d", row, row_result.ok);
+            CORE_UI_LOG_WARN("settings row get failed row=%u code=%d", row, row_result.ok);
             destroy_right_list(); return false;
         }
         const int32_t control_left = settings_model::right_control_left(kRightW);
@@ -524,7 +532,7 @@ bool build_right_list(int category) {
                 ? g_components->arrow_button_create(&right, handle, &g_states[i].choice_right)
                 : left_arrow;
             if (!contracts::succeeded(left_arrow) || !contracts::succeeded(right_arrow)) {
-                CORE_UI_LOG_INFO("settings choice arrow create failed item=%u code=%d/%d",
+                CORE_UI_LOG_WARN("settings choice arrow create failed item=%u code=%d/%d",
                                  i, left_arrow.ok, right_arrow.ok);
                 destroy_right_list(); return false;
             }
@@ -535,7 +543,7 @@ bool build_right_list(int category) {
             const QolResult toggle_result = g_components->native_toggle_create(
                 &toggle, handle, &g_states[i].toggle);
             if (!contracts::succeeded(toggle_result)) {
-                CORE_UI_LOG_INFO("settings toggle create failed item=%u code=%d", i, toggle_result.ok);
+                CORE_UI_LOG_WARN("settings toggle create failed item=%u code=%d", i, toggle_result.ok);
                 destroy_right_list(); return false;
             }
         }
@@ -544,6 +552,7 @@ bool build_right_list(int category) {
     return true;
 }
 void destroy_page() {
+    const bool was_active = g_panel_active;
     { std::lock_guard<std::mutex> lock(g_mtx); g_panel_active = false;
       g_summary_categories = 0; g_summary_items = 0; }
     clear_entry_continuation();
@@ -561,6 +570,7 @@ void destroy_page() {
     g_states.clear(); g_contexts.clear(); g_choice_contexts.clear(); g_items.clear(); g_categories.clear();
     g_owner_availability.clear();
     g_frame = 0; set_status("");
+    if (was_active) CORE_UI_LOG_INFO("close panel=settings result=closed");
 }
 void process_pending_toggles() {
     for (uint32_t i = 0; i < g_items.size(); ++i) {
@@ -577,7 +587,10 @@ void process_pending_toggles() {
         const auto result = g_control->request_set_feature(g_control->context,
             item.plugin_id, item.feature_id, s.desired, &receipt);
         if (!contracts::succeeded(result) || receipt.admission != contracts::FeatureAdmission::kAdmitted ||
-            receipt.request_id == 0) item_error(i, settings_model::request_error_text(result.code));
+            receipt.request_id == 0) {
+            log_setting_request_failure(i, "request_rejected");
+            item_error(i, settings_model::request_error_text(result.code));
+        }
         else { s.request_id = receipt.request_id;
                std::snprintf(s.message, sizeof(s.message), "保存中…"); }
         sync_controls(i);
@@ -592,6 +605,7 @@ void poll_requests() {
             contracts::FeatureReceipt receipt{};
             const auto result = g_control->receipt(g_control->context, s.request_id, &receipt);
             if (!contracts::succeeded(result)) {
+                log_setting_request_failure(i, "receipt_unavailable");
                 s.request_id = 0;
                 s.choice_target = UINT32_MAX;
                 item_error(i, "保存状态未知，请核对当前选项");
@@ -599,6 +613,9 @@ void poll_requests() {
                 continue;
             } else if (receipt.persistence != contracts::FeaturePersistence::kPersisted ||
                        receipt.admission != contracts::FeatureAdmission::kAdmitted) {
+                CORE_UI_LOG_WARN("feature=%s section=%d reason=persistence_failed",
+                                 g_items[i].feature_id,
+                                 static_cast<int>(g_items[i].category));
                 s.request_id = 0;
                 s.choice_target = UINT32_MAX;
                 item_error(i, "保存失败，选项未更改");
@@ -607,10 +624,15 @@ void poll_requests() {
                 s.request_id = 0;
                 s.choice_target = UINT32_MAX;
                 refresh_item_value(i);
-                if (!s.valid || s.choice_position != target)
+                if (!s.valid || s.choice_position != target) {
+                    log_setting_request_failure(i, "persisted_state_mismatch");
                     item_error(i, "保存状态未知，请核对当前选项");
-                else
+                } else {
+                    CORE_UI_LOG_INFO("feature=%s section=%d result=applied",
+                                     g_items[i].feature_id,
+                                     static_cast<int>(g_items[i].category));
                     std::snprintf(s.message, sizeof(s.message), "已保存");
+                }
             }
             sync_controls(i);
             continue;
@@ -618,12 +640,19 @@ void poll_requests() {
         contracts::FeatureReceipt receipt{};
         const auto result = g_control->receipt(g_control->context, s.request_id, &receipt);
         if (!contracts::succeeded(result)) {
+            log_setting_request_failure(i, "receipt_unavailable");
             s.request_id = 0; item_error(i, "保存状态未知，请核对当前设置");
         } else if (receipt.persistence == contracts::FeaturePersistence::kPending) continue;
         else if (receipt.persistence == contracts::FeaturePersistence::kFailed ||
                  receipt.admission != contracts::FeatureAdmission::kAdmitted) {
+            CORE_UI_LOG_WARN("feature=%s section=%d reason=persistence_failed",
+                             g_items[i].feature_id,
+                             static_cast<int>(g_items[i].category));
             s.request_id = 0; item_error(i, "保存失败，设置未更改");
         } else {
+            CORE_UI_LOG_INFO("feature=%s section=%d result=applied",
+                             g_items[i].feature_id,
+                             static_cast<int>(g_items[i].category));
             s.request_id = 0;
             std::snprintf(s.message, sizeof(s.message), "已保存；运行状态由宿主更新");
         }
@@ -657,6 +686,7 @@ void process_pending_choice() {
         item.feature_id, value, &receipt);
     if (!contracts::succeeded(result) || receipt.admission != contracts::FeatureAdmission::kAdmitted ||
         receipt.request_id == 0) {
+        log_setting_request_failure(i, "request_rejected");
         state.choice_target = UINT32_MAX;
         item_error(i, settings_model::request_error_text(!contracts::succeeded(result) ?
             result.code : receipt.error_code != 0 ? receipt.error_code : kQolErrBlocked));
@@ -703,16 +733,20 @@ void process_pending_action() {
             return;
         }
         if (g_control->invoke_entry == nullptr) {
+            log_setting_request_failure(static_cast<uint32_t>(i), "invoke_unavailable");
             item_error(static_cast<uint32_t>(i),
                        settings_model::action_error_text(kQolErrNotReady));
         } else {
             const auto result = g_control->invoke_entry(
                 g_control->context, item.plugin_id, item.feature_id);
-            if (!contracts::succeeded(result))
+            if (!contracts::succeeded(result)) {
+                log_setting_request_failure(static_cast<uint32_t>(i), "invoke_rejected");
                 item_error(static_cast<uint32_t>(i),
                            settings_model::action_error_text(result.code));
-            else
+            } else {
+                CORE_UI_LOG_INFO("apply feature=%s result=invoked", item.feature_id);
                 set_status("");
+            }
         }
         sync_controls(static_cast<uint32_t>(i));
         return;
@@ -720,6 +754,7 @@ void process_pending_action() {
 
     if (!feature_control_has_read_actual() ||
         g_control->request_set_feature == nullptr || g_control->receipt == nullptr) {
+        log_setting_request_failure(static_cast<uint32_t>(i), "entry_api_unavailable");
         item_error(static_cast<uint32_t>(i),
                    settings_model::action_error_text(kQolErrNotReady));
         sync_controls(static_cast<uint32_t>(i));
@@ -731,6 +766,7 @@ void process_pending_action() {
         g_control->context, item.plugin_id, item.feature_id, 1, &receipt);
     if (!contracts::succeeded(result) ||
         receipt.admission != contracts::FeatureAdmission::kAdmitted || receipt.request_id == 0) {
+        log_setting_request_failure(static_cast<uint32_t>(i), "entry_request_rejected");
         const int32_t error = !contracts::succeeded(result) ? result.code :
             (receipt.error_code != 0 ? receipt.error_code : kQolErrBlocked);
         item_error(static_cast<uint32_t>(i), settings_model::request_error_text(error));
@@ -756,10 +792,15 @@ int entry_continuation_item_index() {
     }
     return -1;
 }
-void finish_entry_continuation(uint32_t item_index, const char* error) {
+void finish_entry_continuation(uint32_t item_index, const char* error, const char* reason) {
     clear_entry_continuation();
     if (item_index >= g_items.size()) return;
-    if (error != nullptr) item_error(item_index, error);
+    if (error != nullptr) {
+        item_error(item_index, error);
+        log_setting_request_failure(item_index, reason == nullptr ? "entry_failed" : reason);
+    } else {
+        CORE_UI_LOG_INFO("apply feature=%s result=invoked", g_items[item_index].feature_id);
+    }
     sync_controls(item_index);
 }
 void poll_entry_continuation() {
@@ -773,17 +814,19 @@ void poll_entry_continuation() {
     refresh_owner_availability(index);
     if (!owner_available(index)) {
         finish_entry_continuation(index, feature_model::owner_failure_text(
-            owner_availability(g_items[index].plugin_id)));
+            owner_availability(g_items[index].plugin_id)), "owner_unavailable");
         return;
     }
     if (g_control == nullptr || g_control->receipt == nullptr ||
         g_control->read_feature == nullptr || g_control->invoke_entry == nullptr ||
         !feature_control_has_read_actual()) {
-        finish_entry_continuation(index, settings_model::action_error_text(kQolErrNotReady));
+        finish_entry_continuation(index, settings_model::action_error_text(kQolErrNotReady),
+                                  "entry_api_unavailable");
         return;
     }
     if (++g_entry_continuation.process_ticks > kEntryWaitMaxProcessTicks) {
-        finish_entry_continuation(index, settings_model::action_error_text(kQolErrTimeout));
+        finish_entry_continuation(index, settings_model::action_error_text(kQolErrTimeout),
+                                  "entry_timeout");
         return;
     }
 
@@ -792,26 +835,27 @@ void poll_entry_continuation() {
         const auto result = g_control->receipt(
             g_control->context, g_entry_continuation.request_id, &receipt);
         if (!contracts::succeeded(result)) {
-            finish_entry_continuation(index, settings_model::action_error_text(result.code));
+            finish_entry_continuation(index, settings_model::action_error_text(result.code),
+                                      "receipt_unavailable");
             return;
         }
         if (receipt.request_id != g_entry_continuation.request_id ||
             receipt.admission != contracts::FeatureAdmission::kAdmitted) {
             finish_entry_continuation(index,
                 settings_model::request_error_text(receipt.error_code != 0 ?
-                    receipt.error_code : kQolErrInternal));
+                    receipt.error_code : kQolErrInternal), "receipt_rejected");
             return;
         }
         if (receipt.persistence == contracts::FeaturePersistence::kPending) {
             if (g_entry_continuation.process_ticks >= kEntryWaitMaxProcessTicks)
                 finish_entry_continuation(index,
-                    settings_model::action_error_text(kQolErrTimeout));
+                    settings_model::action_error_text(kQolErrTimeout), "entry_timeout");
             return;
         }
         if (receipt.persistence != contracts::FeaturePersistence::kPersisted) {
             finish_entry_continuation(index,
                 settings_model::request_error_text(receipt.error_code != 0 ?
-                    receipt.error_code : kQolErrInternal));
+                    receipt.error_code : kQolErrInternal), "persistence_failed");
             return;
         }
         g_entry_continuation.persisted = true;
@@ -823,12 +867,12 @@ void poll_entry_continuation() {
         &feature_enabled);
     if (!contracts::succeeded(feature_result)) {
         finish_entry_continuation(index,
-            settings_model::action_error_text(feature_result.code));
+            settings_model::action_error_text(feature_result.code), "feature_read_failed");
         return;
     }
     if (feature_enabled != 1) {
         finish_entry_continuation(index,
-            settings_model::action_error_text(kQolErrNotReady));
+            settings_model::action_error_text(kQolErrNotReady), "feature_not_enabled");
         return;
     }
     g_states[index].valid = true;
@@ -841,18 +885,18 @@ void poll_entry_continuation() {
     if (actual_result.code == kQolErrNotReady) {
         if (g_entry_continuation.process_ticks >= kEntryWaitMaxProcessTicks)
             finish_entry_continuation(index,
-                settings_model::action_error_text(kQolErrTimeout));
+                settings_model::action_error_text(kQolErrTimeout), "entry_timeout");
         return;
     }
     if (!contracts::succeeded(actual_result)) {
         finish_entry_continuation(index,
-            settings_model::action_error_text(actual_result.code));
+            settings_model::action_error_text(actual_result.code), "actual_state_unavailable");
         return;
     }
     if (actual_enabled != 1) {
         if (g_entry_continuation.process_ticks >= kEntryWaitMaxProcessTicks)
             finish_entry_continuation(index,
-                settings_model::action_error_text(kQolErrTimeout));
+                settings_model::action_error_text(kQolErrTimeout), "entry_timeout");
         return;
     }
 
@@ -863,7 +907,8 @@ void poll_entry_continuation() {
     const auto invoke_result = g_control->invoke_entry(g_control->context,
         g_entry_continuation.plugin_id.c_str(), g_entry_continuation.feature_id.c_str());
     finish_entry_continuation(index, contracts::succeeded(invoke_result) ? nullptr :
-        settings_model::action_error_text(invoke_result.code));
+        settings_model::action_error_text(invoke_result.code),
+        contracts::succeeded(invoke_result) ? nullptr : "invoke_rejected");
     if (contracts::succeeded(invoke_result)) set_status("");
 }
 bool components_complete() {
@@ -888,7 +933,7 @@ bool components_complete() {
 void destroy_page();
 void settings_panel_enter() {
     if (!main_thread() || !components_complete() || g_control == nullptr) {
-        CORE_UI_LOG_INFO("settings enter blocked preconditions");
+        CORE_UI_LOG_WARN("settings enter blocked preconditions");
         return;
     }
     if (g_root != nullptr) destroy_page();
@@ -896,11 +941,11 @@ void settings_panel_enter() {
         !g_ui->control_absolute_origin || !g_ui->fill_rect || !g_ui->begin_frame ||
         !g_ui->end_frame || !g_ui->hit_test ||
         g_ui->minor < contracts::kUiAdapterMinor || !g_ui->draw_help_option_row) {
-        CORE_UI_LOG_INFO("settings enter blocked ui api");
+        CORE_UI_LOG_WARN("settings enter blocked ui api");
         return;
     }
     if (!load_catalog()) {
-        CORE_UI_LOG_INFO("settings enter blocked catalog");
+        CORE_UI_LOG_WARN("settings enter blocked catalog");
         set_status("功能目录读取失败");
         return;
     }
@@ -909,7 +954,7 @@ void settings_panel_enter() {
     if (g_ui->screen_inset_width) (void)g_ui->screen_inset_width(&x);
     if (g_ui->screen_inset_height) (void)g_ui->screen_inset_height(&y);
     if (!contracts::succeeded(g_ui->create_control(0, nullptr, &g_root)) || g_root == nullptr) {
-        CORE_UI_LOG_INFO("settings enter blocked root create");
+        CORE_UI_LOG_WARN("settings enter blocked root create");
         return;
     }
     (void)g_ui->set_rect(g_root, {x, y, kPanelW, kPanelH});
@@ -929,25 +974,32 @@ void settings_panel_enter() {
             static_cast<uint32_t>(g_categories.size()), 0, &draw_left_row, &on_left_select, nullptr};
         const QolResult left_create = g_components->scroll_list_create(&list, g_root, &g_left);
         if (!contracts::succeeded(left_create)) {
-            CORE_UI_LOG_INFO("settings enter blocked left list code=%d", left_create.ok);
+            CORE_UI_LOG_WARN("settings enter blocked left list code=%d", left_create.ok);
             destroy_page();
             return;
         }
         if (!build_right_list(0)) {
-            CORE_UI_LOG_INFO("settings enter blocked right list");
+            CORE_UI_LOG_WARN("settings enter blocked right list");
             destroy_page();
             return;
         }
     }
-    std::lock_guard<std::mutex> lock(g_mtx); g_panel_active = true;
+    {
+        std::lock_guard<std::mutex> lock(g_mtx);
+        g_panel_active = true;
+    }
+    CORE_UI_LOG_INFO("panel=settings result=opened");
 }
 void settings_panel_process() {
     if (!main_thread() || !g_panel_active || g_root == nullptr) return;
     ++g_frame;
     refresh_owner_availability();
     if (g_pending_category >= 0) {
-        if (g_pending_category != g_selected_category && build_right_list(g_pending_category))
+        if (g_pending_category != g_selected_category && build_right_list(g_pending_category)) {
             g_selected_category = g_pending_category;
+            CORE_UI_LOG_INFO("apply panel=settings section=%d result=selected",
+                             static_cast<int>(g_categories[static_cast<size_t>(g_selected_category)].category));
+        }
         g_pending_category = -1;
     }
     poll_entry_continuation(); process_pending_action(); process_pending_choice(); poll_requests();
@@ -1063,7 +1115,7 @@ QolResult main_menu_gear_layout(void* parent, UiRect* out_rect, void* user) {
     if (last_menu_rect.x != rect.x || last_menu_rect.y != rect.y ||
         last_menu_rect.w != rect.w || last_menu_rect.h != rect.h) {
         last_menu_rect = rect;
-        CORE_UI_LOG_INFO("main-menu more-games rect=(%lld,%lld,%lld,%lld) gear=(%lld,%lld,%lld,%lld)",
+    CORE_UI_LOG_DEBUG("main-menu more-games rect=(%lld,%lld,%lld,%lld) gear=(%lld,%lld,%lld,%lld)",
                          static_cast<long long>(rect.x), static_cast<long long>(rect.y),
                          static_cast<long long>(rect.w), static_cast<long long>(rect.h),
                          static_cast<long long>(out_rect->x), static_cast<long long>(out_rect->y),
@@ -1075,6 +1127,7 @@ QolResult main_menu_gear_layout(void* parent, UiRect* out_rect, void* user) {
 }  // namespace
 
 void settings_bind_sdk(const contracts::QolHostSdk* sdk, contracts::QolOwnerToken) {
+    const contracts::QolHostSdk* previous_sdk = g_sdk;
     // Teardown uses the previous adapter before installing a new lifecycle context.
     if (g_root != nullptr) destroy_page();
     else clear_entry_continuation();
@@ -1087,6 +1140,16 @@ void settings_bind_sdk(const contracts::QolHostSdk* sdk, contracts::QolOwnerToke
             g_components = static_cast<const contracts::QolUiComponents*>(iface);
     }
     g_module_version[0] = '\0';
+    const bool ready = sdk != nullptr && g_ui != nullptr && g_control != nullptr &&
+        g_components != nullptr;
+    if (sdk != nullptr) {
+        if (ready) CORE_UI_LOG_INFO("bind owner=settings result=ready");
+        else CORE_UI_LOG_WARN("bind owner=settings result=failed reason=ui_api_unavailable");
+    } else if (previous_sdk != nullptr && previous_sdk->log.write != nullptr) {
+        static constexpr char message[] = "unbind owner=settings result=released";
+        (void)previous_sdk->log.write(1, 12, "core.settings/settings", message,
+                                      sizeof(message) - 1);
+    }
 }
 void settings_bind_game(const contracts::QolGameHost* game) { g_game = game; }
 bool settings_provider_open() { return plugin_enabled() && g_control != nullptr && components_complete(); }
@@ -1127,10 +1190,16 @@ std::string data_settings_ui_open_option() {
     return result_ok();
 }
 void settings_release_more_games() {
+    const bool was_mounted = g_main_menu_gear.mounted != 0;
     if (g_components != nullptr && g_components->anchored_button_release != nullptr) {
-        (void)g_components->anchored_button_release(&g_main_menu_gear);
+        const QolResult result = g_components->anchored_button_release(&g_main_menu_gear);
+        if (was_mounted) {
+            if (contracts::succeeded(result)) CORE_UI_LOG_INFO("unbind owner=settings_entry result=released");
+            else CORE_UI_LOG_WARN("unbind owner=settings_entry result=failed reason=release_rejected");
+        }
     } else {
         g_main_menu_gear = {};
+        if (was_mounted) CORE_UI_LOG_WARN("unbind owner=settings_entry result=failed reason=release_api_unavailable");
     }
 }
 const char* settings_more_games_bind_state() {
@@ -1162,10 +1231,17 @@ void settings_main_menu_more_games_draw(void* group, int32_t x, int32_t y, void*
     const contracts::UiAnchoredButtonDesc desc{
         static_cast<uint32_t>(contracts::QolUiRootKind::kMainMenuParent), icon_desc};
     uint8_t created = 0;
-    if (!contracts::succeeded(g_components->anchored_button_ensure(
-            &g_main_menu_gear, &desc, &main_menu_gear_layout, nullptr, &created))) {
+    const QolResult ensured = g_components->anchored_button_ensure(
+        &g_main_menu_gear, &desc, &main_menu_gear_layout, nullptr, &created);
+    if (!contracts::succeeded(ensured)) {
+        if (!g_more_games_bind_failure_logged) {
+            CORE_UI_LOG_WARN("bind owner=settings_entry result=failed reason=ensure_rejected");
+            g_more_games_bind_failure_logged = true;
+        }
         return;
     }
+    g_more_games_bind_failure_logged = false;
+    if (created != 0) CORE_UI_LOG_INFO("bind owner=settings_entry result=ready");
     (void)g_components->anchored_button_draw(&g_main_menu_gear);
 }
 }  // namespace qol::features::core_ui

@@ -271,7 +271,7 @@ private:
             RuntimeSubscription* previous = active_subscription_;
             active_subscription_ = subscription.get();
             try { subscription->observer(subscription->context, &effect); }
-            catch (...) { QOL_LOG_ERROR(QolDomain::kCore, "runtime effect observer threw"); }
+            catch (...) { QOL_LOG_WARN(QolDomain::kCore, "runtime effect observer threw"); }
             active_subscription_ = previous;
         }
         {

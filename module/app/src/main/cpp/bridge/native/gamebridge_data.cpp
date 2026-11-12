@@ -51,7 +51,7 @@ struct ModuleHealthCallbackContext : std::enable_shared_from_this<ModuleHealthCa
         bool attached = false;
         if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
             if (vm->AttachCurrentThread(&env, nullptr) != JNI_OK) {
-                QOL_LOG_ERROR(QolDomain::kCore,
+                QOL_LOG_WARN(QolDomain::kCore,
                               "module health callback could not attach to release class ref");
                 return;
             }
@@ -68,7 +68,9 @@ std::unordered_map<uint64_t, std::shared_ptr<ModuleHealthCallbackContext>>
 
 void clear_java_exception(JNIEnv* env, const char* operation) {
     if (env == nullptr || !env->ExceptionCheck()) return;
-    QOL_LOG_ERROR(QolDomain::kCore, "module health callback JNI failure during %s", operation);
+    QOL_LOG_WARN(QolDomain::kCore,
+                 "module health callback JNI failure during %s op=module_health reason=jni_exception",
+                 operation);
     env->ExceptionDescribe();
     env->ExceptionClear();
 }
@@ -88,7 +90,8 @@ void deliver_module_health(void* raw_context,
     bool attached = false;
     if (context->vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
         if (context->vm->AttachCurrentThread(&env, nullptr) != JNI_OK) {
-            QOL_LOG_ERROR(QolDomain::kCore, "module health callback thread attach failed");
+            QOL_LOG_WARN(QolDomain::kCore,
+                         "module health callback thread attach failed op=module_health reason=thread_attach_failed");
             return;
         }
         attached = true;
@@ -98,7 +101,8 @@ void deliver_module_health(void* raw_context,
     try {
         json_payload = module_health_json(snapshot);
     } catch (const std::bad_alloc&) {
-        QOL_LOG_ERROR(QolDomain::kCore, "module health callback JSON allocation failed");
+        QOL_LOG_WARN(QolDomain::kCore,
+                     "module health callback JSON allocation failed op=module_health reason=json_alloc_failed");
         if (attached) context->vm->DetachCurrentThread();
         return;
     }

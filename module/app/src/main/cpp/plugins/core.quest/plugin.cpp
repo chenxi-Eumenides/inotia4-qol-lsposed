@@ -67,6 +67,7 @@ const contracts::QolGameHost* g_game = nullptr;
 const contracts::WorldFactsApi* g_world_facts = nullptr;
 const contracts::QolQuestPort* g_quest_port = nullptr;
 uint64_t g_snapshot_task = 0;
+bool g_snapshot_failure_active = false;
 uint64_t g_save_enter_subscription = 0;
 Snapshot<QuestSnapshot> g_snapshot;
 
@@ -96,11 +97,18 @@ bool set_state_handler(void*, const uint8_t* payload, uint32_t size) {
     return g_quest_port->write.set_state(command.quest_id, command.state).ok == kQolOk;
 }
 
-void log_message(const contracts::QolHostSdk* sdk, const char* message) {
+void log_message(const contracts::QolHostSdk* sdk, const char* message, int level = 1) {
     if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
     uint32_t length = 0;
     while (message[length] != '\0') ++length;
-    (void)sdk->log.write(1, 1, kPluginId, message, length);
+    (void)sdk->log.write(level, 1, kPluginId, message, length);
+}
+
+void snapshot_read_failed() {
+    if (!g_snapshot_failure_active) {
+        log_message(g_sdk, "fail op=snapshot_read kind=quest reason=read_failed keep=previous", 2);
+        g_snapshot_failure_active = true;
+    }
 }
 
 const char* fragment_for(int32_t endpoint, uint32_t quest_id) {
@@ -155,24 +163,33 @@ void update_snapshot() {
         g_quest_port->read.active_slot_id == nullptr ||
         g_quest_port->read.quest_state == nullptr || g_quest_port->read.total_count == nullptr ||
         g_quest_port->read.static_ready == nullptr) {
+        snapshot_read_failed();
         return;
     }
-    if (g_world_facts == nullptr || g_world_facts->state == nullptr) return;
+    if (g_world_facts == nullptr || g_world_facts->state == nullptr) {
+        snapshot_read_failed();
+        return;
+    }
 
     int32_t state = 0;
-    if (!contracts::succeeded(g_world_facts->state(&state))) return;
+    if (!contracts::succeeded(g_world_facts->state(&state))) { snapshot_read_failed(); return; }
     QuestSnapshot next{};
     if (state != 5) {
         next.state = SnapshotState::kNotInGame;
         g_snapshot.publish(next);
+        if (g_snapshot_failure_active) {
+            log_message(g_sdk, "restore op=snapshot_read kind=quest result=not_in_game");
+        }
+        g_snapshot_failure_active = false;
         return;
     }
     // 静态片段表未下发时不发布，避免输出缺少静态字段的不完整响应。
     int32_t ready = 0;
-    if (!contracts::succeeded(g_quest_port->read.static_ready(&ready)) || ready == 0) return;
+    if (!contracts::succeeded(g_quest_port->read.static_ready(&ready))) { snapshot_read_failed(); return; }
+    if (ready == 0) return;
 
     uint32_t count = 0;
-    if (!contracts::succeeded(g_quest_port->read.active_slot_count(&count))) return;
+    if (!contracts::succeeded(g_quest_port->read.active_slot_count(&count))) { snapshot_read_failed(); return; }
     if (count > kMaxActiveSlots) count = kMaxActiveSlots;
     next.active_count = count;
     for (uint32_t i = 0; i < count; ++i) {
@@ -189,7 +206,7 @@ void update_snapshot() {
     }
 
     uint32_t total = 0;
-    if (!contracts::succeeded(g_quest_port->read.total_count(&total))) return;
+    if (!contracts::succeeded(g_quest_port->read.total_count(&total))) { snapshot_read_failed(); return; }
     if (total > kMaxCompleted) total = kMaxCompleted;
     for (uint32_t quest_id = 0; quest_id < total; ++quest_id) {
         int32_t quest_state = 0;
@@ -200,6 +217,10 @@ void update_snapshot() {
 
     next.state = SnapshotState::kReady;
     g_snapshot.publish(next);
+    if (g_snapshot_failure_active) {
+        log_message(g_sdk, "restore op=snapshot_read kind=quest result=ready");
+        g_snapshot_failure_active = false;
+    }
 }
 
 int32_t snapshot_tick(int64_t, void*) {
@@ -434,7 +455,10 @@ QolResult quit_command_handler(const contracts::HttpReq* request, contracts::Htt
     }
     int32_t quest_id = -1;
     if (!quest_id_field(request->body, request->body_len, &quest_id)) quest_id = -1;
-    if (quest_id < 0) return response_error(response, 400, "questId required");
+    if (quest_id < 0) {
+        log_message(g_sdk, "reject op=quest_quit reason=quest_id_required", 2);
+        return response_error(response, 400, "questId required");
+    }
     if (g_sdk == nullptr || g_sdk->commands.post_typed == nullptr) {
         return response_error(response, 503, "command port unavailable");
     }
@@ -443,8 +467,10 @@ QolResult quit_command_handler(const contracts::HttpReq* request, contracts::Htt
     if (!contracts::succeeded(g_sdk->commands.post_typed(kQuitResultHandlerId, &payload,
                                                         sizeof(payload), &ticket)) ||
         ticket == 0) {
+        log_message(g_sdk, "reject op=quest_quit reason=queue_unavailable", 2);
         return response_error(response, 503, "command queue unavailable");
     }
+    log_message(g_sdk, "dispatch op=quest_quit result=queued");
     const std::string body = std::string("{\"ok\":true,\"ticket\":") +
                              std::to_string(ticket) + "}";
     return response_body(response, body);
@@ -461,10 +487,15 @@ bool quit_result_handler(void*, const uint8_t* payload, uint32_t size, char* out
     std::memcpy(&quest_id, payload, size);
     if (g_quest_port == nullptr || g_quest_port->write.quit_result == nullptr) return false;
     if (!contracts::succeeded(g_quest_port->write.quit_result(quest_id, out, capacity, out_size))) {
+        log_message(g_sdk, "fail op=quest_quit reason=write_failed", 2);
         return false;
     }
     // 业务失败（原错误体含 "ok":false）→ 票据置 failed，结果仍携带原错误体。
-    return std::string(out, *out_size).find("\"ok\":false") == std::string::npos;
+    const bool succeeded = std::string(out, *out_size).find("\"ok\":false") == std::string::npos;
+    log_message(g_sdk, succeeded ? "apply op=quest_quit result=committed"
+                                 : "reject op=quest_quit reason=game_rejected",
+                succeeded ? 1 : 2);
+    return succeeded;
 }
 
 const contracts::HttpEndpointDescriptor kHttpEndpoints[] = {
@@ -497,8 +528,10 @@ void start_snapshot_task() {
     if (g_snapshot_task != 0 || g_sdk == nullptr || g_sdk->scheduler.add == nullptr) return;
     uint64_t task = 0;
     if (contracts::succeeded(g_sdk->scheduler.add(1, &snapshot_tick, nullptr,
-                                                  kSnapshotIntervalFrames, 0, &task))) {
+                                                   kSnapshotIntervalFrames, 0, &task))) {
         g_snapshot_task = task;
+    } else {
+        log_message(g_sdk, "fail op=snapshot_scheduler provider=core.quest reason=unavailable", 2);
     }
 }
 
@@ -596,7 +629,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     set_gate(true);
     start_resync_task();
     start_snapshot_task();
-    log_message(g_sdk, "[core.quest] owner installed: http queries registered");
+    log_message(g_sdk, "op=install provider=core.quest result=ok");
     return 0;
 }
 
@@ -621,8 +654,8 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 
 // 零资源、无门禁键：启停只切业务门禁，不做资源操作（§3.3）。
 void plugin_on_enabled(contracts::PluginContext& ctx) {
+    (void)ctx;
     if (!g_snapshot.initialize(g_sdk)) {
-        log_message(ctx.sdk, "[core.quest] snapshot unavailable");
         return;
     }
     set_gate(true);

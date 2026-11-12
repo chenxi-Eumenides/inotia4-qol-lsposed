@@ -213,14 +213,17 @@ QolResult craft_read_stuff_categories(uint16_t out[kStuffSlotCount]) {
             return qol::contracts::error(kQolErrInvalidArgument, "malformed item handle", 21);
         }
         if (g_item_facts == nullptr || g_item_facts->category == nullptr) {
-            log_message(kLogWarn, "craft item category facts unavailable index=%zu", i);
+            log_message(kLogWarn,
+                        "craft item category facts unavailable index=%zu reason=facts_unavailable",
+                        i);
             return qol::contracts::error(kQolErrNotReady, "item category facts unavailable", 31);
         }
         int32_t category = 0;
         const QolResult category_result = g_item_facts->category(handle, &category);
         if (category_result.ok != kQolOk) {
-            log_message(kLogWarn, "craft item category read failed index=%zu result=%d", i,
-                        category_result.code);
+            log_message(kLogWarn,
+                        "craft item category read failed index=%zu result=%d handle=%u/%u", i,
+                        category_result.code, handle.slot, handle.generation);
             return category_result;
         }
         if (category <= 0 || category > 0xFFFF) {
@@ -309,7 +312,9 @@ bool craft_show_yesno(uint32_t text_id, contracts::QolCraftPopupCallback ok,
     }
     const QolResult result = g_write_port->show_yesno_from_text(text_id, ok, cancel);
     if (result.ok != kQolOk) {
-        log_message(kLogWarn, "craft yesno failed text=%u result=%d", text_id, result.code);
+        log_message(kLogWarn,
+                    "craft yesno failed text=%u result=%d reason=show_yesno_failed", text_id,
+                    result.code);
         return false;
     }
     return true;

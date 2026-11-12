@@ -15,6 +15,8 @@ bool inventory_native_hook_call_refresh_item_area_original();
 bool inventory_native_hook_bind_sdk(const qol::contracts::QolHostSdk* sdk);
 bool inventory_native_hook_bind_game(const qol::contracts::QolGameHost* game);
 bool inventory_native_hook_bind_item_facts(const qol::contracts::ItemFactsApi* facts);
+void inventory_native_hook_begin_item_use();
+bool inventory_native_hook_end_item_use();
 void inventory_native_hook_set_support(bool enabled);
 bool inventory_native_hook_support_enabled();
 

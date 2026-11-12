@@ -158,7 +158,7 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         if (!module_use_finish_locked(use_token, &consumed, &release_plan)) {
             const bool marker_cleared = module_use_abort_locked(use_token);
             const bool isolated = marker_cleared || module_use_abort_isolate_locked(use_token);
-            VIRTBAG_LOG_ERROR("ERROR API use token mismatch bag=%d slot=%d item=%p marker_cleared=%d",
+            VIRTBAG_LOG_WARN("ERROR API use token mismatch bag=%d slot=%d item=%p marker_cleared=%d",
                               bag, slot, item, isolated ? 1 : 0);
             return extension_bag_op_err("extension item changed during native operation");
         }

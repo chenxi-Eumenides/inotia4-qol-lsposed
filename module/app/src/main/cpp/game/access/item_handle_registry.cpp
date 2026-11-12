@@ -65,7 +65,8 @@ contracts::QolItemHandle ItemHandleRegistry::register_item(void* item,
         return {static_cast<uint32_t>(i + 1), slot.generation};
     }
     set_error(error, ItemHandleError::kFull);
-    QOL_LOG_SEAM_ERROR(kQolLogDomainPlatform, "item handle table full capacity=%zu", kCapacity);
+    QOL_LOG_SEAM_ERROR(kQolLogDomainPlatform,
+                       "item handle table full capacity=%zu reason=capacity_exhausted", kCapacity);
     return contracts::kInvalidItemHandle;
 }
 

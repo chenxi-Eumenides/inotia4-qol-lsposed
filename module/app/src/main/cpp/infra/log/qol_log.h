@@ -3,10 +3,8 @@
 // 依赖方向：本文件仅依赖 STL；core 不得依赖 feature/bridge。
 // 行格式唯一权威：`<ts> f=<frame> <L> <domain> <src> <msg>`（单空格分隔）。
 //
-// 噪声上限（写入侧强制，调用点无法绕过）：
-// - INFO 每域每帧最多 kQolLogInfoPerFrameCap 行；超出时先输出一行封顶标记，随后丢弃
-//   该域本帧剩余 INFO。DEBUG/WARN/ERROR 不受限（DEBUG 已有全局开关）。
-// - 文件 sink 超过 kQolLogFileCapBytes 时轮转为 `qol.log.1`（只保留一份旧文件）。
+// INFO 不限流；DEBUG/WARN/ERROR 在 logger 内部按调用点去重。
+// 文件 sink 超过 kQolLogFileCapBytes 时轮转为 `qol.log.1`（只保留一份旧文件）。
 #pragma once
 
 #include <climits>
@@ -24,10 +22,13 @@ enum class QolDomain : uint8_t {
     kSpecialEquip,
 };
 
-// INFO 单帧单域行数上限；超出后只留一行封顶标记。
-constexpr uint32_t kQolLogInfoPerFrameCap = 16;
 // 文件 sink 单文件字节上限；写满后轮转为 `<path>.1`。
 constexpr int64_t kQolLogFileCapBytes = 4 * 1024 * 1024;
+constexpr int64_t kQolLogDebugMinIntervalMs = 250;
+constexpr int64_t kQolLogWarnWindowMs = 5000;
+constexpr int64_t kQolLogErrorWindowMs = 30000;
+constexpr int64_t kQolLogErrorBurstWindowMs = 60000;
+constexpr uint32_t kQolLogErrorBurstLimit = 10;
 
 const char* qol_domain_token(QolDomain domain);          // 小写 token，见实现表
 QolDomain   qol_domain_from_token(const char* token);    // 未知返回 kPlatform
@@ -50,6 +51,7 @@ int64_t qol_log_last_known_frame();
 
 bool qol_log_debug_enabled();
 void qol_log_set_debug_enabled(bool enabled);
+#define QOL_LOG_DEBUG_ENABLED() (qol_log_debug_enabled())
 
 void qol_log_init();                 // 打开文件 sink（截断模式）并写起始横幅；幂等；任意线程
 bool qol_log_file_ready();
@@ -72,28 +74,12 @@ void qol_log_write_kotlin(QolLogLevel level, QolDomain domain, const char* src, 
 // no-op Android stub. Not compiled into Android builds.
 using QolLogHostSink = void (*)(QolLogLevel level, QolDomain domain, const char* line);
 void qol_log_set_host_sink(QolLogHostSink sink);
+using QolLogTestClock = int64_t (*)();
+void qol_log_set_test_clock(QolLogTestClock fn);  // fn=null 恢复真实时钟
 #endif
-
-// 限流原语（P3 会大量使用，本次一并提供并测试）
-struct QolLogThrottle {
-    int64_t last_frame = INT64_MIN;   // 注意：需要 <climits>
-    int64_t last_ms = 0;
-    bool due(int64_t every_frames);
-};
-struct QolLogChangeGate {
-    int64_t last = INT64_MIN;
-    bool changed(int64_t value);
-};
 
 #define QOL_LOG_INFO(dom, ...)  qol_log_write(QolLogLevel::kInfo,  (dom), __FILE__, __LINE__, __VA_ARGS__)
 #define QOL_LOG_WARN(dom, ...)  qol_log_write(QolLogLevel::kWarn,  (dom), __FILE__, __LINE__, __VA_ARGS__)
 #define QOL_LOG_ERROR(dom, ...) qol_log_write(QolLogLevel::kError, (dom), __FILE__, __LINE__, __VA_ARGS__)
 #define QOL_LOG_DEBUG(dom, ...) \
     do { if (qol_log_debug_enabled()) qol_log_write(QolLogLevel::kDebug, (dom), __FILE__, __LINE__, __VA_ARGS__); } while (0)
-#define QOL_LOG_DEBUG_EVERY(dom, every_frames, ...) \
-    do { static QolLogThrottle _qlt; \
-         if (qol_log_debug_enabled() && _qlt.due(every_frames)) \
-             qol_log_write(QolLogLevel::kDebug, (dom), __FILE__, __LINE__, __VA_ARGS__); } while (0)
-#define QOL_LOG_DEBUG_ON_CHANGE(dom, gate, value, ...) \
-    do { if (qol_log_debug_enabled() && (gate).changed(value)) \
-             qol_log_write(QolLogLevel::kDebug, (dom), __FILE__, __LINE__, __VA_ARGS__); } while (0)

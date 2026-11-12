@@ -1,4 +1,5 @@
 #include "core_settings_config_store.h"
+#include "infra/log/qol_log.h"
 
 #include <cerrno>
 #include <cstdio>
@@ -1115,6 +1116,8 @@ bool write_atomic(const std::string& path, const std::string& contents) {
     if (::close(fd) != 0) ok = false;
     if (ok && ::rename(temp.c_str(), path.c_str()) == 0) return true;
     ::unlink(temp.c_str());
+    QOL_LOG_WARN(QolDomain::kConfig,
+                 "fail op=config_write result=failed reason=atomic_write_failed keep=previous");
     return false;
 }
 
@@ -1593,6 +1596,8 @@ ConfigStoreResult ConfigStore::init(const std::string& directory) {
         const bool valid = JsonParser(bytes).read_value_document(&root) &&
                            root.kind == JsonValue::Kind::kObject;
         if (!valid) {
+            QOL_LOG_WARN(QolDomain::kConfig,
+                         "fallback op=config_load result=fallback reason=invalid_json");
             for (const std::string& plugin_id : feature_model_ ? std::vector<std::string>{} : legacy_namespace_ids())
                 namespaces_.emplace_back(plugin_id, default_namespace(plugin_id));
             config_ = project_config(namespaces_, registered_plugin_ids_);

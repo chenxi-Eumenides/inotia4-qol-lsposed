@@ -10,6 +10,7 @@
 #include "plugins/core.item/bags/snapshot_store.h"
 #include "plugins/core.item/bags/native_bag_limit.h"
 #include "plugins/core.item/hooks/inventory_hooks.h"
+#include "plugins/core.item/hooks/inventory_logging.h"
 #include "plugins/core.item/shop/snapshot.h"
 #include "plugins/core.item/usecases/sell_item.h"
 
@@ -27,6 +28,14 @@ void log_message(const contracts::QolHostSdk* sdk, const char* message) {
     uint32_t length = 0;
     while (message[length] != '\0') ++length;
     (void)sdk->log.write(1, 1, kPluginId, message, length);
+}
+
+void log_inventory_unavailable(const contracts::QolHostSdk* sdk) {
+    constexpr char kMessage[] =
+        "degrade feature=inventory_hooks result=unavailable reason=resource_attach_failed";
+    if (sdk == nullptr || sdk->log.write == nullptr) return;
+    (void)sdk->log.write(2, 1, kPluginId, kMessage,
+                         static_cast<uint32_t>(sizeof(kMessage) - 1));
 }
 
 // 物理扫描上界 = 原版袋数 + C18 探测到的追加袋数，最终夹到 item port 布局容量。
@@ -47,7 +56,13 @@ void apply_native_bag_limit() {
         c18 > 0) {
         limit += c18;
     }
+    const int previous_limit = bags::native_bag_limit();
     bags::set_native_bag_limit(limit);
+    const int applied_limit = bags::native_bag_limit();
+    if (applied_limit != previous_limit) {
+        QOL_LOG_INFO(0, "apply op=bag_limit result=applied limit=%d source=native_inventory",
+                     applied_limit);
+    }
 }
 
 void on_capability_changed(void*, const void* payload) {
@@ -221,6 +236,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     if (!inventory_hooks::attach(ctx.sdk, ctx.game, &kItemFactsApi, g_port)) {
+        log_inventory_unavailable(ctx.sdk);
         unsubscribe_capability_changes();
         if (g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
             (void)g_sdk->ticket_result.unregister_typed_result_handler(kItemWriteHandlerId);
@@ -255,7 +271,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 void plugin_on_enabled(contracts::PluginContext& ctx) {
     apply_native_bag_limit();
     if (!inventory_hooks::attach(ctx.sdk, ctx.game, &kItemFactsApi, g_port)) {
-        log_message(ctx.sdk, "[core.item] inventory hooks attach unavailable");
+        log_inventory_unavailable(ctx.sdk);
         return;
     }
     if (!g_snapshot.initialize(g_sdk)) {

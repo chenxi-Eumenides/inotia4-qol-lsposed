@@ -241,7 +241,7 @@ void craft_show_place_write_failed() {
 // 只作废待确认：不写物品、不随机、不扣料、不保存，也不清空已填格。
 void on_cancel_three_slot() {
     cancel_pending_confirmation();
-    log_message(kLogDebug, "three slot confirm cancelled");
+    log_message(kLogDebug, "three slot confirm cancelled op=craft result=cancelled");
 }
 
 // 3 格合成的 YesNo 确认回调（经 x3 传入，void() 形态；原版该槽位是 UIMix_StartMix@0xc0870）。
@@ -253,7 +253,8 @@ void on_confirm_three_slot() {
         // 槽位读取失败：绝不执行（不扣料、不产出），作废本次确认并明确「材料未扣」。
         cancel_pending_confirmation();
         craft_show_craft_unavailable();
-        log_message(kLogWarn, "three slot confirm aborted reason=stuff read failed");
+        log_message(kLogWarn, "three slot confirm aborted reason=stuff read failed mixType=%u",
+                    craft_mix_type());
         return;
     }
     for (size_t i = 0; i < kStuffSlotCount; ++i) {
@@ -296,7 +297,7 @@ void on_confirm_three_slot() {
                 g_startmix_delegate.store(false, std::memory_order_release);
                 craft_show_craft_unavailable();
                 log_message(kLogWarn,
-                            "delegate start mix failed mixType=%u slots=%u/%u/%u handles=%u.%u/%u.%u/%u.%u outside_native=%d/%d/%d",
+                            "delegate start mix failed mixType=%u slots=%u/%u/%u handles=%u.%u/%u.%u/%u.%u outside_native=%d/%d/%d reason=delegate_start_mix_failed",
                             delegated_mix_type, static_cast<unsigned int>(categories[0]),
                             static_cast<unsigned int>(categories[1]),
                             static_cast<unsigned int>(categories[2]),
@@ -318,7 +319,7 @@ void on_confirm_three_slot() {
             const bool cleared = after_categories[0] == 0 && after_categories[1] == 0 &&
                                  after_categories[2] == 0;
             log_message(cleared ? kLogDebug : kLogWarn,
-                        "three slot delegate pre_mixType=%u post_mixType=%u pre_slots=%u/%u/%u post_slots=%u/%u/%u handles=%u.%u/%u.%u/%u.%u outside_native=%d/%d/%d held_pre=%d/%d/%d held_post=%d/%d/%d cleared=%d",
+                        "three slot delegate pre_mixType=%u post_mixType=%u pre_slots=%u/%u/%u post_slots=%u/%u/%u handles=%u.%u/%u.%u/%u.%u outside_native=%d/%d/%d held_pre=%d/%d/%d held_post=%d/%d/%d cleared=%d read_result=%d",
                         pre_mix_type, craft_mix_type(), static_cast<unsigned int>(categories[0]),
                         static_cast<unsigned int>(categories[1]),
                         static_cast<unsigned int>(categories[2]),
@@ -334,9 +335,8 @@ void on_confirm_three_slot() {
                         outside_native[1], outside_native[2], held_pre[0], held_pre[1], held_pre[2],
                         craft_category_held_count(categories[0]),
                         craft_category_held_count(categories[1]),
-                        craft_category_held_count(categories[2]), cleared ? 1 : 0);
-            log_message(kLogDebug, "delegated to original start mix mixType=%u",
-                        delegated_mix_type);
+                        craft_category_held_count(categories[2]), cleared ? 1 : 0,
+                        after_read.code);
             return;
         }
         case result::CraftExecuteResult::kStaleSlots:
@@ -406,15 +406,31 @@ void place_execute(void* ctrl) {
         }
         switch (craft_place_disposition(api->place(&in))) {
             case CraftPlaceDisposition::kAlreadyPlaced:
+                if (const contracts::QolHostSdk* sdk = host_sdk();
+                    sdk != nullptr && sdk->log.debug_enabled != nullptr &&
+                    sdk->log.debug_enabled() != 0 && log_budget_take()) {
+                    log_message(kLogDebug,
+                                "reject op=place item=%u.%u slot=%lld reason=already_placed",
+                                item.slot, item.generation, static_cast<long long>(index));
+                }
                 craft_show_text(kTextAlreadyPlaced);  // 99：不可堆叠物品不能重复放置
                 return;
             case CraftPlaceDisposition::kNotEnoughHeld:
+                if (const contracts::QolHostSdk* sdk = host_sdk();
+                    sdk != nullptr && sdk->log.debug_enabled != nullptr &&
+                    sdk->log.debug_enabled() != 0 && log_budget_take()) {
+                    log_message(kLogDebug,
+                                "reject op=place item=%u.%u slot=%lld reason=insufficient_held",
+                                item.slot, item.generation, static_cast<long long>(index));
+                }
                 // 94：持有总数不足，无法再占一格。放料失败**不清空**已填格。
                 craft_show_text(kTextInsufficientMaterial);
                 return;
             case CraftPlaceDisposition::kWriteFailed:
                 // 写入失败与「材料不足」无关：给出准确提示，保留已填格。
-                log_message(kLogWarn, "three slot place blocked reason=stuff write failed");
+                log_message(kLogWarn,
+                            "three slot place blocked reason=stuff write failed index=%lld",
+                            static_cast<long long>(index));
                 craft_show_place_write_failed();
                 return;
             case CraftPlaceDisposition::kAdvance:
@@ -486,8 +502,9 @@ void place_execute(void* ctrl) {
 // 扩展袋升阶：模块自有 Yes/No 确认（不走原版合成按钮 type 3 分支）
 // ---------------------------------------------------------------------------
 void on_cancel_tier_up() {
+    const uint32_t mix_type = g_pending_tier_up.mix_type;
     g_pending_tier_up = {};
-    log_message(kLogDebug, "tier-up confirm cancelled");
+    log_message(kLogDebug, "tier-up confirm cancelled mixType=%u result=cancelled", mix_type);
 }
 
 void on_confirm_tier_up() {
@@ -511,11 +528,12 @@ void on_confirm_tier_up() {
     }
     if (!craft_delegate_start_mix_with_cost(mix_type, 0)) {
         craft_show_craft_unavailable();
-        log_message(kLogWarn, "tier-up delegate start mix failed mixType=%u", mix_type);
+        log_message(kLogWarn,
+                    "tier-up delegate start mix failed mixType=%u reason=delegate_start_mix_failed",
+                    mix_type);
         return;
     }
     // 不置 g_startmix_delegate：产物必须继续由 MakeItem wrapper 走模块升阶分支。
-    log_message(kLogDebug, "tier-up delegated to original start mix mixType=%u", mix_type);
 }
 
 // ---------------------------------------------------------------------------
@@ -534,7 +552,9 @@ void craft_execute(void* ctrl) {
             // 不清理已填格。
             cancel_pending_confirmation();
             craft_show_craft_unavailable();
-            log_message(kLogWarn, "three slot prepare skipped reason=stuff read failed");
+            log_message(kLogWarn,
+                        "three slot prepare skipped reason=stuff read failed mixType=%u",
+                        mix_type);
             return;
         }
         switch (api->prepare(&in)) {
@@ -554,13 +574,17 @@ void craft_execute(void* ctrl) {
                     // 不扣料、不清理已有材料。
                     cancel_pending_confirmation();
                     craft_show_craft_unavailable();
-                    log_message(kLogWarn, "three slot confirm unavailable reason=no_popup");
+                    log_message(kLogWarn,
+                                "three slot confirm unavailable reason=no_popup mixType=%u",
+                                mix_type);
                 }
                 return;
             case result::PrepareOutcome::kUnavailable:
                 // 配方已匹配但槽位身份/类别等上下文不可用：不是配方错，也不是材料不足。
-                log_message(kLogWarn, "three slot prepare unavailable slots=%u,%u,%u",
-                            in.slot_categories[0], in.slot_categories[1], in.slot_categories[2]);
+                log_message(kLogWarn,
+                            "three slot prepare unavailable slots=%u,%u,%u reason=context_unavailable mixType=%u",
+                            in.slot_categories[0], in.slot_categories[1], in.slot_categories[2],
+                            mix_type);
                 craft_show_craft_unavailable();
                 return;
             case result::PrepareOutcome::kNotMine:
@@ -582,9 +606,10 @@ void craft_execute(void* ctrl) {
     contracts::QolItemHandle target = contracts::kInvalidItemHandle;
     const QolResult target_read = craft_read_target_slot_item(&target);
     if (target_read.ok != kQolOk) {
-        log_message(kLogWarn, "tier-up target slot read failed code=%d", target_read.code);
+        log_message(kLogWarn, "tier-up target slot read failed code=%d mixType=%u",
+                    target_read.code, mix_type);
     } else if (target.slot == 0 || target.generation == 0) {
-        log_message(kLogInfo, "tier-up target slot empty");
+        log_message(kLogDebug, "tier-up target slot empty mixType=%u", mix_type);
     }
     switch (api->craft_gate(target)) {
         case result::CraftGate::kNotJewel:
@@ -618,7 +643,10 @@ void craft_execute(void* ctrl) {
     if (!craft_show_yesno(kTextConfirmCraft, &on_confirm_tier_up, &on_cancel_tier_up)) {
         g_pending_tier_up = {};
         craft_show_craft_unavailable();
-        log_message(kLogWarn, "tier-up confirm unavailable reason=no_popup");
+        log_message(kLogWarn,
+                    "tier-up confirm unavailable reason=no_popup mixType=%u handle=%u/%u",
+                    mix_type, static_cast<unsigned int>(target.slot),
+                    static_cast<unsigned int>(target.generation));
     }
 }
 

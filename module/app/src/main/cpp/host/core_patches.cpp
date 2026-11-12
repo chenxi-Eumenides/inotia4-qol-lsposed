@@ -80,12 +80,12 @@ std::atomic<bool> g_installing{false};
 bool install_hub() {
     qol::game::PatchSite site{};
     if (!qol::game::patch_site(kHubClaim.symbol, &site)) {
-        QOL_LOG_WARN(QolDomain::kCore, "core_patches: hub site not found");
+        QOL_LOG_WARN(QolDomain::kCore, "core_patches: hub site not found symbol=hub");
         return false;
     }
     const qol::patch::Outcome outcome = qol::patch::install_claim(kHubClaim, site.addr);
     if (outcome.ok != 0) {
-        QOL_LOG_WARN(QolDomain::kCore, "core_patches: hub install failed: %s",
+        QOL_LOG_WARN(QolDomain::kCore, "core_patches hub install fail reason=%s",
                      outcome.error != nullptr ? outcome.error : "?");
         return false;
     }
@@ -97,12 +97,12 @@ bool install_hub() {
 bool install_bitend(const contracts::ResourceClaim& claim) {
     qol::game::PatchSite site{};
     if (!qol::game::patch_site(claim.symbol, &site)) {
-        QOL_LOG_WARN(QolDomain::kCore, "core_patches: bitend site not found: %s", claim.symbol);
+        QOL_LOG_WARN(QolDomain::kCore, "core_patches bitend site not found symbol=%s", claim.symbol);
         return false;
     }
     const qol::patch::Outcome outcome = qol::patch::install_claim(claim, site.addr);
     if (outcome.ok != 0) {
-        QOL_LOG_WARN(QolDomain::kCore, "core_patches: bitend install failed %s: %s", claim.id,
+        QOL_LOG_WARN(QolDomain::kCore, "core_patches bitend install fail symbol=%s reason=%s", claim.id,
                      outcome.error != nullptr ? outcome.error : "?");
         return false;
     }
@@ -146,7 +146,7 @@ void apply_monster_compat() {
                              "core_patches monster compat: 0x%lx cmp w8,#0x62 -> #0x7F",
                              static_cast<unsigned long>(p));
             } else {
-                QOL_LOG_WARN(QolDomain::kCore, "core_patches monster compat failed 0x%lx: %s",
+                QOL_LOG_WARN(QolDomain::kCore, "core_patches monster compat fail addr=0x%lx reason=%s",
                              static_cast<unsigned long>(p),
                              outcome.error != nullptr ? outcome.error : "?");
             }
@@ -154,7 +154,7 @@ void apply_monster_compat() {
     }
     fclose(f);
     if (hits == 0) {
-        QOL_LOG_INFO(QolDomain::kCore, "core_patches monster compat: no target (non-monster build)");
+        QOL_LOG_DEBUG(QolDomain::kCore, "core_patches monster compat: no target (non-monster build)");
     }
 }
 

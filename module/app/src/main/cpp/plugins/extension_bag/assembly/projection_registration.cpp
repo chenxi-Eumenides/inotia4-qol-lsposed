@@ -5,11 +5,14 @@
 #include "plugins/extension_bag/core/host_adapter.h"
 #include "plugins/extension_bag/ui/host_ui.h"
 #include "plugins/extension_bag/runtime/extension_bag_port.h"
+#include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "plugins/extension_bag/runtime/state.h"
 
 namespace qol::features::extension_bag {
 namespace {
+
+bool g_projection_callbacks_registered = false;
 
 bool projection_available() { return extension_bag_enabled(); }
 
@@ -149,15 +152,28 @@ const qol::contracts::InventoryProjectionRegistryApi* projection_registry() {
 QolResult register_projection_callbacks() {
     const auto* registry = projection_registry();
     if (registry == nullptr) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "fail op=projection_callback result=failed reason=registry_unavailable");
         return qol::contracts::error(kQolErrNotReady, "inventory.projection unavailable", 40);
     }
-    return registry->register_callbacks(&kProjectionCallbacks);
+    const QolResult result = registry->register_callbacks(&kProjectionCallbacks);
+    if (!qol::contracts::succeeded(result)) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "fail op=projection_callback result=failed reason=register_failed code=%d",
+                     result.code);
+    } else if (!g_projection_callbacks_registered) {
+        QOL_LOG_INFO(QolDomain::kExtensionBag,
+                     "register op=projection_callback result=registered");
+        g_projection_callbacks_registered = true;
+    }
+    return result;
 }
 
 void unregister_projection_callbacks() {
     const auto* registry = projection_registry();
     if (registry != nullptr) {
-        (void)registry->unregister_callbacks();
+        const QolResult result = registry->unregister_callbacks();
+        if (qol::contracts::succeeded(result)) g_projection_callbacks_registered = false;
     }
 }
 

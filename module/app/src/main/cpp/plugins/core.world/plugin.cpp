@@ -2,6 +2,7 @@
 
 #include <cerrno>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -60,7 +61,7 @@ const contracts::QolWorldPort* g_port = nullptr;
 const contracts::QolWorldWritePort* g_world_write_port = nullptr;
 uint64_t g_frame_task = 0;
 Snapshot<WorldSnapshot> g_snapshot;
-uint32_t g_snapshot_failures = 0;
+bool g_snapshot_failure_active = false;
 
 QolResult not_ready() {
     return contracts::error(kQolErrNotReady, "world facts not ready", 21);
@@ -166,14 +167,16 @@ void publish_not_in_game(WorldSnapshot& snapshot, const char* error, uint32_t er
         (void)copy_buffer(snapshot.error, kErrorCapacity, &snapshot.error_size, kFallback,
                           static_cast<uint32_t>(sizeof(kFallback) - 1));
     }
+    const bool recovered = g_snapshot_failure_active;
     g_snapshot.publish(snapshot);
+    g_snapshot_failure_active = false;
+    if (recovered) log_message(g_sdk, "restore op=snapshot_read kind=world result=not_in_game");
 }
 
 void snapshot_read_failed() {
-    // Keeping the previous snapshot unpublished on incomplete reads prevents mixed-frame data;
-    // periodic warnings make the skipped publications observable without logging every frame.
-    if (++g_snapshot_failures % 64 == 0) {
-        log_warning(g_sdk, "[core.world] snapshot read failed; previous snapshot retained");
+    if (!g_snapshot_failure_active) {
+        log_warning(g_sdk, "fail op=snapshot_read kind=world reason=read_failed keep=previous");
+        g_snapshot_failure_active = true;
     }
 }
 
@@ -249,7 +252,10 @@ void update_snapshot() {
         return;
     }
     next.state = SnapshotState::kReady;
+    const bool recovered = g_snapshot_failure_active;
     g_snapshot.publish(next);
+    g_snapshot_failure_active = false;
+    if (recovered) log_message(g_sdk, "restore op=snapshot_read kind=world result=ready");
 }
 
 int32_t frame_tick(int64_t, void*) {
@@ -578,14 +584,25 @@ bool world_write_result(void*, const uint8_t* payload, uint32_t size, char* out,
     std::memcpy(&p, payload, size);
     const QolResult result = g_world_write_port->read.write(
         p.kind, p.a, p.b, p.c, p.d, out, capacity, out_size);
-    if (!contracts::succeeded(result) || *out_size > capacity) return false;
+    if (!contracts::succeeded(result) || *out_size > capacity) {
+        char message[96] = {};
+        std::snprintf(message, sizeof(message), "fail op=world_write kind=%d reason=write_failed", p.kind);
+        log_warning(g_sdk, message);
+        return false;
+    }
     if (p.kind != contracts::kQolWorldWriteMoveTo &&
         p.kind != contracts::kQolWorldWriteWalkDir &&
         p.kind != contracts::kQolWorldWriteInteract) {
+        char message[96] = {};
+        std::snprintf(message, sizeof(message), "apply op=world_write kind=%d result=committed", p.kind);
+        log_message(g_sdk, message);
         return true;
     }
     const std::string legacy_result(out, *out_size);
     if (legacy_result.find("\"ok\":false") != std::string::npos) return true;
+    char message[96] = {};
+    std::snprintf(message, sizeof(message), "apply op=world_write kind=%d result=committed", p.kind);
+    log_message(g_sdk, message);
     int map_id = -1;
     int pixel_x = -1;
     int pixel_y = -1;
@@ -698,7 +715,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         return 1;
     }
-    log_message(g_sdk, "[core.world] provider install");
+    log_message(g_sdk, "install provider=core.world result=ok");
     return 0;
 }
 
@@ -709,15 +726,14 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     if (g_sdk != nullptr && g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
         (void)g_sdk->ticket_result.unregister_typed_result_handler(kWorldWriteHandlerId);
     }
-    log_message(ctx.sdk, "[core.world] provider deactivate");
     g_port = nullptr;
     g_world_write_port = nullptr;
     g_sdk = nullptr;
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
+    (void)ctx;
     if (!g_snapshot.initialize(g_sdk)) {
-        log_message(ctx.sdk, "[core.world] snapshot unavailable");
         return;
     }
     WorldSnapshot empty_snapshot{};
@@ -728,16 +744,13 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
                 1, &frame_tick, nullptr, kSnapshotIntervalFrames, 0, &task))) {
             g_frame_task = task;
         } else {
-            log_warning(ctx.sdk, "[core.world] snapshot scheduler unavailable");
         }
     }
-    log_message(ctx.sdk, "[core.world] provider enabled: capability published");
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     stop_frame_task(ctx.sdk);
     g_snapshot.destroy();
-    log_message(ctx.sdk, "[core.world] provider disabled: capability withdrawn");
 }
 
 void plugin_fill_status(contracts::PluginStatusOut& out) {

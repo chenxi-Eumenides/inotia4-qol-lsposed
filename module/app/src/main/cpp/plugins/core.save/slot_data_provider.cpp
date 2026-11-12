@@ -530,13 +530,11 @@ QolResult slot_data_begin_transition(uint32_t reason, int32_t target) {
         }
     }
     if (unavailable) {
-        static CoreSaveLogThrottle throttle;
-        if (throttle.due(5000))
-            CS_LOG_WARN(kCoreSaveLogDomain,
-                         "slot data transition unavailable available=%d busy=%d "
-                         "transitioning=%d session_state=%u target=%d",
-                         unavailable_available, unavailable_busy, unavailable_transitioning,
-                         unavailable_session_state, unavailable_target);
+        CS_LOG_WARN(kCoreSaveLogDomain,
+                     "slot data transition unavailable available=%d busy=%d "
+                      "transitioning=%d session_state=%u target=%d entry=provider",
+                     unavailable_available, unavailable_busy, unavailable_transitioning,
+                     unavailable_session_state, unavailable_target);
         return fail(kQolErrNotReady, "transition busy");
     }
     QolResult result = ok();
@@ -545,9 +543,9 @@ QolResult slot_data_begin_transition(uint32_t reason, int32_t target) {
             const auto detached = item.second->spec.prepare_detach(item.second->spec.user, &session_before, reason);
             if (!succeeded(detached) && succeeded(result)) {
                 result = detached;
-                CS_LOG_WARN(kCoreSaveLogDomain,
-                             "slot data prepare_detach rejected section=%s code=%d",
-                             item.second->section.c_str(), detached.code);
+            CS_LOG_WARN(kCoreSaveLogDomain,
+                         "slot data prepare_detach rejected section=%s code=%d",
+                         item.second->section.c_str(), detached.code);
             }
         }
         std::lock_guard<std::mutex> lock(g.mutex);
@@ -592,20 +590,16 @@ QolResult slot_data_confirm_transition(int32_t current_slot) {
         }
     }
     if (unavailable) {
-        static CoreSaveLogThrottle throttle;
-        if (throttle.due(5000))
-            CS_LOG_WARN(kCoreSaveLogDomain,
-                         "slot data confirm unavailable available=%d busy=%d transitioning=%d "
-                         "current=%d",
-                         unavailable_available, unavailable_busy, unavailable_transitioning,
-                         current_slot);
+        CS_LOG_WARN(kCoreSaveLogDomain,
+                          "slot data confirm unavailable available=%d busy=%d transitioning=%d "
+                          "current=%d",
+                     unavailable_available, unavailable_busy, unavailable_transitioning,
+                     current_slot);
         return fail(kQolErrConflict, "transition target mismatch");
     }
     if (target_mismatch) {
-        static CoreSaveLogThrottle throttle;
-        if (throttle.due(5000))
             CS_LOG_WARN(kCoreSaveLogDomain,
-                         "slot data confirm target mismatch current=%d target=%d",
+                         "slot data confirm target mismatch current=%d target=%d entry=provider",
                          mismatch_current, mismatch_target);
         return fail(kQolErrConflict, "transition target mismatch");
     }
@@ -637,10 +631,8 @@ QolResult slot_data_confirm_transition(int32_t current_slot) {
             g.session.state = value(QolSlotSessionState::kReady);
     }
     if (!succeeded(activation_failure)) {
-        static CoreSaveLogThrottle throttle;
-        if (throttle.due(5000))
-            CS_LOG_WARN(kCoreSaveLogDomain, "slot data activation failed code=%d",
-                         activation_failure.code);
+        CS_LOG_WARN(kCoreSaveLogDomain, "slot data activation failed code=%d entry=provider",
+                     activation_failure.code);
         return activation_failure;
     }
     return ok();

@@ -52,6 +52,8 @@ SetBagCountResult usecase_set_bag_count(int count) {
     }
     extension_bag_mark_dirty_locked();
     if (!persist_state_locked()) return {false, Error::kPersistFailed, 0};
+    QOL_LOG_INFO(QolDomain::kExtensionBag,
+                 "apply op=bag_count result=applied limit=%d source=runtime", count);
     return {true, Error::kNone, count};
 }
 

@@ -82,6 +82,12 @@ uint64_t g_generation = 0;
 std::string g_message;
 bool g_message_error = false;
 
+void log_panel_message(int32_t level, const char* message) {
+    if (g_sdk == nullptr || g_sdk->log.write == nullptr || message == nullptr) return;
+    (void)g_sdk->log.write(level, 16, "plugins/world_tuning/panel.cpp", message,
+                           static_cast<uint32_t>(std::strlen(message)));
+}
+
 struct ArrowContext {
     uint32_t row;
     int32_t delta;
@@ -249,6 +255,7 @@ void poll_request() {
     if (g_request_id == 0) return;
     contracts::FeatureReceipt receipt{};
     if (!poll_rates_receipt(g_request_id, &receipt)) {
+        log_panel_message(2, "fail op=config_write section=rates result=failed reason=receipt_unavailable");
         g_request_id = 0;
         g_pending_row = -1;
         g_rates = g_confirmed;
@@ -261,12 +268,16 @@ void poll_request() {
     g_request_id = 0;
     g_pending_row = -1;
     if (!persisted) {
+        log_panel_message(2, receipt.admission != contracts::FeatureAdmission::kAdmitted
+                                 ? "fail op=config_write section=rates result=failed reason=admission_rejected"
+                                 : "fail op=config_write section=rates result=failed reason=persistence_failed");
         g_rates = g_confirmed;
         set_message("保存失败，数值未更改", true);
         return;
     }
     g_confirmed = g_rates;
     apply_rates(g_confirmed);
+    log_panel_message(1, "apply feature=world_tuning section=rates result=applied");
     set_message("", false);
 }
 

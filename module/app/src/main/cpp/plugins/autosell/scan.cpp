@@ -68,8 +68,12 @@ InventoryActionLookup inventory_action_api_lookup() {
 void note_inventory_action_state(InventoryActionState state) {
     if (state == g_inventory_action_state) return;
     g_inventory_action_state = state;
-    if (state != InventoryActionState::kAvailable)
-        AUTOSELL_LOG_WARN("inventory.action sell unavailable");
+    if (state != InventoryActionState::kAvailable) {
+        AUTOSELL_LOG_WARN("inventory.action sell unavailable reason=%s",
+                          state == InventoryActionState::kCapabilityUnavailable
+                              ? "capability_unavailable"
+                              : "sell_unavailable");
+    }
 }
 
 struct ScanStats {
@@ -88,7 +92,7 @@ void log_blocked_gate_once(int64_t frame, ScanGateReason reason) {
     const int code = static_cast<int>(reason);
     const int previous = g_last_blocked_gate.exchange(code, std::memory_order_relaxed);
     if (previous != code) {
-        AUTOSELL_LOG_INFO("scan gate frame=%lld result=blocked reason=%s",
+        AUTOSELL_LOG_DEBUG("scan gate frame=%lld result=blocked reason=%s",
                           static_cast<long long>(frame), autosell_scan_gate_name(reason));
     }
 }
@@ -104,7 +108,7 @@ bool scan_round_cancelled(ScanRound& round) {
     if (current_epoch == round.epoch) return false;
     if (!round.cancellation_logged) {
         round.cancellation_logged = true;
-        AUTOSELL_LOG_INFO("scan cancelled frame=%lld epoch=%llu current_epoch=%llu",
+        AUTOSELL_LOG_DEBUG("scan cancelled frame=%lld epoch=%llu current_epoch=%llu",
                           static_cast<long long>(round.frame),
                           static_cast<unsigned long long>(round.epoch),
                           static_cast<unsigned long long>(current_epoch));
@@ -188,7 +192,7 @@ void process_ref(const qol::features::autosell::read_only::InventoryItemRef& ref
     if (decision != autosell::DecisionReason::kRuleMatch) {
         ++stats->no_rule;
         if (g_logged_no_rule_categories.insert(ref.category).second) {
-            AUTOSELL_LOG_WARN(
+            AUTOSELL_LOG_DEBUG(
                 "scan no-rule category=%d space=%d bag=%d slot=%d rarity=%d equip=%d jewel=%d "
                 "backpack=%d badge=%d dice=%d cfg(rarity=%d,enhance=%d,socket=%d,gemTier=%d,"
                 "gemRange=%d,backpack=%d,badge=%d,dice=%d)",
@@ -205,7 +209,7 @@ void process_ref(const qol::features::autosell::read_only::InventoryItemRef& ref
         no_sell != 0) {
         ++stats->no_sell;
         if (g_logged_no_sell_categories.insert(ref.category).second) {
-            AUTOSELL_LOG_WARN("scan no-sell category=%d space=%d bag=%d slot=%d", ref.category,
+            AUTOSELL_LOG_WARN("scan no-sell category=%d space=%d bag=%d slot=%d reason=protected", ref.category,
                               ref.space_id, ref.bag, ref.slot);
         }
         return;
@@ -393,46 +397,13 @@ void scan_body(const autosell::Config& cfg, int64_t frame, ScanRound& round) {
     if (!scan_round_cancelled(round)) scan_registered_sources(cfg, &stats, round);
 
     autosell_note_scan(frame, stats.sold, stats.failed);
-    static int last_refs = -1;
-    static int last_view_skipped = -1;
-    static int last_no_rule = -1;
-    static int last_no_sell = -1;
-    static int last_sold = -1;
-    static int last_failed = -1;
-    static int last_stale = -1;
-    static int last_empty = -1;
-    static int last_no_handle = -1;
-    static bool zero_refs_logged = false;
-    const bool changed = stats.refs != last_refs || stats.view_skipped != last_view_skipped ||
-                         stats.no_rule != last_no_rule || stats.no_sell != last_no_sell ||
-                         stats.sold != last_sold || stats.failed != last_failed ||
-                         stats.stale != last_stale || stats.empty != last_empty ||
-                         stats.no_handle != last_no_handle;
-    if (stats.refs == 0) {
-        if (!zero_refs_logged) {
-            zero_refs_logged = true;
-            AUTOSELL_LOG_WARN("scan frame=%lld refs=0", static_cast<long long>(frame));
-        }
-    } else if (changed) {
-        last_refs = stats.refs;
-        last_view_skipped = stats.view_skipped;
-        last_no_rule = stats.no_rule;
-        last_no_sell = stats.no_sell;
-        last_sold = stats.sold;
-        last_failed = stats.failed;
-        last_stale = stats.stale;
-        last_empty = stats.empty;
-        last_no_handle = stats.no_handle;
-        AUTOSELL_LOG_WARN(
-            "scan frame=%lld refs=%d view_skipped=%d no_rule=%d no_sell=%d sold=%d failed=%d "
-            "stale=%d empty=%d no_handle=%d",
-            static_cast<long long>(frame), stats.refs, stats.view_skipped, stats.no_rule,
-            stats.no_sell, stats.sold, stats.failed, stats.stale, stats.empty, stats.no_handle);
-    }
-    if (stats.sold > 0 || stats.failed > 0) {
-        AUTOSELL_LOG_INFO("scan frame=%lld sold=%d failed=%d", static_cast<long long>(frame),
-                          stats.sold, stats.failed);
-    }
+    const int skipped = stats.view_skipped + stats.no_rule + stats.no_sell + stats.stale +
+                        stats.empty + stats.no_handle;
+    AUTOSELL_LOG_INFO("op=autosell result=ok round=%llu sold=%u skipped=%u failed=%u",
+                      static_cast<unsigned long long>(frame),
+                      static_cast<unsigned int>(stats.sold),
+                      static_cast<unsigned int>(skipped),
+                      static_cast<unsigned int>(stats.failed));
 }
 
 int32_t autosell_tick(int64_t frame, void*) {
@@ -475,7 +446,7 @@ void remove_task_if_any() {
     const auto* sdk = qol::features::autosell::host_sdk();
     if (sdk != nullptr && sdk->scheduler.remove != nullptr) (void)sdk->scheduler.remove(g_task);
     g_task = 0;
-    AUTOSELL_LOG_INFO("task removed");
+    AUTOSELL_LOG_INFO("task removed op=stop result=removed");
 }
 
 void sync_task() {
@@ -502,11 +473,17 @@ void sync_task() {
     }
     if (g_task != 0) return;
     const auto* sdk = qol::features::autosell::host_sdk();
-    if (sdk == nullptr || sdk->scheduler.add == nullptr) return;
+    if (sdk == nullptr || sdk->scheduler.add == nullptr) {
+        AUTOSELL_LOG_WARN("fail op=scan_scheduler reason=scheduler_unavailable");
+        return;
+    }
     uint64_t task = 0;
     const QolResult result = sdk->scheduler.add(0, &autosell_tick, nullptr,
                                                 kAutoSellScanIntervalFrames, 0, &task);
-    if (result.ok != kQolOk) return;
+    if (result.ok != kQolOk || task == 0) {
+        AUTOSELL_LOG_WARN("fail op=scan_scheduler reason=registration_failed code=%d", result.code);
+        return;
+    }
     g_task = task;
     AUTOSELL_LOG_INFO("task registered id=%llu", static_cast<unsigned long long>(g_task));
 }
@@ -517,7 +494,7 @@ void autosell_on_save_enter(void*, const qol::contracts::EventStateChange* chang
         change->value != 1) return;
     const int slot = change->slot;
     if (!autosell_scan_save_enter(slot)) {
-        AUTOSELL_LOG_WARN("save enter rejected slot mismatch slot=%d", slot);
+        AUTOSELL_LOG_WARN("save enter rejected slot mismatch slot=%d reason=slot_mismatch", slot);
         remove_task_if_any();
         return;
     }
@@ -528,7 +505,7 @@ void autosell_on_save_enter(void*, const qol::contracts::EventStateChange* chang
 void autosell_on_save_exit(void*, const void*) {
     // Save-exit rejects slot-data writes until the next successful sd_load marks the session ready.
     autosell_store_reject_session();
-    AUTOSELL_LOG_INFO("save exit; remove task");
+    AUTOSELL_LOG_INFO("save exit; remove task reason=save_exit");
     remove_task_if_any();
 }
 
@@ -552,13 +529,15 @@ void autosell_scan_sync_after_session_change() { sync_task(); }
 void autosell_reset_scan_timer() {
     remove_task_if_any();
     sync_task();
-    AUTOSELL_LOG_INFO("scan timer reset after panel close");
+
 }
 
 void autosell_set_global_enabled(bool enabled) {
-    g_global_enabled.store(enabled, std::memory_order_release);
-    AUTOSELL_LOG_INFO("global enabled=%d save_active=%d", enabled ? 1 : 0,
-                      autosell_scan_session_slot() >= 0 ? 1 : 0);
+    const bool old_enabled = g_global_enabled.exchange(enabled, std::memory_order_acq_rel);
+    if (old_enabled != enabled) {
+        AUTOSELL_LOG_INFO("global enabled=%d save_active=%d feature=autosell", enabled ? 1 : 0,
+                          autosell_scan_session_slot() >= 0 ? 1 : 0);
+    }
     if (enabled) sync_task();
     else {
         log_blocked_gate_once(-1, ScanGateReason::kGlobalDisabled);

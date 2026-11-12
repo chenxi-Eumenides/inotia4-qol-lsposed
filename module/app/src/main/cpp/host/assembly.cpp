@@ -610,7 +610,14 @@ bool event_state_dispatch_tick(int64_t, void*) {
 bool save_transaction_gate_admits(void*, contracts::QolOwnerToken owner,
                                   const contracts::QolSlotOperationLease* lease, int32_t slot) {
     std::lock_guard<std::mutex> lock(infra::slot_operation::mutex());
-    return contracts::succeeded(infra::slot_operation::validate_locked(owner, lease, slot));
+    const contracts::QolResult result =
+        infra::slot_operation::validate_locked(owner, lease, slot);
+    if (!contracts::succeeded(result)) {
+        QOL_LOG_WARN(QolDomain::kSave,
+                     "reject op=save_transaction result=rejected slot=%d reason=lease_invalid",
+                     slot);
+    }
+    return contracts::succeeded(result);
 }
 
 }  // namespace
@@ -666,7 +673,7 @@ bool assembly_init() {
     // 帧源常驻资源：渲染/逻辑锚点。未就绪时 fail-closed 返回 false；不阻断插件注册，
     // 后续可重试（gamebridge 在 bridge 就绪后亦会先调用一次）。
     if (!frame_source_install()) {
-        QOL_LOG_WARN(QolDomain::kCore, "assembly: frame source not ready");
+        QOL_LOG_WARN(QolDomain::kCore, "assembly: frame source not ready phase=startup");
     }
 
     // 命令通道每逻辑帧排空一次；命令体在主线程执行（§6.1）。
@@ -735,7 +742,7 @@ bool assembly_init() {
         const auto& descriptor = plugin.descriptor();
         if (!register_plugin(descriptor)) {
             ++g_registration_failures;
-            QOL_LOG_ERROR(QolDomain::kCore,
+            QOL_LOG_WARN(QolDomain::kCore,
                           "assembly: plugin descriptor registration failed id=%s",
                           descriptor.id != nullptr ? descriptor.id : "(null)");
             return false;
@@ -743,7 +750,7 @@ bool assembly_init() {
         if (plugin.store_namespace != nullptr &&
             !bind_plugin_store(descriptor, plugin.store_namespace)) {
             ++g_registration_failures;
-            QOL_LOG_ERROR(QolDomain::kCore, "assembly: owner store binding failed");
+            QOL_LOG_WARN(QolDomain::kCore, "assembly: owner store binding failed");
             return false;
         }
         ++g_registered_plugins;
@@ -751,7 +758,7 @@ bool assembly_init() {
         const auto feature_result = production_feature_register(descriptor);
         if (!feature_result.ok()) {
             ++g_registration_failures;
-            QOL_LOG_ERROR(QolDomain::kCore,
+            QOL_LOG_WARN(QolDomain::kCore,
                           "assembly: feature metadata missing for %s reason=%.*s",
                           descriptor.id, static_cast<int>(feature_result.message.size()),
                           feature_result.message.c_str());
@@ -761,12 +768,12 @@ bool assembly_init() {
         // 也不向插件提供授权入口。
         if (plugin.slot_operation_allowed && !bind_plugin_slot_operation(descriptor)) {
             ++g_registration_failures;
-            QOL_LOG_ERROR(QolDomain::kCore, "assembly: slot operation binding failed");
+            QOL_LOG_WARN(QolDomain::kCore, "assembly: slot operation binding failed");
             return false;
         }
         if (plugin.save_route_allowed && !bind_plugin_save_route(descriptor)) {
             ++g_registration_failures;
-            QOL_LOG_ERROR(QolDomain::kCore, "assembly: save route binding failed");
+            QOL_LOG_WARN(QolDomain::kCore, "assembly: save route binding failed");
             return false;
         }
     }
@@ -775,13 +782,13 @@ bool assembly_init() {
     // resident lifecycle channel independent of core.settings. No module.platform enable gate.
     if (!production_feature_register_host_owner(platform_config_descriptor()).ok()) {
         ++g_registration_failures;
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: platform config owner registration failed");
+        QOL_LOG_WARN(QolDomain::kCore, "assembly: platform config owner registration failed");
         module_health_set_fact(contracts::QolModuleHealthBit::kModuleInitialization, true, true);
         return false;
     }
     if (!production_feature_register_host_owner(security_config_descriptor()).ok()) {
         ++g_registration_failures;
-        QOL_LOG_ERROR(QolDomain::kCore, "assembly: security config owner registration failed");
+        QOL_LOG_WARN(QolDomain::kCore, "assembly: security config owner registration failed");
         module_health_set_fact(contracts::QolModuleHealthBit::kModuleInitialization, true, true);
         return false;
     }
@@ -792,7 +799,7 @@ bool assembly_init() {
     const auto feature_bootstrap = production_feature_bootstrap(config_store_path());
     if (!feature_bootstrap.ok()) {
         config_store_mark_bootstrapped(false);
-        QOL_LOG_ERROR(QolDomain::kCore,
+        QOL_LOG_WARN(QolDomain::kCore,
                       "assembly: feature bootstrap failed reason=%.*s",
                       static_cast<int>(feature_bootstrap.message.size()),
                       feature_bootstrap.message.c_str());
@@ -804,8 +811,8 @@ bool assembly_init() {
     module_health_config_bootstrap_finished(durable_config_ready);
     if (!production_feature_bind_frame(deps)) {
         ++g_registration_failures;
-        QOL_LOG_ERROR(QolDomain::kCore,
-                      "assembly: feature reconciler bind failed (registry/catalog mismatch or store unavailable)");
+        QOL_LOG_WARN(QolDomain::kCore,
+                      "assembly: feature reconciler bind failed (registry/catalog mismatch or store unavailable) reason=bind_failed");
         module_health_set_fact(contracts::QolModuleHealthBit::kModuleInitialization, true, true);
         return false;
     }
@@ -815,7 +822,7 @@ bool assembly_init() {
     // g_host_sdk keeps feature_control=nullptr; only the settings context receives this copy.
     contracts::QolHostSdk management_sdk = g_host_sdk;
     if (!production_feature_bind_management_sdk(management_sdk)) {
-        QOL_LOG_WARN(QolDomain::kCore, "assembly: management SDK injection unavailable");
+        QOL_LOG_WARN(QolDomain::kCore, "assembly: management SDK injection unavailable reason=sdk_unavailable");
     } else {
         bind_management_sdk(management_sdk);
     }
@@ -838,7 +845,7 @@ bool assembly_init() {
             if (fallback_task != 0) (void)infra::scheduler_remove(fallback_task);
             if (dispatch_task != 0) (void)infra::scheduler_remove(dispatch_task);
             module_engine_failure = true;
-            QOL_LOG_ERROR(QolDomain::kCore,
+            QOL_LOG_WARN(QolDomain::kCore,
                           "assembly: event state frame tasks unavailable (fallback=%llu dispatch=%llu)",
                           static_cast<unsigned long long>(fallback_task),
                           static_cast<unsigned long long>(dispatch_task));
@@ -868,7 +875,7 @@ bool assembly_init() {
     // 失败只降级不 fail 装配：迁移前 bridge 调用点亦不检查返回值。
     char_next_exp_cache_start();  // void：内部以任务 id 幂等，失败保持 0（不派发）
     if (!transition_dispatch_init()) {
-        QOL_LOG_WARN(QolDomain::kCore, "assembly: transition dispatch registration failed");
+        QOL_LOG_WARN(QolDomain::kCore, "assembly: transition dispatch registration failed reason=registration_failed");
         module_engine_failure = true;
     }
     g_assembly_done = true;

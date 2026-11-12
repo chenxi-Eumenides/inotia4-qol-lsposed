@@ -57,6 +57,18 @@ void queue_extension_tab_click_locked(int extension_bag);
 bool extension_tab_control_is_current_locked(int index, void* control);
 bool extension_tab_buttons_have_controls_locked();
 
+void log_inventory_panel_edge_locked() {
+    static bool was_open = false;
+    const bool is_open = qol::extension_bag::ui_state().ui.inventory_frame_active;
+    if (is_open == was_open) return;
+    if (is_open) {
+        VIRTBAG_LOG("open panel=equip result=entered");
+    } else {
+        VIRTBAG_LOG("close panel=equip result=closed");
+    }
+    was_open = is_open;
+}
+
 uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* param) {
     qol::extension_bag::EntryGuard guard(
         "tab_proc", qol::extension_bag::ReentryPolicy::kRejectWrite);
@@ -74,7 +86,7 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
             // 不能阻塞，直接放行让原版处理，避免自死锁。
             ::qol::extension_bag::TryReentryLock lock;
             if (!lock.owns_lock()) {
-                VIRTBAG_LOG("extension tab proc busy event=0x%llx",
+                VIRTBAG_LOG_DEBUG("extension tab proc busy event=0x%llx",
                             static_cast<unsigned long long>(event));
                 return finish(0);
             }
@@ -95,7 +107,7 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
             // 同 0x02：drop 也可能在模块持锁的原生调用栈内到达。
             ::qol::extension_bag::TryReentryLock lock;
             if (!lock.owns_lock()) {
-                VIRTBAG_LOG("extension tab proc busy event=0x%llx",
+                VIRTBAG_LOG_DEBUG("extension tab proc busy event=0x%llx",
                             static_cast<unsigned long long>(event));
                 return finish(0);
             }
@@ -109,7 +121,7 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
                     const bool handled = logical_bag >= 0 &&
                                          route_projected_session_to_tab_locked(lock, logical_bag);
                     if (logical_bag < 0) {
-                        VIRTBAG_LOG("cross tab reject reason=target_tab_index_invalid index=%d", index);
+                        VIRTBAG_LOG_WARN("cross tab reject reason=target_tab_index_invalid index=%d", index);
                     }
                     result = handled ? 1 : 0;
                 } else {
@@ -200,7 +212,7 @@ void delete_extension_tab_buttons_locked() {
             state = {};
         }
         if (live != 0 && handle != nullptr && !extension_bag_ui_delete_control(handle)) {
-            VIRTBAG_LOG("extension tab delete failed control=%p", handle);
+            VIRTBAG_LOG_WARN("extension tab delete failed control=%p", handle);
         }
         qol::extension_bag::ui_state().ui.extension_tab_buttons[static_cast<size_t>(index)] = nullptr;
     }
@@ -275,12 +287,12 @@ QolResult equip_tab_anchor_create(void* parent, qol::contracts::UiRect rect, voi
     // 第 5 参 = proc，经 CreateControlInfo 写入 +0x90（CO_PROC，TouchHandle 统一事件分发）。
     void* ctrl = nullptr;
     if (!extension_bag_ui_create_control(parent, &ctrl) || ctrl == nullptr) {
-        VIRTBAG_LOG("extension tab create failed index=%d", ctx->index);
+        VIRTBAG_LOG_WARN("extension tab create failed index=%d", ctx->index);
         return qol::contracts::error(kQolErrNotReady, "tab create", 10);
     }
     const auto fail = [ctrl](const char* reason, int index) {
         (void)extension_bag_ui_delete_control(ctrl);
-        VIRTBAG_LOG("extension tab setup failed reason=%s index=%d control=%p", reason, index, ctrl);
+        VIRTBAG_LOG_WARN("extension tab setup failed reason=%s index=%d control=%p", reason, index, ctrl);
         return qol::contracts::error(kQolErrNotReady, "tab setup", 9);
     };
     if (!extension_bag_ui_set_control_proc(ctrl, &extension_tab_item_proc)) {
@@ -311,7 +323,7 @@ bool refresh_extension_tab_anchors_locked(const qol::contracts::QolUiComponents*
     const int active = virtual_bag::active_extension_bags();
     const int visible = virtual_bag::rendered_extension_bag_tabs(active);
     if (active > virtual_bag::kMaxRenderedExtensionBagTabs) {
-        VIRTBAG_LOG("tab layout rendered cap reached count=%d", active);
+        VIRTBAG_LOG_DEBUG("tab layout rendered cap reached count=%d", active);
     }
     for (int index = 0; index < visible; ++index) {
         auto& ctx = g_equip_tab_anchor_ctx[static_cast<size_t>(index)];
@@ -326,7 +338,7 @@ bool refresh_extension_tab_anchors_locked(const qol::contracts::QolUiComponents*
             all = false;
             // NotReady 是面板打开初期的正常态（占位容器/布局未就位），不刷日志。
             if (ensured.ok != kQolErrNotReady) {
-                VIRTBAG_LOG("extension tab anchor ensure failed index=%d code=%d root=%p", index,
+                VIRTBAG_LOG_WARN("extension tab anchor ensure failed index=%d code=%d root=%p", index,
                             ensured.ok, parent);
             }
         }
@@ -343,6 +355,7 @@ bool refresh_extension_tab_anchors_locked(const qol::contracts::QolUiComponents*
 }  // namespace
 
 void install_extension_tab_buttons_locked() {
+    log_inventory_panel_edge_locked();
     // 配置门控：扩展背包关闭时不得挂载页签（3 个宿主之一）。启用/禁用均以
     // g_virtual_bag_enabled 为准；调用方不再各自判断。
     if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) return;
@@ -382,6 +395,7 @@ void install_extension_tab_buttons_locked() {
 }
 
 void disable_extension_tab_buttons_locked() {
+    log_inventory_panel_edge_locked();
     void* live_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
     if (qol::extension_bag::ui_state().ui.extension_tab_root != nullptr && live_root == qol::extension_bag::ui_state().ui.extension_tab_root) {
         delete_extension_tab_buttons_locked();
@@ -483,7 +497,7 @@ void handle_extension_tab_click_impl_locked(int extension_bag,
                 }
             }
             if (projection_host < 0) {
-                VIRTBAG_LOG(
+                VIRTBAG_LOG_WARN(
                     "extension tab reject reason=projection_host_unavailable source_original_bag=%d target=%d",
                     original_bag, extension_bag);
                 return;
@@ -529,7 +543,7 @@ void handle_extension_tab_click_impl_locked(int extension_bag,
                             original_bag);
             }
         } else {
-            VIRTBAG_LOG("extension tab reject original window reason=invalid_transaction_domain bag=%d",
+            VIRTBAG_LOG_WARN("extension tab reject original window reason=invalid_transaction_domain bag=%d",
                         original_bag);
         }
         return;
@@ -572,12 +586,10 @@ void handle_extension_tab_click_impl_locked(int extension_bag,
                 const uint8_t bag_type = runtime_state().objects.bag.types[extension_bag];
                 const int bag_capacity = runtime_state().objects.bag.capacities[extension_bag];
                 if (tab_data == nullptr || described_item == nullptr) {
-                    QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                                  "extension bag description rejected missing control item bag=%d control=%p",
+                    QOL_LOG_WARN(QolDomain::kExtensionBag, "extension bag description rejected missing control item bag=%d control=%p",
                                   extension_bag, ctrl);
                 } else if (saved_bag < 0 || saved_desc_type < 0) {
-                    QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                                  "extension bag description rejected state snapshot bag=%d current_bag=%d desc_type=%d",
+                    QOL_LOG_WARN(QolDomain::kExtensionBag, "extension bag description rejected state snapshot bag=%d current_bag=%d desc_type=%d",
                                   extension_bag, saved_bag, saved_desc_type);
                 } else if (unlockable_lock == nullptr) {
                     const bool bag_set = qol::contracts::succeeded(
@@ -591,8 +603,7 @@ void handle_extension_tab_click_impl_locked(int extension_bag,
                     const bool desc_restored = saved_desc_type < 0 || qol::contracts::succeeded(
                         runtime_state().host.write_port->ui.set_desc_type(saved_desc_type));
                     if (!bag_set || !desc_set || !made || !bag_restored || !desc_restored) {
-                        QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                                      "extension bag description UI operation failed bag=%d bag_set=%d desc_set=%d made=%d bag_restored=%d desc_restored=%d",
+                        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension bag description UI operation failed bag=%d bag_set=%d desc_set=%d made=%d bag_restored=%d desc_restored=%d",
                                       extension_bag, bag_set ? 1 : 0, desc_set ? 1 : 0,
                                       made ? 1 : 0, bag_restored ? 1 : 0,
                                       desc_restored ? 1 : 0);
@@ -656,8 +667,7 @@ void handle_extension_tab_click_impl_locked(int extension_bag,
                                 unlockable_lock->lock();
                             }
                             if (!closed) {
-                                QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                                              "extension bag description close failed bag=%d",
+                                QOL_LOG_WARN(QolDomain::kExtensionBag, "extension bag description close failed bag=%d",
                                               extension_bag);
                             }
                         }
@@ -666,8 +676,7 @@ void handle_extension_tab_click_impl_locked(int extension_bag,
                     }
                 }
             } else {
-                QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                              "extension bag description rejected UI adapter unavailable bag=%d control=%p",
+                QOL_LOG_WARN(QolDomain::kExtensionBag, "extension bag description rejected UI adapter unavailable bag=%d control=%p",
                               extension_bag, ctrl);
             }
             VIRTBAG_LOG("extension bag desc opened bag=%d", extension_bag);

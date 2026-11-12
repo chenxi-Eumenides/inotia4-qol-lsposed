@@ -52,7 +52,7 @@ int32_t resync_once() {
         }
         if (post_set_state(quest_id, 2)) ++fixed;
     }
-    log_info("quest resync: fixed=%u", fixed);
+    log_info("op=quest_resync result=ok fixed=%u", fixed);
     return 0;
 }
 

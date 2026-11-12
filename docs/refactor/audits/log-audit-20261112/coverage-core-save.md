@@ -1,0 +1,29 @@
+# core.save 功能级日志覆盖审计
+
+按 `docs/reference/logging-standards.md` 审计：E=不可继续/数据不可恢复，W=单次失败但可继续，I=有限状态变化，D=过程诊断（debug 门控）。关注功能生命周期节点，不逐一枚举内部实现步骤。功能边界参考 `docs/reference/plugins/core.save.md`；事务与 journal 参考 `save_coordinator.cpp`、`save_transition.cpp`、`save_journal.cpp`。路径均相对 `module/app/src/main/cpp/plugins/core.save/`。
+
+| 功能事件 | 触发条件 | 目标等级 | 现有日志 file:line | 状态 | 建议（含建议文案） |
+|---|---|---:|---|---|---|
+| 进入已有存档（读档） | 用户/API 发起；转换确认、sidecar 加载并 ready | I；单次失败 W；重试耗尽/损坏 E | `save_transition.cpp:285,401,352,365,379`；`plugin.cpp:464,470` | weak | begin/ready 只有 kind/slot/token/epoch，确认失败虽有 step/code，但无标准 `op=load` 与 `reason`；补唯一终态：`load op=load slot=%d token=%llu result=ready epoch=%llu`；单次拒绝 `fail op=load slot=%d token=%llu reason=<step> code=%d`。确认重试应按实际执行次数输出 `attempt=i/n`，不是每帧输出。 |
+| 退出当前存档/离开会话 | 转换开始关闭旧 session；取消或进入新槽后旧会话不可用 | I | `save_transition.cpp:285,436`；`slot_data_provider.cpp:533,546` | weak | 日志记 begin/cancel，但缺旧槽及离开结果；转换成功时追加单条 `close op=load slot=%d token=%llu result=closed`，不在逐帧 observe 中记录。 |
+| 正常保存 | `/api/system/save` 或 `SAVE_Save`；原版保存与 sidecar 联合提交 | I；单次失败 W；重试中 W；耗尽 E | `save_coordinator.cpp:368,161,179,194,221,233,245,260,279,288,299,308,322,347,360` | weak | 已有 committed 与多数准备阶段失败；pending 的失败仅记录首阶段，retry_frame 的中间失败静默，且调用点正文无 `op=save`/`reason`。每次实际重试建议 `retry op=save attempt=%u/3 slot=%d tx=%llu reason=<step> code=%d`；最后一次 `fail op=save attempts=3 slot=%d tx=%llu reason=<step> code=%d`；成功保留单条 `save op=save slot=%d tx=%llu result=committed sections=%zu`。 |
+| 覆盖当前槽存档 | 目标槽已存在，现有 `SAVE_Save` 对同槽正式 sections 原子替换 | I；失败 W/E | `save_coordinator.cpp:368,360,645` | weak | 与正常保存共用事务是正确的，不能重复记录；现有结果不能区分创建/覆盖。仅在事务入口已知是否有既有存档时，最终行增加 `mode=create|overwrite`，如 `save op=save slot=%d tx=%llu mode=overwrite result=committed`；若无可靠既有性判断则保持不造字段。 |
+| 新游戏确认/创建 | `SaveSlot_GoToNewGame` begin，选角后确认 reset 并激活新 session | I；拒绝 W；不可恢复 E | `plugin.cpp:560,567`；`save_transition.cpp:285,401`；确认失败 `352,365,379` | weak | 当前主要是通用 transition 事件，不能直接回放新档成功/取消且缺 `class_idx`；创建终态追加单条 `create op=create slot=%d token=%llu class_idx=%d result=ready`，确认失败沿用 transition 唯一失败事件并带 `kind=create`。 |
+| 跨槽复制/存档管理器导入 | 复制、导入或替换另一槽文件 | I/W/E | 无（core.save 无此操作入口；HTTP 备份/导入归 `save_backup`，见 `docs/reference/plugins/core.save.md:21,49,55,60`） | missing | 不在 core.save 增加日志；由 `save_backup` 对复制/导入最终结果、源/目标槽及失败原因负责。本行是范围边界标记，不表示 core.save 应实现复制。 |
+| prepared journal 写入 | 保存预检后写入 stage=prepared，之后才调用原版 SAVE_Save | W；写入成功是事务阶段而非独立用户状态 | `save_coordinator.cpp:260` | weak | 失败有 W；成功没有阶段可见性。避免每一步刷 I；建议事务终态覆盖是否完成 prepared，或只在 `debug.logging` 下输出 `apply op=save slot=%d tx=%llu stage=prepared`。 |
+| confirmed journal 写入及最终替换/清理 | 原版成功后写 confirmed，再原子替换 section 并删除 journal | I（最终提交）；W（单次重试）；E（耗尽/不可恢复） | `save_coordinator.cpp:347,360,368,607,645` | weak | pending 阶段有 INFO（现已按裁决降 W），重试失败部分不逐次记录；成功提交可见但没明确 `journal=cleared`。建议最终提交行补 `journal=cleared`，并对每次重试按 `attempt=i/3`、末次 `attempts=3 reason=` 记录一次。 |
+| prepared journal 条件清理 | 原版未执行/返回失败后核对 journal 身份并尝试移除 | W（清理失败）；I（清理完成可并入事务结局） | `save_coordinator.cpp:279,288,299,308`（上层只输出 preserved/cleaned） | weak | 已把清理结果编码在原版失败日志中，但清理读、decode、remove 的失败根因没有独立字段；不要重复记同一失败。确保既有事务行携带 `journal=cleaned|preserved` 和清理失败 `reason=`/`code=`；当前日志对清理不成功缺 code。 |
+| journal 回放/恢复 | 读档确认时发现 original_confirmed journal，核对 dat evidence 后恢复 replace | I（恢复提交）；W（单次恢复调用失败）；E（损坏或无法恢复） | `save_coordinator.cpp:459,463,470,487,503,517,552,586,607,645`；`save_transition.cpp:105,115,121` | weak | corruption 与不可恢复现已使用 E；恢复 acquire/reserve 的 W 有 step/code。恢复成功最终走 retry committed 但没有恢复结果日志；追加一条 `restore op=recover slot=%d tx=%llu result=committed`，不要再由 confirm 外层重复记 journal 根因。 |
+| 自动恢复超时/重试耗尽 | pending 保存帧驱动最多 3 次；读档确认到期自动 cancel | E（保存耗尽）；W（读档超时取消及取消失败） | `save_coordinator.cpp:552,572,607,645`；`plugin.cpp:464,470,474` | weak | 日志虽能表明耗尽/超时，但 save 的耗尽正文未显式 `attempts=3`/`op=`；读档 timeout 与取消结果分两行。按统一终态格式记录 `fail op=save attempts=3 slot=%d tx=%llu reason=retries_exhausted`；读档单条 `fail op=load slot=%d token=%llu reason=timeout result=cancelled`，取消失败则以同一失败事件 `result=cancel_failed code=%d`，避免重复 timeout+结果事实。 |
+| 降级模式与拒绝后续操作 | journal/evidence 无法恢复、slot health degraded 后阻止保存/转换 | E（进入不可恢复降级）；W（后续单次请求被拒） | `save_coordinator.cpp:332,459,463,470,517,552,586,712,768`；`save_transition.cpp:225` | weak | E 现覆盖核心降级来源，后续拒绝为 W；缺一条清晰的模式变化事实，且部分 W 没有 `op=`。在首次 `health.degraded` 转变处只记一次 `degrade op=save slot=%d tx=%llu reason=<cause>`；后续请求用 `reject op=save slot=%d reason=slot_degraded`，不要对每个消费者重复告警。 |
+| 存档/journal 损坏检测 | journal 不可读、decode 不合法/不支持；游戏存档读档损坏由原版判决 | E（不可恢复数据损坏）；单次校验失败若可继续则 W | journal：`save_coordinator.cpp:463`、`save_transition.cpp:105,121`；游戏 dat 损坏无 core.save 专属日志 | weak | journal decode 已 E，但没有 `reason=`（仅 decode 数值）且恢复路径与 confirm 路径可能分别报告；只在唯一检测点写 `fail op=recover slot=%d reason=journal_corrupt decode=%d`，上层不得重复。原版 dat 的 corrupt verdict 应由 `save.facts`/`save_backup` 判决链记录；core.save 不自行重解析或复制日志。 |
+| 新建档/读档期间 `SAVE_Save` loading bypass | 原版加载链在非 ready session 内尝试保存入口 | D（分支细节）；W（旁路拒绝导致单次读档失败） | `plugin.cpp:503-545` 无日志；`plugin.cpp:615,625` 只覆盖 resume entry 外层失败 | weak | bypass probe/call_original_save 的失败分支直接 return 0，无具体原因；外层只覆盖入口不可用/原版结果 0。可在最终读档 W 上合并原因分类 `reason=bypass_probe_failed|save_not_invoked`；底层只对 debug 开启记录 `D load slot=%d token=%llu bypass_stage=<stage> result=<code>`。 |
+
+## 优先补全项
+
+1. **保存重试的区分与终态**：`save_coordinator.cpp:572-649` 中间失败多静默；按 `op/attempt=i/3/reason` 记录可区分失败，耗尽用 E 与 `attempts=3`，避免只看到最后降级。
+2. **读档确认的最终结果**：在 ready / timeout cancel / confirm 终态形成按 token 唯一的 `op=load result=...`，覆盖用户发起到收敛，不把逐帧 observe 当日志事件。
+3. **journal 恢复成功结果**：`save_coordinator_on_session_enter` 自动恢复成功路径没有恢复完成日志；增加一次带 slot/tx 的 `restore ... result=committed`。
+4. **降级模式的唯一状态变化**：首次进入 degraded 时记 `degrade op=save slot=... tx=... reason=...`；后续拒绝维持 W，不重复宣告同一损坏事实。
+5. **loading bypass 失败原因归一**：将 probe、未执行原版等不同拒绝原因带入最终读档 W，避免无日志 return 0 与笼统 `original_resume_failed`。
+6. **跨槽复制维持边界**：core.save 不拥有复制/导入；日志覆盖应由 save_backup 评估，避免跨组件重复记录同一文件操作。

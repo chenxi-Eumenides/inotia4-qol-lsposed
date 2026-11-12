@@ -139,14 +139,14 @@ bool import_allowed_now(std::string& err) {
         const QolResult world = save_backup::state::snapshot().world_facts->state(&state);
         if (qol::contracts::succeeded(world)) {
             if (state == 4) return true;
-            SB_LOG("save backup import gate: world state=%d (not main menu)", state);
+            SB_LOG_WARN("save backup import gate: world state=%d (not main menu) reason=not_main_menu", state);
             err = "import requires main menu";
             return false;
         }
-        SB_LOG_WARN("save backup import gate: world state unavailable (code=%d), fallback current_slot",
+        SB_LOG("save backup import gate: world state unavailable (code=%d), fallback current_slot",
                     world.code);
     } else {
-        SB_LOG_WARN("save backup import gate: world facts unavailable, fallback current_slot");
+        SB_LOG("save backup import gate: world facts unavailable, fallback current_slot reason=world_facts_unavailable");
     }
 
     if (save_backup::state::snapshot().save_facts == nullptr || save_backup::state::snapshot().save_facts->current_slot == nullptr) {
@@ -158,16 +158,16 @@ bool import_allowed_now(std::string& err) {
     // 主菜单（未加载）时 Adapter 返回 NotReady 且 out=-1（game/adapter_ports/save_port.cpp:104-108），
     // 因此 NotReady 不能单独判为不可用；其余错误码 fail-closed。
     if (!qol::contracts::succeeded(result) && result.code != kQolErrNotReady) {
-        SB_LOG_WARN("save backup import gate: current_slot unavailable (code=%d)", result.code);
+        SB_LOG_WARN("save backup import gate: current_slot unavailable (code=%d) reason=current_slot_unavailable", result.code);
         err = "save state unavailable";
         return false;
     }
     if (current_slot >= 0) {
-        SB_LOG("save backup import gate: current_slot=%d (not main menu)", current_slot);
+        SB_LOG_WARN("save backup import gate: current_slot=%d (not main menu)", current_slot);
         err = "import requires main menu";
         return false;
     }
-    SB_LOG("save backup import gate: fallback current_slot=%d (main menu)", current_slot);
+    SAVE_BACKUP_LOG_DEBUG("save backup import gate: fallback current_slot=%d (main menu)", current_slot);
     return true;
 }
 
@@ -456,6 +456,7 @@ void save_backup_autobackup_pre_save(int32_t slot) {
                                  current.size())) {
         SB_LOG_WARN("autobackup slot=%d fingerprint write failed", slot);
     }
+    SAVE_BACKUP_LOG_INFO("save op=backup result=created source=autosave slot=%d", slot);
 }
 
 
@@ -545,12 +546,12 @@ std::string save_backup_list_json() {
         // 先 stat 再读：超限文件不必先分配内存。
         if (::stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode) || st.st_size < 0 ||
             static_cast<long long>(st.st_size) > kListMaxBundleBytes) {
-            SB_LOG("save backup list skip: %s", name.c_str());
+            SAVE_BACKUP_LOG_DEBUG("save backup list skip: %s", name.c_str());
             continue;
         }
         const long long file_size = static_cast<long long>(st.st_size);
         if (scanned_bytes + file_size > kListMaxTotalBytes) {
-            SB_LOG("save backup list scan stopped: total %lld bytes exceeds %lld", scanned_bytes,
+            SAVE_BACKUP_LOG_DEBUG("save backup list scan stopped: total %lld bytes exceeds %lld", scanned_bytes,
                    kListMaxTotalBytes);
             break;
         }
@@ -559,7 +560,7 @@ std::string save_backup_list_json() {
         save_backup::ParsedBundle parsed;
         if (!read_file_bytes(path, bytes) ||
             !save_backup::parse_bundle(bytes.data(), bytes.size(), parsed)) {
-            SB_LOG("save backup list skip: %s", name.c_str());
+            SB_LOG_WARN("save backup list skip: %s reason=unreadable_or_corrupt", name.c_str());
             continue;
         }
         // 旧备份缺职业/等级：列表解析到即从明文补全并写回（只改 meta 段）。
@@ -603,12 +604,12 @@ Outcome<BackupFilesResult> list_backup_files() {
         struct stat st{};
         if (::stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode) || st.st_size < 0 ||
             static_cast<long long>(st.st_size) > kListMaxBundleBytes) {
-            SB_LOG("save backup list files skip: %s", name.c_str());
+            SAVE_BACKUP_LOG_DEBUG("save backup list files skip: %s", name.c_str());
             continue;
         }
         const long long size = static_cast<long long>(st.st_size);
         if (scanned_bytes + size > kListMaxTotalBytes) {
-            SB_LOG("save backup list files stopped: stat total %lld exceeds %lld", scanned_bytes,
+            SAVE_BACKUP_LOG_DEBUG("save backup list files stopped: stat total %lld exceeds %lld", scanned_bytes,
                    kListMaxTotalBytes);
             break;
         }
@@ -676,6 +677,7 @@ static Outcome<EntryResult> describe_backup_impl(const std::string& name, bool p
          meta_checksum != save_backup::compute_checksum(parsed.bundle_version, parsed.orig_plain,
                                                         parsed.module, parsed.warehouse_blob,
                                                         parsed.c18_native_bag_blob)) {
+        SAVE_BACKUP_LOG_ERROR("fail op=verify reason=checksum_mismatch");
         return Outcome<EntryResult>::failure(BackupError::kChecksumMismatch, "backup checksum mismatch");
     }
     // 旧备份缺职业/等级：从已解析的明文补全并写回（只改 meta 段，checksum/版本不变）。
@@ -818,7 +820,7 @@ static std::string export_json_with_lease(int slot) {
                 return save_backup::api::export_response(entry, true);
             }
         }
-        SB_LOG("save backup dedup hit unreadable or mismatched, writing new bundle: %s",
+        SB_LOG("save backup dedup hit unreadable or mismatched, writing new bundle: %s fallback=write_new_bundle",
                existing.c_str());
     }
 

@@ -182,6 +182,11 @@ void core_save_log_bridge(int32_t level, const char* source, const char* message
     (void)g_sdk->log.write(level, kCoreSaveLogDomain, source, message, length);
 }
 
+bool core_save_log_debug_enabled() {
+    return g_sdk != nullptr && g_sdk->log.debug_enabled != nullptr &&
+           g_sdk->log.debug_enabled() != 0;
+}
+
 // ---- P3c 生产切换：SAVE_Save 入口 / 转换状态机接线 ----
 // 全部原版与自动保存经 hook:SAVE_Save 进入唯一联合协调器；读档/新档入口先进入转换
 // 状态机（prepare_detach → RenderPre 确认序 → ready）。loading 旁路按 P3b-2 准入矩阵
@@ -220,6 +225,7 @@ std::atomic<uint64_t> g_resume_window_token{0};
 // 超时收敛后封锁该槽的 catch-up 补加载重试，避免同世界内 cancel/begin 每帧抖动；
 // 用户显式读档/新档 begin 成功或离开世界（world_ready==0）时解除。
 std::atomic<int32_t> g_catch_up_blocked_slot{-1};
+thread_local const char* g_resume_failure_reason = nullptr;
 
 void resume_timer_arm(uint64_t token) {
     g_resume_elapsed_frames.store(0, std::memory_order_release);
@@ -381,16 +387,14 @@ void save_transition_observe() {
                         static_cast<uint32_t>(TransitionKind::kResume), st.current_slot, &token);
                     if (contracts::succeeded(began)) {
                         CS_LOG_INFO(kCoreSaveLogDomain,
-                                     "catch-up transition begun slot=%d token=%llu",
+                                      "catch-up transition begun slot=%d token=%llu trigger=catch_up",
                                      st.current_slot, token);
                         // 补加载转换同样武装确认计时器：begin 不再静默悬挂。
                         resume_timer_arm(token);
                     } else {
-                        static CoreSaveLogThrottle throttle;
-                        if (throttle.due(5000))
-                            CS_LOG_WARN(kCoreSaveLogDomain,
-                                         "catch-up transition begin failed slot=%d code=%d",
-                                         st.current_slot, began.code);
+                        CS_LOG_WARN(kCoreSaveLogDomain,
+                                    "catch-up transition begin failed slot=%d code=%d trigger=catch_up",
+                                    st.current_slot, began.code);
                     }
                 }
             }
@@ -458,16 +462,15 @@ void save_transition_timeout_frame(uint64_t now) {
     g_resume_clock_backward_window_begin.store(backward_window_begin, std::memory_order_release);
     g_resume_clock_backward_count.store(backward_count, std::memory_order_release);
     if (timeout != TransitionTimeoutTick::kExpired) return;
-    CS_LOG_WARN(kCoreSaveLogDomain, "resume confirm timeout token=%llu elapsed=%llu", token,
-                 elapsed_frames);
-    const auto cancelled = save_transition_cancel(token);
+    const auto cancelled = save_transition_cancel(token, "cancelled", "timeout");
     if (contracts::succeeded(cancelled)) {
         // 封锁该槽的 catch-up 重试：防止超时 cancel 后同世界内每帧重新 begin 抖动。
         g_catch_up_blocked_slot.store(target, std::memory_order_release);
         resume_timer_disarm();
     } else {
-        CS_LOG_WARN(kCoreSaveLogDomain, "resume confirm timeout cancel failed token=%llu code=%d",
-                     token, cancelled.code);
+        CS_LOG_WARN(kCoreSaveLogDomain,
+                    "op=load result=failed slot=%d token=%llu reason=timeout_cancel_failed code=%d",
+                    target, static_cast<unsigned long long>(token), cancelled.code);
     }
 }
 
@@ -509,15 +512,23 @@ int save_save_wrapper() {
         contracts::QolSlotOperationLease lease{};
         int32_t target = -1;
         if (!save_transition_bypass_lease(&lease, &target)) return 0;
+        uint64_t token = 0;
+        (void)save_transition_pending_observation(&token, nullptr);
         contracts::QolSaveOriginalResult original{};
         original.size = sizeof(original);
         const auto probed = g_save_tx->probe_loading_bypass(g_save_tx->adapter_ctx, &lease, target);
-        if (!contracts::succeeded(probed)) return 0;
+        if (!contracts::succeeded(probed)) {
+            g_resume_failure_reason = "bypass_probe_failed";
+            return 0;
+        }
         // 旁路放行：直接经 Adapter trampoline 执行原版（与普通保存共用受控入口；
         // Adapter 在此窗口标记 joint in-flight，拒绝嵌套事务）。
         const auto invoked = g_save_tx->call_original_save(g_save_tx->adapter_ctx, &lease, target,
                                                            &original);
-        if (!contracts::succeeded(invoked) || original.invoked == 0) return 0;
+        if (!contracts::succeeded(invoked) || original.invoked == 0) {
+            g_resume_failure_reason = "save_not_invoked";
+            return 0;
+        }
         return original.result_valid != 0 ? original.original_result : 0;
     }
     // 普通保存：经宿主 save_route 派发进入唯一协调器（owner 停用后派发被摘除）。
@@ -598,7 +609,7 @@ int save_resume_entry_wrapper(int32_t slot) {
     const QolResult began = save_transition_begin(
         static_cast<uint32_t>(TransitionKind::kResume), slot, &token);
     if (!contracts::succeeded(began)) {
-        CS_LOG_WARN(kCoreSaveLogDomain, "resume entry begin rejected slot=%d code=%d", slot,
+            CS_LOG_WARN(kCoreSaveLogDomain, "resume entry begin rejected slot=%d code=%d entry=resume", slot,
                     began.code);
         return 0;
     }
@@ -608,18 +619,20 @@ int save_resume_entry_wrapper(int32_t slot) {
             token, slot, static_cast<uint32_t>(contracts::QolSaveCallKind::kResume));
     }
     if (bypass == 0) {
-        (void)save_transition_cancel(token);
-        CS_LOG_WARN(kCoreSaveLogDomain, "resume entry bypass unavailable slot=%d", slot);
+        (void)save_transition_cancel(token, "failed", "bypass_unavailable");
         return 0;
     }
     resume_timer_arm(token);
+    g_resume_failure_reason = nullptr;
     const int result = g_backup_game_start_resume_game(slot);
     if (hooks.save_load_bypass_end != nullptr) hooks.save_load_bypass_end(bypass);
     if (result == 0) {
         // 原版未启动/明确失败：释放 token/lease 与确认计时器，且不留下 save_enter pending。
-        (void)save_transition_cancel(token);
+        const char* reason = g_resume_failure_reason != nullptr
+                                 ? g_resume_failure_reason : "original_resume_failed";
+        (void)save_transition_cancel(token, "failed", reason);
+        g_resume_failure_reason = nullptr;
         resume_timer_disarm();
-        CS_LOG_WARN(kCoreSaveLogDomain, "resume entry original failed slot=%d", slot);
         return 0;
     }
     return result;
@@ -1101,6 +1114,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     // 本地日志 seam 装配：此后 core.save 各 TU 的 CS_LOG_* 经桥落到宿主日志。
     core_save_log_install(&core_save_log_bridge);
+    core_save_log_debug_install(&core_save_log_debug_enabled);
     g_game = ctx.game;
     g_owner = ctx.owner_token;
     if (!contracts::succeeded(initialize_slot_data(ctx))) {
@@ -1109,6 +1123,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         g_port = nullptr;
         core_save_log_install(nullptr);
+        core_save_log_debug_install(nullptr);
         return 1;
     }
     // 转换状态机与联合协调器（P3b-3 面）：本批起生产装配；缝注入后确认序的 journal
@@ -1127,6 +1142,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         g_port = nullptr;
         core_save_log_install(nullptr);
+        core_save_log_debug_install(nullptr);
         return 1;
     }
     save_transition_set_transition_gate(&save_transition_gate_admits, nullptr);
@@ -1141,6 +1157,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         g_port = nullptr;
         core_save_log_install(nullptr);
+        core_save_log_debug_install(nullptr);
         return 1;
     }
     const contracts::QolSaveOwnerCallbacks callbacks{
@@ -1157,6 +1174,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         g_port = nullptr;
         core_save_log_install(nullptr);
+        core_save_log_debug_install(nullptr);
         return 1;
     }
     if (!contracts::succeeded(ctx.sdk->ticket_result.register_typed_result_handler(
@@ -1174,6 +1192,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         g_port = nullptr;
         core_save_log_install(nullptr);
+        core_save_log_debug_install(nullptr);
         return 1;
     }
     if (ctx.sdk->scheduler.add != nullptr && g_slot_data_frame_task == 0) {
@@ -1194,6 +1213,7 @@ int plugin_install(contracts::PluginContext& ctx) {
             g_sdk = nullptr;
             g_port = nullptr;
             core_save_log_install(nullptr);
+            core_save_log_debug_install(nullptr);
             return 1;
         }
     }
@@ -1265,6 +1285,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     g_event_state = nullptr;
     g_event_owner = 0;
     core_save_log_install(nullptr);
+    core_save_log_debug_install(nullptr);
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {

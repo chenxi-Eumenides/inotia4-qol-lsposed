@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """统一日志系统合规检查（P4）。
 
-权威规范：`docs/archive/development/logging.md`。本脚本静态检查代码是否满足该规范：
+权威规范：`docs/reference/logging-standards.md`（等级语义、正文内容、频率与去重）与
+`docs/reference/logging.md`（行格式、唯一出口、domain 与文件契约）。本脚本静态检查代码
+是否满足这两份规范：
 
   R1 唯一出口    native 中除 `infra/log/qol_log.cpp` 与 host 桩外不得出现 __android_log_print；
                  Kotlin 中除 `LogFile.kt` 外不得出现 android.util.Log
   R2 旧 tag 清零  字符串字面量中不得出现已废弃 logcat tag（含 Inotia4Export/ApiServer/
                  OpApiService/OpController）；`qol.log` 文件名允许保留
   R3 domain 词表  Kotlin `LogDomain` token 集合 == native `qol_domain_token` token 集合
-  R4 逐帧无高级别 `*_tick|*_process|*_draw*|*_render*`（含 frame_host 的
+  R4 逐帧无 INFO  `*_tick|*_process|*_draw*|*_render*`（含 frame_host 的
                  `render_pre_wrapper`/`logic_pre_wrapper`）函数体、`frame_task_add(` 回调与
-                 内联回调内不得有 I/W/E；别名宏按映射级别判定（软告警）
+                 内联回调内不得有 INFO；WARN/ERROR 由 logger 内部窗口去重吸收，不在此报（软告警）
   R5 级别与定位  `WARN|ERROR`（含别名）格式串需含 `=`；INFO/DEBUG 正文不得以 `ERROR ` 开头（软告警）
 
 R2 只在字符串字面量中匹配 “整串等于 tag” 或 “以 `tag:` 开头” 两种旧用法，避免把
@@ -86,7 +88,8 @@ EXEMPT_ANDROID_LOG = {QOL_LOG_CPP.resolve(), LOG_STUB.resolve()}
 # 触发时执行，并非逐帧，作为逐帧线索会产生大量误报。
 #
 # 注：仍属**仅命名启发式**；门控型回调（如 `save_enter_tick` 用 exchange-once 保证每次
-# 进程只输出一次）可能仍命中，属已知基线，需逐点复核而不是机械降级（见 logging.md §7）。
+# 进程只输出一次）可能仍命中，属已知基线，需逐点复核而不是机械降级
+# （见 `docs/reference/logging-standards.md` §4.1）。
 PER_FRAME_NAME_PATTERNS = (
     r"\w*_tick",
     r"\w*_process",
@@ -430,7 +433,9 @@ def _frame_task_callback_names(text: str, masked: str) -> set[str]:
     return names
 
 
-_HIGH_LEVELS = {"INFO", "WARN", "ERROR"}
+# R4 只禁 INFO：逐帧路径禁止 INFO（logging-standards §4.1）；WARN/ERROR 的频率由 logger
+# 内部窗口去重吸收（§4.2），不再在此重复报警。
+_HIGH_LEVELS = {"INFO"}
 
 
 def check_per_frame_levels(findings: list[Finding]) -> None:
@@ -464,7 +469,7 @@ def check_per_frame_levels(findings: list[Finding]) -> None:
             if context is not None:
                 findings.append(
                     Finding(rel(path), _line_of(text, pos), "R4",
-                            f"{context} 内出现 {name}（级别 {level}）；非 debug 级别禁止逐帧",
+                            f"{context} 内出现 {name}（级别 {level}）；逐帧路径禁止 INFO，改用 DEBUG",
                             soft=True)
                 )
 

@@ -6,6 +6,7 @@
 #include <mutex>
 
 #include "host/owner_identity.h"
+#include "infra/log/qol_log.h"
 
 namespace qol::host::save_route {
 namespace {
@@ -71,21 +72,43 @@ QolResult route_bind(void*, contracts::QolOwnerToken owner,
                      const contracts::QolSaveOwnerCallbacks* callbacks, uint64_t* out_binding) {
     if (out_binding == nullptr || callbacks == nullptr ||
         callbacks->abi.size < sizeof(*callbacks) || callbacks->native_call == nullptr ||
-        callbacks->render_ready == nullptr)
+        callbacks->render_ready == nullptr) {
+        QOL_LOG_WARN(QolDomain::kSave,
+                     "reject op=save_route result=rejected reason=invalid_callbacks");
         return fail(kQolErrInvalidArgument, "invalid save route callbacks");
+    }
     std::lock_guard<std::mutex> lock(g_mtx);
-    if (!contracts::succeeded(owner_authorize_save_route(owner)))
+    if (!contracts::succeeded(owner_authorize_save_route(owner))) {
+        QOL_LOG_WARN(QolDomain::kSave,
+                     "reject op=save_route result=rejected owner=%llu reason=not_authorized",
+                     static_cast<unsigned long long>(owner));
         return fail(kQolErrBlocked, "save route not authorized");
-    if (find_active_by_owner_locked(owner) != nullptr)
+    }
+    if (find_active_by_owner_locked(owner) != nullptr) {
+        QOL_LOG_WARN(QolDomain::kSave,
+                     "reject op=save_route result=rejected owner=%llu reason=already_bound",
+                     static_cast<unsigned long long>(owner));
         return fail(kQolErrBusy, "owner already bound");
-    if (g_next_id == UINT64_MAX) return fail(kQolErrBusy, "binding id exhausted");
+    }
+    if (g_next_id == UINT64_MAX) {
+        QOL_LOG_WARN(QolDomain::kSave,
+                     "reject op=save_route result=rejected owner=%llu reason=binding_id_exhausted",
+                     static_cast<unsigned long long>(owner));
+        return fail(kQolErrBusy, "binding id exhausted");
+    }
     for (auto& binding : g_bindings) {
         if (binding.id != 0) continue;
         // bind 只复制表，不在调用栈访问游戏或回调（冻结语义）。
         binding = Binding{g_next_id, owner, *callbacks, false, 0};
         *out_binding = g_next_id++;
+        QOL_LOG_INFO(QolDomain::kSave,
+                     "bind op=save_route owner=%llu result=bound",
+                     static_cast<unsigned long long>(owner));
         return contracts::ok();
     }
+    QOL_LOG_WARN(QolDomain::kSave,
+                 "reject op=save_route result=rejected owner=%llu reason=binding_capacity",
+                 static_cast<unsigned long long>(owner));
     return fail(kQolErrBusy, "binding capacity exhausted");
 }
 
@@ -101,6 +124,9 @@ QolResult route_unbind(void*, contracts::QolOwnerToken owner, uint64_t binding_i
         return fail(kQolErrNotReady, "unbind still draining");
     }
     *find_by_id_locked(binding_id) = Binding{};
+    QOL_LOG_INFO(QolDomain::kSave,
+                 "unbind op=save_route owner=%llu result=unbound",
+                 static_cast<unsigned long long>(owner));
     return contracts::ok();
 }
 
@@ -202,7 +228,12 @@ bool owner_stopped_poll(uint64_t token) {
         if (!binding.id || binding.owner != token) continue;
         binding.draining = true;
         if (binding.in_flight) completed = false;
-        else binding = Binding{};
+        else {
+            QOL_LOG_INFO(QolDomain::kSave,
+                         "unbind op=save_route owner=%llu result=unbound",
+                         static_cast<unsigned long long>(binding.owner));
+            binding = Binding{};
+        }
     }
     return completed;
 }
@@ -211,6 +242,9 @@ void step() {
     std::lock_guard<std::mutex> lock(g_mtx);
     for (auto& binding : g_bindings) {
         if (binding.id == 0 || !binding.draining || binding.in_flight != 0) continue;
+        QOL_LOG_INFO(QolDomain::kSave,
+                     "unbind op=save_route owner=%llu result=unbound",
+                     static_cast<unsigned long long>(binding.owner));
         binding = Binding{};
     }
 }

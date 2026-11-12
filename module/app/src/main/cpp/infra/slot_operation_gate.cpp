@@ -1,5 +1,6 @@
 #include "slot_operation_gate.h"
 #include "infra/store.h"
+#include "infra/log/qol_log.h"
 
 #include <array>
 #include <cstring>
@@ -56,8 +57,12 @@ QolResult acquire(uint64_t owner, uint32_t mask, contracts::QolSlotOperationLeas
         return fail(kQolErrInvalidArgument, "invalid operation mask");
     std::lock_guard<std::mutex> lock(g_mutex);
     for (int32_t slot = 0; slot < 3; ++slot) {
-        if ((mask & (1u << slot)) && (busy_locked(slot) || store::reservation_busy_locked(slot)))
+        if ((mask & (1u << slot)) && (busy_locked(slot) || store::reservation_busy_locked(slot))) {
+            QOL_LOG_WARN(QolDomain::kSave,
+                         "reject op=slot_operation result=rejected slot=%d reason=slot_occupied",
+                         slot);
             return fail(kQolErrBusy, "operation slots occupied");
+        }
     }
     if (g_next_id == std::numeric_limits<uint64_t>::max()) return fail(kQolErrBusy, "operation id exhausted");
     for (auto& lease : g_leases) {

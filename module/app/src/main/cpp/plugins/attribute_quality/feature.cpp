@@ -311,6 +311,12 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
     if (backup == nullptr) {
         g_backup_math_get_random = nullptr;
         set_active(false);
+        if (ctx.sdk != nullptr && ctx.sdk->log.write != nullptr) {
+            constexpr char kMessage[] =
+                "degrade feature=attribute_quality.provider resource=hook:MATH_GetRandom reason=backup_unavailable";
+            (void)ctx.sdk->log.write(2, 0, "plugins/attribute_quality/feature.cpp",
+                                     kMessage, sizeof(kMessage) - 1);
+        }
         return 1;
     }
     g_backup_math_get_random = backup;

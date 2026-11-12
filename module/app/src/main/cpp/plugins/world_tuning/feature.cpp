@@ -87,6 +87,8 @@ std::atomic<bool> g_large_drop_reroll_logged{false};
 void log_write(int32_t level, const char* format, va_list args) {
     const auto* sdk = g_sdk;
     if (sdk == nullptr || sdk->log.write == nullptr || format == nullptr) return;
+    if (level == 0 &&
+        (sdk->log.debug_enabled == nullptr || sdk->log.debug_enabled() == 0)) return;
     char message[contracts::kMessageCap + 1]{};
     const int length = std::vsnprintf(message, sizeof(message), format, args);
     if (length < 0) return;
@@ -99,6 +101,13 @@ void log_info(const char* format, ...) {
     va_list args;
     va_start(args, format);
     log_write(1, format, args);
+    va_end(args);
+}
+
+void log_debug(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    log_write(0, format, args);
     va_end(args);
 }
 
@@ -299,7 +308,7 @@ void char_add_damage_wrapper(void* attacker, void* victim, int32_t damage, int32
             read_trace_attr(106, &attr106, 1u << 3);
             read_trace_attr(109, &attr109, 1u << 4);
         }
-        log_info("[damage_trace] stage=world_tuning_add_damage attacker=%p victim=%p caller=%p damage_in=%d damage_out=%d damage_flag=%d magic_flag=%d percent=%d victim_side=%d attacker_side=%d deps=%d gate=%d attrs_mask=%u attr5=%d attr71=%d attr81=%d attr106=%d attr109=%d",
+        log_debug("[damage_trace] stage=world_tuning_add_damage attacker=%p victim=%p caller=%p damage_in=%d damage_out=%d damage_flag=%d magic_flag=%d percent=%d victim_side=%d attacker_side=%d deps=%d gate=%d attrs_mask=%u attr5=%d attr71=%d attr81=%d attr106=%d attr109=%d",
                  attacker, victim, caller, damage, out_damage, damage_flag, magic_flag, percent,
                  static_cast<int>(victim_side), static_cast<int>(attacker_side),
                  (g_extras != nullptr && g_facts != nullptr) ? 1 : 0,
@@ -550,11 +559,11 @@ void drop_item_wrapper(void* ch) {
         int32_t used = -1;
         int32_t capacity = -1;
         if (item_pool_snapshot(&used, &capacity)) {
-            log_info("drop settlement begin ch=%p side=%d rounds=%d reroll=%d pool_used=%d "
+            log_debug("drop settlement begin ch=%p side=%d rounds=%d reroll=%d pool_used=%d "
                      "pool_capacity=%d pool_free=%d",
                      ch, side, rounds, rolls, used, capacity, capacity - used);
         } else {
-            log_info("drop settlement begin ch=%p side=%d rounds=%d reroll=%d pool_used=-1 "
+            log_debug("drop settlement begin ch=%p side=%d rounds=%d reroll=%d pool_used=-1 "
                      "pool_capacity=-1 pool_free=-1",
                      ch, side, rounds, rolls);
         }
@@ -566,7 +575,7 @@ void drop_item_wrapper(void* ch) {
         int32_t used = -1;
         int32_t capacity = -1;
         const bool pool_known = item_pool_snapshot(&used, &capacity);
-        log_info("drop settlement end ch=%p rounds=%d make_calls=%u make_null=%u "
+        log_debug("drop settlement end ch=%p rounds=%d make_calls=%u make_null=%u "
                  "pool_used=%d pool_capacity=%d pool_free=%d",
                  ch, rounds, g_settlement_make_calls, g_settlement_make_nulls, used, capacity,
                  pool_known ? capacity - used : -1);
@@ -589,7 +598,7 @@ void* make_item_wrapper(int32_t category, int32_t lookup_key, int32_t flag) {
         const int32_t free_slots = pool_known ? capacity - used : -1;
         if (sequence <= kSettlementSlotLogCap ||
             (pool_known && free_slots <= kPoolWarnFreeSlots)) {
-            log_info("make_item slot seq=%u category=%d lookup=%d flag=%d depth=%u "
+            log_debug("make_item slot seq=%u category=%d lookup=%d flag=%d depth=%u "
                      "pool_used=%d pool_capacity=%d pool_free=%d",
                      sequence, category, lookup_key, flag, g_drop_depth, used, capacity,
                      free_slots);
@@ -621,7 +630,7 @@ void* make_item_wrapper(int32_t category, int32_t lookup_key, int32_t flag) {
     const DropQualityGroup group = quality_group(first, lookup_key);
     if (group == DropQualityGroup::kNone) return first;
     if (rolls > kDropLargeWarnThreshold && !g_large_drop_reroll_logged.exchange(true)) {
-        log_warn("drop reroll %d > %d; no hard cap applied", rolls, kDropLargeWarnThreshold);
+        log_warn("drop reroll %d > %d; no hard cap applied path=drop", rolls, kDropLargeWarnThreshold);
     }
 
     int32_t best_level = 0;
@@ -667,7 +676,7 @@ void* make_equip_detail_wrapper(int32_t kind, int32_t min_level, int32_t max_lev
     int32_t best_rarity = 0;
     if (!read_item_rarity(first, &best_rarity)) return first;
     if (rolls > kDropLargeWarnThreshold && !g_large_drop_reroll_logged.exchange(true)) {
-        log_warn("drop reroll %d > %d; no hard cap applied", rolls, kDropLargeWarnThreshold);
+        log_warn("drop reroll %d > %d; no hard cap applied path=equip", rolls, kDropLargeWarnThreshold);
     }
     void* best = first;
     for (int32_t i = 1; i < rolls; ++i) {
@@ -743,7 +752,7 @@ int32_t char_get_action_cooltime_wrapper(void* ch, void* action) {
     if (total > INT32_MAX) total = INT32_MAX;
     const uint32_t trace = g_skill_cooltime_trace.fetch_add(1, std::memory_order_relaxed);
     if (trace < 8) {
-        log_info("skill_cooltime ch=%p action=%p base=%d scaled=%lld percent=%d",
+        log_debug("skill_cooltime ch=%p action=%p base=%d scaled=%lld percent=%d",
                  ch, action, duration, static_cast<long long>(total), percent);
     }
     return static_cast<int32_t>(total);
@@ -815,6 +824,7 @@ bool reload_rates_from_config() {
         return false;
     }
     apply_rates(parsed);
+    log_info("feature=world_tuning section=rates result=applied");
     return true;
 }
 

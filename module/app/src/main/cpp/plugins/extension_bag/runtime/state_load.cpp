@@ -35,7 +35,7 @@ bool virtual_bag_module_save_validate_locked() {
             const virtual_bag::Item& item = bag_state.items[bag][slot];
             if (item.category <= 0 && item.count <= 0) continue;
             if (extension_bag_module_slot_has_native_object(bag, slot)) {
-                QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
                               "save validation reject: over-capacity slot holds live object bag=%d slot=%d",
                               bag, slot);
                 return false;

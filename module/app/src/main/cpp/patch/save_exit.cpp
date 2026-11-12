@@ -21,7 +21,7 @@ namespace {
 void save_exit_fire() {
     const qol::contracts::SaveExitEvent event{current_save_slot()};
     (void)qol::infra::publish(qol::contracts::kEventSaveExit, &event);
-    QOL_LOG_INFO(QolDomain::kSave, "save exit fired");
+    QOL_LOG_INFO(QolDomain::kSave, "save exit fired slot=%d", event.slot);
     if (fn_game_exit != nullptr) fn_game_exit();
 }
 

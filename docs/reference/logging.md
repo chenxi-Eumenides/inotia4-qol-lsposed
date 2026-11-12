@@ -4,6 +4,9 @@
 `qol-crash.log` 与 `java-crash.log` 的格式契约、线程模型与符号化工具用法。
 `docs/archive/development/logging.md` 是历史归档材料，不作为当前规则依据。
 
+记录内容、等级选择、正文结构、去重责任与审计流程见
+[`logging-standards.md`](logging-standards.md)；本文只描述机制与格式。
+
 实现位置：`module/app/src/main/cpp/infra/log/qol_log.{h,cpp}`、
 `module/app/src/main/cpp/infra/log/qol_crash.{h,cpp}`、
 `module/app/src/main/java/com/inotia4/qol/JavaCrashReporter.kt`、
@@ -22,20 +25,22 @@
 - `message` 内的换行转义为字面 `\n`（Debug 级保留原样，仅 debug 视图用）；`\r` 丢弃。
 - 单条消息缓冲 4096 字节，溢出截断并补 `...`。
 
-native 出口为 `QOL_LOG_DEBUG` / `QOL_LOG_INFO` / `QOL_LOG_WARN` / `QOL_LOG_ERROR`（含
-`QOL_LOG_DEBUG_EVERY` / `QOL_LOG_DEBUG_ON_CHANGE` 限流变体，`infra/log/qol_log.h`）。
+native 出口为 `QOL_LOG_DEBUG` / `QOL_LOG_INFO` / `QOL_LOG_WARN` / `QOL_LOG_ERROR`；
+需在构造昂贵 debug 参数前短路时使用 `QOL_LOG_DEBUG_ENABLED`（`infra/log/qol_log.h`）。
 Kotlin 经 `LogFile` facade 转发 `qol_log_write_kotlin`，D 级门控与 native 一致
 （debug 未开启时格式化前短路）。
 
 ## 2. 级别与限流
 
+本节描述当前实现机制；等级语义与内容要求以
+[`logging-standards.md`](logging-standards.md) 为准。
+
 | 级别 | 行为 |
 |---|---|
-| D | 仅 debug 开关开启时落盘/上 logcat |
-| I | **每帧每域最多 16 行**（`kQolLogInfoPerFrameCap`）；超限时先写一行封顶标记 `log INFO cap reached domain=... frame=... limit=16`（保留越限调用点的 src），随后同帧同域 INFO 丢弃 |
-| W / E | 不限流 |
-
-帧号未就绪阶段 INFO 不限流（该阶段日志量由初始化次数决定）。
+| D | debug 开关控制；同调用点正文未变化不输出，变化且间隔 ≥250ms 输出，同调用点每帧最多 1 行 |
+| I | 不限流 |
+| W | 同调用点同正文 5s 内只输出一次 |
+| E | 同调用点同正文 30s 内只输出一次；同调用点每 60s 最多 10 行，超出输出一行 suppressed 汇总 |
 
 ## 3. 域（domain）
 

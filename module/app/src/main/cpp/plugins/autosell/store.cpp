@@ -45,12 +45,15 @@ struct SlotConfigState {
     uint64_t captured_revision = 0;
     bool request_inflight = false;
     qol::contracts::QolSlotDataRequest request = 0;
+    uint64_t attempts_revision = 0;
+    uint32_t write_attempts = 0;
 };
 std::array<SlotConfigState, kSlotCount> g_slots{};
 uint64_t g_retry_task = 0;
 int64_t g_last_retry_frame = -1;
 int64_t g_retry_due_frame = -1;
 constexpr int64_t kRetryIntervalFrames = 60;
+constexpr uint32_t kMaxWriteAttempts = 3;
 
 bool same_config(const autosell::Config& a, const autosell::Config& b) {
     return a.enabled == b.enabled && a.rarity == b.rarity && a.enhance == b.enhance &&
@@ -218,7 +221,7 @@ void remove_retry_task() {
     if (sdk != nullptr && sdk->scheduler.remove != nullptr) {
         const QolResult result = sdk->scheduler.remove(g_retry_task);
         if (!qol::contracts::succeeded(result))
-            AUTOSELL_LOG_WARN("slot data retry task removal failed id=%llu code=%d",
+            AUTOSELL_LOG_WARN("slot data retry task removal failed id=%llu code=%d reason=remove_failed",
                               static_cast<unsigned long long>(g_retry_task), result.code);
     }
     g_retry_task = 0;
@@ -271,7 +274,8 @@ QolResult sd_load(void*, const qol::contracts::QolSlotDataContext* ctx, uint32_t
     const auto kind = static_cast<qol::contracts::QolSlotDataPresence>(presence);
     if (kind == qol::contracts::QolSlotDataPresence::kUnreadable ||
         kind == qol::contracts::QolSlotDataPresence::kVersionUnsupported) {
-        AUTOSELL_LOG_WARN("slot data load rejected presence=%u version=%u", presence, stored_version);
+        AUTOSELL_LOG_WARN("slot data load rejected presence=%u version=%u reason=unsupported_or_unreadable",
+                          presence, stored_version);
         return sd_error(kind == qol::contracts::QolSlotDataPresence::kVersionUnsupported
                             ? kQolErrUnsupported : kQolErrInternal,
                         "autosell slot data unavailable");
@@ -321,9 +325,7 @@ QolResult sd_load(void*, const qol::contracts::QolSlotDataContext* ctx, uint32_t
     commit_lock.unlock();
     autosell_set_store_status(ctx->session.slot, ctx->session.slot, false);
     autosell_scan_session_loaded(ctx->session.slot, ctx->session.epoch);
-    if (dirty && !request_dirty_write(ctx->session.slot, ctx->session.epoch))
-        AUTOSELL_LOG_WARN("slot data catch-up write failed; dirty revision retained slot=%d",
-                          ctx->session.slot);
+    if (dirty) (void)request_dirty_write(ctx->session.slot, ctx->session.epoch);
     return sd_ok();
 }
 
@@ -359,7 +361,11 @@ void sd_complete(void*, const qol::contracts::QolSlotDataContext* ctx, uint32_t 
             ctx->session.slot >= 0 && ctx->session.slot < kSlotCount) {
             context_valid = true;
             auto& state = g_slots[static_cast<size_t>(ctx->session.slot)];
-            if (committed && state.captured_revision == state.revision) state.dirty = false;
+            if (committed && state.captured_revision == state.revision) {
+                state.dirty = false;
+                state.write_attempts = 0;
+                state.attempts_revision = state.revision;
+            }
             latest_durable = committed && !state.dirty;
             if (state.dispatched_revision <= state.captured_revision) {
                 state.dispatched_revision = 0;
@@ -370,7 +376,23 @@ void sd_complete(void*, const qol::contracts::QolSlotDataContext* ctx, uint32_t 
     }
     if (context_valid)
         autosell_set_store_status(ctx->session.slot, ctx->session.slot, latest_durable);
-    AUTOSELL_LOG_INFO("slot data write slot=%d committed=%d", ctx->session.slot, committed ? 1 : 0);
+    AUTOSELL_LOG_DEBUG("slot data write slot=%d committed=%d", ctx->session.slot, committed ? 1 : 0);
+    if (context_valid && !committed) {
+        uint32_t attempt = 0;
+        {
+            std::lock_guard<std::mutex> lock(g_store_mtx);
+            attempt = g_slots[static_cast<size_t>(ctx->session.slot)].write_attempts;
+        }
+        if (attempt >= kMaxWriteAttempts) {
+            qol::features::autosell::private_log::write(
+                qol::features::autosell::host_sdk(), 3, 9, __FILE__, __LINE__,
+                "fail op=slot_data_write attempts=3 slot=%d reason=write_not_committed",
+                ctx->session.slot);
+        } else {
+            AUTOSELL_LOG_WARN("retry op=slot_data_write attempt=%u/3 slot=%d reason=write_not_committed",
+                              attempt, ctx->session.slot);
+        }
+    }
     if (committed && context_valid) {
         bool dirty = false;
         {
@@ -379,7 +401,7 @@ void sd_complete(void*, const qol::contracts::QolSlotDataContext* ctx, uint32_t 
                     g_slots[static_cast<size_t>(ctx->session.slot)].dirty;
         }
         if (dirty)
-            AUTOSELL_LOG_INFO("slot data newer revision remains dirty; retry task will flush slot=%d",
+            AUTOSELL_LOG_DEBUG("slot data newer revision remains dirty; retry task will flush slot=%d",
                               ctx->session.slot);
     }
 }
@@ -388,12 +410,15 @@ bool request_dirty_write(int slot, uint64_t epoch) {
     uint64_t revision = 0;
     qol::contracts::QolSlotDataHandle handle = 0;
     qol::contracts::QolSlotDataRequest existing_request = 0;
+    uint32_t attempt = 0;
     {
         std::lock_guard<std::mutex> lock(g_store_mtx);
         if (slot < 0 || slot >= kSlotCount || epoch == 0 || epoch != g_epoch ||
             slot != g_loaded_slot) return false;
         auto& state = g_slots[static_cast<size_t>(slot)];
         if (!state.dirty) return true;
+        if (state.attempts_revision == state.revision &&
+            state.write_attempts >= kMaxWriteAttempts) return false;
         existing_request = state.request;
         if (state.request_inflight && existing_request == 0) return true;
         revision = state.revision;
@@ -402,7 +427,7 @@ bool request_dirty_write(int slot, uint64_t epoch) {
     if (existing_request != 0) {
         qol::contracts::QolSlotDataStatus status{};
         if (!query_request(existing_request, &status)) {
-            AUTOSELL_LOG_WARN("slot data request status unavailable; retain request=%llu",
+            AUTOSELL_LOG_WARN("slot data request status unavailable; retain request=%llu reason=status_unavailable",
                               static_cast<unsigned long long>(existing_request));
             return false;
         }
@@ -411,7 +436,7 @@ bool request_dirty_write(int slot, uint64_t epoch) {
         if (status.state != static_cast<uint32_t>(qol::contracts::QolSlotDataRequestState::kCompleted) &&
             status.state != static_cast<uint32_t>(qol::contracts::QolSlotDataRequestState::kFailed) &&
             status.state != static_cast<uint32_t>(qol::contracts::QolSlotDataRequestState::kCancelled)) {
-            AUTOSELL_LOG_WARN("slot data request has unknown state=%u; retain request=%llu",
+            AUTOSELL_LOG_WARN("slot data request has unknown state=%u; retain request=%llu reason=unknown_state",
                               status.state, static_cast<unsigned long long>(existing_request));
             return false;
         }
@@ -428,6 +453,11 @@ bool request_dirty_write(int slot, uint64_t epoch) {
         std::lock_guard<std::mutex> lock(g_store_mtx);
         auto& state = g_slots[static_cast<size_t>(slot)];
         if (!state.dirty || epoch != g_epoch || state.revision != revision) return true;
+        if (state.attempts_revision != revision) {
+            state.attempts_revision = revision;
+            state.write_attempts = 0;
+        }
+        attempt = ++state.write_attempts;
         state.dispatched_revision = revision;
         state.request_inflight = true;
     }
@@ -442,8 +472,15 @@ bool request_dirty_write(int slot, uint64_t epoch) {
                 state.request_inflight = false;
             }
         }
-        AUTOSELL_LOG_WARN("slot data write request failed slot=%d revision=%llu code=%d",
-                          slot, static_cast<unsigned long long>(revision), result.code);
+        if (attempt >= kMaxWriteAttempts) {
+            qol::features::autosell::private_log::write(
+                qol::features::autosell::host_sdk(), 3, 9, __FILE__, __LINE__,
+                "fail op=slot_data_write attempts=3 slot=%d reason=request_failed code=%d",
+                slot, result.code);
+        } else {
+            AUTOSELL_LOG_WARN("retry op=slot_data_write attempt=%u/3 slot=%d reason=request_failed code=%d",
+                              attempt, slot, result.code);
+        }
         return false;
     }
     if (request == 0) {
@@ -453,8 +490,15 @@ bool request_dirty_write(int slot, uint64_t epoch) {
             state.dispatched_revision = 0;
             state.request_inflight = false;
         }
-        AUTOSELL_LOG_WARN("slot data write returned empty request slot=%d revision=%llu",
-                          slot, static_cast<unsigned long long>(revision));
+        if (attempt >= kMaxWriteAttempts) {
+            qol::features::autosell::private_log::write(
+                qol::features::autosell::host_sdk(), 3, 9, __FILE__, __LINE__,
+                "fail op=slot_data_write attempts=3 slot=%d reason=empty_request",
+                slot);
+        } else {
+            AUTOSELL_LOG_WARN("retry op=slot_data_write attempt=%u/3 slot=%d reason=empty_request",
+                              attempt, slot);
+        }
         return false;
     }
     {
@@ -497,7 +541,7 @@ void store_flush(int64_t frame) {
         if (!g_slots[static_cast<size_t>(slot)].dirty) return;
     }
     if (!request_dirty_write(slot, epoch))
-        AUTOSELL_LOG_WARN("slot data retry deferred slot=%d epoch=%llu",
+        AUTOSELL_LOG_DEBUG("slot data retry deferred slot=%d epoch=%llu",
                           slot, static_cast<unsigned long long>(epoch));
 }
 
@@ -535,7 +579,7 @@ bool autosell_store_register(qol::contracts::QolOwnerToken owner,
     if (g_unregister_request != 0) {
         qol::contracts::QolSlotDataStatus status{};
         if (!query_request(g_unregister_request, &status)) {
-            AUTOSELL_LOG_WARN("slot data re-register blocked; unregister state unavailable");
+            AUTOSELL_LOG_WARN("slot data re-register blocked; unregister state unavailable reason=status_unavailable");
             return false;
         }
         if (status.state == static_cast<uint32_t>(qol::contracts::QolSlotDataRequestState::kPending))
@@ -549,7 +593,7 @@ bool autosell_store_register(qol::contracts::QolOwnerToken owner,
         }
     }
     if (!ensure_retry_task()) {
-        AUTOSELL_LOG_WARN("slot data retry scheduler unavailable");
+        AUTOSELL_LOG_WARN("slot data retry scheduler unavailable op=schedule_retry reason=scheduler_unavailable");
         return false;
     }
     const qol::contracts::QolSlotDataSpec spec{
@@ -577,11 +621,11 @@ bool autosell_store_commit_config(const autosell::Config& config) {
     {
         std::lock_guard<std::mutex> lock(g_store_mtx);
         if (g_loaded_slot < 0 || g_epoch == 0) {
-            AUTOSELL_LOG_WARN("config write rejected without active slot session");
+            AUTOSELL_LOG_WARN("config write rejected without active slot session reason=no_active_session");
             return false;
         }
         if (!g_load_ready) {
-            AUTOSELL_LOG_WARN("config write rejected while slot session is not loaded");
+            AUTOSELL_LOG_WARN("config write rejected while slot session is not loaded reason=session_not_loaded");
             return false;
         }
         slot = g_loaded_slot;
@@ -604,7 +648,7 @@ bool autosell_store_commit_config(const autosell::Config& config) {
     const bool accepted = !write_needed || request_dirty_write(slot, epoch);
     if (write_needed) autosell_set_store_status(slot, slot, false);
     if (!accepted)
-        AUTOSELL_LOG_WARN("config revision retained for retry slot=%d", slot);
+        AUTOSELL_LOG_DEBUG("config revision retained for retry slot=%d", slot);
     return accepted;
 }
 
@@ -618,14 +662,14 @@ void autosell_store_unregister() {
         AUTOSELL_LOG_WARN("slot data unregister failed code=%d", result.code);
         g_handle.store(handle, std::memory_order_release);
         if (!ensure_retry_task())
-            AUTOSELL_LOG_WARN("slot data retry task could not resume after unregister failure");
+            AUTOSELL_LOG_WARN("slot data retry task could not resume after unregister failure reason=scheduler_unavailable");
         return;
     }
     if (request == 0) {
-        AUTOSELL_LOG_WARN("slot data unregister returned empty request");
+        AUTOSELL_LOG_WARN("slot data unregister returned empty request op=unregister reason=empty_request");
         g_handle.store(handle, std::memory_order_release);
         if (!ensure_retry_task())
-            AUTOSELL_LOG_WARN("slot data retry task could not resume after invalid unregister result");
+            AUTOSELL_LOG_WARN("slot data retry task could not resume after invalid unregister result reason=scheduler_unavailable");
         return;
     }
     g_unregister_request = request;
@@ -641,7 +685,7 @@ void autosell_store_unregister() {
             state.request = 0;
         }
     } else {
-        AUTOSELL_LOG_INFO("slot data unregister pending request=%llu",
+        AUTOSELL_LOG_DEBUG("slot data unregister pending request=%llu",
                           static_cast<unsigned long long>(request));
     }
     {

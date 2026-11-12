@@ -564,7 +564,6 @@ const qol::contracts::ResourceClaim* inventory_hooks_claims(uint32_t* out_count)
 int32_t inventory_hooks_bind_backup(const char*, void*) { return 0; }
 void inventory_log_bind_sdk(const qol::contracts::QolHostSdk*) {}
 bool inventory_log_debug_enabled() { return false; }
-bool inventory_log_debug_due(int64_t*, int64_t) { return false; }
 void inventory_log_write(int32_t, const char*, int, const char*, ...) {}
 
 void qol_log_write(QolLogLevel, QolDomain, const char*, int, const char*, ...) {}

@@ -40,7 +40,7 @@ bool collect_warehouse(int slot, SlotSnapshot& out, std::string& err) {
         const std::string suffix = name.substr(dat_name.size());
         // 非合法仓库伴生名（如 `.wh4-` 后带路径字符）不是仓库文件，跳过。
         if (!::save_backup::valid_warehouse_suffix(suffix)) {
-            SB_LOG("save backup export slot=%d: skip invalid warehouse name: %s", slot,
+            SAVE_BACKUP_LOG_DEBUG("save backup export slot=%d: skip invalid warehouse name: %s", slot,
                    name.c_str());
             continue;
         }
@@ -48,19 +48,19 @@ bool collect_warehouse(int slot, SlotSnapshot& out, std::string& err) {
         struct stat info{};
         if (::stat(full.c_str(), &info) == 0 && S_ISREG(info.st_mode) && info.st_size > 0 &&
             static_cast<uint64_t>(info.st_size) > ::save_backup::kMaxWarehouseDataBytes) {
-            SB_LOG("save backup export slot=%d: warehouse too large (%lld): %s", slot,
+            SAVE_BACKUP_LOG_WARN("save backup export slot=%d: warehouse too large (%lld): %s reason=file_too_large", slot,
                    static_cast<long long>(info.st_size), name.c_str());
             err = "warehouse file too large";
             return false;
         }
         std::vector<uint8_t> bytes;
         if (!g_source.read_file_bytes(full, bytes)) {
-            SB_LOG("save backup export slot=%d: warehouse read failed: %s", slot, name.c_str());
+            SAVE_BACKUP_LOG_WARN("save backup export slot=%d: warehouse read failed: %s reason=read_failed", slot, name.c_str());
             err = "warehouse read failed";
             return false;
         }
         if (bytes.size() > ::save_backup::kMaxWarehouseDataBytes) {
-            SB_LOG("save backup export slot=%d: warehouse too large (%zu): %s", slot, bytes.size(),
+            SAVE_BACKUP_LOG_WARN("save backup export slot=%d: warehouse too large (%zu): %s reason=file_too_large", slot, bytes.size(),
                    name.c_str());
             err = "warehouse file too large";
             return false;
@@ -80,7 +80,7 @@ bool collect_warehouse(int slot, SlotSnapshot& out, std::string& err) {
                     file.data.assign(buffer.begin(), buffer.begin() + payload_len);
                     file.flags = ::save_backup::kWarehouseFlagPlain;
                     decrypted = true;
-                    SB_LOG("save backup export slot=%d: warehouse decrypted for cross-device: %s "
+                    SAVE_BACKUP_LOG_DEBUG("save backup export slot=%d: warehouse decrypted for cross-device: %s "
                            "(%zu bytes)",
                            slot, name.c_str(), file.data.size());
                 }
@@ -89,8 +89,8 @@ bool collect_warehouse(int slot, SlotSnapshot& out, std::string& err) {
         if (!decrypted) {
             file.data.swap(bytes);
             file.flags = 0;
-            SB_LOG("save backup export slot=%d: warehouse kept as ciphertext (decrypt "
-                   "unavailable): %s (%zu bytes)",
+            SAVE_BACKUP_LOG_DEBUG("save backup export slot=%d: warehouse kept as ciphertext (decrypt "
+                   "unavailable): %s (%zu bytes) reason=decrypt_unavailable",
                    slot, name.c_str(), file.data.size());
         }
         out.warehouse.files.push_back(std::move(file));
@@ -99,7 +99,7 @@ bool collect_warehouse(int slot, SlotSnapshot& out, std::string& err) {
     // 容量校验早于组装；错误串与旧导出路径一致。
     std::string warehouse_error;
     if (!::save_backup::validate_warehouse(out.warehouse.files, warehouse_error)) {
-        SB_LOG("save backup export slot=%d: warehouse validation failed: %s", slot,
+        SAVE_BACKUP_LOG_WARN("save backup export slot=%d: warehouse validation failed: %s reason=validation_failed", slot,
                warehouse_error.c_str());
         err = warehouse_error;
         return false;
@@ -109,14 +109,14 @@ bool collect_warehouse(int slot, SlotSnapshot& out, std::string& err) {
         const ::save_backup::InlineWarehouseStrip strip =
             ::save_backup::warehouse_strip_inline_segment(out.dat.plain);
         if (strip == ::save_backup::InlineWarehouseStrip::kStripped) {
-            SB_LOG("save backup export slot=%d: inline WH96v002 segment stripped (origLen=%zu)",
+            SAVE_BACKUP_LOG_DEBUG("save backup export slot=%d: inline WH96v002 segment stripped (origLen=%zu)",
                    slot, out.dat.plain.size());
         } else {
-            SB_LOG("save backup export slot=%d: inline warehouse kept (%s)", slot,
+            SAVE_BACKUP_LOG_DEBUG("save backup export slot=%d: inline warehouse kept (%s)", slot,
                    ::save_backup::inline_warehouse_strip_name(strip));
         }
     } else {
-        SB_LOG("save backup export slot=%d: no external warehouse collected, keep inline "
+        SAVE_BACKUP_LOG_DEBUG("save backup export slot=%d: no external warehouse collected, keep inline "
                "warehouse",
                slot);
     }
@@ -181,7 +181,7 @@ bool collect_c18_native_bag(int slot, SlotSnapshot& out, std::string& err) {
     // 是否导出 C18 只看对应文件是否存在，不看游戏变体/身份；不调用任何游戏函数。
     std::string data_dir;
     if (!g_source.get_data_directory(data_dir) || data_dir.empty()) {
-        SB_LOG("save backup export slot=%d: c18 bag absent", slot);
+        SAVE_BACKUP_LOG_DEBUG("save backup export slot=%d: c18 bag absent", slot);
         return true;
     }
     const std::string slot_suffix = std::to_string(slot + 1) + ".dat";
@@ -197,7 +197,7 @@ bool collect_c18_native_bag(int slot, SlotSnapshot& out, std::string& err) {
             return false;
         }
         out.c18_native_bag.present = true;
-        SB_LOG("save backup export slot=%d: c18 bag source=%s records=%u", slot, path.c_str(),
+        SAVE_BACKUP_LOG_DEBUG("save backup export slot=%d: c18 bag source=%s records=%u", slot, path.c_str(),
                count);
         return true;
     }
@@ -208,14 +208,14 @@ bool collect_c18_native_bag(int slot, SlotSnapshot& out, std::string& err) {
     const C18BagProbe probe = read_c18_bag_file(shared, -1, count, reserved, records, err);
     if (probe == C18BagProbe::kError) return false;
     if (probe == C18BagProbe::kAbsent) {
-        SB_LOG("save backup export slot=%d: c18 bag absent", slot);
+        SAVE_BACKUP_LOG_DEBUG("save backup export slot=%d: c18 bag absent", slot);
         return true;
     }
     if (!fill_c18_bag_image(slot, count, reserved, records, out.c18_native_bag.image, err)) {
         return false;
     }
     out.c18_native_bag.present = true;
-    SB_LOG("save backup export slot=%d: c18 bag source=%s records=%u", slot, shared.c_str(), count);
+    SAVE_BACKUP_LOG_DEBUG("save backup export slot=%d: c18 bag source=%s records=%u", slot, shared.c_str(), count);
     return true;
 }
 

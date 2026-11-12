@@ -21,7 +21,6 @@ namespace {
 constexpr const char* kPluginId = "character_panel";
 constexpr const char* kPluginVersion = "0.1.0";
 constexpr char kRegistrationFailureMessage[] = "text consumer registration failed";
-constexpr char kOpenTaskFailureMessage[] = "overview frame task registration failed";
 constexpr const char* kCharinfoHookResourceId = "hook:Scene_Draw_Popup_SC_CharacterInfo";
 constexpr const char* kCharacterInfoOwnershipResourceId = "own:popup.character_info";
 bool g_register_failed = true;
@@ -103,6 +102,8 @@ int32_t overview_open_tick(int64_t frame, void* ctx) {
 void log_info(int32_t level, const char* message) {
     const contracts::QolHostSdk* sdk = host_sdk();
     if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
+    if (level == 0 &&
+        (sdk->log.debug_enabled == nullptr || sdk->log.debug_enabled() == 0)) return;
     (void)sdk->log.write(level, 1, kPluginId, message,
                          static_cast<uint32_t>(std::strlen(message)));
 }
@@ -195,7 +196,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     // 常驻帧任务：消费原版面板点击留下的 pending，在帧安全点经 ui_panels 打开总览。
-    if (!ensure_open_task()) log_info(1, kOpenTaskFailureMessage);
+    if (!ensure_open_task()) log_info(2, "overview frame task registration failed reason=open_unavailable entry=open_task");
     return 0;
 }
 
@@ -231,7 +232,7 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
     g_register_failed = !register_consumers();  // 幂等（activate 重入）
     if (g_register_failed) log_info(2, kRegistrationFailureMessage);
     // activate 重入时帧任务可能已在；deactivate 后再 activate 时重新注册。
-    if (!ensure_open_task()) log_info(1, kOpenTaskFailureMessage);
+    if (!ensure_open_task()) log_info(2, "overview frame task registration failed reason=open_unavailable entry=install");
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {

@@ -202,6 +202,19 @@ uint64_t g_pending_config_write = 0;
 qol::contracts::QolOwnerToken g_pending_config_owner{};
 const qol::contracts::QolSlotDataApi* g_slot_data_api_cache = nullptr;
 
+void log_bag_count_config_receipt(int32_t level, const char* result, const char* reason) {
+    if (g_sdk == nullptr || g_sdk->log.write == nullptr || result == nullptr) return;
+    char message[160]{};
+    const int written = reason == nullptr
+        ? std::snprintf(message, sizeof(message),
+                        "op=config_receipt section=extension_bag key=bagCount result=%s", result)
+        : std::snprintf(message, sizeof(message),
+                        "op=config_receipt section=extension_bag key=bagCount result=%s reason=%s",
+                        result, reason);
+    if (written <= 0 || static_cast<size_t>(written) >= sizeof(message)) return;
+    (void)g_sdk->log.write(level, 1, kPluginId, message, static_cast<uint32_t>(written));
+}
+
 void close_extension_bag_gates() {
     g_source_active.store(false, std::memory_order_release);
     extension_bag_bag_source_unregister();
@@ -258,11 +271,7 @@ bool parse_count_string(const char* value, uint32_t size, int32_t minimum,
 bool write_bag_count_config(const qol::contracts::PluginContext& ctx, int32_t count) {
     const auto* api = contracts::feature_if_available(ctx.sdk);
     if (api == nullptr || api->request_set_config == nullptr) {
-    if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
-            constexpr char message[] = "bagCount config write unavailable";
-            (void)g_sdk->log.write(2, 1, kPluginId, message,
-                                   static_cast<uint32_t>(sizeof(message) - 1));
-        }
+        log_bag_count_config_receipt(2, "failed", "request_unavailable");
         return false;
     }
     char json[16]{};
@@ -273,11 +282,7 @@ bool write_bag_count_config(const qol::contracts::PluginContext& ctx, int32_t co
         kPluginId, kBagCountConfigKey, json, static_cast<uint32_t>(length), &receipt);
     if (!contracts::succeeded(result) || receipt.admission != contracts::FeatureAdmission::kAdmitted ||
         receipt.request_id == 0) {
-        if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
-            constexpr char message[] = "bagCount config write failed; runtime choice retained";
-            (void)g_sdk->log.write(2, 1, kPluginId, message,
-                                   static_cast<uint32_t>(sizeof(message) - 1));
-        }
+        log_bag_count_config_receipt(2, "failed", "request_rejected");
         return false;
     }
     {
@@ -302,20 +307,16 @@ void poll_bag_count_config_write() {
     contracts::FeatureReceipt receipt{};
     const QolResult result = api->receipt(api->context, owner, request_id, &receipt);
     if (!contracts::succeeded(result)) {
-        if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
-            constexpr char message[] = "bagCount config receipt unavailable";
-            (void)g_sdk->log.write(2, 1, kPluginId, message,
-                                   static_cast<uint32_t>(sizeof(message) - 1));
-        }
+        log_bag_count_config_receipt(2, "failed", "receipt_unavailable");
     } else if (receipt.persistence == contracts::FeaturePersistence::kPending) {
         return;
     } else if (receipt.persistence == contracts::FeaturePersistence::kFailed ||
                receipt.admission != contracts::FeatureAdmission::kAdmitted) {
-        if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
-            constexpr char message[] = "bagCount config persistence failed; runtime value retained";
-            (void)g_sdk->log.write(2, 1, kPluginId, message,
-                                   static_cast<uint32_t>(sizeof(message) - 1));
-        }
+        log_bag_count_config_receipt(
+            2, "failed", receipt.persistence == contracts::FeaturePersistence::kFailed
+                             ? "persistence_failed" : "admission_rejected");
+    } else {
+        log_bag_count_config_receipt(1, "applied", nullptr);
     }
     std::lock_guard<std::mutex> lock(g_config_mutex);
     if (g_pending_config_write == request_id) {

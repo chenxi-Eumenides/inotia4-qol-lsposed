@@ -7,6 +7,10 @@
 #include <array>
 #include <cstring>
 
+// item_action 在 use/discard 前后调用这两个钩子做失败归因；host 测试不安装 hook。
+void inventory_native_hook_begin_item_use() {}
+bool inventory_native_hook_end_item_use() { return false; }
+
 namespace qol::features::inventory_hooks {
 namespace {
 

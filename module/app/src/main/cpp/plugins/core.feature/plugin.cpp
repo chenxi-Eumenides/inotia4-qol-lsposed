@@ -45,6 +45,13 @@ using FrameCountFn = int64_t (*)();
 
 const contracts::QolHostSdk* g_sdk = nullptr;
 
+void write_log(int level, const char* message) {
+    if (g_sdk == nullptr || g_sdk->log.write == nullptr || message == nullptr) return;
+    uint32_t length = 0;
+    while (message[length] != '\0') ++length;
+    (void)g_sdk->log.write(level, 1, kPluginId, message, length);
+}
+
 std::atomic<bool> g_mask_crit_effects{true};
 std::atomic<AddActEffectFn> g_add_act_effect_backup{nullptr};
 std::atomic<MapSetShakeFn> g_map_set_shake_backup{nullptr};
@@ -174,7 +181,15 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 }
 
 int32_t on_resource_ready(contracts::PluginContext&, const char* resource_id, void* backup) {
-    if (resource_id == nullptr || backup == nullptr) return 0;
+    if (resource_id == nullptr) return 0;
+    if (backup == nullptr) {
+        if (std::strcmp(resource_id, kResourceAddActEffect) == 0 ||
+            std::strcmp(resource_id, kResourceMapSetShake) == 0 ||
+            std::strcmp(resource_id, kResourceVibrationPlay) == 0) {
+            write_log(2, "degrade feature=core.feature.mask_crit_effects resource=effect_hook reason=backup_missing");
+        }
+        return 0;
+    }
     if (std::strcmp(resource_id, kResourceAddActEffect) == 0) {
         g_add_act_effect_backup.store(reinterpret_cast<AddActEffectFn>(backup),
                                       std::memory_order_release);
@@ -189,7 +204,12 @@ int32_t on_resource_ready(contracts::PluginContext&, const char* resource_id, vo
 }
 
 QolResult mask_crit_effects_toggle(contracts::PluginContext&, uint8_t enabled) {
-    g_mask_crit_effects.store(enabled != 0, std::memory_order_release);
+    const bool next = enabled != 0;
+    const bool previous = g_mask_crit_effects.exchange(next, std::memory_order_acq_rel);
+    if (previous != next) {
+        write_log(1, next ? "apply feature=core.feature.mask_crit_effects enabled=1"
+                          : "apply feature=core.feature.mask_crit_effects enabled=0");
+    }
     if (enabled == 0) {
         g_crit_feedback_pending.store(false, std::memory_order_release);
         g_crit_feedback_frame.store(-1, std::memory_order_release);

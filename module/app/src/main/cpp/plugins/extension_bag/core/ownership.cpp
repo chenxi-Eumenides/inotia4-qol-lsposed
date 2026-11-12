@@ -369,7 +369,7 @@ bool object_touch_window_active_locked() {
 bool retire_custody_item_locked(uint32_t handle, void* item, const char* context) {
     if (item == nullptr || !ownership::live_state(qol::extension_bag::ui_state().objects.ownership_ledger, handle,
                                                    ownership::State::kModuleOwned)) {
-        VIRTBAG_LOG("ownership release refused context=%s invalid_handle=%u item=%p", context,
+        VIRTBAG_LOG_WARN("ownership release refused context=%s invalid_handle=%u item=%p", context,
                     handle, item);
         return false;
     }
@@ -449,7 +449,7 @@ void* load_item_payload_tracked_locked(const uint8_t* payload, int payload_size,
     uint32_t handle = 0;
     if (ownership::allocate(&qol::extension_bag::ui_state().objects.ownership_ledger, &handle) != ownership::Outcome::kOk) {
         release_temporary_item_locked(item);
-        VIRTBAG_LOG("ownership allocate reject; temp freed context=%s", context);
+        VIRTBAG_LOG_WARN("ownership allocate reject; temp freed context=%s", context);
         return nullptr;
     }
     *out_handle = handle;
@@ -460,7 +460,7 @@ void handover_tracked_item_locked(uint32_t handle, void* item, const char* conte
     if (ownership::handover_to_inventory(&qol::extension_bag::ui_state().objects.ownership_ledger, handle) !=
         ownership::Outcome::kOk) {
         if (defer_item_free_locked(item)) {
-            VIRTBAG_LOG("ownership handover reject; custody retained context=%s item=%p",
+            VIRTBAG_LOG_WARN("ownership handover reject; custody retained context=%s item=%p",
                         context, item);
         } else {
             VIRTBAG_LOG_ERROR("ERROR ownership handover reject; custody unavailable "
@@ -476,7 +476,7 @@ void release_tracked_item_locked(uint32_t handle, void* item, const char* contex
         release_temporary_item_locked(item);
     } else {
         if (defer_item_free_locked(item)) {
-            VIRTBAG_LOG("ownership release reject; custody retained context=%s item=%p",
+            VIRTBAG_LOG_WARN("ownership release reject; custody retained context=%s item=%p",
                         context, item);
         } else {
             VIRTBAG_LOG_ERROR("ERROR ownership release reject; custody unavailable "
@@ -512,7 +512,7 @@ bool module_object_replacement_allowed_locked(int bag, int slot, const char* con
     }
     const ModuleUseState& use = qol::extension_bag::ui_state().objects.module_object_use[bag][slot];
     if (use.active || use.pending_release) {
-        VIRTBAG_LOG("module object replacement rejected while confirm-use active context=%s bag=%d slot=%d item=%p generation=%llu",
+        VIRTBAG_LOG_WARN("module object replacement rejected while confirm-use active context=%s bag=%d slot=%d item=%p generation=%llu",
                     context, bag, slot, use.item,
                     static_cast<unsigned long long>(use.generation));
         return false;
@@ -528,7 +528,7 @@ bool module_object_release_allowed_locked(int bag, int slot, void* item, const c
     }
     const ModuleUseState& use = qol::extension_bag::ui_state().objects.module_object_use[bag][slot];
     if (use.pending_release) {
-        VIRTBAG_LOG("module object release rejected while pending release context=%s bag=%d slot=%d item=%p",
+        VIRTBAG_LOG_WARN("module object release rejected while pending release context=%s bag=%d slot=%d item=%p",
                     context, bag, slot, item);
         return false;
     }
@@ -539,7 +539,7 @@ bool module_object_release_allowed_locked(int bag, int slot, void* item, const c
                                token->owner == use.owner &&
                                qol::extension_bag::ui_state().objects.module_objects[bag][slot] == token->item;
     if (allow_owner && token_matches && token->owner == std::this_thread::get_id()) return true;
-    VIRTBAG_LOG("module object release rejected while confirm-use active context=%s bag=%d slot=%d item=%p",
+    VIRTBAG_LOG_WARN("module object release rejected while confirm-use active context=%s bag=%d slot=%d item=%p",
                 context, bag, slot, item);
     return false;
 }
@@ -780,7 +780,7 @@ bool free_module_object_locked(int bag, int slot, void* raw_use_token) {
     ModuleUseToken* use_token = static_cast<ModuleUseToken*>(raw_use_token);
     const ModuleUseState& current_use = qol::extension_bag::ui_state().objects.module_object_use[bag][slot];
     if (current_use.active && use_token == nullptr) {
-        VIRTBAG_LOG("module free rejected without real token bag=%d slot=%d item=%p",
+        VIRTBAG_LOG_WARN("module free rejected without real token bag=%d slot=%d item=%p",
                     bag, slot, item);
         return false;
     }

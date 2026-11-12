@@ -4,6 +4,7 @@
 #include "contracts/module_health.h"
 
 #include <mutex>
+#include <cstdio>
 
 namespace qol::features::module_health {
 namespace {
@@ -23,6 +24,18 @@ uint64_t g_frame_task = 0;
 bool g_snapshot_initialized = false;
 bool g_sampling_enabled = false;
 const char* g_scheduler_error = nullptr;
+
+void log_scheduler_failure(const contracts::QolHostSdk* sdk, const char* op,
+                           const char* reason) {
+    if (sdk == nullptr || sdk->log.write == nullptr) return;
+    char message[160]{};
+    const int length = std::snprintf(message, sizeof(message),
+        "fail op=health_scheduler resource=frame_task action=%s reason=%s", op, reason);
+    if (length <= 0) return;
+    const uint32_t message_length = static_cast<uint32_t>(
+        length < static_cast<int>(sizeof(message)) ? length : static_cast<int>(sizeof(message) - 1));
+    (void)sdk->log.write(2, 0, "plugins/module_health/plugin.cpp", message, message_length);
+}
 
 bool valid_snapshot(const contracts::QolModuleHealthSnapshot& snapshot) {
     return snapshot.struct_size >= sizeof(contracts::QolModuleHealthSnapshot) &&
@@ -72,8 +85,11 @@ int32_t frame_tick(int64_t, void*) {
 
 QolResult start_frame_task(const contracts::QolHostSdk* sdk) {
     if (sdk == nullptr || sdk->scheduler.add == nullptr || sdk->scheduler.remove == nullptr) {
-        std::lock_guard<std::mutex> lock(g_health_mutex);
-        g_scheduler_error = kSchedulerUnavailable;
+        {
+            std::lock_guard<std::mutex> lock(g_health_mutex);
+            g_scheduler_error = kSchedulerUnavailable;
+        }
+        log_scheduler_failure(sdk, "start", "scheduler_unavailable");
         return contracts::error(kQolErrNotReady, kSchedulerUnavailable,
                                 sizeof(kSchedulerUnavailable) - 1);
     }
@@ -90,9 +106,12 @@ QolResult start_frame_task(const contracts::QolHostSdk* sdk) {
     const QolResult result = sdk->scheduler.add(
         1, &frame_tick, nullptr, kHealthSampleIntervalFrames, 0, &task);
     if (!contracts::succeeded(result) || task == 0) {
-        std::lock_guard<std::mutex> lock(g_health_mutex);
-        g_sampling_enabled = false;
-        g_scheduler_error = kSchedulerRegistrationFailed;
+        {
+            std::lock_guard<std::mutex> lock(g_health_mutex);
+            g_sampling_enabled = false;
+            g_scheduler_error = kSchedulerRegistrationFailed;
+        }
+        log_scheduler_failure(sdk, "start", "registration_failed");
         return contracts::succeeded(result)
             ? contracts::error(kQolErrBlocked, kSchedulerRegistrationFailed,
                                sizeof(kSchedulerRegistrationFailed) - 1)
@@ -117,14 +136,20 @@ void stop_frame_task(const contracts::QolHostSdk* sdk) {
     if (task == 0) return;
 
     if (sdk == nullptr || sdk->scheduler.remove == nullptr) {
-        std::lock_guard<std::mutex> lock(g_health_mutex);
-        g_scheduler_error = kSchedulerUnavailable;
+        {
+            std::lock_guard<std::mutex> lock(g_health_mutex);
+            g_scheduler_error = kSchedulerUnavailable;
+        }
+        log_scheduler_failure(sdk, "stop", "scheduler_unavailable");
         return;
     }
     const QolResult result = sdk->scheduler.remove(task);
     if (!contracts::succeeded(result) && result.code != kQolErrNotFound) {
-        std::lock_guard<std::mutex> lock(g_health_mutex);
-        g_scheduler_error = kSchedulerRemovalFailed;
+        {
+            std::lock_guard<std::mutex> lock(g_health_mutex);
+            g_scheduler_error = kSchedulerRemovalFailed;
+        }
+        log_scheduler_failure(sdk, "stop", "removal_failed");
         return;
     }
     std::lock_guard<std::mutex> lock(g_health_mutex);

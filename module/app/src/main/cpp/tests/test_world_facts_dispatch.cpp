@@ -424,7 +424,7 @@ void test_lifecycle_and_responses() {
     g_warning_logs = 0;
     g_fail_world_reads = true;
     for (int i = 0; i < 128; ++i) CHECK(g_scheduler.handler(150 + i, g_scheduler.ctx) != 0);
-    CHECK(g_warning_logs == 2);  // 1/64 periodic warning remains rate-limited, not one-shot.
+    CHECK(g_warning_logs == 1);  // 快照失败按边沿记录，连续失败不重复告警。
     g_fail_world_reads = false;
     CHECK(g_scheduler.handler(300, g_scheduler.ctx) != 0);
 

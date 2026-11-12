@@ -209,14 +209,14 @@ bool extension_bag_restore_popup(::qol::contracts::QolPopupStateEntry* entry,
                                  const char* popup_name) {
     if (entry == nullptr || entry->slot == nullptr) return true;
     if (runtime_state().host.sdk == nullptr || runtime_state().host.sdk->hooks.popup_restore == nullptr) {
-        VIRTBAG_LOG_ERROR("ERROR popup restore unavailable popup=%s entry=%p",
+        VIRTBAG_LOG_WARN("ERROR popup restore unavailable popup=%s entry=%p",
                           popup_name, entry->slot);
         return false;
     }
     auto restore_entry = *entry;
     const QolResult result = runtime_state().host.sdk->hooks.popup_restore(&restore_entry);
     if (!qol::contracts::succeeded(result)) {
-        VIRTBAG_LOG_ERROR("ERROR popup restore failed popup=%s entry=%p code=%d",
+        VIRTBAG_LOG_WARN("ERROR popup restore failed popup=%s entry=%p code=%d",
                           popup_name, entry->slot, result.code);
         return false;
     }

@@ -49,7 +49,9 @@ bool call_bridge(const char* what, Call&& call) {
     bool attached = false;
     JNIEnv* env = current_env(&attached);
     if (env == nullptr) {
-        QOL_LOG_ERROR(QolDomain::kPlatform, "public export %s skipped: jni env unavailable", what);
+        QOL_LOG_WARN(QolDomain::kPlatform,
+                     "reject op=public_export kind=%s result=failed reason=jni_env_unavailable",
+                     what);
         return false;
     }
     bool ok = false;
@@ -61,8 +63,14 @@ bool call_bridge(const char* what, Call&& call) {
             if (!ok) {
                 // 必须清掉 pending exception，否则下一个 JNI 入口立即爆异常。
                 env->ExceptionClear();
-                QOL_LOG_ERROR(QolDomain::kPlatform, "public export %s failed: java exception", what);
+                QOL_LOG_WARN(QolDomain::kPlatform,
+                             "fail op=public_export kind=%s result=failed reason=java_exception",
+                             what);
             }
+        } else {
+            QOL_LOG_WARN(QolDomain::kPlatform,
+                         "reject op=public_export kind=%s result=failed reason=bridge_unavailable",
+                         what);
         }
     }
     if (attached) g_jvm()->DetachCurrentThread();
@@ -79,16 +87,19 @@ void register_bridge(JNIEnv* env, jclass bridge) {
     jmethodID pick = env->GetStaticMethodID(bridge, "pickImportFile", "()V");
     if (env->ExceptionCheck()) {
         env->ExceptionClear();
-        QOL_LOG_ERROR(QolDomain::kPlatform, "public export bridge register failed: method lookup");
+        QOL_LOG_WARN(QolDomain::kPlatform,
+                     "public export bridge register failed: method lookup symbol=registerBridge reason=method_lookup_failed");
         return;
     }
     if (crash_logs == nullptr || backup == nullptr || pick == nullptr) {
-        QOL_LOG_ERROR(QolDomain::kPlatform, "public export bridge register failed: method missing");
+        QOL_LOG_WARN(QolDomain::kPlatform,
+                     "public export bridge register failed: method missing symbol=registerBridge reason=method_missing");
         return;
     }
     jobject global = env->NewGlobalRef(bridge);
     if (global == nullptr) {
-        QOL_LOG_ERROR(QolDomain::kPlatform, "public export bridge register failed: global ref");
+        QOL_LOG_WARN(QolDomain::kPlatform,
+                     "public export bridge register failed: global ref symbol=registerBridge reason=global_ref_failed");
         return;
     }
     std::lock_guard<std::mutex> lock(g_mutex);
@@ -97,6 +108,8 @@ void register_bridge(JNIEnv* env, jclass bridge) {
     g_export_crash_logs = crash_logs;
     g_export_backup = backup;
     g_pick_import_file = pick;
+    QOL_LOG_INFO(QolDomain::kPlatform,
+                 "op=public_export_bridge result=ready methods=3");
 }
 #endif
 

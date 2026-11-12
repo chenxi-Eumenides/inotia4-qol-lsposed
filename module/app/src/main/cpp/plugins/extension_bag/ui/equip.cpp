@@ -120,7 +120,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(::qol::extension_bag::Re
                 ::qol::extension_bag::access::bag().isolation_now_ms = extension_bag_ui_isolation_now_ms_locked();
                 virtual_bag::normalize(&::qol::extension_bag::access::bag());
                 persist_state_locked();
-                QOL_LOG_WARN(QolDomain::kExtensionBag, "extension equip rejected source release bag=%d slot=%d",
+                QOL_LOG_WARN(QolDomain::kExtensionBag, "extension equip rejected source release bag=%d slot=%d reason=source_release_failed",
                             src_bag, src_slot);
                 return ExtensionBagEquipResult::kFailed;
             }
@@ -139,12 +139,12 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(::qol::extension_bag::Re
     // P4.3：移除前先分配保管 handle（失败时物品仍在原版库存，无丢失风险）。
     uint32_t custody_handle = 0;
     if (ownership::allocate(&qol::extension_bag::ui_state().objects.ownership_ledger, &custody_handle) != ownership::Outcome::kOk) {
-        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension equip ledger exhausted src=%d/%d", src_bag, src_slot);
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension equip ledger exhausted src=%d/%d reason=ledger_exhausted", src_bag, src_slot);
         return ExtensionBagEquipResult::kFailed;
     }
 
     if (!remove_item_direct_unlocked(lock, src_bag, src_slot, item, "extension equip")) {
-        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension equip remove verify failed bag=%d slot=%d", src_bag, src_slot);
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension equip remove verify failed bag=%d slot=%d reason=remove_verify_failed", src_bag, src_slot);
         // 物品仍被 INVEN 持有（remove 未生效）→ 不得释放，记 inventory 终态。
         handover_tracked_item_locked(custody_handle, item,
                                      "equip remove verify failed; retained in inventory");
@@ -168,7 +168,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(::qol::extension_bag::Re
         ::qol::extension_bag::access::bag().isolation_now_ms = extension_bag_ui_isolation_now_ms_locked();
         virtual_bag::normalize(&::qol::extension_bag::access::bag());
     } else {
-        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension equip state reject bag=%d category=%d", internal_bag, category);
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension equip state reject bag=%d category=%d reason=state_rejected", internal_bag, category);
     }
     bool restored = false;
     uint32_t rebuilt_handle = 0;
@@ -184,7 +184,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(::qol::extension_bag::Re
     }
     retire_custody_item_locked(custody_handle, item, "equip rollback custody retired");
     persist_state_locked();
-    QOL_LOG_WARN(QolDomain::kExtensionBag, "extension equip persist failed bag=%d restored=%d", internal_bag,
+    QOL_LOG_WARN(QolDomain::kExtensionBag, "extension equip persist failed bag=%d restored=%d reason=persist_failed", internal_bag,
                 restored ? 1 : 0);
     return restored ? ExtensionBagEquipResult::kPersistFailed : ExtensionBagEquipResult::kFailed;
 }
@@ -231,7 +231,7 @@ bool equip_module_item_on_character_locked(::qol::extension_bag::ReentryLock& lo
     lock.lock();
     if (outcome.status != qol::contracts::InventoryActionStatus::kOk) {
         QOL_LOG_WARN(QolDomain::kExtensionBag,
-                     "extension character equip action rejected role=%d bag=%d slot=%d equip_slot=%d status=%d",
+                     "extension character equip action rejected role=%d bag=%d slot=%d equip_slot=%d status=%d reason=action_rejected",
                      role, source_bag, source_slot, equip_slot,
                      static_cast<int>(outcome.status));
         return false;
@@ -276,7 +276,7 @@ bool try_equip_on_extension_tab_drop_locked(::qol::extension_bag::ReentryLock& l
     if (item == nullptr) return false;
     const ExtensionBagEquipResult result = equip_extension_bag_item_locked(lock, index, item);
     if (result != ExtensionBagEquipResult::kOk) {
-        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension tab drop equip result=%d index=%d", static_cast<int>(result),
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension tab drop equip result=%d index=%d reason=drop_rejected", static_cast<int>(result),
                     index);
         return false;
     }
@@ -314,7 +314,7 @@ bool equip_extension_source_on_tab_locked(::qol::extension_bag::ReentryLock& loc
     const ExtensionBagEquipResult result =
         equip_extension_bag_item_locked(lock, target_bag, source_item);
     if (result != ExtensionBagEquipResult::kOk) {
-        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension source tab equip result=%d target=%d source=%d/%d",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension source tab equip result=%d target=%d source=%d/%d reason=equip_rejected",
                     static_cast<int>(result), target_bag, source_bag, source_slot);
         return false;
     }
@@ -358,7 +358,7 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
             // 物品详情不是袋卸下详情，清掉上一袋残留的卸下目标。
             qol::extension_bag::ui_state().ui.extension_desc_unequip_bag = -1;
             install_extension_desc_item_hooks_locked(item);
-            QOL_LOG_INFO(QolDomain::kExtensionBag,
+            QOL_LOG_DEBUG(QolDomain::kExtensionBag,
                          "extension desc item captured bag=%d slot=%d item=%p",
                          item_bag, item_slot, item);
         } else {
@@ -372,7 +372,7 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
                 // 袋物品也需要出售按钮 hook；equip/unequip 仍由 detail_hooks
                 // 按原版 proc 主动解绑，保留函数级按钮入口。
                 install_extension_desc_item_hooks_locked(item);
-                QOL_LOG_INFO(QolDomain::kExtensionBag,
+                QOL_LOG_DEBUG(QolDomain::kExtensionBag,
                              "extension bag desc keeps original unequip bag=%d slot=%d item=%p",
                              item_bag, item_slot, item);
             } else {

@@ -105,12 +105,12 @@ const contracts::ResourceClaim kClaims[] = {
 bool install_frame_claim(const contracts::ResourceClaim& claim) {
     qol::game::PatchSite site{};
     if (!qol::game::patch_site(claim.symbol, &site)) {
-        QOL_LOG_ERROR(QolDomain::kCore, "frame_source: site not found %s", claim.symbol);
+        QOL_LOG_WARN(QolDomain::kCore, "frame_source: site not found %s", claim.symbol);
         return false;
     }
     const qol::patch::Outcome outcome = qol::patch::install_claim(claim, site.addr);
     if (outcome.ok != 0) {
-        QOL_LOG_ERROR(QolDomain::kCore, "frame_source: install failed %s: %s", claim.id,
+        QOL_LOG_WARN(QolDomain::kCore, "frame_source: install failed %s: %s", claim.id,
                       outcome.error != nullptr ? outcome.error : "?");
         return false;
     }
@@ -157,7 +157,7 @@ bool frame_source_install() {
 
     for (const contracts::ResourceClaim& claim : kClaims) {
         if (!hooks::register_claim(claim)) {
-            QOL_LOG_ERROR(QolDomain::kCore, "frame_source: claim registration failed %s", claim.id);
+            QOL_LOG_WARN(QolDomain::kCore, "frame_source: claim registration failed %s", claim.id);
             g_frame_source_installing.store(false, std::memory_order_release);
             module_health_set_fact(contracts::QolModuleHealthBit::kFrameHooks, true, true);
             return false;
@@ -186,7 +186,7 @@ bool frame_source_install() {
     g_frame_source_installed.store(true, std::memory_order_release);
     g_frame_source_installing.store(false, std::memory_order_release);
     module_health_set_fact(contracts::QolModuleHealthBit::kFrameHooks, true, false);
-    QOL_LOG_INFO(QolDomain::kCore, "frame_source installed (render + logic anchors)");
+    QOL_LOG_INFO(QolDomain::kCore, "frame_source install result=ok anchors=render,logic");
     return true;
 }
 

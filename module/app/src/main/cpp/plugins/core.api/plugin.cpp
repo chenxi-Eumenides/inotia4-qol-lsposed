@@ -30,6 +30,14 @@ const contracts::HttpRouteMetadataDescriptor kRouteMetadata[] = {
 #undef QOL_HTTP_ROUTE
 
 const contracts::QolHostSdk* g_sdk = nullptr;
+bool g_api_enabled = false;
+
+void write_log(int level, const char* message) {
+    if (g_sdk == nullptr || g_sdk->log.write == nullptr || message == nullptr) return;
+    uint32_t length = 0;
+    while (message[length] != '\0') ++length;
+    (void)g_sdk->log.write(level, 1, kPluginId, message, length);
+}
 
 QolResult write_response(contracts::HttpRes* response, uint16_t status, const std::string& body) {
     if (response == nullptr || response->body == nullptr || response->body_capacity < body.size()) {
@@ -277,7 +285,15 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"api.enabled", 1, contracts::FeatureCategory::kGeneral,
      contracts::FeatureType::kToggle, "API服务", "允许外部程序控制游戏",
-      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr,
+      [](contracts::PluginContext&, uint8_t enabled) -> QolResult {
+          const bool next = enabled != 0;
+          if (g_api_enabled != next) {
+              g_api_enabled = next;
+              write_log(1, next ? "start op=http_service result=enabled"
+                                : "stop op=http_service result=disabled");
+          }
+          return contracts::ok();
+      }, nullptr,
       nullptr, -5},
 };
 
@@ -311,6 +327,7 @@ const contracts::PluginDescriptor kDescriptor = {
 // Host 常驻控制端点的兼容测试辅助：body 解析 + action 映射 + 命令投递，保留响应形状验证。
 QolResult lifecycle_command(const contracts::HttpReq* request, contracts::HttpRes* response, void*) {
     if (request == nullptr || response == nullptr) {
+        write_log(2, "reject op=feature_lifecycle reason=bad_request");
         return error_response(response, 400, "bad request");
     }
     std::string id;
@@ -319,9 +336,11 @@ QolResult lifecycle_command(const contracts::HttpReq* request, contracts::HttpRe
     bool has_action = false;
     if (!extract_string_fields(request->body, request->body_len, "id", &id, &has_id, "action",
                                &action, &has_action)) {
+        write_log(2, "reject op=feature_lifecycle reason=bad_request");
         return error_response(response, 400, "bad request");
     }
     if (!has_id || !has_action || id.empty() || action.empty()) {
+        write_log(2, "reject op=feature_lifecycle reason=missing_fields");
         return error_response(response, 400, "id and action required");
     }
     int32_t action_code = 0;
@@ -331,6 +350,7 @@ QolResult lifecycle_command(const contracts::HttpReq* request, contracts::HttpRe
         action_code = contracts::kFeatureLifecycleActivate;
     } else {
         // 未知动作是 HTTP 200 的失败信封（迁移前 service 直接返回 JsonUtil.err），非协议错误。
+        write_log(2, "reject op=feature_lifecycle reason=unknown_action");
         return write_response(response, 200, "{\"ok\":false,\"error\":\"unknown action\"}");
     }
     contracts::QolCommandTicket ticket = 0;
@@ -344,8 +364,12 @@ QolResult lifecycle_command(const contracts::HttpReq* request, contracts::HttpRe
         if (!contracts::succeeded(posted)) ticket = 0;
     }
     if (ticket == 0) {
+        write_log(2, "reject op=feature_lifecycle reason=queue_rejected");
         return write_response(response, 200, "{\"ok\":false,\"error\":\"lifecycle rejected\"}");
     }
+    write_log(1, action == "activate"
+                      ? "dispatch op=feature_lifecycle action=activate result=queued"
+                      : "dispatch op=feature_lifecycle action=deactivate result=queued");
     return write_response(response, 200,
                           "{\"ok\":true,\"ticket\":" + std::to_string(ticket) + "}");
 }

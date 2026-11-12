@@ -312,7 +312,7 @@ ART 的 `FATAL EXCEPTION` 看 `java-crash.log` 与 logcat。
 | `scripts/maintenance/check_arch.py` | 构建前静态预检总入口，按上文顺序运行变种表生成器、四个架构检查器、符号 VMA、HTTP 路由和日志策略检查；失败聚合；`--list` 列出步骤，`--only <步骤>` 精确筛选；`--all` 将明细参数转发给支持的步骤，`-v`/`--verbose` 是兼容别名 | Native、JNI、资源、偏移、符号、路由或日志相关改动后；构建前运行 |
 | `scripts/maintenance/check_symbols.py` | 校验 `game_symbols.h`/`symbol_registry.h` 常量与目标 `libgame.so` 符号 VMA 是否一致；默认比对 `apk/decoded/overhaul/lib/arm64-v8a/libgame.so` 的 120+ 符号；加 `--all` 输出全部分类和符号比对结果；地址不一致或缺失返回非零 | **改 `game_symbols.h`/`symbol_registry.h`、新增 VMA 或换游戏版本/so 后必跑**；新增符号须登记 `SYMBOL_TO_MACRO` 映射；已纳入静态预检 |
 | `scripts/maintenance/check_http_routes.py` | 校验 controller、native 与 API reference 路由一致性；加 `--all` 输出完整检查明细 | 路由、controller 或 API reference 变更后；已纳入静态预检 |
-| `scripts/verification/check_log_policy.py` | 按 `docs/archive/development/logging.md` 静态检查日志合规：R1 唯一出口 / R2 旧 tag 清零 / R3 domain 词表一致 / R4 逐帧无高级别 / R5 级别与定位；findings 默认可见 | **改 native/Kotlin 日志相关代码后**；R1–R3 违规时退出码非 0，迁移期可加 `--warn-only`；已纳入静态预检 |
+| `scripts/verification/check_log_policy.py` | 按 `docs/reference/logging-standards.md`（等级、内容、频率）与 `docs/reference/logging.md`（唯一出口、格式、domain）静态检查日志合规：R1 唯一出口 / R2 旧 tag 清零 / R3 domain 词表一致 / R4 逐帧无 INFO / R5 级别与定位；findings 默认可见 | **改 native/Kotlin 日志相关代码后**；R1–R3 违规时退出码非 0，迁移期可加 `--warn-only`；已纳入静态预检 |
 | `scripts/verification/smoke_all.py` | 从 controller 注解提取全部路由做全量 smoke 探测，产出与 `smoke_baseline_v0.5.43.json` 可对比的基线报告；默认隐藏 PASS 明细但保留 warn/fail，使用 `--all` 显示全部明细 | 重构或端点变更后、真机 API 可达时 |
 | `scripts/verification/api_poll.py` | 连续轮询 `/api/system/game`、party、inventory，标记字段变化 | 单点联调、确认某字段是否按预期变化时（默认 2.0s × 30 次） |
 | `scripts/verification/live_session.py` | 全自动联调会话：等待 API 就绪 → 等待世界就绪 → 连续采样 → 检测失败/超时 → 输出报告 | 需要长时间观察稳定性时（默认上限 5 分钟） |

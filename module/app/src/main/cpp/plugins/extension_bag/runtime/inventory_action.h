@@ -28,7 +28,7 @@ inline const contracts::InventoryActionApi* inventory_action_api() {
     if (contracts::inventory_action_api_valid(api)) return api;
     if (!missing_logged) {
         missing_logged = true;
-        QOL_LOG_ERROR(QolDomain::kExtensionBag,
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
                       "inventory.action unavailable code=%d; item mutation rejected",
                       result.code);
     }

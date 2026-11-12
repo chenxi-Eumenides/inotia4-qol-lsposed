@@ -1,5 +1,7 @@
 #include "plugin.h"
 
+#include <cstdio>
+
 #include "contracts/craft_facts.h"
 #include "contracts/game_ports/craft_port.h"
 #include "contracts/http.h"
@@ -123,6 +125,17 @@ const contracts::QolPortRequirement kPorts[] = {
      {contracts::kQolPortCraftVersion.major, contracts::kQolPortCraftVersion.minor}},
 };
 
+void log_install_failure(const contracts::QolHostSdk* sdk, const char* reason) {
+    if (sdk == nullptr || sdk->log.write == nullptr || reason == nullptr) return;
+    char message[128]{};
+    const int length = std::snprintf(message, sizeof(message),
+                                     "fail op=install provider=core.craft reason=%s", reason);
+    if (length <= 0) return;
+    const uint32_t message_length = static_cast<uint32_t>(
+        length < static_cast<int>(sizeof(message)) ? length : sizeof(message) - 1);
+    (void)sdk->log.write(2, 1, kPluginId, message, message_length);
+}
+
 const contracts::CapabilityRequirement kOptionalHttpRequires[] = {
     {contracts::kHttpRegistryCapabilityId,
      {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor}},
@@ -147,6 +160,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     if (ctx.struct_size < contracts::PLUGIN_CONTEXT_PORTS_STRUCT_SIZE ||
         ctx.sdk_major != contracts::kHostSdkMajor || ctx.sdk == nullptr || ctx.ports == nullptr ||
         ctx.port_count != 1 || ctx.ports[0] == nullptr) {
+        log_install_failure(ctx.sdk, "context_or_port_invalid");
         return 1;
     }
     g_port = static_cast<const contracts::QolCraftPort*>(ctx.ports[0]);
@@ -154,26 +168,27 @@ int plugin_install(contracts::PluginContext& ctx) {
                               {contracts::kQolPortCraftVersion.major,
                                contracts::kQolPortCraftVersion.minor}) ||
         g_port->read.ui_type == nullptr || g_port->read.stuff_item == nullptr ||
-        g_port->read_only.panel_state == nullptr ||
-        g_port->read_only.stuff_slot_available == nullptr) {
+         g_port->read_only.panel_state == nullptr ||
+         g_port->read_only.stuff_slot_available == nullptr) {
+        log_install_failure(ctx.sdk, "craft_port_unavailable");
         g_port = nullptr;
         return 1;
     }
-    log_message(ctx.sdk, "[core.craft] provider install");
+    log_message(ctx.sdk, "op=install provider=core.craft result=ok");
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
-    log_message(ctx.sdk, "[core.craft] provider deactivate");
+    log_message(ctx.sdk, "op=deactivate provider=core.craft result=ok");
     g_port = nullptr;
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
-    log_message(ctx.sdk, "[core.craft] provider enabled: capability published");
+    log_message(ctx.sdk, "op=enable provider=core.craft result=ok");
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
-    log_message(ctx.sdk, "[core.craft] provider disabled: capability withdrawn");
+    log_message(ctx.sdk, "op=disable provider=core.craft result=ok");
 }
 
 void plugin_fill_status(contracts::PluginStatusOut& out) {

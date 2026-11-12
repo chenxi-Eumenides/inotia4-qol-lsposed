@@ -28,7 +28,7 @@ void save_load_wrapper(int32_t slot) {
                        hooks.save_transition_begin_thunk(0, slot, &transition);
     if (!began) {
         QOL_LOG_WARN(QolDomain::kSave,
-                     "save enter blocked by transition gate slot=%d", slot);
+                     "save enter blocked by transition gate slot=%d reason=transition_gate", slot);
         return;  // 不消费、不执行原版转换：模块准入失败即阻断（fail-closed）。
     }
     // API 与按钮读档共用受控转换上下文（统一设置未就绪 transition + invocation）。
@@ -39,7 +39,7 @@ void save_load_wrapper(int32_t slot) {
         if (hooks_cancel.save_transition_cancel_thunk != nullptr)
             hooks_cancel.save_transition_cancel_thunk(transition);
         QOL_LOG_WARN(QolDomain::kSave,
-                     "save enter blocked because loading bypass scope is occupied slot=%d", slot);
+                     "save enter blocked because loading bypass scope is occupied slot=%d reason=bypass_occupied", slot);
         return;
     }
     const int result = fn_game_start_resume_game != nullptr
@@ -51,7 +51,8 @@ void save_load_wrapper(int32_t slot) {
         const auto& hooks_cancel = qol::contracts::qol_runtime_hooks();
         if (hooks_cancel.save_transition_cancel_thunk != nullptr)
             hooks_cancel.save_transition_cancel_thunk(transition);
-        QOL_LOG_WARN(QolDomain::kSave, "save enter original failed slot=%d", slot);
+        QOL_LOG_WARN(QolDomain::kSave,
+                     "save enter original failed slot=%d reason=original_failed", slot);
         return;
     }
 }
@@ -62,7 +63,8 @@ void save_load_wrapper(int32_t slot) {
 // save.cpp 经受控转换路径完成，两条入口不能互换。
 void save_new_wrapper() {
     if (fn_select_character_start_game == nullptr) {
-        QOL_LOG_WARN(QolDomain::kSave, "new game confirmation unavailable; original not invoked");
+        QOL_LOG_WARN(QolDomain::kSave,
+                     "new game confirmation unavailable; original not invoked reason=confirmation_unavailable");
         return;
     }
     fn_select_character_start_game();

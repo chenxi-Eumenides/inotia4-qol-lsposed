@@ -259,16 +259,6 @@ namespace {
 
 constexpr int32_t kWorldTransitionTimeoutMs = 5000;
 
-// 本地宏：调用点文本零改动（先例 5890b5a4 同法）；dom 参数被忽略。
-#define QOL_LOG_DEBUG_EVERY(dom, every_frames, ...)                    \
-    do {                                                               \
-        static int64_t _seam_last_frame = INT64_MIN;                   \
-        if (qol::game::qol_seam_debug_enabled() &&                     \
-            qol::game::qol_seam_due(&_seam_last_frame, (every_frames))) \
-            qol::game::qol_seam_write(qol::game::kQolLogLevelDebug, qol::game::kQolLogDomainApi,\
-                                 __FILE__, __LINE__, __VA_ARGS__); \
-    } while (0)
-
 uint32_t gamestate_state() {
     return g_gamestate != nullptr ? *reinterpret_cast<uint32_t*>(g_gamestate) : 0;
 }
@@ -442,14 +432,14 @@ bool nav_task_tick(int64_t /*frame*/, void* ctx) {
             n->target_py = py;
             for (int i = 0; i < retry.dir_count; ++i)
                 n->dirs[i] = static_cast<int8_t>(retry.dirs[i]);
-            QOL_LOG_DEBUG_EVERY(QolDomain::kApi, 60,
+            QOL_LOG_SEAM_DEBUG(kQolLogDomainApi,
                                 "replan: wait-retry ok dirs=%d", retry.dir_count);
             return !map_link_check(n->ch);
         }
         ++n->wait_frames;
         if (n->wait_frames > 60) {
             n->wait_frames = 0;
-            QOL_LOG_DEBUG_EVERY(QolDomain::kApi, 60,
+            QOL_LOG_SEAM_DEBUG(kQolLogDomainApi,
                                 "replan: wait timeout at (%d,%d)", px >> 4, py >> 4);
             return false;
         }
@@ -469,7 +459,7 @@ bool nav_task_tick(int64_t /*frame*/, void* ctx) {
                 fn_char_move(n->ch, face_dir, 8, 0);
                 n->face_target = false;
                 n->wait_frames = 1;
-                QOL_LOG_DEBUG_EVERY(QolDomain::kApi, 60,
+                QOL_LOG_SEAM_DEBUG(kQolLogDomainApi,
                                     "replan: reached nearest (%d,%d), waiting", px >> 4, py >> 4);
                 return true;
             }
@@ -485,7 +475,7 @@ bool nav_task_tick(int64_t /*frame*/, void* ctx) {
     if (fn_char_move(n->ch, n->dirs[n->dir_idx], 8, 0)) {
         // 撞墙/被动态单位阻挡 → 从当前格 BFS 绕行（排除撞墙格，见下 wall_tx/wall_ty）。
         if (n->target_tx < 0 || n->replan_count >= 5) {
-            QOL_LOG_DEBUG_EVERY(QolDomain::kApi, 60,
+            QOL_LOG_SEAM_DEBUG(kQolLogDomainApi,
                                 "replan: abort target=(%d,%d) replan=%d",
                                 n->target_tx, n->target_ty, n->replan_count);
             return false;
@@ -496,7 +486,7 @@ bool nav_task_tick(int64_t /*frame*/, void* ctx) {
         int wall_tx = -1, wall_ty = -1;
         int wall_dir = (n->dir_idx >= 0 && n->dir_idx < n->dir_count) ? n->dirs[n->dir_idx] : -1;
         if (wall_dir >= 0) { wall_tx = cpx + NAV_DX[wall_dir]; wall_ty = cpy + NAV_DY[wall_dir]; }
-        QOL_LOG_DEBUG_EVERY(QolDomain::kApi, 60,
+        QOL_LOG_SEAM_DEBUG(kQolLogDomainApi,
                             "replan: hit wall at (%d,%d) dir=%d replan=%d wall=(%d,%d)", cpx, cpy,
                             wall_dir, n->replan_count, wall_tx, wall_ty);
         // v0.5.27：撞墙后从当前格 BFS 绕行（排除撞墙格）——废除 v0.4.53 的 resume 探测：
@@ -513,13 +503,13 @@ bool nav_task_tick(int64_t /*frame*/, void* ctx) {
             n->target_py = py;
             n->face_target = !np.found;
             for (int i = 0; i < np.dir_count; ++i) n->dirs[i] = static_cast<int8_t>(np.dirs[i]);
-            QOL_LOG_DEBUG_EVERY(QolDomain::kApi, 60,
+            QOL_LOG_SEAM_DEBUG(kQolLogDomainApi,
                                 "replan: cur-path ok dirs=%d found=%d nearest=(%d,%d)",
                                 np.dir_count, np.found ? 1 : 0, np.nearest_x, np.nearest_y);
             return !map_link_check(n->ch);
         }
         // 全量规划失败：终止任务（v0.4.51：不再多余尝试）
-        QOL_LOG_DEBUG_EVERY(QolDomain::kApi, 60,
+        QOL_LOG_SEAM_DEBUG(kQolLogDomainApi,
                             "replan: fail, terminate at (%d,%d)", cpx, cpy);
         return false;
     }
@@ -540,8 +530,6 @@ bool nav_task_tick(int64_t /*frame*/, void* ctx) {
     nav_pick_items(n->ch, 0x18);
     return !map_link_check(n->ch);
 }
-
-#undef QOL_LOG_DEBUG_EVERY
 
 // op 信封字节由 op_ok()/op_err() 生成（game/ops，含成功力刷恰一次语义），拷入定长 POD。
 WorldWriteResult pack_result(const std::string& body) {

@@ -32,6 +32,8 @@ inline void write(const contracts::QolHostSdk* sdk, int32_t level, int32_t domai
 
 #define CORE_UI_LOG_INFO(...) \
     ::qol::features::core_ui::private_log::write(g_sdk, 1, 12, __FILE__, __LINE__, __VA_ARGS__)
+#define CORE_UI_LOG_WARN(...) \
+    ::qol::features::core_ui::private_log::write(g_sdk, 2, 12, __FILE__, __LINE__, __VA_ARGS__)
 #define CORE_UI_LOG_DEBUG(...)                                                   \
     do {                                                                        \
         if (g_sdk != nullptr && g_sdk->log.debug_enabled != nullptr &&          \

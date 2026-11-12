@@ -23,7 +23,7 @@ static bool g_snapshot_serialize_warned = false;
 void log_snapshot_serialize_failure() {
     if (g_snapshot_serialize_warned) return;
     g_snapshot_serialize_warned = true;
-    constexpr char kMessage[] = "[core.item] snapshot serialize failed";
+    constexpr char kMessage[] = "fail op=snapshot reason=serialize_failed";
     if (g_sdk == nullptr || g_sdk->log.write == nullptr) return;
     (void)g_sdk->log.write(2, 1, kPluginId, kMessage,
                            static_cast<uint32_t>(sizeof(kMessage) - 1));

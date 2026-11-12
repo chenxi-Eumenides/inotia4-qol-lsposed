@@ -66,6 +66,18 @@ InventoryActionStatus status_from_result(const QolResult& result, bool item_was_
     }
 }
 
+const char* action_failure_reason(const QolResult& result) {
+    switch (result.code) {
+        case kQolErrInvalidArgument: return "invalid_argument";
+        case kQolErrNotFound: return "not_found";
+        case kQolErrConflict: return "conflict";
+        case kQolErrBlocked: return "blocked";
+        case kQolErrUnsupported: return "unsupported";
+        case kQolErrNotReady: return "not_ready";
+        default: return "operation_failed";
+    }
+}
+
 // inventory.transfer 能力（core.inventory 提供）：注册源/跨空间移动、detached 序列化与
 // 定位。按调用时 require；缺失时对应路径显式返回 Unsupported，不得回退本地 transport。
 // 注册源同空间的本地 export/import/remove 分支已删除，移动统一经此能力。
@@ -375,6 +387,7 @@ contracts::InventoryUseOutcome use(QolActionRef ref) {
             return outcome;
         }
         contracts::QolItemInventoryStateWriteResult write_result{};
+        inventory_native_hook_begin_item_use();
         operation = g_item_state_write->use_item(native_bag_number(ref), ref.slot, &write_result);
     } else {
         const contracts::QolBagSource* source = find_bag_source(ref.space_id);
@@ -382,9 +395,17 @@ contracts::InventoryUseOutcome use(QolActionRef ref) {
             outcome.status = InventoryActionStatus::kUnsupported;
             return outcome;
         }
+        inventory_native_hook_begin_item_use();
         operation = source->use({ref.space_id, ref.bag}, ref.slot);
     }
+    const bool hook_logged_failure = inventory_native_hook_end_item_use();
     if (!contracts::succeeded(operation)) {
+        if (!hook_logged_failure) {
+            QOL_LOG_WARN(0,
+                         "reject op=item_use space=%d bag=%d slot=%d item=%u/%u reason=%s",
+                         ref.space_id, ref.bag, ref.slot, before.item.slot,
+                         before.item.generation, action_failure_reason(operation));
+        }
         outcome.status = status_from_result(operation, true);
         return outcome;
     }
@@ -397,6 +418,9 @@ contracts::InventoryUseOutcome use(QolActionRef ref) {
                after.item.generation == before.item.generation) {
         outcome.consumed_count = before.count > after.count ? before.count - after.count : 0;
     } else {
+        QOL_LOG_WARN(0,
+                     "reject op=item_use space=%d bag=%d slot=%d item=%u/%u reason=post_use_read_failed",
+                     ref.space_id, ref.bag, ref.slot, before.item.slot, before.item.generation);
         outcome.status = status_from_result(read_after, true);
         return outcome;
     }
@@ -435,6 +459,10 @@ contracts::InventoryUseOutcome discard(QolActionRef ref, int32_t count) {
         operation = source->remove(item.item, count, &mutation);
     }
     if (!contracts::succeeded(operation)) {
+        QOL_LOG_WARN(0,
+                     "reject op=item_drop space=%d bag=%d slot=%d item=%u/%u count=%d reason=%s",
+                     ref.space_id, ref.bag, ref.slot, item.item.slot, item.item.generation, count,
+                     action_failure_reason(operation));
         outcome.status = status_from_result(operation, true);
         return outcome;
     }

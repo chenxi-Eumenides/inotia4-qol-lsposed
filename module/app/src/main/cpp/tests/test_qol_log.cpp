@@ -24,8 +24,10 @@ static int g_fail = 0;
 namespace {
 
 int64_t g_test_frame = 0;
+int64_t g_test_now = 100000;
 
 int64_t test_frame_provider() { return g_test_frame; }
+int64_t test_clock() { return g_test_now; }
 
 int g_frame_provider_calls = 0;
 
@@ -159,38 +161,6 @@ static void test_buffer_truncation() {
     CHECK(std::strlen(small) == sizeof(small) - 1);
 }
 
-static void test_throttle_frames() {
-    qol_log_set_frame_provider(&test_frame_provider);
-
-    g_test_frame = 10;
-    QolLogThrottle throttle;
-    CHECK(throttle.due(5));       // 首次放行
-    CHECK(!throttle.due(5));      // 同帧不放行
-    g_test_frame = 14;
-    CHECK(!throttle.due(5));      // 差 4 < 5
-    g_test_frame = 15;
-    CHECK(throttle.due(5));       // 差 5 >= 5
-    g_test_frame = 19;
-    CHECK(!throttle.due(5));
-    g_test_frame = 20;
-    CHECK(throttle.due(5));
-
-    // 无 provider -> 时间窗口（首次放行，连续第二次不放行）。
-    qol_log_set_frame_provider(nullptr);
-    QolLogThrottle fallback;
-    CHECK(fallback.due(5));
-    CHECK(!fallback.due(5));
-}
-
-static void test_change_gate() {
-    QolLogChangeGate gate;
-    CHECK(gate.changed(7));    // 首次：与初值不同 -> 触发
-    CHECK(!gate.changed(7));   // 同值不触发
-    CHECK(gate.changed(8));    // 变值触发
-    CHECK(!gate.changed(8));
-    CHECK(gate.changed(0));
-}
-
 // 修复 1：qol_log_write_kotlin 对 kDebug 走 qol_log_debug_enabled() 门控。
 // 通过帧 provider 调用次数间接观测是否进入 emit_line（格式化前短路则 provider 不被调用）。
 static void test_kotlin_write_debug_gate() {
@@ -226,37 +196,6 @@ static void test_kotlin_write_debug_gate() {
     qol_log_set_debug_enabled(false);
 }
 
-// 修复 2：帧号回退后立即放行；有效帧 → 无效帧重置基准，恢复后按首次放行。
-static void test_throttle_frame_rollback() {
-    qol_log_set_frame_provider(&test_frame_provider);
-
-    g_test_frame = 1000;
-    QolLogThrottle throttle;
-    CHECK(throttle.due(5));   // 首次放行
-    g_test_frame = 1005;
-    CHECK(throttle.due(5));   // 正常间隔放行
-    g_test_frame = 3;         // 计数器回退/重开档（frame < last_frame）
-    CHECK(throttle.due(5));   // 立即放行，不等长间隔
-    g_test_frame = 4;
-    CHECK(!throttle.due(5));  // 回退后从新基准 3 起算
-    g_test_frame = 7;
-    CHECK(!throttle.due(5));  // 差 4 < 5
-    g_test_frame = 8;
-    CHECK(throttle.due(5));   // 差 5 >= 5
-
-    // 有效帧 → 帧号无效：重置基准并放行一次，之后退化为时间窗口。
-    g_test_frame = 50;
-    QolLogThrottle nested;
-    CHECK(nested.due(10));    // 首次放行
-    g_test_frame = -1;
-    CHECK(nested.due(10));    // 有效→无效：重置并放行
-    CHECK(!nested.due(10));   // 连续无效：时间窗口内不放行
-    g_test_frame = 2;
-    CHECK(nested.due(10));    // 帧恢复：按首次调用放行
-
-    qol_log_set_frame_provider(nullptr);
-}
-
 static void test_debug_flag_and_sink_host() {
     CHECK(!qol_log_debug_enabled());
     qol_log_set_debug_enabled(true);
@@ -279,41 +218,55 @@ void collect_sink(QolLogLevel, QolDomain, const char* line) {
 
 }  // namespace
 
-// INFO 单帧单域预算：超限只留一行封顶标记，其余丢弃；换帧恢复；其他级别不受限。
-static void test_info_per_frame_cap() {
+static void test_logger_dedup() {
     qol_log_set_host_sink(&collect_sink);
+    qol_log_set_test_clock(&test_clock);
     qol_log_set_frame_provider(&test_frame_provider);
-
-    g_test_frame = 500;
-    g_sink_lines.clear();
-    for (uint32_t i = 0; i < kQolLogInfoPerFrameCap + 3; ++i) {
-        qol_log_write_kotlin(QolLogLevel::kInfo, QolDomain::kUi, "x.kt:1", "tick");
-    }
-    CHECK(g_sink_lines.size() == kQolLogInfoPerFrameCap + 1);
-    CHECK(g_sink_lines.back().find("log INFO cap reached domain=ui frame=500") !=
-          std::string::npos);
-
-    // 换帧后预算重置。
-    g_test_frame = 501;
-    g_sink_lines.clear();
-    qol_log_write_kotlin(QolLogLevel::kInfo, QolDomain::kUi, "x.kt:1", "tick");
-    CHECK(g_sink_lines.size() == 1);
-    CHECK(g_sink_lines[0].find("cap reached") == std::string::npos);
-
-    // 预算按域独立：另一域不受 ui 已用额度影响。
-    g_sink_lines.clear();
-    for (uint32_t i = 0; i < kQolLogInfoPerFrameCap; ++i) {
-        qol_log_write_kotlin(QolLogLevel::kInfo, QolDomain::kSave, "x.kt:1", "tick");
-    }
-    CHECK(g_sink_lines.size() == kQolLogInfoPerFrameCap);
-
-    // WARN / ERROR / DEBUG 不占 INFO 预算也不被截断。
+    qol_log_set_debug_enabled(true);
+    g_test_frame = 500; g_test_now = 100000;
     g_sink_lines.clear();
     for (int i = 0; i < 40; ++i) {
-        qol_log_write_kotlin(QolLogLevel::kWarn, QolDomain::kUi, "x.kt:1", "w");
-        qol_log_write_kotlin(QolLogLevel::kError, QolDomain::kUi, "x.kt:1", "e");
+        qol_log_write_kotlin(QolLogLevel::kInfo, QolDomain::kUi, "x.kt:1", "tick");
     }
-    CHECK(g_sink_lines.size() == 80);
+    CHECK(g_sink_lines.size() == 40);
+    for (const auto& line : g_sink_lines) CHECK(line.find("cap reached") == std::string::npos);
+
+    g_sink_lines.clear(); g_test_frame = 510;
+    for (int i = 0; i < 3; ++i) qol_log_write_kotlin(QolLogLevel::kDebug, QolDomain::kCore, "d.kt:1", "a");
+    CHECK(g_sink_lines.size() == 1);
+    g_test_frame = 511; g_test_now += kQolLogDebugMinIntervalMs;
+    qol_log_write_kotlin(QolLogLevel::kDebug, QolDomain::kCore, "d.kt:1", "b");
+    CHECK(g_sink_lines.size() == 2);
+    qol_log_write_kotlin(QolLogLevel::kDebug, QolDomain::kCore, "d.kt:1", "c");
+    CHECK(g_sink_lines.size() == 2);
+    g_test_frame = 512; g_test_now += kQolLogDebugMinIntervalMs;
+    qol_log_write_kotlin(QolLogLevel::kDebug, QolDomain::kCore, "d.kt:1", "c");
+    CHECK(g_sink_lines.size() == 3);
+    qol_log_write_kotlin(QolLogLevel::kDebug, QolDomain::kCore, "d.kt:1", "d");
+    CHECK(g_sink_lines.size() == 3);
+
+    g_sink_lines.clear(); g_test_frame = 520;
+    for (int i = 0; i < 3; ++i) qol_log_write_kotlin(QolLogLevel::kWarn, QolDomain::kCore, "w.kt:1", "same");
+    CHECK(g_sink_lines.size() == 1);
+    g_test_now += kQolLogWarnWindowMs;
+    qol_log_write_kotlin(QolLogLevel::kWarn, QolDomain::kCore, "w.kt:1", "same");
+    qol_log_write_kotlin(QolLogLevel::kWarn, QolDomain::kCore, "w.kt:1", "different");
+    CHECK(g_sink_lines.size() == 3);
+
+    g_sink_lines.clear();
+    qol_log_write_kotlin(QolLogLevel::kError, QolDomain::kCore, "e.kt:1", "same");
+    qol_log_write_kotlin(QolLogLevel::kError, QolDomain::kCore, "e.kt:1", "same");
+    CHECK(g_sink_lines.size() == 1);
+    g_test_now += kQolLogErrorWindowMs;
+    qol_log_write_kotlin(QolLogLevel::kError, QolDomain::kCore, "e.kt:1", "same");
+    CHECK(g_sink_lines.size() == 2);
+    g_sink_lines.clear(); g_test_now += kQolLogErrorBurstWindowMs;
+    for (int i = 0; i < 12; ++i) {
+        char msg[24]; std::snprintf(msg, sizeof(msg), "failure=%d", i);
+        qol_log_write_kotlin(QolLogLevel::kError, QolDomain::kCore, "burst.kt:1", msg);
+    }
+    CHECK(g_sink_lines.size() == 11);
+    CHECK(g_sink_lines.back().find("suppressed level=E domain=core src=burst.kt:1 count=11 window_ms=60000") != std::string::npos);
 
     // SDK 转发的绝对路径落盘为 basename。
     g_sink_lines.clear();
@@ -322,7 +275,16 @@ static void test_info_per_frame_cap() {
     CHECK(g_sink_lines[0].find(" b.cpp:9 m") != std::string::npos);
     CHECK(g_sink_lines[0].find("/proj/") == std::string::npos);
 
+    g_sink_lines.clear();
+    for (int i = 0; i < 600; ++i) {
+        char src[32]; std::snprintf(src, sizeof(src), "overflow%d.kt:1", i);
+        qol_log_write_kotlin(QolLogLevel::kWarn, QolDomain::kCore, src, "x");
+    }
+    CHECK(g_sink_lines.size() == 600);
+
     qol_log_set_host_sink(nullptr);
+    qol_log_set_test_clock(nullptr);
+    qol_log_set_debug_enabled(false);
     qol_log_set_frame_provider(nullptr);
 }
 
@@ -400,12 +362,9 @@ int main() {
     test_normalize_src();
     test_format_ts_shape();
     test_buffer_truncation();
-    test_throttle_frames();
-    test_change_gate();
     test_kotlin_write_debug_gate();
-    test_throttle_frame_rollback();
     test_debug_flag_and_sink_host();
-    test_info_per_frame_cap();
+    test_logger_dedup();
     test_last_known_frame();
     test_crash_capture();
 

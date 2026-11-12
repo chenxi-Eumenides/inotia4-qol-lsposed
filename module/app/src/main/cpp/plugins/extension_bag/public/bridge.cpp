@@ -124,12 +124,12 @@ bool virtual_bag_enabled() {
 bool virtual_bag_prepare_save_slot_load() {
     ::qol::extension_bag::ReentryLock lock;
     if (!module_cache_clear_preflight_locked()) {
-        VIRTBAG_LOG("prepare save-slot load preflight failed");
+        VIRTBAG_LOG_WARN("prepare save-slot load preflight failed");
         return false;
     }
     if (qol::extension_bag::ui_state().objects.module_view_installed) restore_module_view_locked();
     if (!clear_module_cache_locked()) {
-        VIRTBAG_LOG("prepare save-slot load blocked by active module object");
+        VIRTBAG_LOG_WARN("prepare save-slot load blocked by active module object");
         return false;
     }
     // The item pool is reset by the load; queued addresses become invalid and may be

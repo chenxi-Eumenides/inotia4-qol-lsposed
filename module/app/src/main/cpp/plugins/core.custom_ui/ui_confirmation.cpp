@@ -28,6 +28,7 @@ bool g_dispatching = false;
 bool g_overlay_registered = false;
 bool g_overlay_orphaned = false;
 bool g_overlay_drawn_once = false;
+bool g_draw_failure_logged = false;
 bool g_v1_overlay = false;
 bool g_return_suppression_pending = false;
 int64_t g_return_suppression_frame = -1;
@@ -68,6 +69,22 @@ constexpr char kTextUnsupported[] = "confirmation adapter lacks raw-text creatio
 
 void confirmation_ok_trampoline(void*);
 void confirmation_cancel_trampoline(void*);
+
+void log_confirmation(int32_t level, const char* event, uint64_t token,
+                      const char* result, const char* reason = nullptr) {
+    if (g_sdk == nullptr || g_sdk->log.write == nullptr || event == nullptr || result == nullptr)
+        return;
+    char message[160]{};
+    if (reason != nullptr) {
+        std::snprintf(message, sizeof(message), "confirmation event=%s token=%llu result=%s reason=%s",
+                      event, static_cast<unsigned long long>(token), result, reason);
+    } else {
+        std::snprintf(message, sizeof(message), "confirmation event=%s token=%llu result=%s",
+                      event, static_cast<unsigned long long>(token), result);
+    }
+    (void)g_sdk->log.write(level, 12, "core.custom_ui/ui_confirmation", message,
+                           static_cast<uint32_t>(std::strlen(message)));
+}
 uint64_t overlay_scope_owner_begin(uint64_t token);
 bool overlay_scope_owner_finish(uint64_t id);
 void overlay_scope_owner_release(uint64_t id);
@@ -227,12 +244,20 @@ bool confirmation_overlay_draw(void*, contracts::QolUiAdapter* ui, uint64_t toke
     }
     if (ui->call_ui_popup_msg_draw == nullptr ||
         !contracts::succeeded(ui->call_ui_popup_msg_draw())) {
-        if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
-            static constexpr char message[] = "native popup draw failed; V1 remains invisible";
-            (void)g_sdk->log.write(1, 12, "core.custom_ui/ui_confirmation", message,
-                                   sizeof(message) - 1);
+        bool should_log = false;
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            if (!g_draw_failure_logged) {
+                g_draw_failure_logged = true;
+                should_log = true;
+            }
         }
+        if (should_log) log_confirmation(2, "draw", token, "degraded", "native_popup_draw_failed");
         return false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        g_draw_failure_logged = false;
     }
     return true;
 }
@@ -262,9 +287,26 @@ bool unregister_frame_overlay(const contracts::QolUiAdapter* adapter) {
         if (!g_overlay_registered) return true;
         g_overlay_orphaned = true;
     }
-    if (!adapter_has_overlay_slots(adapter)) return false;
+    if (!adapter_has_overlay_slots(adapter)) {
+        if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
+            static constexpr char message[] = "op=overlay owner=core.custom_ui result=failed reason=adapter_unavailable";
+            (void)g_sdk->log.write(2, 12, "core.custom_ui/ui_confirmation", message,
+                                   sizeof(message) - 1);
+        }
+        return false;
+    }
     const QolResult result = adapter->set_frame_overlay(nullptr, &g_overlay_binding_tag);
-    if (!contracts::succeeded(result)) return false;
+    if (!contracts::succeeded(result)) {
+        if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
+            char message[128]{};
+            std::snprintf(message, sizeof(message),
+                          "op=overlay owner=core.custom_ui result=failed reason=unregister_rejected code=%d",
+                          result.code);
+            (void)g_sdk->log.write(2, 12, "core.custom_ui/ui_confirmation", message,
+                                   static_cast<uint32_t>(std::strlen(message)));
+        }
+        return false;
+    }
     std::lock_guard<std::mutex> lock(g_mutex);
     g_overlay_registered = false;
     g_overlay_orphaned = false;
@@ -512,6 +554,7 @@ void confirmation_dispatch(bool confirm) {
     }
 
     if (consumer != nullptr) {
+        log_confirmation(1, confirm ? "confirm" : "cancel", token, "completed");
         consumer(user);
         std::lock_guard<std::mutex> lock(g_mutex);
         g_dispatching = false;
@@ -631,6 +674,7 @@ QolResult confirmation_open_impl(const contracts::UiConfirmationSpec* spec,
         g_consuming = false;
         g_active_token = token;
         g_overlay_drawn_once = false;
+        g_draw_failure_logged = false;
         g_v1_overlay = false;
         g_return_suppression_pending = false;
         g_return_suppression_frame = -1;
@@ -700,6 +744,7 @@ QolResult confirmation_open_impl(const contracts::UiConfirmationSpec* spec,
         g_opening = false;
     }
     *out_token = token;
+    log_confirmation(1, "open", token, "opened");
     return contracts::ok();
 }
 
@@ -896,6 +941,14 @@ bool ui_confirmation_register_frame_overlay(contracts::QolUiFrameOverlayDrawFn d
         std::lock_guard<std::mutex> lock(g_mutex);
         g_overlay_orphaned = false;
         return true;
+    }
+    if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
+        char message[128]{};
+        std::snprintf(message, sizeof(message),
+                      "op=overlay owner=core.custom_ui result=failed reason=register_rejected code=%d",
+                      result.code);
+        (void)g_sdk->log.write(2, 12, "core.custom_ui/ui_confirmation", message,
+                               static_cast<uint32_t>(std::strlen(message)));
     }
     std::lock_guard<std::mutex> lock(g_mutex);
     g_overlay_orphaned = true;

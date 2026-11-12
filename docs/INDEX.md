@@ -10,7 +10,8 @@
 | 使用 HTTP API | `reference/api-reference.md` | `guides/game-guide.md` |
 | 理解 API 服务开关与 OP 权限边界 | `refactor/api-optional-op-design.md` | `reference/api-reference.md` §7.6/§8、`reference/plugins/core.api.md` |
 | 构建、部署与设备验收 | `guides/build-and-deploy.md` | `reference/api-reference.md`（涉及 API 验收时）、`reference/logging.md`（崩溃取证） |
-| 排查崩溃、读日志与符号化 | `reference/logging.md` | `guides/build-and-deploy.md` §3.3/§3.3.1 |
+| 排查崩溃、读日志与符号化 | `reference/logging.md` | `reference/logging-standards.md`（记录规范）、`guides/build-and-deploy.md` §3.3/§3.3.1 |
+| 写日志或审计日志 | `reference/logging-standards.md` | `reference/logging.md`（格式与文件契约）、`refactor/plugin-audit-playbook.md` |
 | 修改源码或设计边界 | 根目录 `ARCHITECTURE.md` | `refactor/`、相关 `reference/plugins/` |
 | 入口 hook 原语 / hook 库选型 | `refactor/hook-engine-decision.md` | `ARCHITECTURE.md` §3.2、`patch/`、`hooks/` |
 | 插件审计 | `refactor/plugin-audit-playbook.md` | `refactor/audits/`、`refactor/issues.md` |
@@ -28,6 +29,7 @@
 
 - `api-reference.md`：HTTP API 路径、方法、参数、响应和状态码的唯一权威。
 - `logging.md`：日志行格式、级别与域、文件清单与保留/轮转策略、`qol-crash.log`/`java-crash.log` 格式契约与符号化用法的唯一权威。
+- `logging-standards.md`：日志等级语义、重试分级、正文结构、频率与去重责任、审计流程与验收指标的当前权威；写日志和审计日志都以它为准。
 - `game/`：原版游戏系统与逆向结论。
 - `game/attributes.md`：角色属性体系——主属性、attr 0-31、隐藏扩展区、面板可见集合与不属于属性的全局加成。
 - `game/cooldown.md`：技能、药水与道具冷却的运行时结构、时长公式、tick 时间基准、复活卷轴与 monster v29 变体差异、符号地址。

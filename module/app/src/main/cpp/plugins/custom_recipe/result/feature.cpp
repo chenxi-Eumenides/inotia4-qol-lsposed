@@ -516,8 +516,9 @@ QolResult write_material_needs(const ::custom_recipe::Def* def,
         const QolResult result = g_write_port->write_stuff_need(
             i, def->materials[i].item_id, plan.needs[i]);
         if (result.ok != kQolOk) {
-            log_message(2, "tier-up failed stage=material_need index=%u result=%d",
-                        static_cast<uint32_t>(i), result.code);
+            log_message(2,
+                        "tier-up failed stage=material_need index=%u result=%d recipe=%u",
+                        static_cast<uint32_t>(i), result.code, def->label_word_id);
             return result;
         }
     }
@@ -637,7 +638,8 @@ void refresh_dynamic_recipes(void* /*ctx*/) {
     if (g_save_facts == nullptr || g_save_facts->current_slot == nullptr ||
         g_save_facts->slot_times == nullptr) {
         ::custom_recipe::set_dynamic_three_slot_recipes(nullptr, 0);
-        log_message(2, "dynamic recipe rebuild skipped: save facts unavailable");
+        log_message(2,
+                    "dynamic recipe rebuild skipped: save facts unavailable reason=save_facts_unavailable");
         return;
     }
 
@@ -878,6 +880,7 @@ bool locate_material_action_ref(contracts::QolItemHandle item, contracts::QolAct
 
 void log_execute_stage(int32_t level, const char* stage, uint32_t index,
                        int32_t result, int32_t before, int32_t after) {
+    if (level == 1) level = 0;
     if (level == 0 && g_verify_log_budget.fetch_sub(1) <= 0) return;
     log_message(level,
                 "three slot execute stage=%s index=%u result=%d before=%d after=%d",
@@ -899,16 +902,17 @@ void discard_uncommitted_product(qol::contracts::QolItemHandle product,
     if (!valid_craft_item(product)) return;
     if (g_inventory_action == nullptr || g_inventory_action->discard_handle == nullptr) {
         log_message(2, "three slot execute stage=product_cleanup index=%u result=%d "
-                       "after=%s ownership=unknown",
-                    index, kQolErrNotReady, failed_stage);
+                       "after=%s ownership=unknown product=%u.%u",
+                    index, kQolErrNotReady, failed_stage, product.slot, product.generation);
         return;
     }
     const qol::contracts::InventoryUseOutcome discarded =
         g_inventory_action->discard_handle(product, 1);
     if (discarded.status != qol::contracts::InventoryActionStatus::kOk) {
         log_message(2, "three slot execute stage=product_cleanup index=%u result=%d "
-                       "after=%s ownership=unknown",
-                    index, inventory_action_status_code(discarded.status), failed_stage);
+                       "after=%s ownership=unknown product=%u.%u",
+                    index, inventory_action_status_code(discarded.status), failed_stage,
+                    product.slot, product.generation);
     } else if (g_verify_log_budget.fetch_sub(1) > 0) {
         log_message(0, "three slot execute stage=product_cleanup index=%u result=0 "
                        "after=%s ownership=released",
@@ -1006,7 +1010,7 @@ result::CraftGate api_craft_gate(qol::contracts::QolItemHandle target_item) {
     }
     if (item_type != qol::contracts::QolItemType::kEquipment) {
         if (gate_log_take()) {
-            log_message(1, "tier-up gate blocked stage=not_equipment item_type=%d handle=%u/%u",
+            log_message(0, "tier-up gate blocked stage=not_equipment item_type=%d handle=%u/%u",
                         static_cast<int32_t>(item_type),
                         static_cast<uint32_t>(target_item.slot),
                         static_cast<uint32_t>(target_item.generation));
@@ -1038,7 +1042,7 @@ result::CraftGate api_craft_gate(qol::contracts::QolItemHandle target_item) {
     }
     if (view.native_option_count == 0) {
         if (gate_log_take()) {
-            log_message(1, "tier-up gate blocked stage=no_native_option handle=%u/%u",
+            log_message(0, "tier-up gate blocked stage=no_native_option handle=%u/%u",
                         static_cast<uint32_t>(target_item.slot),
                         static_cast<uint32_t>(target_item.generation));
         }
@@ -1068,7 +1072,7 @@ result::CraftGate api_craft_gate(qol::contracts::QolItemHandle target_item) {
     }
     if (upgradable == 0) {
         if (gate_log_take()) {
-            log_message(1, "tier-up gate blocked stage=no_upgradable_affix options=%u handle=%u/%u",
+            log_message(0, "tier-up gate blocked stage=no_upgradable_affix options=%u handle=%u/%u",
                         view.native_option_count, static_cast<uint32_t>(target_item.slot),
                         static_cast<uint32_t>(target_item.generation));
         }
@@ -1089,7 +1093,8 @@ static void note_thread_contract(const char* entry) {
     if (g_game->thread.is_main_thread() != 0) return;
     static std::atomic<bool> reported{false};
     if (reported.exchange(true)) return;
-    log_message(2, "wrong thread entry=%s (main-thread contract violated)", entry);
+    log_message(2, "wrong thread entry=%s (main-thread contract violated) reason=main_thread_contract",
+                entry);
 }
 
 result::PlaceOutcome api_place(const result::CraftPlaceInput* in) {
@@ -1149,7 +1154,9 @@ result::PrepareOutcome api_prepare(const result::CraftPrepareInput* in) {
         return PrepareOutcome::kNoMatch;
     }
     if (g_craft_facts == nullptr || g_craft_facts->read.stuff_item == nullptr) {
-        log_message(2, "three slot prepare failed stage=identity result=%d", kQolErrNotReady);
+        log_message(2,
+                    "three slot prepare failed stage=identity result=%d reason=stuff_facts_unavailable slots=%u/%u/%u",
+                    kQolErrNotReady, categories[0], categories[1], categories[2]);
         return PrepareOutcome::kUnavailable;
     }
     qol::contracts::QolItemHandle items[kThreeSlotStuffCount] = {
@@ -1160,15 +1167,19 @@ result::PrepareOutcome api_prepare(const result::CraftPrepareInput* in) {
     for (size_t i = 0; i < kThreeSlotStuffCount; ++i) {
         const QolResult read = g_craft_facts->read.stuff_item(static_cast<uint32_t>(i), &items[i]);
         if (read.ok != kQolOk) {
-            log_message(2, "three slot prepare failed stage=identity index=%u result=%d",
-                        static_cast<uint32_t>(i), read.code);
+            log_message(2,
+                        "three slot prepare failed stage=identity index=%u result=%d handle=%u.%u",
+                        static_cast<uint32_t>(i), read.code, items[i].slot,
+                        items[i].generation);
             return PrepareOutcome::kUnavailable;
         }
         if (categories[i] == 0) {
             if (items[i].slot != 0 || items[i].generation != 0) {
                 // 调用方声称该格为空但槽内有对象：上下文与配方判定不一致。
-                log_message(2, "three slot prepare failed stage=empty_identity index=%u result=%d",
-                            static_cast<uint32_t>(i), kQolErrConflict);
+                log_message(2,
+                            "three slot prepare failed stage=empty_identity index=%u result=%d reason=identity_mismatch handle=%u.%u",
+                            static_cast<uint32_t>(i), kQolErrConflict, items[i].slot,
+                            items[i].generation);
                 return PrepareOutcome::kUnavailable;
             }
             continue;
@@ -1176,18 +1187,25 @@ result::PrepareOutcome api_prepare(const result::CraftPrepareInput* in) {
         uint16_t actual_category = 0;
         const QolResult category_result = read_live_item_category(items[i], &actual_category);
         if (category_result.ok != kQolOk) {
-            log_message(2, "three slot prepare failed stage=identity_category index=%u result=%d",
-                        static_cast<uint32_t>(i), category_result.code);
+            log_message(2,
+                        "three slot prepare failed stage=identity_category index=%u result=%d handle=%u.%u",
+                        static_cast<uint32_t>(i), category_result.code, items[i].slot,
+                        items[i].generation);
             return PrepareOutcome::kUnavailable;
         }
         if (actual_category != categories[i]) {
             // 传入类别与槽内实际类别不一致：上下文错误，不是「配方不匹配」。
-            log_message(2, "three slot prepare failed stage=identity_category index=%u result=%d",
-                        static_cast<uint32_t>(i), kQolErrConflict);
+            log_message(2,
+                        "three slot prepare failed stage=identity_category index=%u result=%d reason=category_mismatch actual=%u expected=%u",
+                        static_cast<uint32_t>(i), kQolErrConflict, actual_category,
+                        categories[i]);
             return PrepareOutcome::kUnavailable;
         }
     }
     three_slot_refresh_pending(*recipe, items, categories);  // YesNo 前保存完整 recipe 与 identity。
+    log_message(1,
+                "apply op=recipe_match product=%u slots=%u/%u/%u result=confirm_pending",
+                recipe->product, categories[0], categories[1], categories[2]);
     return PrepareOutcome::kConfirmPending;
 }
 
@@ -1670,7 +1688,7 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
         }
     }
     if (g_verify_log_budget.fetch_sub(1) > 0) {
-        log_message(0, "three slot crafted product=%u consumed=%d",
+        log_message(1, "three slot crafted product=%u consumed=%d",
                     static_cast<uint32_t>(product_category),
                     valid_craft_item(items[0]) + valid_craft_item(items[1]) +
                         valid_craft_item(items[2]) -
@@ -1724,8 +1742,9 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
         qol::contracts::AttributeQualityItem current{};
         const QolResult quality_result = query_jewel_quality(in->item, &api, &current);
         if (quality_result.ok != kQolOk) {
-            log_message(2, "make item aborted: attribute quality query failed code=%d",
-                        quality_result.code);
+            log_message(2,
+                        "make item aborted: attribute quality query failed code=%d item=%u.%u mixType=%u",
+                        quality_result.code, in->item.slot, in->item.generation, in->mix_type);
             return 1;
         }
 
@@ -1734,13 +1753,18 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
         const int type = static_cast<int>((word >> kJewelTypeShift) & kJewelTypeMask);
         const int value = static_cast<int>(word & kJewelValueMask);
         if (current.attribute_id != type || current.value != value) {
-            log_message(2, "make item aborted: jewel quality facts do not match item word");
+            log_message(2,
+                        "make item aborted: jewel quality facts do not match item word item=%u.%u mixType=%u reason=quality_word_mismatch quality=%d/%d word=%d/%d",
+                        in->item.slot, in->item.generation, in->mix_type, current.attribute_id,
+                        current.value, type, value);
             return 1;
         }
 
         if (g_item_payload == nullptr || g_item_payload->update == nullptr ||
             g_inventory_transfer == nullptr || g_inventory_transfer->replace_item == nullptr) {
-            log_message(2, "make item aborted: item payload/replace unavailable");
+            log_message(2,
+                        "make item aborted: item payload/replace unavailable mixType=%u item=%u.%u reason=payload_replace_unavailable",
+                        in->mix_type, in->item.slot, in->item.generation);
             return 1;
         }
         const int quality_tier =
@@ -1751,8 +1775,9 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
         const QolResult material_result =
             prepare_material_needs(def, quality_tier, attribute_tier, &material_plan);
         if (material_result.ok != kQolOk) {
-            log_message(2, "make item aborted: material precheck failed code=%d",
-                        material_result.code);
+            log_message(2,
+                        "make item aborted: material precheck failed code=%d mixType=%u item=%u.%u",
+                        material_result.code, in->mix_type, in->item.slot, in->item.generation);
             return 1;
         }
 
@@ -1767,7 +1792,9 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
             current_tier, range, &evaluate_candidate_quality, &evaluation,
             &make_item_rand_bridge, &upgrade_result, &target, &new_value);
         if (computed.ok != kQolOk) {
-            log_message(2, "make item aborted: tier evaluation failed code=%d", computed.code);
+            log_message(2,
+                        "make item aborted: tier evaluation failed code=%d mixType=%u item=%u.%u",
+                        computed.code, in->mix_type, in->item.slot, in->item.generation);
             return 1;
         }
         if (upgrade_result != UpgradeResult::kOk) {
@@ -1787,7 +1814,9 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
         contracts::QolItemPayload payload{};
         const QolResult updated = update_item_payload(in->item, &mutation, 1, &payload);
         if (updated.ok != kQolOk) {
-            log_message(2, "make item failed stage=payload_update result=%d", updated.code);
+            log_message(2,
+                        "make item failed stage=payload_update result=%d mixType=%u item=%u.%u",
+                        updated.code, in->mix_type, in->item.slot, in->item.generation);
             return 1;
         }
         contracts::QolBagMutationResult replaced{};
@@ -1804,6 +1833,9 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
             log_message(0, "make item tier-up type=%d value=%d->%d range=[%d,%d] target=%d", type,
                         value, new_value, range.min, range.max, tier_ordinal(target));
         }
+        log_message(1,
+                    "apply op=tier_up result=committed item=%u.%u mixType=%u kind=jewel",
+                    in->item.slot, in->item.generation, in->mix_type);
         return 0;
     }
 
@@ -1856,8 +1888,10 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
     int32_t pick = -1;
     const QolResult picked = in->rand_inclusive(0, static_cast<int32_t>(candidate_count - 1), &pick);
     if (picked.ok != kQolOk || pick < 0 || static_cast<uint32_t>(pick) >= candidate_count) {
-        log_message(2, "make item aborted: equipment affix random failed code=%d pick=%d count=%u",
-                    picked.ok == kQolOk ? kQolErrInternal : picked.code, pick, candidate_count);
+        log_message(2,
+                    "make item aborted: equipment affix random failed code=%d pick=%d count=%u item=%u.%u mixType=%u",
+                    picked.ok == kQolOk ? kQolErrInternal : picked.code, pick, candidate_count,
+                    in->item.slot, in->item.generation, in->mix_type);
         return 1;
     }
     const AffixCandidate& candidate = candidates[static_cast<uint32_t>(pick)];
@@ -1870,13 +1904,15 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
         &evaluate_candidate_quality, &evaluation, &make_item_rand_bridge,
         &upgrade_result, &target, &new_value);
     if (computed.ok != kQolOk || upgrade_result != UpgradeResult::kOk) {
-        log_message(2, "make item aborted: equipment tier evaluation failed code=%d result=%d",
-                    computed.code, static_cast<int32_t>(upgrade_result));
+        log_message(2,
+                    "make item aborted: equipment tier evaluation failed code=%d result=%d item=%u.%u mixType=%u",
+                    computed.code, static_cast<int32_t>(upgrade_result), in->item.slot,
+                    in->item.generation, in->mix_type);
         return 1;
     }
     if (new_value < std::numeric_limits<int16_t>::min() ||
         new_value > std::numeric_limits<int16_t>::max()) {
-        log_message(3, "make item aborted: equipment value out of int16 range value=%d", new_value);
+        log_message(2, "make item aborted: equipment value out of int16 range value=%d", new_value);
         return 1;
     }
     if ((view.fields & qol::contracts::kQolItemInventoryHasRarity) == 0) return 1;
@@ -1890,14 +1926,18 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
     if (quality_tier < 0 || attribute_tier < 0) return 1;
     if (g_item_payload == nullptr || g_item_payload->update == nullptr ||
         g_inventory_transfer == nullptr || g_inventory_transfer->replace_item == nullptr) {
-        log_message(2, "make item aborted: item payload/replace unavailable");
+        log_message(2,
+                    "make item aborted: item payload/replace unavailable mixType=%u item=%u.%u reason=payload_replace_unavailable",
+                    in->mix_type, in->item.slot, in->item.generation);
         return 1;
     }
     MaterialNeedPlan material_plan{};
     const QolResult material_result =
         prepare_material_needs(def, quality_tier, attribute_tier, &material_plan);
     if (material_result.ok != kQolOk) {
-        log_message(2, "make item aborted: material precheck failed code=%d", material_result.code);
+        log_message(2,
+                    "make item aborted: material precheck failed code=%d mixType=%u item=%u.%u",
+                    material_result.code, in->mix_type, in->item.slot, in->item.generation);
         return 1;
     }
 
@@ -1910,7 +1950,9 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
     contracts::QolItemPayload payload{};
     const QolResult updated = update_item_payload(in->item, &mutation, 1, &payload);
     if (updated.ok != kQolOk) {
-        log_message(2, "make item failed stage=payload_update result=%d", updated.code);
+        log_message(2,
+                    "make item failed stage=payload_update result=%d mixType=%u item=%u.%u",
+                    updated.code, in->mix_type, in->item.slot, in->item.generation);
         return 1;
     }
     contracts::QolBagMutationResult replaced{};
@@ -1929,6 +1971,9 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
                     candidate.native_index, candidate.option_id, candidate.value, new_value,
                     candidate.range.min, candidate.range.max, tier_ordinal(target));
     }
+    log_message(1,
+                "apply op=tier_up result=committed item=%u.%u mixType=%u kind=equipment",
+                in->item.slot, in->item.generation, in->mix_type);
     return 0;
 }
 

@@ -65,6 +65,8 @@ void unregister_write_result_handler() {
     g_write_result_registered = false;
 }
 
+void log_line(int32_t level, const char* format, ...);
+
 // 物理扫描上界 = 模块布局事实（原版 6 袋 + C18 探测到的追加袋数）。
 void apply_native_bag_limit() {
     if (g_port == nullptr || !contracts::qol_item_port_native_bag_size_valid(g_port)) {
@@ -72,7 +74,13 @@ void apply_native_bag_limit() {
     }
     contracts::QolNativeBagLayout layout{};
     if (contracts::succeeded(g_port->read.native_bag_layout(&layout)) && layout.bag_limit > 0) {
+        const int previous_limit = bags::native_bag_limit();
         bags::set_native_bag_limit(layout.bag_limit);
+        const int applied_limit = bags::native_bag_limit();
+        if (applied_limit != previous_limit) {
+            log_line(1, "apply op=bag_limit result=applied limit=%d source=native_layout",
+                     applied_limit);
+        }
     }
 }
 
@@ -151,6 +159,8 @@ int plugin_install(contracts::PluginContext& context) {
     bags::inventory_snapshot_store().clear();
     register_write_result_handler();
     if (!hooks::attach(context.sdk, context.game, port)) {
+        log_line(2,
+                 "degrade feature=inventory_storage result=unavailable reason=resource_attach_failed");
         unregister_write_result_handler();
         g_sdk = nullptr;
         g_port = nullptr;

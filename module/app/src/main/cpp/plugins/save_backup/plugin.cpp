@@ -529,7 +529,7 @@ int32_t plugin_on_resource_ready(contracts::PluginContext& ctx, const char* reso
     // 受限回调（§3.3）：只缓存 backup（原函数入口），常数时间、无资源操作。
     if (resource_id != nullptr && std::strcmp(resource_id, kSlotDeleteResourceId) == 0) {
         g_slot_delete_orig.store(backup, std::memory_order_release);
-        SB_LOG("slot delete hook: backup handover orig=%p", backup);
+        SAVE_BACKUP_LOG_DEBUG("slot delete hook: backup handover orig=%p", backup);
     }
     return 0;
 }

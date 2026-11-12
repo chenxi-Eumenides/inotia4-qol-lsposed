@@ -61,6 +61,8 @@ bool chain_still_valid() {
 void log_message(int32_t level, const char* format, ...) {
     const qol::contracts::QolHostSdk* sdk = qol::features::world_teleport::host_sdk();
     if (sdk == nullptr || sdk->log.write == nullptr || format == nullptr) return;
+    if (level == 0 &&
+        (sdk->log.debug_enabled == nullptr || sdk->log.debug_enabled() == 0)) return;
     char message[qol::contracts::kMessageCap + 1]{};
     va_list args;
     va_start(args, format);
@@ -222,11 +224,11 @@ void open_choice_panel() {
     int current_id = 0;
     int record_count = 0;
     if (!read_current_map_id(&current_id) || !read_map_record_count(&record_count)) {
-        log_message(3, "world teleport: choice symbols not resolved");
+        log_message(2, "world teleport: choice symbols not resolved reason=map_facts_unresolved");
         return;
     }
     const int max_map_id = world_teleport::max_map_id_from_record_count(record_count);
-    log_message(1, "world teleport: map records count=%d max_map_id=%d current=%d",
+    log_message(0, "world teleport: map records count=%d max_map_id=%d current=%d",
                 record_count, max_map_id, current_id);
 
     // 选择面板统一；回调按变体分流：monster/大修走确认与扣费，c18/原版/未知免费直传。
@@ -252,7 +254,7 @@ void open_choice_panel() {
             if (!resolve_landing(target_id, &target.land_x, &target.land_y)) {
                 target.valid = false;
                 landing_missing = true;
-                log_message(3, "world teleport: static map data missing target=%d", target_id);
+                log_message(2, "world teleport: static map data missing target=%d reason=landing_data_unavailable", target_id);
             }
         }
         g_targets[index] = target;
@@ -282,11 +284,11 @@ void open_choice_panel() {
         "world_teleport.confirm"};
     const qol::contracts::UiChoiceApi* api = ui_choice_api();
     if (api == nullptr || api->open == nullptr) {
-        log_message(3, "world teleport: ui_choice capability unavailable");
+        log_message(2, "world teleport: ui_choice capability unavailable reason=capability_unavailable");
         return;
     }
     if (!api->open(spec)) {
-        log_message(3, "world teleport: choice open failed");
+        log_message(2, "world teleport: choice open failed reason=api_rejected");
         return;
     }
     log_ui_top_layer(current_id);
@@ -303,7 +305,7 @@ int32_t delayed_open_confirmation(int64_t, void* param) {
     const auto* target = static_cast<const ChoiceTarget*>(param);
     const auto* actions = world_actions();
     if (target == nullptr || actions == nullptr || actions->create_yesno == nullptr) {
-        log_message(3, "world teleport: confirmation symbols not resolved");
+        log_message(2, "world teleport: confirmation symbols not resolved reason=confirmation_symbols_unresolved");
         return 0;
     }
     if (!qol::contracts::succeeded(actions->create_yesno(
@@ -311,7 +313,7 @@ int32_t delayed_open_confirmation(int64_t, void* param) {
             reinterpret_cast<void*>(&teleport_confirmed),
             reinterpret_cast<void*>(&teleport_cancelled),
             reinterpret_cast<void*>(static_cast<intptr_t>(target->cost))))) {
-        log_message(3, "world teleport: confirmation open failed target=%d", target->map_id);
+        log_message(2, "world teleport: confirmation open failed target=%d reason=create_yesno_failed", target->map_id);
         return 0;
     }
     log_message(1, "world teleport: confirmation opened target=%d cost=%d",
@@ -323,7 +325,7 @@ void request_open_choice() {
     g_chain_generation = g_op_generation.load(std::memory_order_acquire);
 #if WORLD_TELEPORT_OPEN_NEXT_FRAME
     if (!schedule(delayed_open_choice, nullptr, 0)) {
-        log_message(3, "world teleport: delayed choice registration failed");
+        log_message(2, "world teleport: delayed choice registration failed reason=scheduler_rejected");
     }
 #else
     open_choice_panel();
@@ -334,7 +336,7 @@ void show_message(const char* message) {
     const auto* actions = world_actions();
     if (actions == nullptr || actions->show_banner == nullptr ||
         !qol::contracts::succeeded(actions->show_banner(message))) {
-        log_message(3, "world teleport: instant message symbol not resolved");
+        log_message(2, "world teleport: instant message symbol not resolved reason=show_banner_unavailable");
         return;
     }
     log_message(1, "world teleport: instant message shown text=%s", message);
@@ -349,36 +351,36 @@ int32_t delayed_transfer(int64_t, void* param) {
     if (target == nullptr || facts == nullptr || actions == nullptr ||
         facts->active_player_direction == nullptr ||
         actions->request_map_change == nullptr) {
-        log_message(3, "world teleport: transfer symbols not resolved");
+        log_message(2, "world teleport: transfer symbols not resolved reason=charge_symbols_unresolved");
         return 0;
     }
     if (target->charge && (item_facts == nullptr || item_facts->money == nullptr ||
                            actions->minus_money == nullptr)) {
-        log_message(3, "world teleport: transfer symbols not resolved");
+        log_message(2, "world teleport: transfer symbols not resolved reason=transfer_symbols_unresolved");
         return 0;
     }
     int32_t direction = -1;
     if (!qol::contracts::succeeded(facts->active_player_direction(&direction)) ||
         direction < 0) {
-        log_message(3, "world teleport: active player unavailable");
+        log_message(2, "world teleport: active player unavailable reason=money_unavailable");
         return 0;
     }
     const int cost = target->charge ? target->cost : 0;
     if (target->charge) {
         int64_t money = 0;
         if (!qol::contracts::succeeded(item_facts->money(&money))) {
-            log_message(3, "world teleport: active player unavailable");
+            log_message(2, "world teleport: active player unavailable reason=direction_unavailable");
             return 0;
         }
         if (money < target->cost) {
             show_message("金币不足，无法传送");
-            log_message(1, "world teleport: insufficient money target=%d cost=%d money=%lld",
+            log_message(2, "world teleport: insufficient money target=%d cost=%d money=%lld reason=insufficient_money",
                         target->map_id, target->cost, static_cast<long long>(money));
             return 0;
         }
         if (!qol::contracts::succeeded(actions->minus_money(static_cast<int64_t>(target->cost)))) {
             show_message("扣费失败，无法传送");
-            log_message(3, "world teleport: charge failed target=%d cost=%d",
+            log_message(2, "world teleport: charge failed target=%d cost=%d reason=minus_money_failed",
                         target->map_id, target->cost);
             return 0;
         }
@@ -388,14 +390,14 @@ int32_t delayed_transfer(int64_t, void* param) {
                                         direction))) {
         if (!target->charge) {
             show_message("传送失败");
-            log_message(3, "world teleport: transfer failed target=%d cost=0",
+            log_message(2, "world teleport: transfer failed target=%d cost=0 reason=map_change_failed",
                         target->map_id);
             return 0;
         }
         const bool refunded = actions->add_money != nullptr &&
             qol::contracts::succeeded(actions->add_money(static_cast<int64_t>(target->cost)));
         show_message(refunded ? "传送失败，已退还金币" : "传送失败，退款异常");
-        log_message(3, "world teleport: transfer failed target=%d cost=%d refunded=%d",
+        log_message(2, "world teleport: transfer failed target=%d cost=%d refunded=%d reason=map_change_failed",
                     target->map_id, target->cost, refunded ? 1 : 0);
         return 0;
     }
@@ -409,13 +411,13 @@ int32_t delayed_close_choice(int64_t, void* param) {
     const auto* actions = world_actions();
     if (actions == nullptr || actions->close_popup == nullptr ||
         actions->restore_hud == nullptr) {
-        log_message(3, "world teleport: choice close symbols not resolved");
+        log_message(2, "world teleport: choice close symbols not resolved reason=close_or_restore_unavailable");
         return 0;
     }
     (void)actions->close_popup();
     (void)actions->restore_hud();
     if (!schedule(delayed_transfer, param, 1)) {
-        log_message(3, "world teleport: transfer registration failed");
+        log_message(2, "world teleport: transfer registration failed reason=scheduler_rejected");
     }
     return 0;
 }
@@ -425,11 +427,11 @@ void teleport_confirmed(void*) {
     const ChoiceTarget* target = &g_pending_target;
     const auto* actions = world_actions();
     if (!target->valid || actions == nullptr || actions->close_popup == nullptr) {
-        log_message(3, "world teleport: confirm symbols not resolved");
+        log_message(2, "world teleport: confirm symbols not resolved reason=selection_context_unavailable");
         return;
     }
     if (!schedule(delayed_close_choice, const_cast<ChoiceTarget*>(target), 1)) {
-        log_message(3, "world teleport: transfer registration failed");
+        log_message(2, "world teleport: transfer registration failed reason=scheduler_rejected");
         return;
     }
     (void)actions->close_popup();
@@ -441,7 +443,7 @@ void teleport_confirmed(void*) {
 void teleport_cancelled(void*) {
     if (!chain_still_valid()) return;
     if (!schedule(delayed_open_choice, nullptr, 1)) {
-        log_message(3, "world teleport: choice reopen registration failed");
+        log_message(2, "world teleport: choice reopen registration failed reason=scheduler_rejected");
     }
     log_message(1, "world teleport: confirmation cancelled");
 }
@@ -451,14 +453,14 @@ void teleport_on_select(int index, void*) {
     const auto* actions = world_actions();
     if (index < 0 || index >= static_cast<int>(kTeleportChoiceCount) || actions == nullptr) {
         close_choice_panel();
-        log_message(3, "world teleport: confirm symbols not resolved");
+        log_message(2, "world teleport: confirm symbols not resolved reason=create_yesno_unavailable");
         return;
     }
     const ChoiceTarget& target = g_targets[static_cast<size_t>(index)];
     if (!target.valid) {
         show_message("目标地图无效，无法传送");
         close_choice_panel();
-        log_message(2, "world teleport: invalid target index=%d map_id=%d", index, target.map_id);
+        log_message(2, "world teleport: invalid target index=%d map_id=%d reason=target_unavailable", index, target.map_id);
         return;
     }
     g_pending_target = target;
@@ -469,16 +471,16 @@ void teleport_on_select(int index, void*) {
             (void)actions->restore_hud();
         }
         if (!schedule(delayed_close_choice, &g_pending_target, 1)) {
-            log_message(3, "world teleport: transfer registration failed");
+            log_message(2, "world teleport: transfer registration failed reason=scheduler_rejected");
             return;
         }
-        log_message(1, "world teleport: selected index=%d target=%d cost=0",
+        log_message(0, "world teleport: selected index=%d target=%d cost=0",
                     index, target.map_id);
         return;
     }
     if (actions->create_yesno == nullptr) {
         close_choice_panel();
-        log_message(3, "world teleport: confirm symbols not resolved");
+        log_message(2, "world teleport: confirm symbols not resolved reason=confirm_action_unavailable");
         return;
     }
     std::snprintf(g_confirm_text.data(), g_confirm_text.size(), "是否传送至%s？",
@@ -488,10 +490,10 @@ void teleport_on_select(int index, void*) {
         (void)actions->restore_hud();
     }
     if (!schedule(delayed_open_confirmation, &g_pending_target, 1)) {
-        log_message(3, "world teleport: confirmation registration failed");
+        log_message(2, "world teleport: confirmation registration failed reason=scheduler_rejected");
         return;
     }
-    log_message(1, "world teleport: selected index=%d target=%d cost=%d",
+    log_message(0, "world teleport: selected index=%d target=%d cost=%d",
                 index, target.map_id, target.cost);
 }
 
@@ -507,23 +509,23 @@ void world_teleport_call_map_name() {
     // 原函数入口即写地图名横幅；入口 hook 接管后须在业务分支前复刻该副作用。
     int banner_map_id = 0;
     if (!read_current_map_id(&banner_map_id)) {
-        log_message(3, "world teleport: banner map id unavailable");
+        log_message(2, "world teleport: banner map id unavailable reason=map_name_unavailable");
     } else {
         const char* banner_name = read_map_name(banner_map_id);
         if (banner_name != nullptr) {
             show_message(banner_name);
         } else {
-            log_message(3, "world teleport: banner map id unavailable");
+            log_message(2, "world teleport: banner map id unavailable reason=current_map_unavailable");
         }
     }
     int state = -1;
     if (!read_state(&state)) {
-        log_message(3, "world teleport: state unavailable");
+        log_message(2, "world teleport: state unavailable reason=world_state_unavailable");
         return;
     }
-    log_message(1, "world teleport: CallMapName intercepted state=%d", state);
+    log_message(0, "world teleport: CallMapName intercepted state=%d", state);
     if (state != kWorldState) {
-        log_message(2, "world teleport: ignored CallMapName outside world state=%d", state);
+        log_message(0, "world teleport: ignored CallMapName outside world state=%d", state);
         return;
     }
     request_open_choice();

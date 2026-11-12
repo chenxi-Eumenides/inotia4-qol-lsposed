@@ -43,7 +43,7 @@ auto call_backup(const char* hook_id, Function backup, Args&&... args)
     -> decltype(backup(std::forward<Args>(args)...)) {
     using Return = decltype(backup(std::forward<Args>(args)...));
     if (backup == nullptr) {
-        QOL_LOG_ERROR(QolDomain::kExtensionBag, "hook=%s backup missing", hook_id);
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "hook=%s backup missing", hook_id);
         if constexpr (std::is_void<Return>::value) {
             return;
         } else {
@@ -145,7 +145,7 @@ void refresh_item_area_wrapper() {
         return;
     }
     if (backup == nullptr) {
-        QOL_LOG_ERROR(QolDomain::kExtensionBag,
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
                       "hook=%s backup missing", "hook:UIEquip_RefreshItemArea");
         return;
     }
@@ -162,7 +162,7 @@ uint64_t equip_control_event_proc_wrapper(void* control, uint64_t event, void* x
                            param);
     }
     if (backup == nullptr) {
-        QOL_LOG_ERROR(QolDomain::kExtensionBag,
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
                       "hook=%s backup missing", "hook:UIEquip_EquipControlEventProc");
         return 0;
     }
@@ -256,7 +256,7 @@ int32_t bind_backup(const char* resource_id, void* backup) {
 bool call_refresh_item_area_original() {
     const RefreshItemAreaFn backup = refresh_item_area_backup();
     if (backup == nullptr) {
-        QOL_LOG_ERROR(QolDomain::kExtensionBag, "hook=%s backup missing",
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "hook=%s backup missing",
                       "hook:UIEquip_RefreshItemArea");
         return false;
     }

@@ -92,7 +92,7 @@ int64_t store_button_sell_exe_wrapper() {
             }
         }
     }
-    VIRTBAG_LOG("store button sell view=%d module=%d count=%d item=%p",
+    VIRTBAG_LOG_DEBUG("store button sell view=%d module=%d count=%d item=%p",
                 qol::extension_bag::ui_state().store.view_installed ? 1 : 0, module_item ? 1 : 0, count, item);
     if (!module_item || count <= 1) return backup();
 
@@ -105,7 +105,7 @@ int64_t store_button_sell_exe_wrapper() {
     if (ui == nullptr || callback == nullptr ||
         !qol::contracts::succeeded(
             ui->create_item_count_popup(1, item, 1, count, callback))) {
-        VIRTBAG_LOG("store quantity dialog unavailable; falling back count=%d", count);
+        VIRTBAG_LOG_WARN("store quantity dialog unavailable; falling back count=%d", count);
         return backup();
     }
     return 1;
@@ -173,7 +173,7 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
     }
     if (!module_item) return reinterpret_cast<StoreSellItemFn>(qol::extension_bag::ui_state().ui.backup_store_sell_item)(displayed_price);
     if (reject) {
-        VIRTBAG_LOG("store sell reject reason=identity_or_plan bag=%d slot=%d", bag, slot);
+        VIRTBAG_LOG_WARN("store sell reject reason=identity_or_plan bag=%d slot=%d", bag, slot);
         store_sell_popup(0xc);
         return 0;
     }
@@ -181,7 +181,7 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
     const int count = plan.kind == qol::store_sell::PlanKind::kWhole ? 1 : plan.count;
     const int64_t price = extension_bag_sell_price(item, count, false);
     if (price < 0 || price != displayed_price) {
-        VIRTBAG_LOG("store sell reject reason=price_mismatch bag=%d slot=%d count=%d price=%lld displayed=%lld",
+        VIRTBAG_LOG_WARN("store sell reject reason=price_mismatch bag=%d slot=%d count=%d price=%lld displayed=%lld",
                     bag, slot, count, static_cast<long long>(price),
                     static_cast<long long>(displayed_price));
         store_sell_popup(0xc);
@@ -194,7 +194,7 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
     }
     const auto result = action->sell({qol::features::extension_bag::kExtensionBagSpaceId, bag, slot}, expected_item, count, "store");
     if (result.status != qol::contracts::InventorySellStatus::kOk) {
-        VIRTBAG_LOG("store sell action rejected bag=%d slot=%d count=%d status=%d",
+        VIRTBAG_LOG_WARN("store sell action rejected bag=%d slot=%d count=%d status=%d",
                     bag, slot, count, static_cast<int>(result.status));
         store_sell_popup(0xc);
         return 0;
@@ -221,7 +221,7 @@ StoreSaveSlotLookup store_find_original_slot_with_real_capacity(void* item,
                                                                  int32_t* out_slot) {
     if (item == nullptr || out_slot == nullptr || ::qol::extension_bag::access::host().game == nullptr ||
         ::qol::extension_bag::access::host().inventory_extras == nullptr || ::qol::extension_bag::access::host().inventory_extras->read.find_save_slot == nullptr) {
-        VIRTBAG_LOG("store buy gate original lookup unavailable item=%p", item);
+        VIRTBAG_LOG_WARN("store buy gate original lookup unavailable item=%p", item);
         return StoreSaveSlotLookup::kError;
     }
 
@@ -233,11 +233,11 @@ StoreSaveSlotLookup store_find_original_slot_with_real_capacity(void* item,
     if (projected) {
         if (!virtual_bag::valid_original_transaction_bag(original_bag) ||
             !bag_size_word_locked(original_bag, &projected_size_word)) {
-            VIRTBAG_LOG("store buy gate cannot read projected capacity window=%d", original_bag);
+            VIRTBAG_LOG_WARN("store buy gate cannot read projected capacity window=%d", original_bag);
             return StoreSaveSlotLookup::kError;
         }
         if (!set_bag_size_word_locked(original_bag, qol::extension_bag::ui_state().store.original_size_word)) {
-            VIRTBAG_LOG("store buy gate cannot restore original capacity window=%d", original_bag);
+            VIRTBAG_LOG_WARN("store buy gate cannot restore original capacity window=%d", original_bag);
             return StoreSaveSlotLookup::kError;
         }
     }
@@ -256,21 +256,21 @@ StoreSaveSlotLookup store_find_original_slot_with_real_capacity(void* item,
             return StoreSaveSlotLookup::kError;
         }
         if (!set_bag_size_word_locked(original_bag, projected_size_word)) {
-            VIRTBAG_LOG("store buy gate failed to restore projected capacity window=%d", original_bag);
+            VIRTBAG_LOG_WARN("store buy gate failed to restore projected capacity window=%d", original_bag);
             return StoreSaveSlotLookup::kError;
         }
     }
 
     if (qol::contracts::succeeded(result)) {
         if (slot < 0 || slot > UINT8_MAX) {
-            VIRTBAG_LOG("store buy gate received invalid original slot=%d", slot);
+            VIRTBAG_LOG_DEBUG("store buy gate received invalid original slot=%d", slot);
             return StoreSaveSlotLookup::kError;
         }
         *out_slot = slot;
         return StoreSaveSlotLookup::kFound;
     }
     if (result.code == kQolErrNotFound) return StoreSaveSlotLookup::kNotFound;
-    VIRTBAG_LOG("store buy gate original lookup failed code=%d", result.code);
+    VIRTBAG_LOG_WARN("store buy gate original lookup failed code=%d", result.code);
     return StoreSaveSlotLookup::kError;
 }
 
@@ -282,7 +282,7 @@ bool store_extension_can_accept_item_locked(void* item) {
     int category = 0;
     if (!serialize_item_payload_locked(item, &payload, &payload_size) ||
         !read_item_category(item, &category)) {
-        VIRTBAG_LOG("store buy gate extension preflight rejected item=%p reason=source-read", item);
+        VIRTBAG_LOG_WARN("store buy gate extension preflight rejected item=%p reason=source-read", item);
         return false;
     }
     int canonical_count = static_cast<int>(virtual_bag_canonical_count(item, 1));

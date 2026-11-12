@@ -26,6 +26,17 @@ const contracts::QolCharacterExtrasPort* g_character_extras = nullptr;
 const contracts::CharacterFactsApi* g_character_facts = nullptr;
 const char* g_install_error = nullptr;
 bool g_panel_registered = false;
+
+void log_panel_open_failure(const char* reason) {
+    if (g_sdk == nullptr || g_sdk->log.write == nullptr || reason == nullptr) return;
+    char message[128]{};
+    const int length = std::snprintf(message, sizeof(message),
+                                     "fail op=open_panel panel=world_tuning reason=%s", reason);
+    if (length <= 0) return;
+    const uint32_t message_length = static_cast<uint32_t>(
+        length < static_cast<int>(sizeof(message)) ? length : sizeof(message) - 1);
+    (void)g_sdk->log.write(2, 16, "plugins/world_tuning/plugin.cpp", message, message_length);
+}
 // item.use 与面板 UI 能力均为可选：由宿主在能力注册/撤销时广播变更，
 // 插件据此重新 require、注册 provider 或解绑/注销。
 uint64_t g_capability_event_subscription = 0;
@@ -477,13 +488,16 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 
 QolResult open_panel_feature(contracts::PluginContext& ctx) {
     if (!gate_enabled()) {
+        log_panel_open_failure("feature_disabled");
         return contracts::error(kQolErrNotReady, "world tuning is not enabled", 29);
     }
     ensure_panel();
     if (!panel_available()) {
+        log_panel_open_failure("ui_unavailable");
         return contracts::error(kQolErrNotReady, "ui tools unavailable", 19);
     }
     if (ctx.sdk == nullptr || ctx.sdk->capabilities.require == nullptr) {
+        log_panel_open_failure("capability_unavailable");
         return contracts::error(kQolErrNotReady, "ui_panels unavailable", 21);
     }
     const void* iface = nullptr;
@@ -493,10 +507,16 @@ QolResult open_panel_feature(contracts::PluginContext& ctx) {
              static_cast<uint16_t>(contracts::kUiPanelsVersionMinor)},
             &iface)) ||
         iface == nullptr) {
+        log_panel_open_failure("capability_unavailable");
         return contracts::error(kQolErrNotReady, "ui_panels unavailable", 21);
     }
     const auto* panels = static_cast<const contracts::UiPanelsApi*>(iface);
-    if (panels->open == nullptr || !panels->open("world_tuning")) {
+    if (panels->open == nullptr) {
+        log_panel_open_failure("open_unavailable");
+        return contracts::error(kQolErrBlocked, "world tuning panel could not be opened", 35);
+    }
+    if (!panels->open("world_tuning")) {
+        log_panel_open_failure("open_rejected");
         return contracts::error(kQolErrBlocked, "world tuning panel could not be opened", 35);
     }
     return contracts::ok();

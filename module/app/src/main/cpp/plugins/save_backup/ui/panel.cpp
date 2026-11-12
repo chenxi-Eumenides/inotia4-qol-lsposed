@@ -317,7 +317,7 @@ void refresh_panel_data() {
     g_auto_loading = false;
     g_backups_loading = true;
     rebuild_parse_queue_locked();
-    SB_UI_LOG("backup files enumerated: %zu files, %d pages, parse queue=%zu",
+    SAVE_BACKUP_LOG_DEBUG("backup files enumerated: %zu files, %d pages, parse queue=%zu",
               g_backups.size(), g_total_pages, g_parse_queue.size());
 }
 
@@ -354,7 +354,7 @@ void process_one_parse_task() {
         if (task.slot == g_selected_slot) {
             g_auto_backup_valid = ok;
             if (ok) g_auto_backup = std::move(parsed);
-            else SB_UI_LOG("auto backup parse failed: slot=%d", task.slot);
+            else SAVE_BACKUP_LOG_WARN("auto backup parse failed: slot=%d", task.slot);
         }
     } else {
         auto it = std::find_if(g_backups.begin(), g_backups.end(), [&](const BackupEntry& item) {
@@ -365,10 +365,10 @@ void process_one_parse_task() {
                 *it = std::move(parsed);
                 g_entry_cache[backup_cache_key(task.name, task.size, task.mtime_ms)] = *it;
                 if (it->warehouse_undecryptable) {
-                    SB_UI_LOG("backup warehouse not decryptable: %s", task.name.c_str());
+                    SAVE_BACKUP_LOG_WARN("backup warehouse not decryptable: %s", task.name.c_str());
                 }
             } else {
-                SB_UI_LOG("backup entry parse failed: %s", task.name.c_str());
+                SAVE_BACKUP_LOG_WARN("backup entry parse failed: %s", task.name.c_str());
                 if (g_selected_backup_name == task.name) {
                     g_selected_backup_name.clear();
                     g_selected_backup = -1;

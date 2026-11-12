@@ -89,7 +89,7 @@ QolResult c18_layout_not_ready(void* parent, const char* reason, int detail,
     if (should_log) {
         int child_count = 0;
         const bool count_ok = extension_bag_ui_child_count(parent, &child_count);
-        VIRTBAG_LOG("C18 tab layout fail-closed root=%p generation=%llu child_count=%d count_ok=%d "
+        VIRTBAG_LOG_WARN("C18 tab layout fail-closed root=%p generation=%llu child_count=%d count_ok=%d "
                     "insets=%lldx%lld screen=%lldx%lld topology=reject reason=%s detail=%d",
                     parent, static_cast<unsigned long long>(generation), child_count,
                     count_ok ? 1 : 0, static_cast<long long>(inset_width),
@@ -330,7 +330,7 @@ void prepare_c18_native_bag_layout_locked_impl() {
                     parent, static_cast<unsigned long long>(generation),
                     g_c18_applied_reflow.rendered_tabs, rendered_tabs);
         if (!restore_c18_applied_reflow(parent, generation)) {
-            VIRTBAG_LOG("C18 native reflow resize restore failed root=%p generation=%llu",
+            VIRTBAG_LOG_WARN("C18 native reflow resize restore failed root=%p generation=%llu",
                         parent, static_cast<unsigned long long>(generation));
             return;
         }
@@ -386,7 +386,7 @@ void prepare_c18_native_bag_layout_locked_impl() {
             !extension_bag_ui_set_rect(control,
                 {shifted_x, candidate.local_y,
                  candidate.width, candidate.height})) {
-            VIRTBAG_LOG("C18 native reflow aborted root=%p generation=%llu failed_child=%d",
+            VIRTBAG_LOG_WARN("C18 native reflow aborted root=%p generation=%llu failed_child=%d",
                         parent, static_cast<unsigned long long>(qol::extension_bag::ui_state().ui.inventory_generation), i);
             (void)restore_c18_applied_reflow(parent, generation);
             return;
