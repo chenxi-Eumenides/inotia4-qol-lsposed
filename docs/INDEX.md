@@ -18,6 +18,7 @@
 | 配置 `enable` 与插件生命周期方案评审 | `refactor/config-enable-lifecycle-proposal.md` | `ARCHITECTURE.md` §7.2/§8.2、`reference/api-reference.md` §7.6 |
 | 查询验证标准和当前欠账 | `refactor/verification.md` | `refactor/verification/`、`refactor/slot-data-contract.md` |
 | 理解原版游戏机制 | `reference/game/` | `archive/` 中相关历史记录仅用于追溯 |
+| 了解原版 so 结构、函数族与可替换边界 | `reference/game/native-binary.md` | `reference/game/runtime.md`、`reference/game/game-systems.md` |
 
 ## 目录职责
 
@@ -31,6 +32,7 @@
 - `game/attributes.md`：角色属性体系——主属性、attr 0-31、隐藏扩展区、面板可见集合与不属于属性的全局加成。
 - `game/cooldown.md`：技能、药水与道具冷却的运行时结构、时长公式、tick 时间基准、复活卷轴与 monster v29 变体差异、符号地址。
 - `game/runtime.md`：单线程主循环、固定 60ms 逻辑帧、全局 tick、主循环入口与帧锚点、主菜单/世界状态机。
+- `game/native-binary.md`：原版 v1.3.2 解包位置、`libgame.so` ELF 指标、函数族构成、调用/全局状态耦合与替换边界分层。
 - `game/equipment.md`：群友推荐的可获得与不可获得装备清单。
 - `plugins/`：官方插件当前职责与实现参考。
 
