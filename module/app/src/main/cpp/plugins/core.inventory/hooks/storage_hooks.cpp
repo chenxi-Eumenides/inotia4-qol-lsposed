@@ -831,14 +831,17 @@ bool import_registered_item_direct(void* item, int32_t space_id, int32_t bag, in
     if (!qol::contracts::succeeded(result)) {
         ++g_save_item_direct_fail_count;
         QOL_LOG_ERROR(QolDomain::kInventory,
-                      "SaveItemDirect eb failed origin=%s item=%p space=%d bag=%d slot=%d code=%d",
-                      origin, item, space_id, bag, slot, static_cast<int32_t>(result.code));
+                      "SaveItemDirect eb failed origin=%s item=%p space=%d bag=%d slot=%d code=%d category=%d count=%d payload=%u",
+                      origin, item, space_id, bag, slot, static_cast<int32_t>(result.code),
+                      static_cast<int>(transfer.category), static_cast<int>(transfer.count),
+                      static_cast<unsigned int>(transfer.payload_size));
         return false;
     }
     g_pending_eb_items.push_back(item);
     core_inventory_log_write(0, __FILE__, __LINE__,
-                        "SaveItemDirect eb imported origin=%s item=%p space=%d bag=%d slot=%d",
-                        origin, item, space_id, bag, slot);
+                        "SaveItemDirect eb imported origin=%s item=%p space=%d bag=%d slot=%d category=%d count=%d",
+                        origin, item, space_id, bag, slot,
+                        static_cast<int>(transfer.category), static_cast<int>(transfer.count));
     return true;
 }
 

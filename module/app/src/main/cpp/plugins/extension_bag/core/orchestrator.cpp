@@ -200,6 +200,22 @@ bool serialize_item_payload_locked(void* item,
            virtual_bag::PayloadValidation::kOk;
 }
 
+static void format_payload_hex_prefix(const uint8_t* payload, int payload_size,
+                                      char* out, size_t out_size) {
+    static constexpr char kHexDigits[] = "0123456789abcdef";
+    if (out == nullptr || out_size == 0) return;
+    const size_t byte_count = payload == nullptr || payload_size <= 0
+                                  ? 0
+                                  : static_cast<size_t>(payload_size < 24 ? payload_size : 24);
+    const size_t writable_bytes = (out_size - 1) / 2;
+    const size_t count = byte_count < writable_bytes ? byte_count : writable_bytes;
+    for (size_t i = 0; i < count; ++i) {
+        out[i * 2] = kHexDigits[payload[i] >> 4];
+        out[i * 2 + 1] = kHexDigits[payload[i] & 0x0f];
+    }
+    out[count * 2] = '\0';
+}
+
 void release_temporary_item_locked(void* item) {
     if (item == nullptr) return;
     extension_bag_invalidate_item_handle(item);
@@ -485,8 +501,27 @@ void recover_pending_transaction_locked(::qol::extension_bag::ReentryLock& lock)
     persist_state_locked();
 }
 void* materialize_module_item_locked(const virtual_bag::Item& descriptor) {
-    return load_item_payload_locked(descriptor.payload.data(), descriptor.payload_size,
-                                    "materialize_module_item");
+    void* item = load_item_payload_locked(descriptor.payload.data(), descriptor.payload_size,
+                                          "materialize_module_item");
+    if (item != nullptr) return item;
+
+    // 仅在失败路径重试一次，用于区分持久性 payload 拒绝与瞬时池压力；成功路径行为不变。
+    const virtual_bag::ManagedLoadResult retry = virtual_bag::load_item_payload_exact(
+        descriptor.payload.data(), descriptor.payload_size, extension_serialize_item_payload,
+        extension_load_item_payload, extension_free_item_payload);
+    if (retry.item != nullptr) release_temporary_item_locked(retry.item);
+
+    // 购买入库失败属于必须取证的异常：用 WARN（不限流），并与重试结果合并为一行。
+    // INFO 每帧每域 16 行封顶（docs/reference/logging.md §2），扩展袋域在商店刷新帧会触顶；
+    // DEBUG 又受 debug 开关门控，两种级别都可能让这次失败没有证据。
+    char head[49]{};
+    format_payload_hex_prefix(descriptor.payload.data(), descriptor.payload_size, head,
+                              sizeof(head));
+    VIRTBAG_LOG_WARN("materialize failed category=%u count=%u size=%d head=%s retry=%s",
+                     static_cast<unsigned int>(descriptor.category),
+                     static_cast<unsigned int>(descriptor.count), descriptor.payload_size, head,
+                     virtual_bag::managed_load_failure_reason(retry.failure));
+    return item;
 }
 bool item_pointer_known_locked(void* item) {
     if (item == nullptr) return true;  // 空指针由调用方各自处理

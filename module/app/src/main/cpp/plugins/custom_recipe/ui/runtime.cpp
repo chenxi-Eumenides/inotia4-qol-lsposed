@@ -267,24 +267,78 @@ void on_confirm_three_slot() {
         case result::CraftExecuteResult::kOk:
             finish_three_slot_craft();
             return;
-        case result::CraftExecuteResult::kOkDelegated:
+        case result::CraftExecuteResult::kOkDelegated: {
             // 三同类档位宝石三合一：mixType 已由结果层推导（原版宝石配方 12..15）。
             // 写 [g_uimix+0x48] 与原版口径费用后全权委托原版 UIMix_StartMix——产物词条
             //（大修定向合成/c18 补掷/原版随机）、扣料、清格、刷新、音效、弹窗按该变体原版行为
             // 执行。StartMix 不还原 [+0x48]，委托端口在返回前恢复本页「合成」记录并重算
             // stuff/费用，因此这里不需要再 finish；否则面板会停在原版宝石配方，无法继续放料。
             // 委托失败（符号缺失/配方非法）时未进入 StartMix，材料未扣，保留已填格。
+            //
+            // 诊断：原版 StartMix 无返回值，只能靠委托后三格是否被清空判断是否空转。
+            // 成功属正常路径用 DEBUG；空转是必须取证的失败用 WARN（INFO 每帧每域 16 行封顶，
+            // 且失败前通常已有其它 INFO 日志，不能保证落盘）。每次委托只写一行。
+            const uint32_t pre_mix_type = craft_mix_type();
+            const uint16_t* categories = in.slot_categories;
+            const contracts::QolItemHandle* handles = in.items;
+            const int outside_native[3] = {
+                selected_item_outside_native_inven(handles[0]) ? 1 : 0,
+                selected_item_outside_native_inven(handles[1]) ? 1 : 0,
+                selected_item_outside_native_inven(handles[2]) ? 1 : 0,
+            };
+            const int held_pre[3] = {
+                craft_category_held_count(categories[0]),
+                craft_category_held_count(categories[1]),
+                craft_category_held_count(categories[2]),
+            };
             g_startmix_delegate.store(true, std::memory_order_release);
             if (!craft_delegate_start_mix(delegated_mix_type)) {
                 g_startmix_delegate.store(false, std::memory_order_release);
                 craft_show_craft_unavailable();
-                log_message(kLogWarn, "delegate start mix failed mixType=%u", delegated_mix_type);
+                log_message(kLogWarn,
+                            "delegate start mix failed mixType=%u slots=%u/%u/%u handles=%u.%u/%u.%u/%u.%u outside_native=%d/%d/%d",
+                            delegated_mix_type, static_cast<unsigned int>(categories[0]),
+                            static_cast<unsigned int>(categories[1]),
+                            static_cast<unsigned int>(categories[2]),
+                            static_cast<unsigned int>(handles[0].slot),
+                            static_cast<unsigned int>(handles[0].generation),
+                            static_cast<unsigned int>(handles[1].slot),
+                            static_cast<unsigned int>(handles[1].generation),
+                            static_cast<unsigned int>(handles[2].slot),
+                            static_cast<unsigned int>(handles[2].generation), outside_native[0],
+                            outside_native[1], outside_native[2]);
                 return;
             }
             g_startmix_delegate.store(false, std::memory_order_release);
+            uint16_t after_categories[kStuffSlotCount]{};
+            const QolResult after_read = craft_read_stuff_categories(after_categories);
+            if (after_read.ok != kQolOk) {
+                after_categories[0] = after_categories[1] = after_categories[2] = 0;
+            }
+            const bool cleared = after_categories[0] == 0 && after_categories[1] == 0 &&
+                                 after_categories[2] == 0;
+            log_message(cleared ? kLogDebug : kLogWarn,
+                        "three slot delegate pre_mixType=%u post_mixType=%u pre_slots=%u/%u/%u post_slots=%u/%u/%u handles=%u.%u/%u.%u/%u.%u outside_native=%d/%d/%d held_pre=%d/%d/%d held_post=%d/%d/%d cleared=%d",
+                        pre_mix_type, craft_mix_type(), static_cast<unsigned int>(categories[0]),
+                        static_cast<unsigned int>(categories[1]),
+                        static_cast<unsigned int>(categories[2]),
+                        static_cast<unsigned int>(after_categories[0]),
+                        static_cast<unsigned int>(after_categories[1]),
+                        static_cast<unsigned int>(after_categories[2]),
+                        static_cast<unsigned int>(handles[0].slot),
+                        static_cast<unsigned int>(handles[0].generation),
+                        static_cast<unsigned int>(handles[1].slot),
+                        static_cast<unsigned int>(handles[1].generation),
+                        static_cast<unsigned int>(handles[2].slot),
+                        static_cast<unsigned int>(handles[2].generation), outside_native[0],
+                        outside_native[1], outside_native[2], held_pre[0], held_pre[1], held_pre[2],
+                        craft_category_held_count(categories[0]),
+                        craft_category_held_count(categories[1]),
+                        craft_category_held_count(categories[2]), cleared ? 1 : 0);
             log_message(kLogDebug, "delegated to original start mix mixType=%u",
                         delegated_mix_type);
             return;
+        }
         case result::CraftExecuteResult::kStaleSlots:
         case result::CraftExecuteResult::kAborted:
             // 确认框停留期间格被换掉 / 停用 / 无待确认：不消耗、不产出 → 清空重来（行为不变）。
