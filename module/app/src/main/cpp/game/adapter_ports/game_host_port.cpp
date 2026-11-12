@@ -20,6 +20,7 @@
 #include "game/access/craft.h"
 #include "game/access/item_class.h"
 #include "game/access/inventory.h"
+#include "game/access/item_pool.h"
 #include "game/access/symbols.h"
 #include "game/access/ui_choice.h"
 #include "game/access/world.h"
@@ -1077,6 +1078,22 @@ QolResult read_group_skill_learned(int32_t act_id, int32_t* out_value) {
     return contracts::ok();
 }
 
+// 物品对象池占用（ITEMPOOL）。只读扫描 300 个占用位，不写游戏状态；池未建立时
+// 返回 NotReady，让调用方把“未知”与“0 占用”区分开。
+QolResult read_item_pool_usage(uint32_t* out_used, uint32_t* out_capacity) {
+    if (out_used == nullptr || out_capacity == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    *out_used = 0;
+    *out_capacity = 0;
+    uint32_t used = 0;
+    uint32_t capacity = 0;
+    if (!qol::game::item_pool_usage(&used, &capacity)) return not_ready();
+    *out_used = used;
+    *out_capacity = capacity;
+    return contracts::ok();
+}
+
 contracts::QolGameHost make_game_host() {
     contracts::QolGameHost host{};
     host.abi = {sizeof(contracts::QolGameHost), contracts::kGameHostMajor,
@@ -1129,6 +1146,7 @@ contracts::QolGameHost make_game_host() {
                            &read_character_evasion_rate_1000,
                            &read_character_display_damage_reduce_rate,
                            &read_group_skill_learned};
+    host.item_pool = {&read_item_pool_usage};
     return host;
 }
 

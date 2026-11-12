@@ -261,6 +261,13 @@ static_assert(std::is_standard_layout<QolReadOnlyApi>::value,
 static_assert(std::is_trivially_copyable<QolReadOnlyApi>::value,
               "QolReadOnlyApi must remain trivially copyable");
 
+// 物品对象池（ITEMPOOL）余量只读面（v2.15 尾追加）：诊断“池满导致创建失败”。
+// 池为全局固定 300 槽；usage 只扫描占用位，不写游戏状态，须在游戏线程调用。
+struct QolItemPoolApi {
+    // 成功返回池占用数与容量；池未初始化或映射不可读返回 NotReady，out 归零。
+    QolResult (*usage)(uint32_t* out_used, uint32_t* out_capacity);
+};
+
 struct QolGameHost {
     QolAbiHeader abi;
     QolTargetApi target;
@@ -276,6 +283,7 @@ struct QolGameHost {
     QolAttrRangeC18Api attr_range_c18;
     QolItemCategoryApi item_category;
     QolCharacterReadApi character_read;
+    QolItemPoolApi item_pool;
 };
 
 static_assert(std::is_standard_layout<QolGameHost>::value,
@@ -294,12 +302,15 @@ static_assert(offsetof(QolGameHost, attr_range_c18) ==
 static_assert(offsetof(QolGameHost, item_category) ==
                   offsetof(QolGameHost, attr_range_c18) + sizeof(QolAttrRangeC18Api),
               "QolGameHost item_category ABI offset changed");
-static_assert(sizeof(QolGameHost) ==
-                  offsetof(QolGameHost, character_read) + sizeof(QolCharacterReadApi),
-              "QolGameHost ABI size changed");
 static_assert(offsetof(QolGameHost, character_read) ==
                   offsetof(QolGameHost, item_category) + sizeof(QolItemCategoryApi),
               "QolGameHost character_read ABI offset changed");
+static_assert(offsetof(QolGameHost, item_pool) ==
+                  offsetof(QolGameHost, character_read) + sizeof(QolCharacterReadApi),
+              "QolGameHost item_pool ABI offset changed");
+static_assert(sizeof(QolGameHost) ==
+                  offsetof(QolGameHost, item_pool) + sizeof(QolItemPoolApi),
+              "QolGameHost ABI size changed");
 
 constexpr uint16_t kGameHostMajor = 2;
 // 2.4 appended the read-only game identity tail used by the settings page.
@@ -315,6 +326,8 @@ constexpr uint16_t kGameHostItemCategoryMinor = 10;
 // 2.13 appended main-stat and panel-derived getters used by the character overview panel.
 // 2.14 appended the mercenary group-skill learned query (13 already assigned).
 constexpr uint16_t kGameHostCharacterReadMinor = 14;
-constexpr uint16_t kGameHostMinor = kGameHostCharacterReadMinor;
+// 2.15 appended the ITEMPOOL usage tail used by world_tuning drop diagnostics.
+constexpr uint16_t kGameHostItemPoolMinor = 15;
+constexpr uint16_t kGameHostMinor = kGameHostItemPoolMinor;
 
 }  // namespace qol::contracts

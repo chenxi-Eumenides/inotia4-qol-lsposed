@@ -14,6 +14,7 @@
 #include "game/variants/game_variant.h"
 #include "game/access/game_access.h"
 #include "game/access/item_handle_registry.h"
+#include "game/access/item_pool.h"
 #include "game/access/attr_range_ui.h"
 #include "game/access/char.h"
 #include "game/access/craft.h"
@@ -885,7 +886,47 @@ QolResult seam_log_write(int32_t, int32_t, const char*, const char* message,
 
 }  // namespace
 
+// ITEMPOOL 用量读取：用假 g_base 映射变量槽与 300 槽池，验证占用位统计与失败语义。
+void test_item_pool_usage_fake_pool() {
+    const uintptr_t saved_base = g_base;
+    const uintptr_t saved_readable = reinterpret_cast<uintptr_t>(g_test_extra_readable);
+    const size_t saved_readable_size = g_test_extra_readable_size;
+
+    // 变量槽与池放在同一块假映射内（测试 stub 的可读区只有一个）。
+    constexpr size_t kPoolOffset = ITEMPOOL_POOL_VAR_VMA + 0x1000;
+    constexpr size_t kPoolBytes = static_cast<size_t>(ITEMPOOL_CAPACITY) * ITEMPOOL_OBJECT_STRIDE;
+    std::vector<uint8_t> image(kPoolOffset + kPoolBytes, 0);
+    uint8_t* pool = image.data() + kPoolOffset;
+    *reinterpret_cast<void**>(image.data() + ITEMPOOL_POOL_VAR_VMA) = pool;
+    g_base = reinterpret_cast<uintptr_t>(image.data());
+    g_test_extra_readable = image.data();
+    g_test_extra_readable_size = image.size();
+
+    for (size_t i = 0; i < 3; ++i) {
+        pool[i * ITEMPOOL_OBJECT_STRIDE + ITEMPOOL_USED_FLAG_OFFSET] = 1;
+    }
+    // 相邻字节的非 bit0 位不得计入占用。
+    pool[3 * ITEMPOOL_OBJECT_STRIDE + ITEMPOOL_USED_FLAG_OFFSET] = 0xfe;
+    uint32_t used = 0;
+    uint32_t capacity = 0;
+    assert(qol::game::item_pool_usage(&used, &capacity));
+    assert(used == 3 && capacity == 300);
+
+    // 池变量为空：失败且输出归零，调用方按“未知”处理。
+    *reinterpret_cast<void**>(image.data() + ITEMPOOL_POOL_VAR_VMA) = nullptr;
+    used = 7;
+    capacity = 7;
+    assert(!qol::game::item_pool_usage(&used, &capacity));
+    assert(used == 0 && capacity == 0);
+    assert(!qol::game::item_pool_usage(nullptr, &capacity));
+
+    g_base = saved_base;
+    g_test_extra_readable = reinterpret_cast<const void*>(saved_readable);
+    g_test_extra_readable_size = saved_readable_size;
+}
+
 int main() {
+    test_item_pool_usage_fake_pool();
     const auto set_u16_le = [](size_t offset, uint16_t value) {
         qol::game::g_save_load_plain[offset] = static_cast<uint8_t>(value & 0xffu);
         qol::game::g_save_load_plain[offset + 1] = static_cast<uint8_t>(value >> 8);
@@ -1300,7 +1341,7 @@ int main() {
     assert(variant.id == static_cast<uint32_t>(qol::GameSeries::kOriginal));
     assert(variant.capabilities == qol::kCapWarehouse);
     assert(game.abi.minor == qol::contracts::kGameHostMinor);
-    assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 14);
+    assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 15);
     // 人物属性面板/总览使用的只读面：主属性、面板派生 getter 与属性读取全部就绪。
     assert(game.character_read.attr != nullptr);
     assert(game.character_read.physical_defense_calculate != nullptr);
@@ -1311,6 +1352,7 @@ int main() {
     assert(game.character_read.evasion_rate_1000 != nullptr);
     assert(game.character_read.display_damage_reduce_rate != nullptr);
     assert(game.character_read.group_skill_learned != nullptr);
+    assert(game.item_pool.usage != nullptr);
     assert(game.attr_range_c18.jewel_generation_range != nullptr);
     static_assert(std::is_standard_layout<qol::contracts::QolReadOnlyApi>::value,
                   "read-only face must remain standard layout");

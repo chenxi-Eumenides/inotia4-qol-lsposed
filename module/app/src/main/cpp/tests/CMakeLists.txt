@@ -1469,6 +1469,7 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/game/adapter_ports/world_action_port.cpp
     ${CPP_DIR}/game/access/item_handle_registry.cpp
     ${CPP_DIR}/game/access/inventory.cpp
+    ${CPP_DIR}/game/access/item_pool.cpp
     ${CPP_DIR}/game/adapter_ports/character_extras_port.cpp
     ${CPP_DIR}/game/adapter_ports/inventory_extras_port.cpp
     ${CPP_DIR}/game/adapter_ports/item_extras_port.cpp

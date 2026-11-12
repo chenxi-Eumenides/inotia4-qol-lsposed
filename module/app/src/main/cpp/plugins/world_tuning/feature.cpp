@@ -70,6 +70,14 @@ uint64_t g_item_use_subscription = 0;
 // 开箱的同一批 maker 调用隔离开。仅游戏线程访问。
 thread_local uint32_t g_drop_depth = 0;
 
+// 一次掉落结算（最外层 DropItem 调用）内的造物诊断计数。槽内 maker 只在结算内部执行，
+// 崩溃发生在 maker 返回之前，因此每条 make_item 日志必须在调用原函数前落盘。
+thread_local uint32_t g_settlement_make_calls = 0;
+thread_local uint32_t g_settlement_make_nulls = 0;
+// 单次结算最多逐条打印的槽数；超出后只在池余量低于告警线时继续打印。
+constexpr uint32_t kSettlementSlotLogCap = 16;
+constexpr int32_t kPoolWarnFreeSlots = 8;
+
 // 诊断（真机验收用）：异常态只记一次，避免热路径反复刷日志。
 std::atomic<bool> g_faction_deps_missing_logged{false};
 std::atomic<bool> g_pool_slot_unresolved_logged{false};
@@ -418,6 +426,25 @@ enum class DropQualityGroup { kNone, kScroll, kGem, kBag, kDice };
 
 bool drop_context_active() { return g_drop_depth != 0; }
 
+// 物品池余量快照。宿主未提供 v2.15 尾面或池未建立时返回 false，调用方记 -1 表示未知。
+bool item_pool_snapshot(int32_t* used, int32_t* capacity) {
+    const auto* game = g_game;
+    if (game == nullptr || used == nullptr || capacity == nullptr) return false;
+    if (game->abi.minor < contracts::kGameHostItemPoolMinor ||
+        game->item_pool.usage == nullptr) {
+        return false;
+    }
+    uint32_t pool_used = 0;
+    uint32_t pool_capacity = 0;
+    if (!contracts::succeeded(game->item_pool.usage(&pool_used, &pool_capacity)) ||
+        pool_capacity == 0) {
+        return false;
+    }
+    *used = static_cast<int32_t>(pool_used);
+    *capacity = static_cast<int32_t>(pool_capacity);
+    return true;
+}
+
 bool read_item_category(const void* item, int32_t* out) {
     const auto* game = g_game;
     if (game == nullptr || game->abi.minor < contracts::kGameHostItemCategoryMinor ||
@@ -508,15 +535,42 @@ void drop_item_wrapper(void* ch) {
         backup(ch);
         return;
     }
-    const int32_t rounds = rate_value(RateId::kDropQuantity);
-    const int32_t rolls = rate_value(RateId::kDropReroll);
+    int32_t rounds = rate_value(RateId::kDropQuantity);
+    int32_t rolls = rate_value(RateId::kDropReroll);
     if (rounds <= 0 || rolls <= 0) return;
     if (rounds > kDropLargeWarnThreshold && !g_large_drop_quantity_logged.exchange(true)) {
         log_warn("drop quantity %d > %d; no hard cap applied", rounds, kDropLargeWarnThreshold);
     }
+    const bool outermost = g_drop_depth == 0;
+    if (outermost) {
+        g_settlement_make_calls = 0;
+        g_settlement_make_nulls = 0;
+        // side: 0=玩家侧、1=怪物侧、2=无法判定，来自本插件既有阵营判定。
+        const int32_t side = static_cast<int32_t>(classify(ch));
+        int32_t used = -1;
+        int32_t capacity = -1;
+        if (item_pool_snapshot(&used, &capacity)) {
+            log_info("drop settlement begin ch=%p side=%d rounds=%d reroll=%d pool_used=%d "
+                     "pool_capacity=%d pool_free=%d",
+                     ch, side, rounds, rolls, used, capacity, capacity - used);
+        } else {
+            log_info("drop settlement begin ch=%p side=%d rounds=%d reroll=%d pool_used=-1 "
+                     "pool_capacity=-1 pool_free=-1",
+                     ch, side, rounds, rolls);
+        }
+    }
     ++g_drop_depth;
     for (int32_t i = 0; i < rounds; ++i) backup(ch);
     --g_drop_depth;
+    if (outermost) {
+        int32_t used = -1;
+        int32_t capacity = -1;
+        const bool pool_known = item_pool_snapshot(&used, &capacity);
+        log_info("drop settlement end ch=%p rounds=%d make_calls=%u make_null=%u "
+                 "pool_used=%d pool_capacity=%d pool_free=%d",
+                 ch, rounds, g_settlement_make_calls, g_settlement_make_nulls, used, capacity,
+                 pool_known ? capacity - used : -1);
+    }
 }
 
 void* make_item_wrapper(int32_t category, int32_t lookup_key, int32_t flag) {
@@ -526,8 +580,40 @@ void* make_item_wrapper(int32_t category, int32_t lookup_key, int32_t flag) {
     const MakeItemFn backup =
         reinterpret_cast<MakeItemFn>(g_backup_make_item.load(std::memory_order_acquire));
     if (backup == nullptr) return nullptr;
+    if (drop_context_active()) {
+        // 必须在调用原函数前落盘：池满时原函数在返回 NULL 之前就会崩在完美道具分支。
+        const uint32_t sequence = ++g_settlement_make_calls;
+        int32_t used = -1;
+        int32_t capacity = -1;
+        const bool pool_known = item_pool_snapshot(&used, &capacity);
+        const int32_t free_slots = pool_known ? capacity - used : -1;
+        if (sequence <= kSettlementSlotLogCap ||
+            (pool_known && free_slots <= kPoolWarnFreeSlots)) {
+            log_info("make_item slot seq=%u category=%d lookup=%d flag=%d depth=%u "
+                     "pool_used=%d pool_capacity=%d pool_free=%d",
+                     sequence, category, lookup_key, flag, g_drop_depth, used, capacity,
+                     free_slots);
+        }
+        if (pool_known && free_slots <= 0) {
+            log_warn("make_item pool exhausted pool_used=%d pool_capacity=%d; original "
+                     "ITEMSYSTEM_MakeItem may dereference the null item (perfect-item branch)",
+                     used, capacity);
+        }
+    }
     void* first = backup(category, lookup_key, flag);
-    if (first == nullptr) return nullptr;
+    if (first == nullptr) {
+        if (drop_context_active()) {
+            ++g_settlement_make_nulls;
+            int32_t used = -1;
+            int32_t capacity = -1;
+            const bool pool_known = item_pool_snapshot(&used, &capacity);
+            log_warn("make_item returned null category=%d lookup=%d flag=%d pool_used=%d "
+                     "pool_capacity=%d",
+                     category, lookup_key, flag, used, capacity);
+            (void)pool_known;
+        }
+        return nullptr;
+    }
     if (!g_gate.load(std::memory_order_relaxed) || !drop_context_active()) return first;
 
     const int32_t rolls = rate_value(RateId::kDropReroll);

@@ -125,6 +125,7 @@ add_library(gamebridge SHARED
     game/read/game_tiles.cpp
     game/access/inventory.cpp
     game/access/inventory_legacy_read.cpp
+    game/access/item_pool.cpp
     game/access/hive_iap.cpp
     game/access/ui_kit.cpp
     game/access/ui_confirmation.cpp
