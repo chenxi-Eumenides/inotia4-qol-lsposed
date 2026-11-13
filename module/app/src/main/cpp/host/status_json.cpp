@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "contracts/plugin.h"
+#include "contracts/capacity.h"
 #include "game/json/game_json.h"
 #include "hooks/registry.h"
 #include "host/plugin_registry.h"
@@ -17,8 +18,7 @@ namespace qol::host {
 
 namespace {
 
-// 快照容量：与 infra/status.cpp 的 kMaxFeatures 一致；栈数组，避免动态分配。
-constexpr uint32_t kSnapshotCapacity = 64;
+constexpr uint32_t kSnapshotCapacity = qol::capacity::kMaxFeatureStatuses;
 
 // bootstrap 条目：P1 阶段 native 骨架本身已装载，作为诊断接口的真实内容
 // （不是假数据）。用函数局部 static 的 lambda 保证只注册一次；status_register
@@ -126,9 +126,9 @@ const char* policy_name(qol::contracts::ResourcePolicy policy) {
 std::string host_feature_status_json() {
     ensure_bootstrap_registered();
 
-    qol::infra::FeatureStatus features[kSnapshotCapacity];
+    std::vector<qol::infra::FeatureStatus> features(kSnapshotCapacity);
     uint32_t written = 0;
-    if (!qol::infra::status_snapshot(features, kSnapshotCapacity, &written)) {
+    if (!qol::infra::status_snapshot(features.data(), kSnapshotCapacity, &written)) {
         return "{\"ok\":false,\"error\":\"snapshot failed\"}";
     }
 

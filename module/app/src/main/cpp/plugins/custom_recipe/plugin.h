@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "../../contracts/plugin.h"
 
 // 自定义合成配方插件清单入口（ARCHITECTURE.md §3.3；C2 Step 4）。
@@ -10,6 +12,8 @@
 // 资源跟随生命周期；acquire=table_ensure / release=table_deactivate）。
 
 namespace qol::features::custom_recipe {
+
+inline constexpr uint32_t kResourceCount = 13;
 
 const contracts::PluginDescriptor& plugin_descriptor();
 

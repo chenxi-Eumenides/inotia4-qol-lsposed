@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "infra/log/qol_log.h"
+#include "contracts/capacity.h"
 #include "contracts/commands.h"
 #include "contracts/events.h"
 #include "contracts/game_ports/craft_ui_write_port.h"
@@ -193,7 +194,7 @@ void begin_http_endpoint_stop(const contracts::PluginDescriptor& plugin) {
     if (plugin.id != nullptr) http_endpoint_binder_owner_stop_begin(plugin.id);
 }
 
-constexpr uint32_t kMaxResourcesPerPlugin = 32;
+constexpr uint32_t kMaxResourcesPerPlugin = qol::capacity::kMaxPluginResources;
 // 60ms/帧、单步通常远低于 1ms；24 步/帧可在约 4 帧内排空当前资源量。
 constexpr uint32_t kInstallStepsPerFrame = 24;
 // 装配依赖：feature_registry_prepare 时存入本 TU 静态，供事务引擎推进安装/还原的
@@ -975,6 +976,7 @@ bool descriptor_valid(const contracts::PluginDescriptor& plugin) {
     if (plugin.version == nullptr) return false;
     if (plugin.install == nullptr) return false;
     if (plugin.resources_count > kMaxResourcesPerPlugin) return false;
+    if (plugin.feature_count > qol::capacity::kMaxFeaturesPerPlugin) return false;
     if (plugin.resources_count > 0 && plugin.resources == nullptr) return false;
     for (uint32_t i = 0; i < plugin.resources_count; ++i) {
         const contracts::ResourceClaim& claim = plugin.resources[i];

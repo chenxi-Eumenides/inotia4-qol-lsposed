@@ -43,6 +43,8 @@ const contracts::ResourceClaim kResources[] = {
     STACK_LIMIT_CLAIM("P_ITEMSYSTEM_DIVIDE_10848C_ARG"),
     STACK_LIMIT_CLAIM("P_ITEMSYSTEM_DIVIDE_10848C_CALL"),
 };
+static_assert(kResourceCount == (sizeof(kResources) / sizeof(kResources[0])),
+              "kResourceCount must match kResources");
 #undef STACK_LIMIT_CLAIM
 
 // 仅用于诊断上报；资源安装/还原与有效态由宿主生命周期负责。

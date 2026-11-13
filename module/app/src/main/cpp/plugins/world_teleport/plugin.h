@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "../../contracts/plugin.h"
 #include "../../contracts/game_ports/world_action_port.h"
 #include "../../contracts/item_facts.h"
@@ -10,6 +12,8 @@
 // kEntryHook（宿主 hooks/ 引擎安装）；变体序列经 QolGameHost.target.query_variant 读取。
 
 namespace qol::features::world_teleport {
+
+inline constexpr uint32_t kResourceCount = 1;
 
 const contracts::PluginDescriptor& plugin_descriptor();
 const contracts::QolHostSdk* host_sdk();

@@ -181,6 +181,8 @@ const contracts::ResourceClaim kResources[] = {
         reinterpret_cast<void*>(&autosell_equip_desc_draw_wrapper),  // handler
     },
 };
+static_assert(kResourceCount == (sizeof(kResources) / sizeof(kResources[0])),
+              "kResourceCount must match kResources");
 
 // 门禁应用：同步扫描任务「已武装」标志与 UI 入口按钮/面板门控（现行为不变）。
 void apply_gate(bool enabled) {

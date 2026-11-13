@@ -1,5 +1,6 @@
 #include "storage_hooks.h"
 #include "plugins/core.inventory/api/access.h"
+#include "plugins/core.inventory/plugin.h"
 
 #include <algorithm>
 #include <array>
@@ -1422,6 +1423,10 @@ const qol::contracts::ResourceClaim kClaims[] = {
                        remove_item_data_wrapper),
     STORAGE_HOOK_CLAIM("hook:INVEN_MoveItem", "F_INVEN_MOVE_ITEM_VMA", move_item_wrapper),
 };
+
+static_assert(sizeof(kClaims) / sizeof(kClaims[0]) ==
+                  qol::features::core_inventory::kResourceCount,
+              "kClaims must match core.inventory kResourceCount");
 
 #undef STORAGE_HOOK_CLAIM
 

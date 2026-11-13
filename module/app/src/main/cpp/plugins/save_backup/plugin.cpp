@@ -145,6 +145,8 @@ const contracts::ResourceClaim kResources[] = {
         reinterpret_cast<void*>(&slot_delete_hook_wrapper),  // handler
     },
 };
+static_assert(kResourceCount == (sizeof(kResources) / sizeof(kResources[0])),
+              "kResourceCount must match kResources");
 
 // ---- HTTP 面：备份四端点（owner=save_backup）----
 // 声明式注册：descriptor 的 http 列表由宿主在插件 enabled 时注册、停用时置路由墓碑摘除，

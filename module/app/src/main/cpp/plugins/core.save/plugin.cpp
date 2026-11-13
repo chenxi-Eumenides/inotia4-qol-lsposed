@@ -1056,6 +1056,8 @@ const contracts::ResourceClaim kResources[] = {
      0,
      reinterpret_cast<void*>(&select_char_back_wrapper)},
 };
+static_assert(kResourceCount == (sizeof(kResources) / sizeof(kResources[0])),
+              "kResourceCount must match kResources");
 
 int plugin_install(contracts::PluginContext& ctx) {
     clear_all_transition_ticket_contexts();

@@ -76,6 +76,8 @@ const contracts::ResourceClaim kResources[] = {
      kPluginId, "普攻出手前检查攻击距离", nullptr, 120,
       reinterpret_cast<void*>(&start_action_ex_wrapper), true},
 };
+static_assert(kResourceCount == (sizeof(kResources) / sizeof(kResources[0])),
+              "kResourceCount must match kResources");
 
 int plugin_install(contracts::PluginContext& ctx) {
     g_enabled.store(false, std::memory_order_release);

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "../../contracts/plugin.h"
 
 // 存档管理器备份插件清单入口（ARCHITECTURE.md §3.3）：1 条 kPtrSlot 资源（常驻）。
@@ -8,6 +10,8 @@
 // on_resource_ready 交还 wrapper。
 
 namespace qol::features::save_backup {
+
+inline constexpr uint32_t kResourceCount = 1;
 
 const contracts::PluginDescriptor& plugin_descriptor();
 

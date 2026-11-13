@@ -1,11 +1,13 @@
 #include "patch/claims.h"
 
+#include "contracts/capacity.h"
+
 #include <cstring>
 
 namespace qol::patch {
 namespace {
 
-constexpr uint32_t kMaxClaims = 64;
+constexpr uint32_t kMaxClaims = qol::capacity::kMaxPatchPoints;
 
 struct PointClaim {
     uintptr_t addr;

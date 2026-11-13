@@ -1,5 +1,7 @@
 #include "infra/status.h"
 
+#include "contracts/capacity.h"
+
 #include <cstring>
 
 namespace qol::infra {
@@ -7,8 +9,7 @@ namespace qol::infra {
 namespace {
 
 // 静态容量上限，避免动态分配。超限注册返回 false，调用方可感知。
-// 状态容量与宿主插件容量一致；infra 不依赖 host，因此此处使用对应字面量。
-constexpr uint32_t kMaxFeatures = 128;
+constexpr uint32_t kMaxFeatures = qol::capacity::kMaxFeatureStatuses;
 
 FeatureStatus g_features[kMaxFeatures];
 

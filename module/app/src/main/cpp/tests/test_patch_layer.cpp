@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "contracts/plugin.h"
+#include "contracts/capacity.h"
 #include "game/symbols/game_symbols.h"
 #include "game/access/patches.h"
 #include "game/access/ptr_slots.h"
@@ -396,15 +397,15 @@ void test_claims_arbitration() {
 
 void test_claims_capacity() {
     reset_all();
-    for (uint32_t i = 0; i < 64; ++i) {
+    for (uint32_t i = 0; i < qol::capacity::kMaxPatchPoints; ++i) {
         CHECK(claim_point(0x3000 + i * 4, "owner:idempotent"));
     }
-    CHECK(claimed_count() == 64);
+    CHECK(claimed_count() == qol::capacity::kMaxPatchPoints);
     CHECK(!claim_point(0x4000, "overflow"));
-    CHECK(claimed_count() == 64);
+    CHECK(claimed_count() == qol::capacity::kMaxPatchPoints);
     // 满容时同地址同 claim 幂等仍成立。
     CHECK(claim_point(0x3000, "owner:idempotent"));
-    CHECK(claimed_count() == 64);
+    CHECK(claimed_count() == qol::capacity::kMaxPatchPoints);
 }
 
 void test_primitives_not_set() {

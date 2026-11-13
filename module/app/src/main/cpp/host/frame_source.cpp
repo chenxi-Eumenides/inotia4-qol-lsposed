@@ -100,6 +100,8 @@ const contracts::ResourceClaim kClaims[] = {
         reinterpret_cast<void*>(&frame_logic_pre_wrapper),
     },
 };
+static_assert(kFrameSourceClaimCount == (sizeof(kClaims) / sizeof(kClaims[0])),
+              "frame source claim count mismatch");
 
 // 解析站点并物理安装；成功后登记运行期地址（供回滚/诊断）。
 bool install_frame_claim(const contracts::ResourceClaim& claim) {

@@ -156,6 +156,8 @@ const contracts::ResourceClaim kResources[] = {
         reinterpret_cast<void*>(&memorytext_get_text_wrapper),  // handler
     },
 };
+static_assert(kResourceCount == (sizeof(kResources) / sizeof(kResources[0])),
+              "kResourceCount must match kResources");
 
 const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_CHOICE,

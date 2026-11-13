@@ -138,6 +138,8 @@ const contracts::ResourceClaim kResources[] = {
         reinterpret_cast<void*>(&can_unequip_wrapper),
     },
 };
+static_assert(kResourceCount == (sizeof(kResources) / sizeof(kResources[0])),
+              "kResourceCount must match kResources");
 
 int plugin_install(contracts::PluginContext& ctx) {
     // 重新 install 可能未经过 deactivate；先撤销旧订阅再覆盖 sdk，避免订阅泄漏。

@@ -49,6 +49,8 @@ const contracts::ResourceClaim kResources[] = {
         reinterpret_cast<void*>(&math_get_random_wrapper),
     },
 };
+static_assert(kResourceCount == (sizeof(kResources) / sizeof(kResources[0])),
+              "kResourceCount must match kResources");
 
 // 能力提供声明：id + 版本 + 接口指针（§3.3）。
 const contracts::CapabilityProvisionRef kProvides[] = {

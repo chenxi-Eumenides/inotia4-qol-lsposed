@@ -60,6 +60,8 @@ const contracts::ResourceClaim kResources[] = {
         nullptr,  // kWordReplace 无 handler
     },
 };
+static_assert(kResourceCount == (sizeof(kResources) / sizeof(kResources[0])),
+              "kResourceCount must match kResources");
 
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;

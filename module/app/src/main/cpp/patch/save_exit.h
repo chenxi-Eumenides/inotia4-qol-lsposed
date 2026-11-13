@@ -4,6 +4,8 @@
 
 #include "contracts/plugin.h"
 
+inline constexpr uint32_t kSaveExitClaimCount = 1;
+
 // 退出存档（world -> 主菜单）事件发源地。
 //
 // 语义：从 world 返回主菜单时触发一次（含模块 go_main_menu 与游戏原生回主菜单，二者都走

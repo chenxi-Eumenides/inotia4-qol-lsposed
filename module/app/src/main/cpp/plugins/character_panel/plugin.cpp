@@ -62,6 +62,8 @@ const contracts::ResourceClaim kResources[] = {
             const_cast<contracts::OwnershipOps*>(&kCharacterInfoPopupOps)),  // handler
     },
 };
+static_assert(kResourceCount == (sizeof(kResources) / sizeof(kResources[0])),
+              "kResourceCount must match kResources");
 
 const contracts::CapabilityRequirement kRequires[] = {
     {contracts::kTextLayerCapabilityId,

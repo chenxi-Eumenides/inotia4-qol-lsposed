@@ -5,6 +5,7 @@
 
 #include "patch/call_patch.h"
 
+#include "contracts/capacity.h"
 #include "infra/log/qol_log.h"
 
 #include <array>
@@ -22,6 +23,8 @@ namespace {
 constexpr size_t kPageSize = 4096;
 constexpr size_t kThunkSlot = 32;         // 每槽 32B 对齐（thunk 码 20B + 字面量 8B）
 constexpr size_t kSlotsPerPage = kPageSize / kThunkSlot;
+constexpr size_t kMaxThunkSlots = qol::capacity::kMaxThunkSlots;
+constexpr size_t kThunkPageCapacity = (kMaxThunkSlots + kSlotsPerPage - 1) / kSlotsPerPage;
 constexpr uintptr_t kBlNegativeReach = uintptr_t{1} << 27;
 constexpr uintptr_t kBlPositiveReach = (uintptr_t{1} << 27) - 4;
 // Linux MAP_FIXED_NOREPLACE ABI value, including on build headers predating its declaration.
@@ -38,10 +41,10 @@ MmapFunction g_mmap_function = &::mmap;
 MunmapFunction g_munmap_function = &::munmap;
 
 // thunk 页登记：每页 4096B 承载 32B thunk，共享复用；页必落在调用点 ±128MB 内。
-std::array<void*, 8> g_thunk_pages{};
+std::array<void*, kThunkPageCapacity> g_thunk_pages{};
 size_t g_thunk_page_count = 0;
-std::array<size_t, 8> g_thunk_page_used{};
-std::array<void*, 8 * kSlotsPerPage> g_free_thunk_slots{};
+std::array<size_t, kThunkPageCapacity> g_thunk_page_used{};
+std::array<void*, kMaxThunkSlots> g_free_thunk_slots{};
 size_t g_free_thunk_slot_count = 0;
 size_t g_thunk_slots_allocated = 0;
 
@@ -55,9 +58,12 @@ struct PatchedCall {
     uintptr_t target;  // 实际写入的分支目标（BL：wrapper/thunk；B：thunk）
     void* thunk_slot;
 };
-constexpr size_t kMaxPatchedCalls = 128;
+constexpr size_t kMaxPatchedCalls = qol::capacity::kMaxCallPatches;
 std::array<PatchedCall, kMaxPatchedCalls> g_patched_calls{};
 size_t g_patched_call_count = 0;
+
+static_assert(kThunkPageCapacity * kSlotsPerPage >= kMaxThunkSlots,
+              "thunk pages must cover the shared thunk slot capacity");
 
 struct AllocationFailure {
     uintptr_t requested = 0;

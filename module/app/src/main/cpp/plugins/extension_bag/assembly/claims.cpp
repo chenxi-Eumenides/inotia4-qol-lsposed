@@ -30,6 +30,7 @@
 #include <cstring>
 
 #include "contracts/plugin.h"
+#include "plugins/extension_bag/plugin.h"
 
 // ---- 资源 id（诊断/桥接按 id 分发）----
 constexpr const char* kEbM1SaveInventory = "hook:SAVE_SaveInventory";
@@ -565,6 +566,8 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
         static_assert(kBaseCount == 25,
                       "extension_bag base claim count changed; update the 26→31 resource total");
         constexpr uint32_t kExtraCapacity = 1 + 5;
+        static_assert(kBaseCount + kExtraCapacity == qol::features::extension_bag::kResourceCount,
+                      "extension_bag: 25 base + 1 merge + 5 equip");
         std::array<::qol::contracts::ResourceClaim, kBaseCount + kExtraCapacity> table{};
         for (uint32_t i = 0; i < kBaseCount; ++i) table[i] = kBaseClaims[i];
         uint32_t next = kBaseCount;

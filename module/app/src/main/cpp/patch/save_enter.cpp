@@ -104,6 +104,8 @@ const qol::contracts::ResourceClaim kEnterClaims[] = {
         reinterpret_cast<void*>(&save_new_wrapper),
     },
 };
+static_assert(::kSaveEnterClaimCount == (sizeof(kEnterClaims) / sizeof(kEnterClaims[0])),
+              "save enter claim count mismatch");
 
 }  // namespace
 

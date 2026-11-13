@@ -36,6 +36,8 @@ const contracts::ResourceClaim kResources[] = {
         reinterpret_cast<void*>(&process_recipe_wrapper),
     },
 };
+static_assert(kResourceCount == (sizeof(kResources) / sizeof(kResources[0])),
+              "kResourceCount must match kResources");
 
 void clear_install_state() {
     set_gate(false);

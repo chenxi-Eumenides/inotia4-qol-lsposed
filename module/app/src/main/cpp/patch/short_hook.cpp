@@ -1,5 +1,7 @@
 #include "patch/short_hook.h"
 
+#include "contracts/capacity.h"
+
 #include <array>
 #include <cstring>
 #include <mutex>
@@ -10,7 +12,7 @@ namespace qol::patch {
 namespace {
 
 constexpr size_t kSlotCapacity = 32;  // 与 call_patch 的 thunk 槽一致
-constexpr size_t kMaxEntries = 128;
+constexpr size_t kMaxEntries = qol::capacity::kMaxShortHooks;
 
 struct ShortHookEntry {
     uintptr_t entry = 0;

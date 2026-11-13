@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include "contracts/capacity.h"
 #include "contracts/plugin.h"
 #include "hooks/install.h"
 
@@ -16,7 +17,7 @@ namespace qol::host {
 
 // 宿主插件容量上限：插件注册表、owner 身份表、HTTP owner 绑定表与帧侧装配顺序表共用，
 // 避免只扩容其中一张表后，下一个插件在下游表以「注册失败」形式再次暴露。
-inline constexpr uint32_t kHostMaxPlugins = 128;
+inline constexpr uint32_t kHostMaxPlugins = qol::capacity::kMaxPlugins;
 
 struct HostDeps {
     uintptr_t (*resolve_entry)(const char* symbol, bool* out_followed);

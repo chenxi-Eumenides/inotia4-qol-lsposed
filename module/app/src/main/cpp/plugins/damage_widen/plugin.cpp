@@ -449,6 +449,9 @@ const contracts::ResourceClaim kResources[] = {
      true, kPluginId, "物理防御保留 CAL 文本公式并以宽中间值计算", nullptr, 120,
      reinterpret_cast<void*>(&calc_physical_defense_wrapper), true, false, false, true},
 };
+static_assert(qol::features::damage_widen::kResourceCount ==
+                  (sizeof(kResources) / sizeof(kResources[0])),
+              "kResourceCount must match kResources");
 
 bool character_read_available(const contracts::QolGameHost* game) {
     return game != nullptr && game->abi.size >= sizeof(contracts::QolGameHost) &&

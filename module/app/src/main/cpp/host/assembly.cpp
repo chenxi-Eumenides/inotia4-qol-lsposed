@@ -13,6 +13,8 @@
 #include "patch/native_hook.h"
 #include "patch/save_enter.h"
 #include "patch/save_exit.h"
+#include "contracts/capacity.h"
+#include "host/core_patches.h"
 #include "infra/log/qol_log.h"
 #include "infra/capabilities.h"
 #include "contracts/character_state.h"
@@ -232,7 +234,12 @@ struct BuiltInPlugin {
     const char* store_namespace = nullptr;
     bool slot_operation_allowed = false;
     bool save_route_allowed = false;
+    uint32_t resource_count = 0;
 };
+
+constexpr BuiltInPlugin with_resource_count(PluginDescriptorFn descriptor, uint32_t count) {
+    return BuiltInPlugin{descriptor, nullptr, false, false, count};
+}
 
 // 这里只登记插件描述符，不表达 provider/consumer 业务顺序；plugin_registry 根据
 // requires/provides 构建 capability DAG 并决定 install/publish 顺序。
@@ -241,36 +248,60 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
 #if !QOL_KERNEL_ONLY
     {&features::core_world::plugin_descriptor},
     {&features::core_craft::plugin_descriptor},
-    {&features::core_save::plugin_descriptor, "module-saves", true, true},
+    {&features::core_save::plugin_descriptor, "module-saves", true, true,
+     features::core_save::kResourceCount},
     {&features::core_character::plugin_descriptor},
     {&features::core_data::plugin_descriptor},
-    {&features::core_feature::plugin_descriptor},
-    {&features::attribute_quality::plugin_descriptor},
-    {&features::attribute_range_display::plugin_descriptor},
-    {&features::autosell::plugin_descriptor},
+    with_resource_count(&features::core_feature::plugin_descriptor,
+                        features::core_feature::kResourceCount),
+    with_resource_count(&features::attribute_quality::plugin_descriptor,
+                        features::attribute_quality::kResourceCount),
+    with_resource_count(&features::attribute_range_display::plugin_descriptor,
+                        features::attribute_range_display::kResourceCount),
+    with_resource_count(&features::autosell::plugin_descriptor,
+                        features::autosell::kResourceCount),
     {&features::core_api::plugin_descriptor},
-    {&features::core_settings::plugin_descriptor},
-    {&features::core_ui::plugin_descriptor},
-    {&features::custom_recipe::plugin_descriptor},
-    {&features::extension_bag::plugin_descriptor},
-    {&features::core_inventory::plugin_descriptor},
-    {&features::core_item::plugin_descriptor},
-    {&features::item_lab::plugin_descriptor},
+    with_resource_count(&features::core_settings::plugin_descriptor,
+                        features::core_settings::kResourceCount),
+    with_resource_count(&features::core_ui::plugin_descriptor,
+                        features::core_ui::kResourceCount),
+    with_resource_count(&features::custom_recipe::plugin_descriptor,
+                        features::custom_recipe::kResourceCount),
+    with_resource_count(&features::extension_bag::plugin_descriptor,
+                        features::extension_bag::kResourceCount),
+    with_resource_count(&features::core_inventory::plugin_descriptor,
+                        features::core_inventory::kResourceCount),
+    with_resource_count(&features::core_item::plugin_descriptor,
+                        features::core_item::kResourceCount),
+    with_resource_count(&features::item_lab::plugin_descriptor,
+                        features::item_lab::kResourceCount),
     {&features::core_ui_state::plugin_descriptor},
-    {&features::push_all::plugin_descriptor},
-    {&features::better_move::plugin_descriptor},
-    {&features::combat_move::plugin_descriptor},
-    {&features::popup_blocker::plugin_descriptor},
-    {&features::damage_widen::plugin_descriptor},
+    with_resource_count(&features::push_all::plugin_descriptor,
+                        features::push_all::kResourceCount),
+    with_resource_count(&features::better_move::plugin_descriptor,
+                        features::better_move::kResourceCount),
+    with_resource_count(&features::combat_move::plugin_descriptor,
+                        features::combat_move::kResourceCount),
+    with_resource_count(&features::popup_blocker::plugin_descriptor,
+                        features::popup_blocker::kResourceCount),
+    with_resource_count(&features::damage_widen::plugin_descriptor,
+                        features::damage_widen::kResourceCount),
     {&features::core_quest::plugin_descriptor},
-    {&features::save_backup::plugin_descriptor, nullptr, true},
-    {&features::world_tuning::plugin_descriptor},
-    {&features::craft_lottery::plugin_descriptor},
-    {&features::special_equip::plugin_descriptor},
-    {&features::stack_limit::plugin_descriptor},
+    {&features::save_backup::plugin_descriptor, nullptr, true, false,
+     features::save_backup::kResourceCount},
+    with_resource_count(&features::world_tuning::plugin_descriptor,
+                        features::world_tuning::kResourceCount),
+    with_resource_count(&features::craft_lottery::plugin_descriptor,
+                        features::craft_lottery::kResourceCount),
+    with_resource_count(&features::special_equip::plugin_descriptor,
+                        features::special_equip::kResourceCount),
+    with_resource_count(&features::stack_limit::plugin_descriptor,
+                        features::stack_limit::kResourceCount),
     {&features::core_system::plugin_descriptor},
-    {&features::character_panel::plugin_descriptor},
-    {&features::world_teleport::plugin_descriptor},
+    with_resource_count(&features::character_panel::plugin_descriptor,
+                        features::character_panel::kResourceCount),
+    with_resource_count(&features::world_teleport::plugin_descriptor,
+                        features::world_teleport::kResourceCount),
     // custom_map 尚未完成（资源替换与面板未经真机验收），暂不注册：不进入 capability DAG、
     // 不声明 feature 与资源 claim。代码与 target 保留，完成后恢复这一行即可接线。
     // {&features::custom_map::plugin_descriptor},
@@ -280,6 +311,39 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
 
 constexpr uint32_t kBuiltInPluginCount =
     sizeof(kBuiltInPlugins) / sizeof(kBuiltInPlugins[0]) - 1;  // 末位 nullptr
+// 容量约束来自 contracts/capacity.h；内建声明资源由 sidecar 在编译期汇总校验。
+constexpr uint32_t builtin_declared_resources() {
+    uint32_t total = 0;
+    for (uint32_t i = 0; i < kBuiltInPluginCount; ++i) {
+        total += kBuiltInPlugins[i].resource_count;
+    }
+    return total;
+}
+
+constexpr uint32_t builtin_max_plugin_resources() {
+    uint32_t maximum = 0;
+    for (uint32_t i = 0; i < kBuiltInPluginCount; ++i) {
+        if (kBuiltInPlugins[i].resource_count > maximum) {
+            maximum = kBuiltInPlugins[i].resource_count;
+        }
+    }
+    return maximum;
+}
+
+constexpr uint32_t kBuiltinDeclaredResources = builtin_declared_resources();
+constexpr uint32_t kHostDeclaredClaims = kSaveEnterClaimCount + kSaveExitClaimCount +
+                                         kCorePatchClaimCount + kFrameSourceClaimCount;
+static_assert(kHostDeclaredClaims == qol::capacity::kHostClaimCount,
+              "host claim count must match capacity reserve");
+static_assert(kBuiltinDeclaredResources + kHostDeclaredClaims <=
+                  qol::capacity::kMaxDeclaredResources,
+              "built-in + host claims exceed declared resource budget");
+static_assert(qol::capacity::kMaxDeclaredResources -
+                      (kBuiltinDeclaredResources + kHostDeclaredClaims) >=
+                  qol::capacity::kHostClaimReserve,
+              "declared resource budget must keep headroom");
+static_assert(builtin_max_plugin_resources() <= qol::capacity::kMaxPluginResources,
+              "a built-in plugin declares more resources than the per-plugin budget");
 // 内建描述符多于注册表容量时，装配会在列表中段失败且表现为「某个插件注册失败」，
 // 真实原因（容量不足）不可见；容量不足必须在构建期暴露。
 static_assert(kBuiltInPluginCount <= kHostMaxPlugins,

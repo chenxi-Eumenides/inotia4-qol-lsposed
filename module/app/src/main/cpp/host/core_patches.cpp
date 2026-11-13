@@ -72,6 +72,11 @@ const contracts::ResourceClaim kLoadInventoryBitendClaim{
     false,
 };
 
+const contracts::ResourceClaim* const kCorePatchClaims[] = {
+    &kHubClaim, &kSaveInventoryBitendClaim, &kLoadInventoryBitendClaim};
+static_assert(sizeof(kCorePatchClaims) / sizeof(kCorePatchClaims[0]) == kCorePatchClaimCount,
+              "core patch claim count mismatch");
+
 constexpr const char* kMonsterClaimId = "patch:MONSTER_ITEM_COUNT_COMPAT";
 
 std::atomic<bool> g_installed{false};
@@ -179,9 +184,9 @@ bool core_patches_install() {
         return true;
     }
 
-    hooks::register_claim(kHubClaim);
-    hooks::register_claim(kSaveInventoryBitendClaim);
-    hooks::register_claim(kLoadInventoryBitendClaim);
+    for (const contracts::ResourceClaim* claim : kCorePatchClaims) {
+        (void)hooks::register_claim(*claim);
+    }
     (void)install_hub();
     (void)install_bitend(kSaveInventoryBitendClaim);
     (void)install_bitend(kLoadInventoryBitendClaim);

@@ -54,6 +54,8 @@ const contracts::ResourceClaim kResources[] = {
      reinterpret_cast<void*>(&tutorial_description_suppress),
      true},
 };
+static_assert(kResourceCount == (sizeof(kResources) / sizeof(kResources[0])),
+              "kResourceCount must match kResources");
 
 int plugin_install(contracts::PluginContext& ctx) {
     if (ctx.struct_size < sizeof(contracts::PluginContext) || ctx.sdk == nullptr ||

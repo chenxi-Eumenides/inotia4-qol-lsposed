@@ -1,5 +1,7 @@
 #include "patch/insn_patch.h"
 
+#include "contracts/capacity.h"
+
 #include <array>
 #include <cstring>
 #include <mutex>
@@ -8,7 +10,7 @@
 #include "patch/call_patch.h"
 
 namespace {
-constexpr size_t kMaxEntries = 32;
+constexpr size_t kMaxEntries = qol::capacity::kMaxInsnPatches;
 struct Entry {
     uintptr_t site = 0;
     uint32_t original = 0;

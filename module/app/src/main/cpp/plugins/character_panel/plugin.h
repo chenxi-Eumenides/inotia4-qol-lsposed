@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../contracts/plugin.h"
+#include <cstdint>
 
 // character_panel 插件（ADR 0001 D4）：把原版人物属性面板改造成属性总览入口。
 // 声明面见：
@@ -11,6 +12,7 @@
 
 namespace qol::features::character_panel {
 
+inline constexpr uint32_t kResourceCount = 2;
 const contracts::PluginDescriptor& plugin_descriptor();
 
 }  // namespace qol::features::character_panel

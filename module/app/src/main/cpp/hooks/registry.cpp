@@ -1,5 +1,7 @@
 #include "hooks/registry.h"
 
+#include "contracts/capacity.h"
+
 // 资源登记表实现（见 hooks/registry.h 的接口契约）。
 // 静态数组 + 追加计数：登记只在装配期发生，无删除路径，故不需要空闲链表。
 
@@ -12,8 +14,8 @@ namespace {
 
 // 插件声明期登记的 claim 已用满 160 条，宿主 save 发起点（2 条读档/新档 + 1 条退出存档）
 // 在装配末段登记时被拒，导致存档入口补装 300 帧后耗尽、水印显示「存档入口」。
-// 扩到 192 给宿主 claim 和后续插件留出余量。
-constexpr uint32_t kMaxClaims = 192;
+// 容量由 contracts/capacity.h 统一派生，给宿主 claim 和后续插件留出余量。
+constexpr uint32_t kMaxClaims = qol::capacity::kMaxDeclaredResources;
 
 struct Entry {
     contracts::ResourceClaim claim;

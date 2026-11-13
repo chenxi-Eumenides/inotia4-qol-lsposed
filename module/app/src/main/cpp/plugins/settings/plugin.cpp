@@ -62,6 +62,8 @@ const contracts::ResourceClaim kResources[] = {
         reinterpret_cast<void*>(&core_ui::settings_main_menu_more_games_draw),
     },
 };
+static_assert(kResourceCount == (sizeof(kResources) / sizeof(kResources[0])),
+              "kResourceCount must match kResources");
 
 // ---- HTTP command handlers（/api/debug/settings-ui/* POST）----
 // 四条 typed endpoints 均无请求体；Host 依据 descriptor 管理绑定和生命周期撤销。

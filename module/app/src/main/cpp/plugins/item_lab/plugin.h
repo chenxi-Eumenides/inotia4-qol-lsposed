@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include "../../contracts/plugin.h"
 #include "../../contracts/game_host.h"
 #include "../../contracts/item_payload.h"
@@ -7,6 +8,7 @@
 #include "../../contracts/game_ports/inventory_extras_port.h"
 
 namespace qol::features::item_lab {
+inline constexpr uint32_t kResourceCount = 1;
 const contracts::PluginDescriptor& plugin_descriptor();
 const contracts::QolHostSdk* host_sdk();
 const contracts::InventoryActionApi* inventory_action();

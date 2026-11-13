@@ -8,6 +8,7 @@
 #include "../../contracts/ui.h"
 #include "../../contracts/game_ports/inventory_extras_port.h"
 #include "../../contracts/game_ports/item_port.h"
+#include <cstdint>
 
 // 自动出售插件清单入口（ARCHITECTURE.md §3.3）：资源常驻（gate=nullptr）。
 // 开关为 descriptor feature `autosell.auto_sell`；生命周期驱动扫描任务与 UI 入口
@@ -15,6 +16,7 @@
 
 namespace qol::features::autosell {
 
+inline constexpr uint32_t kResourceCount = 1;
 const contracts::PluginDescriptor& plugin_descriptor();
 const contracts::QolHostSdk* host_sdk();
 const contracts::QolGameHost* game_host();

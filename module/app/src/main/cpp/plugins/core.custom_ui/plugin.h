@@ -2,6 +2,7 @@
 
 #include "../../contracts/game_ports/choice_port.h"
 #include "../../contracts/plugin.h"
+#include <cstdint>
 
 // core.custom_ui 工具/框架插件清单入口（ARCHITECTURE.md §7.1；ADR 0001 D1 的 A 档）：
 //   · provides `ui_components` v1.0（可复用界面组件能力）；
@@ -13,6 +14,7 @@
 
 namespace qol::features::core_ui {
 
+inline constexpr uint32_t kResourceCount = 4;
 const contracts::PluginDescriptor& plugin_descriptor();
 const contracts::QolHostSdk* host_sdk();
 const contracts::QolChoicePort* choice_port();

@@ -131,6 +131,8 @@ const contracts::ResourceClaim kResources[] = {
         nullptr,
     },
 };
+static_assert(kResourceCount == (sizeof(kResources) / sizeof(kResources[0])),
+              "kResourceCount must match kResources");
 
 constexpr contracts::FeatureChoiceOption kMovementModes[] = {
     {"eight_way", "八向移动"},

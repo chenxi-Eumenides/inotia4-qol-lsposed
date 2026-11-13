@@ -297,6 +297,8 @@ const contracts::ResourceClaim kResources[] = {
         nullptr,
     },
 };
+static_assert(kResourceCount == (sizeof(kResources) / sizeof(kResources[0])),
+              "kResourceCount must match kResources");
 
 // 面板 provider 注销与绑定缓存失效；deactivate 与能力撤销共用。
 void unregister_panel() {

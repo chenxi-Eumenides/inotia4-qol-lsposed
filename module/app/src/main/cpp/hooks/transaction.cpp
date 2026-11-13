@@ -1,23 +1,27 @@
 #include "hooks/transaction.h"
 
 // 资源事务引擎实现（见 hooks/transaction.h 的接口契约与 ARCHITECTURE.md §4.4）。
-// 固定容量静态数组：登记表上限 192 条，事务资源数不会超过它；终态记录保留最近 16 个。
+// 固定容量静态数组：单事务资源数按单插件声明预算限制；容量由 contracts/capacity.h 派生。
 
 #include <cstring>
 
+#include "contracts/capacity.h"
 #include "hooks/install.h"
 #include "hooks/registry.h"
 
 namespace qol::hooks {
 namespace {
 
-// 登记表容量（hooks/registry.cpp 同值）；事务资源列表按此设置上限。
-constexpr uint32_t kMaxResources = 192;
+// 事务资源列表按单插件声明预算设置上限。
+constexpr uint32_t kMaxResources = qol::capacity::kMaxPluginResources;
 // 终态事务保留条数：环形覆盖最旧，淘汰后查询返回 false。
-constexpr uint32_t kMaxTerminal = 16;
+constexpr uint32_t kMaxTerminal = qol::capacity::kMaxTerminalTransactions;
 // 并发未终态事务槽位数（每插件至多一个）。
-constexpr uint32_t kMaxActive = 32;
+constexpr uint32_t kMaxActive = qol::capacity::kMaxActiveTransactions;
 constexpr uint32_t kDefaultBudget = 120;
+
+static_assert(kMaxResources <= qol::capacity::kMaxDeclaredResources,
+              "transaction resources must fit in declared resource budget");
 
 struct TxEntry {
     const contracts::ResourceClaim* claim = nullptr;
@@ -521,6 +525,7 @@ uint64_t tx_begin(const char* plugin_id, TxKind kind) {
         }
         ++total;
     }
+    if (total > kMaxResources) return 0;
     if (total == 0) {
         return 0;
     }

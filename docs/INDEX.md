@@ -30,6 +30,7 @@
 - `api-reference.md`：HTTP API 路径、方法、参数、响应和状态码的唯一权威。
 - `logging.md`：日志行格式、级别与域、文件清单与保留/轮转策略、`qol-crash.log`/`java-crash.log` 格式契约与符号化用法的唯一权威。
 - `logging-standards.md`：日志等级语义、重试分级、正文结构、频率与去重责任、审计流程与验收指标的当前权威；写日志和审计日志都以它为准。
+- `capacity.md`：模块固定容量、派生关系、编译期断言与扩容规则。
 - `game/`：原版游戏系统与逆向结论。
 - `game/attributes.md`：角色属性体系——主属性、attr 0-31、隐藏扩展区、面板可见集合与不属于属性的全局加成。
 - `game/cooldown.md`：技能、药水与道具冷却的运行时结构、时长公式、tick 时间基准、复活卷轴与 monster v29 变体差异、符号地址。

@@ -1,4 +1,5 @@
 #include "inventory_hooks.h"
+#include "plugins/core.item/plugin.h"
 #include "plugins/core.item/api/native_inventory.h"
 #include "plugins/core.item/api/item_use.h"
 #include "../api/projection.h"
@@ -1518,6 +1519,8 @@ const qol::contracts::ResourceClaim kInventoryHookClaims[] = {
 
 constexpr uint32_t kInventoryHookClaimCount =
     sizeof(kInventoryHookClaims) / sizeof(kInventoryHookClaims[0]);
+static_assert(kInventoryHookClaimCount == qol::features::core_item::kResourceCount,
+              "inventory hook claim count must match core.item kResourceCount");
 
 // claim.handler → 该 wrapper 的 backup 槽（原有 g_backup_* 全局）。以 handler 做唯一映射，
 // 避免 id 表与 backup 表两处重复维护；未登记 handler 返回 nullptr，桥按 fail-closed 处理。

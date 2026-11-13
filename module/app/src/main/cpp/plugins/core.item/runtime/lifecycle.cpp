@@ -1,4 +1,5 @@
 #include "plugins/core.item/runtime/core_item_internal.h"
+#include "plugins/core.item/plugin.h"
 #include "plugins/core.item/api/bag_source.h"
 #include "plugins/core.item/api/native_inventory.h"
 #include "plugins/core.item/api/item_use.h"
@@ -98,6 +99,8 @@ void unsubscribe_capability_changes() {
 // Inventory claims；merge ptrslot 与 5 条装备页 UI hook 已迁往 extension_bag。
 // MakeItem 空转 hook 已移除，claims 表为 10 条（运行时以 claims 返回值计数）。
 constexpr uint32_t kInventoryResourceCount = 10;
+static_assert(kInventoryResourceCount == qol::features::core_item::kResourceCount,
+              "kInventoryResourceCount must match core.item kResourceCount");
 constexpr uint32_t kMaxResources = 32;
 static_assert(kInventoryResourceCount <= kMaxResources,
               "core.item resource table capacity");

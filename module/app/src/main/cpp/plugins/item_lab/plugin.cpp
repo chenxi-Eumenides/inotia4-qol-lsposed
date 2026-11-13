@@ -27,6 +27,8 @@ const contracts::ResourceClaim kResources[] = {{
     contracts::ResourceRequirement::kRequired, contracts::ResourceFailure::kFailClosed,
     true, kId, "背包页测试物品按钮绘制", nullptr, 120,
     reinterpret_cast<void*>(&item_lab_equip_roll_dice_draw_wrapper)}};
+static_assert(kResourceCount == (sizeof(kResources) / sizeof(kResources[0])),
+              "kResourceCount must match kResources");
 int install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_extras = ctx.ports && ctx.port_count ? static_cast<const contracts::QolInventoryExtrasPort*>(ctx.ports[0]) : nullptr;

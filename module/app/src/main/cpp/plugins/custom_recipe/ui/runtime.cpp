@@ -9,6 +9,7 @@
 #include "../model/result.h"
 #include "../table/text_table.h"
 #include "feature.h"
+#include "../plugin.h"
 
 // ===========================================================================
 // 合成器界面子层运行时：全部 UIMix hook 的唯一挂载处（原 craft_ui 并入 custom_recipe）
@@ -834,6 +835,8 @@ const contracts::ResourceClaim kClaims[] = {
 #undef CRAFT_CLAIM
 
 constexpr uint32_t kClaimCount = sizeof(kClaims) / sizeof(kClaims[0]);
+static_assert(kClaimCount + 1 == qol::features::custom_recipe::kResourceCount,
+              "custom_recipe: 12 UI claims + 1 ownership");
 
 void clear_backups() {
     g_backup_place = nullptr;

@@ -1,9 +1,11 @@
 #pragma once
 
 #include "../../contracts/plugin.h"
+#include <cstdint>
 
 namespace qol::features::combat_move {
 
+inline constexpr uint32_t kResourceCount = 4;
 const contracts::PluginDescriptor& plugin_descriptor();
 int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup);
 void keep_target_wrapper(void* character, void* target);

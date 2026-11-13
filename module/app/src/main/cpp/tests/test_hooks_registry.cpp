@@ -4,6 +4,7 @@
 
 #include "hooks/install.h"
 #include "hooks/registry.h"
+#include "contracts/capacity.h"
 #include "infra/log/qol_log.h"
 
 #include <cstdint>
@@ -208,17 +209,17 @@ void test_entry_target_conflict_tracks_occupied_runtime_targets() {
 
 void test_capacity() {
     registry_reset_for_test();
-    static char ids[192][16];
-    for (int i = 0; i < 192; ++i) {
+    static char ids[qol::capacity::kMaxDeclaredResources][16];
+    for (uint32_t i = 0; i < qol::capacity::kMaxDeclaredResources; ++i) {
         std::snprintf(ids[i], sizeof(ids[i]), "hook:%d", i);
         CHECK(register_claim(make_claim(ids[i], "owner")));
     }
-    CHECK(claim_count() == 192);
+    CHECK(claim_count() == qol::capacity::kMaxDeclaredResources);
     CHECK(!register_claim(make_claim("hook:overflow", "owner")));
-    CHECK(claim_count() == 192);
+    CHECK(claim_count() == qol::capacity::kMaxDeclaredResources);
     // 满容时同 id 幂等仍成立，不误判为冲突。
     CHECK(register_claim(make_claim(ids[0], "owner")));
-    CHECK(claim_count() == 192);
+    CHECK(claim_count() == qol::capacity::kMaxDeclaredResources);
 }
 
 void test_reset() {

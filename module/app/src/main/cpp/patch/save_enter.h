@@ -4,6 +4,8 @@
 
 #include "contracts/plugin.h"
 
+inline constexpr uint32_t kSaveEnterClaimCount = 2;
+
 // 两个发起点的声明式资源表（owner="core"，kCallPatch；handler 为本 TU 的 wrapper）。
 // 只声明不安装：宿主装配经 hooks 登记 + 机制分派安装；未就绪时不改写字节，可重试。
 uint32_t save_enter_claim_count();

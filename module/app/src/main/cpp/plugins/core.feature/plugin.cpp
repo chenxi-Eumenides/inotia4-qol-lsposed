@@ -145,6 +145,8 @@ const contracts::ResourceClaim kResources[] = {
      kPluginId, "暴击震动与闪白同帧出现；仅拦截暴击分支触发的震动",
      nullptr, 120, reinterpret_cast<void*>(&vibration_play_wrapper)},
 };
+static_assert(kResourceCount == (sizeof(kResources) / sizeof(kResources[0])),
+              "kResourceCount must match kResources");
 
 int plugin_install(contracts::PluginContext& ctx) {
     if (ctx.sdk == nullptr) return 1;

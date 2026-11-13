@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 // 启动期宿主兼容 patch 的声明式安装入口：Hive 登录跳过与 monster 特征兼容。
 //
 // 由 bridge_init 经注入的 boot hook 调用（game/access/game_access.h 的 BridgeBootPatchFn）。
@@ -8,6 +10,8 @@
 // 不入资源表（见 .cpp）。
 
 namespace qol::host {
+
+inline constexpr uint32_t kCorePatchClaimCount = 3;
 
 // 幂等：已安装返回 true；未就绪（bridge/g_base）返回 false 允许后续重试。
 bool core_patches_install();

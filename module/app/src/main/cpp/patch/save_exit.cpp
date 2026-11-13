@@ -43,6 +43,7 @@ const qol::contracts::ResourceClaim kExitClaim{
     120,      // step_budget
     reinterpret_cast<void*>(&save_exit_fire),  // handler（BL 目标）
 };
+static_assert(::kSaveExitClaimCount == 1, "save exit claim count mismatch");
 
 }  // namespace
 
