@@ -33,6 +33,7 @@
 - `capacity.md`：模块固定容量、派生关系、编译期断言与扩容规则。
 - `game/`：原版游戏系统与逆向结论。
 - `game/attributes.md`：角色属性体系——主属性、attr 0-31、隐藏扩展区、面板可见集合与不属于属性的全局加成。
+- `game/item-equipment-limits.md`：装备字段位宽、前缀→品质映射、附魔/强化/孔位上限及原生限制与系统安全限制的区分。
 - `game/cooldown.md`：技能、药水与道具冷却的运行时结构、时长公式、tick 时间基准、复活卷轴与 monster v29 变体差异、符号地址。
 - `game/runtime.md`：单线程主循环、固定 60ms 逻辑帧、全局 tick、主循环入口与帧锚点、主菜单/世界状态机。
 - `game/native-binary.md`：原版 v1.3.2 解包位置、`libgame.so` ELF 指标、函数族构成、调用/全局状态耦合与替换边界分层。

@@ -1,4 +1,5 @@
 #include "spec.h"
+#include "../../contracts/item_equipment_limits.h"
 namespace qol::features::item_lab {
 namespace {
 constexpr uint8_t kRawRarity[5] = {0, 4, 7, 10, 11};
@@ -16,12 +17,20 @@ constexpr contracts::QolItemPayloadOption kEnchantOptions[] = {
     {static_cast<uint16_t>((2u << 13) | 0u), 500},
     {static_cast<uint16_t>((2u << 13) | 31u), 50},
     {static_cast<uint16_t>((2u << 13) | 30u), 10}};
-constexpr uint32_t kEquipmentMarker = 100u << 25;
+constexpr uint32_t kEquipmentMarker = contracts::kItemEquipmentMarker
+    << contracts::kItemEquipmentMarkerShift;
 }
 bool build_equipment_payload(const EquipmentSpec& spec, contracts::QolItemPayloadBlob* out) {
     if (out == nullptr || spec.rarity > 4 ||
+        (spec.raw_prefix >= 0 &&
+         spec.raw_prefix > contracts::kItemPrefixRawMax) ||
+        spec.socket_total > contracts::kItemSocketTotalMax ||
+        spec.socket_filled > contracts::kItemSocketFilledMax ||
+        spec.enchant_level > contracts::kItemEnchantLevelMax ||
+        spec.enchant_remaining > contracts::kItemEnchantRemainingMax ||
+        spec.enchant_id > contracts::kItemEnchantIdMax ||
         spec.native_option_count > 4 || spec.gem_option_count > 4 ||
-        spec.enchant_option_count > 4) {
+        spec.enchant_option_count > contracts::kItemSystemTestedEnchantNodes) {
         return false;
     }
     contracts::QolItemPayloadOption options[12]{};
@@ -29,11 +38,13 @@ bool build_equipment_payload(const EquipmentSpec& spec, contracts::QolItemPayloa
     for (uint32_t i = 0; i < spec.native_option_count; ++i) options[count++] = kNativeOptions[i];
     for (uint32_t i = 0; i < spec.gem_option_count; ++i) options[count++] = kGemOptions[i];
     for (uint32_t i = 0; i < spec.enchant_option_count; ++i) options[count++] = kEnchantOptions[i];
-    const uint8_t raw = spec.raw_prefix < 0 ? kRawRarity[spec.rarity]
-                                            : static_cast<uint8_t>(spec.raw_prefix & 0x0F);
+    const uint8_t raw = spec.raw_prefix < 0
+                            ? kRawRarity[spec.rarity]
+                            : static_cast<uint8_t>(spec.raw_prefix);
     const uint16_t enchant_word = static_cast<uint16_t>(
-        ((spec.enchant_id & 0x1F) << 11) | ((spec.enchant_level & 0x1F) << 6) |
-        ((spec.enchant_remaining & 0x0F) << 2));
+        ((spec.enchant_id & contracts::kItemEnchantIdMax) << 11) |
+        ((spec.enchant_level & contracts::kItemEnchantLevelMax) << 6) |
+        ((spec.enchant_remaining & contracts::kItemEnchantRemainingMax) << 2));
     const contracts::QolItemPayloadHeader header{
         0,
         static_cast<uint16_t>((static_cast<uint32_t>(spec.category) << 6) |

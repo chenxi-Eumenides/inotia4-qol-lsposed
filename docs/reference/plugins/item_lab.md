@@ -20,15 +20,17 @@
 
 | 字段 | 位宽/范围 | 游戏实际限制 |
 |---|---|---|
-| 总孔数 `socket_total` | bits4-7，0..15 | 常规最多 4 孔 |
-| 已镶嵌 `socket_filled` | bits0-3，0..15 | 不超过总孔数才合法 |
+| 总孔数 `socket_total` | bits4-7，0..15 | 字段可到 15；常规装备最多 4 孔 |
+| 已镶嵌 `socket_filled` | bits0-3，0..15 | 实测允许 filled > total（1/4 可生成显示）；系统默认要求 ≤ 总孔数 |
 | 强化耐久 `enchant_remaining` | bits2-5，0..15 | 15 |
-| 强化等级 `enchant_level` | bits6-10，0..31 | 当前版本强化上限 12；旧系统理论上限 15 |
+| 强化等级 `enchant_level` | bits6-10，0..31 | 实测 31 可生成；从 31 再强化会导致游戏崩溃；当前版本强化上限 12 |
 | 强化 ID `enchant_id` | bits11-15，0..31 | 游戏维护 |
 
 - `enchant_level`/`enchant_remaining`/`enchant_id` 已由 `item.facts` view 解析，但常规 Item JSON 只输出 type=2 的 `enchant` 数组，未输出这三个标量；`/api/debug/item/raw` 可查看 `enchant_count`、`enhance_low4`、`enchant_id`。
 - `GetRarity` 从 `I_TYPE` bits2-5 经 `ITEMGRADEBASE +4` 映射，因此前缀 raw 会决定实际 rarity：raw=9 映射为蓝（2），raw=0 映射为白（0）。第 4/5 件的“请求 rarity”与“实际 rarity”会不一致，属于预期非法状态。
 - 标记位：`I_COUNT` bits25-31 固定写 100，保证 `ITEM_IsRealEquip` 不把装备判为未鉴定/损坏。
+- 附魔实测：4 个 type=2 节点允许显示；未发现游戏原生单独上限。payload 最多 59 个总 option 节点，模块 view 每列表最多 32 个；系统默认按 4 个生成。
+- 前缀/品质完整映射及原生限制与系统安全限制的区分见 `docs/reference/game/item-equipment-limits.md`。
 
 ## 容量与日志
 
