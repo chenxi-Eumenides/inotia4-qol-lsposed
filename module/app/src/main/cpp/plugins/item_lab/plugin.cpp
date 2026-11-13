@@ -41,6 +41,10 @@ int install(contracts::PluginContext& ctx) {
     if (!contracts::succeeded(g_sdk->capabilities.require(contracts::kInventoryAccessCapabilityId,{1,1},&api)) || !api) return 1;
     g_access = static_cast<const contracts::QolInventoryAccessApi*>(api);
     g_enabled.store(true, std::memory_order_release);
+    ITEM_LAB_INFO("install ok sdk=%p extras=%p action=%p payload=%p access=%p",
+                  static_cast<const void*>(g_sdk), static_cast<const void*>(g_extras),
+                  static_cast<const void*>(g_action), static_cast<const void*>(g_payload),
+                  static_cast<const void*>(g_access));
     return 0;
 }
 void deactivate(contracts::PluginContext&) { g_enabled.store(false, std::memory_order_release); g_sdk=nullptr; g_action=nullptr; g_payload=nullptr; g_access=nullptr; g_extras=nullptr; }
