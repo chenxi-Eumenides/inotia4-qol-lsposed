@@ -43,6 +43,9 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
     {"F_UI_PLAY_PORTING_DRAW_VMA", F_UI_PLAY_PORTING_DRAW_VMA},
     {"F_CHAR_MOVE_ON_WAIT_COORD_VMA", F_CHAR_MOVE_ON_WAIT_COORD_VMA},
     {"F_MAP_IS_BLOCKING_BYPIXEL_VMA", F_MAP_IS_BLOCKING_BYPIXEL_VMA},
+    // 战斗优化入口（owner=combat_move）：动作切换汇合点与动作启动入口。
+    {"F_CHAR_SET_ACTION_VMA", F_CHAR_SET_ACTION_VMA},
+    {"F_CHAR_START_ACTION_EX_VMA", F_CHAR_START_ACTION_EX_VMA},
     // 教程文案抑制入口（owner=popup_blocker）：hook handler 短路原绘制函数并返回 0。
     {"F_TUTORIAL_DESCRIPTION_VMA", F_TUTORIAL_DESCRIPTION_VMA},
     // 属性显示范围：详情渲染三点（MATH_GetRandom 截获 / 选项行改写 / 构造入口缓存）。
