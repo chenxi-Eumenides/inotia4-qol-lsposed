@@ -208,17 +208,17 @@ void test_entry_target_conflict_tracks_occupied_runtime_targets() {
 
 void test_capacity() {
     registry_reset_for_test();
-    static char ids[160][16];
-    for (int i = 0; i < 160; ++i) {
+    static char ids[192][16];
+    for (int i = 0; i < 192; ++i) {
         std::snprintf(ids[i], sizeof(ids[i]), "hook:%d", i);
         CHECK(register_claim(make_claim(ids[i], "owner")));
     }
-    CHECK(claim_count() == 160);
+    CHECK(claim_count() == 192);
     CHECK(!register_claim(make_claim("hook:overflow", "owner")));
-    CHECK(claim_count() == 160);
+    CHECK(claim_count() == 192);
     // 满容时同 id 幂等仍成立，不误判为冲突。
     CHECK(register_claim(make_claim(ids[0], "owner")));
-    CHECK(claim_count() == 160);
+    CHECK(claim_count() == 192);
 }
 
 void test_reset() {
