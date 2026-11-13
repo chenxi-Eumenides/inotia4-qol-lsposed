@@ -103,10 +103,14 @@ void item_lab_construct_all() {
     if(!has_slot0 && slot_result.code!=kQolErrNotFound){ITEM_LAB_WARN("slot0 read failed space=%d bag=%d code=%d",bag.space_id,bag.bag,slot_result.code);return;}
     contracts::QolBagInfo info{};
     if(!contracts::succeeded(access->native_bag_info(&bag,&info))){ITEM_LAB_WARN("bag info failed space=%d bag=%d",bag.space_id,bag.bag);return;}
-    // 固定构造 5 件（普通/宝石/2 合法装备/1 非法装备）；slot0 有物品时额外 1 件副本。
-    const int needed=has_slot0?6:5;
-    if(info.capacity-info.occupied_slots<needed){ITEM_LAB_WARN("construct skipped reason=bag_full space=%d bag=%d capacity=%d occupied=%d needed=%d",bag.space_id,bag.bag,info.capacity,info.occupied_slots,needed);return;}
-    if(has_slot0){
+    // 固定构造 5 件（普通/宝石/2 合法装备/1 非法装备）。副本只在额外有 1 个空位时创建；
+    // 空位不足 6 时优先保证 5 件构造物品，避免整批跳过。
+    constexpr int kConstructedCount=5;
+    const int free_slots=info.capacity-info.occupied_slots;
+    if(free_slots<kConstructedCount){ITEM_LAB_WARN("construct skipped reason=bag_full space=%d bag=%d capacity=%d occupied=%d needed=%d",bag.space_id,bag.bag,info.capacity,info.occupied_slots,kConstructedCount);return;}
+    const bool copy_slot0=has_slot0&&free_slots>=kConstructedCount+1;
+    if(has_slot0&&!copy_slot0){ITEM_LAB_WARN("copy skipped reason=no_slot_for_copy space=%d bag=%d free=%d",bag.space_id,bag.bag,free_slots);}
+    if(copy_slot0){
         contracts::QolItemPayload src{};
         if(!update_payload(slot0.item,nullptr,0,&src)){
             ITEM_LAB_WARN("slot0 payload copy failed space=%d bag=%d",bag.space_id,bag.bag);
