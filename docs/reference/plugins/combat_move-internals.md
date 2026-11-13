@@ -15,7 +15,7 @@
 | `hook:CHAR_StartActionEx` | `F_CHAR_START_ACTION_EX_VMA` | entry hook | 普攻出手前的距离门（超距取消本次出手，保留目标） |
 
 私有端口 `QOL_PORT_COMBAT_MOVE`（v1.0，仅 `combat_move` 可声明）。端口只提供只读判定和一个受控写原语
-（`set_target`，用于非锁定态透传清目标）；游戏调用全部在 `game/adapter_ports/combat_move_port.cpp` 内完成。
+（`set_target` 透传清目标、`stop_combat` 停战）；游戏调用全部在 `game/adapter_ports/combat_move_port.cpp` 内完成。
 
 ## 2. 攻击移动态判定
 
@@ -33,22 +33,25 @@ enabled
 
 ## 3. 范围门
 
-`CHAR_StartActionEx` 入口：
+`CHAR_StartActionEx` 入口（仅默认攻击动作）：
 
 ```
-target_locked && 本次动作为默认攻击
-  且 距离 > effective_range(动作攻击距离) → 返回 0（取消本次出手，不清目标、不停战）
-否则 → 原函数
+dist <= 攻击距离                → 原函数（出手）
+攻击距离 < dist <= 有效距离      → 返回 0（取消本次出手，保留目标）
+dist > 有效距离                 → 清目标 + 停战 + 返回 0
 ```
 
-- `target_locked` = 开关开启 && 当前出战主角（`ch+0x2FA == 0` 且 `ch+0x09 type == 0`）&& `ch+0x278` 目标非空。
-  保留目标不依赖当前动作，因此取消出手后进入空闲仍不会在移动时被清锁。
-- `attacking` = `target_locked` && `ch+0x280` 当前动作为默认攻击；只有它触发走路动作抑制与移动放行。
-- 余量：`margin% = clamp(10 + (13 - range) * 10, 10, 100)`，`effective_range = range + range * margin% / 100`。
-  取值来自 ACTDATABASE 基础攻击动作距离 `+0x05`（现为 4/6/12/13）：4→+100%、6→+80%、8→+60%、12→+20%、13→+10%。
-- 距离用 `CHAR_GetDistance`，范围用 `CHAR_GetActDistance`（动作表距离 + attr75），与
+- `有效距离 = 攻击距离 + 攻击距离 × margin% / 100`，余量只作为“保留锁定的宽限带”，不扩大出手距离。
+- `margin% = clamp(10 + (13 − 攻击距离) × 10, 10, 100)`；ACTDATABASE 基础攻击动作距离为 4/6/12/13：
+  4→+100%（宽限 8）、6→+80%（宽限 10）、8→+60%（宽限 12）、12→+20%（宽限 14）、13→+10%（宽限 14）。
+- 距离用 `CHAR_GetDistance`，攻击距离用 `CHAR_GetActDistance`（动作表距离 + attr75），与
   `CHAR_ProcessNormalAIOnCombat` 构造目标列表时同口径。
-- 超距只取消本次动作启动，不调用 `CHAR_SetTarget`/`CHAR_StopCombat`；回到范围内后由原版动作链再次尝试。
+- 清目标走 `CHAR_SetTarget(ch, 0)`；`CHAR_StopCombat` 只清战斗标志、仇恨并复位动作，不清目标，因此两者都调用。
+- `thread_local` 重入标志覆盖 `stop_combat` 触发的动作切换。
+
+`target_locked` = 开关开启 && 当前出战主角（`ch+0x2FA == 0` 且 `ch+0x09 type == 0`）&& `ch+0x278` 目标非空。
+保留目标不依赖当前动作，因此取消出手后进入空闲、继续移动时也不会被清锁。
+`attacking` = `target_locked` && `ch+0x280` 当前动作为默认攻击；只有它触发走路动作抑制与移动放行。
 
 ## 4. 关键常量（C18 arm64）
 

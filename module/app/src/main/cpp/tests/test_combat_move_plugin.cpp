@@ -14,10 +14,11 @@ int g_default_attack = 1;
 int g_current_action_present = 1;
 int g_action_marker = 0;
 int32_t g_walk = 1;
-int32_t g_distance = 20;
+int32_t g_distance = 4;
 int32_t g_range = 4;
 int32_t g_no_move = 1;
 int32_t g_set_target_calls = 0;
+int32_t g_stop_combat_calls = 0;
 int32_t g_set_action_backup_calls = 0;
 int32_t g_start_action_backup_calls = 0;
 void* g_forwarded_target = nullptr;
@@ -39,6 +40,7 @@ void set_target(void*, void* value) {
     ++g_set_target_calls;
     g_target = value;
 }
+void stop_combat(void*) { ++g_stop_combat_calls; }
 
 void set_action_backup(void*, void*, void* target_value) {
     ++g_set_action_backup_calls;
@@ -89,7 +91,7 @@ int main() {
     const contracts::QolCombatMovePort port{
         contracts::kQolPortCombatMoveVersion, &active_player, &player_side, &target,
         &current_action, &is_default_attack, &is_walk_action, &distance, &action_range,
-        &is_no_move, &set_target};
+        &is_no_move, &set_target, &stop_combat};
     const void* ports[] = {&port};
     contracts::QolHostSdk sdk{};
     contracts::QolGameHost game{};
@@ -120,42 +122,46 @@ int main() {
     assert(g_forwarded_target == reinterpret_cast<void*>(0x3));
     assert(features::combat_move::move_gate_wrapper(reinterpret_cast<void*>(0x1)) == g_no_move);
 
-    // 超距只取消出手：保留目标、不调用停战，返回 0。
     g_character_type = 0;
-    g_distance = 20;
-    g_target = reinterpret_cast<void*>(0x10);
-    assert(features::combat_move::start_action_ex_wrapper(
-               reinterpret_cast<void*>(0x1), reinterpret_cast<void*>(0x2), 0) == 0);
-    assert(g_target == reinterpret_cast<void*>(0x10));
-    assert(g_start_action_backup_calls == 0);
+    g_range = 4;  // 有效距离 8
 
-    // 目标保留不依赖当前动作：空闲时移动也不清目标。
-    g_current_action_present = 0;
-    g_set_target_calls = 0;
-    features::combat_move::keep_target_wrapper(reinterpret_cast<void*>(0x1), nullptr);
-    assert(g_set_target_calls == 0);
-    // 空闲（非攻击动作）时不放行无移动状态，也不抑制走路。
-    assert(features::combat_move::move_gate_wrapper(reinterpret_cast<void*>(0x1)) == g_no_move);
-    features::combat_move::set_action_wrapper(reinterpret_cast<void*>(0x1),
-                                                reinterpret_cast<void*>(0x2),
-                                                reinterpret_cast<void*>(0x3));
-    assert(g_set_action_backup_calls == 2);
-
-    // 回到范围内：放行原函数。
-    g_current_action_present = 1;
+    // 范围内：放行出手。
     g_distance = 4;
     assert(features::combat_move::start_action_ex_wrapper(
                reinterpret_cast<void*>(0x1), reinterpret_cast<void*>(0x2), 0) == 37);
     assert(g_start_action_backup_calls == 1);
 
-    // 范围上限 13→14：距离 14 放行、15 取消。
+    // 超出攻击范围但在余量内：取消出手，保留目标，不停战。
+    g_distance = 5;
+    assert(features::combat_move::start_action_ex_wrapper(
+               reinterpret_cast<void*>(0x1), reinterpret_cast<void*>(0x2), 0) == 0);
+    g_distance = 8;
+    assert(features::combat_move::start_action_ex_wrapper(
+               reinterpret_cast<void*>(0x1), reinterpret_cast<void*>(0x2), 0) == 0);
+    assert(g_target == reinterpret_cast<void*>(0x10));
+    assert(g_stop_combat_calls == 0);
+    assert(g_start_action_backup_calls == 1);
+
+    // 超出余量：取消出手、清目标并停战。
+    g_distance = 9;
+    assert(features::combat_move::start_action_ex_wrapper(
+               reinterpret_cast<void*>(0x1), reinterpret_cast<void*>(0x2), 0) == 0);
+    assert(g_target == nullptr);
+    assert(g_stop_combat_calls == 1);
+
+    // 远距离攻击范围：13 → 有效距离 14；14 保留，15 清除。
     g_range = 13;
+    g_target = reinterpret_cast<void*>(0x10);
     g_distance = 14;
     assert(features::combat_move::start_action_ex_wrapper(
-               reinterpret_cast<void*>(0x1), reinterpret_cast<void*>(0x2), 0) == 37);
+               reinterpret_cast<void*>(0x1), reinterpret_cast<void*>(0x2), 0) == 0);
+    assert(g_target == reinterpret_cast<void*>(0x10));
+    assert(g_stop_combat_calls == 1);
     g_distance = 15;
     assert(features::combat_move::start_action_ex_wrapper(
                reinterpret_cast<void*>(0x1), reinterpret_cast<void*>(0x2), 0) == 0);
+    assert(g_target == nullptr);
+    assert(g_stop_combat_calls == 2);
 
     // 非默认攻击动作不参与范围门。
     g_range = 4;
@@ -165,11 +171,18 @@ int main() {
                reinterpret_cast<void*>(0x1), reinterpret_cast<void*>(0x2), 0) == 37);
     g_default_attack = 1;
 
-    // 无目标时不清目标、也不走范围门。
-    g_target = nullptr;
+    // 目标保留不依赖当前动作：空闲时移动也不清目标。
+    g_target = reinterpret_cast<void*>(0x10);
+    g_current_action_present = 0;
     g_set_target_calls = 0;
     features::combat_move::keep_target_wrapper(reinterpret_cast<void*>(0x1), nullptr);
-    assert(g_set_target_calls == 1);
+    assert(g_set_target_calls == 0);
+    // 空闲不等于攻击：不放行无移动状态，也不抑制走路。
+    assert(features::combat_move::move_gate_wrapper(reinterpret_cast<void*>(0x1)) == g_no_move);
+    features::combat_move::set_action_wrapper(reinterpret_cast<void*>(0x1),
+                                                reinterpret_cast<void*>(0x2),
+                                                reinterpret_cast<void*>(0x3));
+    assert(g_set_action_backup_calls == 2);
 
     descriptor.deactivate(ctx);
     assert(features::combat_move::move_gate_wrapper(reinterpret_cast<void*>(0x1)) == 1);

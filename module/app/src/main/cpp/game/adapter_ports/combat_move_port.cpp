@@ -62,6 +62,10 @@ void set_target(void* character, void* value) {
     if (character != nullptr && fn_char_set_target != nullptr) fn_char_set_target(character, value);
 }
 
+void stop_combat(void* character) {
+    if (character != nullptr && fn_char_stop_combat != nullptr) fn_char_stop_combat(character);
+}
+
 const contracts::QolCombatMovePort kPort{
     contracts::kQolPortCombatMoveVersion,
     &is_active_player,
@@ -74,6 +78,7 @@ const contracts::QolCombatMovePort kPort{
     &action_range,
     &is_no_move,
     &set_target,
+    &stop_combat,
 };
 
 }  // namespace

@@ -25,6 +25,7 @@ std::atomic<const contracts::QolHostSdk*> g_sdk{nullptr};
 std::atomic<const contracts::QolCombatMovePort*> g_port{nullptr};
 std::atomic<SetActionFn> g_set_action_backup{nullptr};
 std::atomic<StartActionExFn> g_start_action_ex_backup{nullptr};
+thread_local bool g_in_gate = false;
 
 // 范围余量随攻击距离递减：距离 4 时 +100%，距离 13 时 +10%，中间线性，越界按端点夹取。
 // 基础攻击动作的距离取值只有 4/6/12/13（ACTDATABASE +0x05，与 CHAR_GetDistance 同口径）。
@@ -116,7 +117,8 @@ int plugin_install(contracts::PluginContext& ctx) {
         port->target == nullptr || port->current_action == nullptr ||
         port->is_default_attack == nullptr || port->is_walk_action == nullptr ||
         port->distance == nullptr || port->action_range == nullptr ||
-        port->is_no_move == nullptr || port->set_target == nullptr) {
+        port->is_no_move == nullptr || port->set_target == nullptr ||
+        port->stop_combat == nullptr) {
         return 1;
     }
     g_sdk.store(ctx.sdk, std::memory_order_release);
@@ -195,16 +197,22 @@ int32_t start_action_ex_wrapper(void* character, void* action, int32_t flag) {
     const auto* port = g_port.load(std::memory_order_acquire);
     const auto backup = g_start_action_ex_backup.load(std::memory_order_acquire);
     if (backup == nullptr) return 0;
-    if (!target_locked(port, character) || action == nullptr ||
+    if (g_in_gate || !target_locked(port, character) || action == nullptr ||
         port->is_default_attack(character, action) == 0) {
         return backup(character, action, flag);
     }
     void* target = port->target(character);
+    if (target == nullptr) return backup(character, action, flag);
     const int32_t range = port->action_range(character, action);
-    if (target == nullptr || port->distance(character, target) <= effective_range(range)) {
-        return backup(character, action, flag);
-    }
-    // 超出范围只取消本次出手，保留目标；回到范围内后由动作链再次尝试。
+    const int32_t dist = port->distance(character, target);
+    if (dist <= range) return backup(character, action, flag);
+    // 攻击范围外但在余量内：取消本次出手并保留目标，回到范围后继续攻击。
+    if (dist <= effective_range(range)) return 0;
+    // 超出余量：取消出手、清目标并停战。
+    g_in_gate = true;
+    port->set_target(character, nullptr);
+    port->stop_combat(character);
+    g_in_gate = false;
     return 0;
 }
 

@@ -562,14 +562,14 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 
 ### 5.36 combat_move 战斗优化（2026-11-13；Host/静态/构建通过，真机待验）
 
-范围：新增 `combat_move` 插件，开启后移动不清除普攻目标、不把攻击动作替换为走路动作，并在每次普攻出手前按“动作攻击距离 + 余量”判定；超距只取消本次出手、保留目标，回到范围内继续攻击。余量随攻击距离递减（4→+100%，13→+10%，线性）。
+范围：新增 `combat_move` 插件，开启后移动不清除普攻目标、不把攻击动作替换为走路动作，并在每次普攻出手前按距离分三档：≤攻击距离正常出手；攻击距离~+余量之间取消出手但保留目标；超出余量清目标并停战。余量随攻击距离递减（4→+100%，13→+10%，线性），只作保留锁定的宽限带。
 
 | 验证项 | 当前结果 | 范围与未完成项 |
 |---|---|---|
 | Host | **PASS**：`cmake -S module/app/src/main/cpp/tests -B .tmp/combat-move/host && cmake --build .tmp/combat-move/host -j4`；`ctest --test-dir .tmp/combat-move/host --output-on-failure` → **168/168**（首次 `core_settings_config_store_tests` 因 `${CMAKE_CURRENT_BINARY_DIR}/config-native-owner` 不存在而 abort，`mkdir -p` 后复跑通过；与本次改动无关） | 新增 `combat_move_plugin_tests` 覆盖：默认关闭、kGameplay、4 资源机制、攻击移动态抑制走路、怪物 type 不进入攻击移动态、范围门取消与放行、call-patch 资源 id 返回 0、端口不可用 fail-closed |
 | 静态检查 | **PASS**：`uv run python scripts/maintenance/check_arch.py` → 全部通过（layers/offsets/jni/resources/symbols/http_routes/log_policy；符号比对 502 项一致） | — |
-| 构建 | **PASS（Debug）**：`scripts/build-debug.sh` → `output/inotia4_qol_lsposed_debug_2611140156_bc2e13d50232.apk`，SHA-256 `bc2e13d5023200b0a6d9eab66c2ffecd9aa5925e6888dc3dda092c43e96a192a`。首次真机安装（16:21）报 `hook:CHAR_SetAction: symbol unresolved`，插件状态 `unsupported`；根因是 entry hook 走 `game/access/symbols.cpp` 的 `kHookEntrySymbols` 白名单，`F_CHAR_SET_ACTION_VMA`/`F_CHAR_START_ACTION_EX_VMA` 未登记，补登记后重建。 | `git diff --check` 通过 |
-| 真机 | **NOT_ACCEPTED（未执行）**：未安装本轮 Debug 包、未进档 | 待核验：①点击怪物自动攻击中按方向键，攻击动画继续、坐标继续变化、目标不丢；②目标走出“攻击距离+余量”后，下一次普攻被取消但目标保留；目标回到范围内后自动继续攻击；③松键站定后仍按原版继续攻击同一目标；④切图/换人/目标死亡清除正常；⑤与 `better_move` 八向/全向同时开启时朝向、对齐、撞墙滑行正常；⑥眩晕/击退期间不可移动（269 掩码语义未被全局放开）；⑦关闭 feature 后行为与原版一致、`/api/system/resources` 四个资源回落 |
+| 构建 | **PASS（Debug）**：`scripts/build-debug.sh` → `output/inotia4_qol_lsposed_debug_2611140225_e803156dffdb.apk`，SHA-256 `e803156dffdbaa7620838ce2b096a770d22b7f8703656bb1c3e6cb7997819104`。首次真机安装（16:21）报 `hook:CHAR_SetAction: symbol unresolved`，插件状态 `unsupported`；根因是 entry hook 走 `game/access/symbols.cpp` 的 `kHookEntrySymbols` 白名单，`F_CHAR_SET_ACTION_VMA`/`F_CHAR_START_ACTION_EX_VMA` 未登记，补登记后重建。 | `git diff --check` 通过 |
+| 真机 | **NOT_ACCEPTED（未执行）**：未安装本轮 Debug 包、未进档 | 待核验：①点击怪物自动攻击中按方向键，攻击动画继续、坐标继续变化、目标不丢；②目标进入余量区间时下一次普攻被取消但目标保留；超出余量后清目标并停战；回到攻击距离内自动继续攻击；③松键站定后仍按原版继续攻击同一目标；④切图/换人/目标死亡清除正常；⑤与 `better_move` 八向/全向同时开启时朝向、对齐、撞墙滑行正常；⑥眩晕/击退期间不可移动（269 掩码语义未被全局放开）；⑦关闭 feature 后行为与原版一致、`/api/system/resources` 四个资源回落 |
 | 风险评估 | **未消除**：移动中普攻是否自动连段取决于原版动作链，若动作链要求站立则移动中只保留首段攻击；方向变化时原版 1–2 帧对齐停顿仍存在 | 两项均需真机观察后决定是否追加动作结束补触发 / 对齐早退处理 |
 
 ### 5.37 物品对象池 300→1638 槽与 make_item 池满兜底（2026-11-14；Host/静态/构建通过，真机待验）
