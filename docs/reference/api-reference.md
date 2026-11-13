@@ -97,6 +97,7 @@
   "equipment": [
     { "slot": 0, "name": "光荣的火冠", "category": 333, "count": 1, "item_type": "equipment",
       "need_level": 5, "rarity": 3, "rarity_tier": "紫",
+      "prefix": 3, "prefix_tier": "太古的 ",
       "base": { "damage": 0, "defense": 37, "magic_rate": 0.0 },
       "bonus": [ { "id": 1, "name": "敏捷", "value": 18 } ],
       "gem": { "total_slots": 1, "slots": [] },
@@ -131,8 +132,9 @@
 {
   "bags": [
     { "bag": 0, "items": [
-      { "slot": 3, "name": "基础短剑", "category": 462, "count": 1, "item_type": "equipment",
+      { "slot": 3, "name": "生锈的 基础短剑", "category": 462, "count": 1, "item_type": "equipment",
         "need_level": 1, "rarity": 0, "rarity_tier": "白",
+        "prefix": 0, "prefix_tier": "生锈的 ",
         "base": { "damage": 5, "defense": 0, "magic_rate": 1.1 },
         "bonus": [ { "id": 3, "name": "力量", "value": 18 } ],
         "gem": { "total_slots": 0, "slots": [] },

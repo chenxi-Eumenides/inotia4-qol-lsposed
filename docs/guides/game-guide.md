@@ -376,30 +376,33 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 
 ```json
 {
-  "slot": 3, "name": "基础短剑", "category": 462, "count": 1, "item_type": "equipment",
-  "need_level": 1, "rarity": 0, "rarity_tier": "白",
+  "slot": 3, "name": "生锈的 基础短剑", "category": 462, "count": 1, "item_type": "equipment",
+  "position": "短剑", "need_level": 1, "rarity": 0, "rarity_tier": "白",
+  "prefix": 0, "prefix_tier": "生锈的 ",
   "base": { "damage": 5, "defense": 0, "magic_rate": 1.1 },
   "bonus": [ { "id": 3, "name": "力量", "value": 18 } ],
   "gem": { "total_slots": 0, "slots": [] },
   "chaos": { "is_chaos": false, "level": 0, "rate": 100 },
-  "enchant": { "id": 0, "level": 0 }
+  "enchant": []
 }
 ```
 
 | 字段 | 说明 |
 |---|---|
 | `slot` | 槽位（背包槽 0-15 / 装备槽 0-9） |
-| `name` | 物品名（品级前缀 + 名称联查，已直接给出） |
+| `name` | 物品名；背包/写结果含品级前缀，角色装备接口只给基础名（不含前缀） |
 | `category` | 类别索引（ITEMDATABASE 记录下标，即物品 ID；`name` 已直接给出，用 `/api/system/tables/ITEMDATABASE/search?q=名称` 反查） |
 | `count` | 数量（装备类恒 1） |
 | `item_type` | 物品类型五类：`equipment` / `potion` / `scroll` / `gem` / `consumable`（ITEMDATABASE +2 字节用途类型判定） |
+| `position` | 装备位置名（ITEMCLASSBASE 文本 ID 联查：短剑/长剑/钝器/法杖/皮甲/布甲/板甲/头盔/戒指/盾牌等） |
 | `need_level` | 所需等级（ITEM_GetAbilityLevel；无等级概念的消耗品归 0） |
 | `rarity`/`rarity_tier` | 稀有度档位 0-4 / 档位名（白绿蓝黄紫） |
+| `prefix`/`prefix_tier` | 前缀档 0-15（`I_TYPE` bits2-5）/ 前缀名（按变体与 ITEMCLASSBASE class bits 选择；C18 含精金/神铸/弑神/天命/星陨） |
 | `base` | 基础属性：`{damage 物攻, defense 物防, magic_rate 魔法伤害倍率(原始值/100)}` |
 | `bonus` | 词缀列表：`{id 词缀索引, name 词缀名, value 词缀值}` |
 | `gem` | 宝石：`{total_slots 总槽位, slots[{id, name, value}] 已镶宝石}` |
 | `chaos` | 混沌：`{is_chaos, level 混沌等级, rate 混沌成功率}` |
-| `enchant` | 附魔：`{id, level, effect 附魔名(ITEMENCHANTBASE 联查，无附魔时 null)}` |
+| `enchant` | 附魔数组：Monster 为 `[{id, level, effect}]`（首项来自 `I_ENCHANT`，其余来自 option type=2 节点，`effect` 由 `ITEMOPTINFOBASE` 联查）；C18 及其他变体固定 `[]` |
 
 ### 5.4 Skills（技能）
 

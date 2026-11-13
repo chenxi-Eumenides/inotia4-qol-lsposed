@@ -479,6 +479,7 @@ std::string character_enchant_entries(void* item, long long enchant_id, long lon
 void append_character_equipment_item(std::string& out, void* item, int slot) {
     const uint8_t* it = reinterpret_cast<const uint8_t*>(item);
     const uint16_t flags = *reinterpret_cast<const uint16_t*>(it + I_TYPE);
+    const long long raw_rarity = (flags >> 2) & 0x0F;
     const bool has_category = fn_get_bit != nullptr;
     const long long category = has_category ? fn_get_bit(flags, 15, 6) : -1;
     const bool has_count = fn_get_cumulate_count != nullptr;
@@ -561,6 +562,21 @@ void append_character_equipment_item(std::string& out, void* item, int slot) {
         }
     } else {
         out += "null";
+    }
+    field("prefix");
+    out += std::to_string(raw_rarity);
+    field("prefix_tier");
+    {
+        const char* class_text = category >= 0
+                                     ? character_static_text(
+                                           contracts::QolItemStaticTextKind::kItemPrefixClass,
+                                           static_cast<int32_t>(category))
+                                     : nullptr;
+        const int class_bits = class_text != nullptr ? std::atoi(class_text) : 0;
+        out += "\"";
+        out += contracts::item_rarity_prefix(static_cast<int>(qol::game_variant().series),
+                                            class_bits, static_cast<int>(raw_rarity));
+        out += "\"";
     }
     field("base");
     out += "{\"damage\":";
