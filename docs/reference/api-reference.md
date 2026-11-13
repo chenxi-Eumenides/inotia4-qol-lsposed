@@ -101,7 +101,7 @@
       "bonus": [ { "id": 1, "name": "敏捷", "value": 18 } ],
       "gem": { "total_slots": 1, "slots": [] },
       "chaos": { "is_chaos": false, "level": null, "rate": null },
-      "enchant": { "id": 0, "level": 0, "effect": null } },
+      "position": "头环", "enchant": [] },
     null
   ],
   "type": 0,
@@ -137,7 +137,7 @@
         "bonus": [ { "id": 3, "name": "力量", "value": 18 } ],
         "gem": { "total_slots": 0, "slots": [] },
         "chaos": { "is_chaos": false, "level": null, "rate": null },
-        "enchant": { "id": 0, "level": 0, "effect": null } }
+        "position": "短剑", "enchant": [] }
     ], "capacity": 16, "occupied_slots": 13 }
   ]
 }
@@ -148,22 +148,23 @@
 | 字段 | 说明 |
 |---|---|
 | `slot` | 槽位（背包槽 0-15 / 装备槽 0-9） |
-| `name` | 物品名（品级前缀 + ITEMDATABASE 名称，Kotlin 联查注入） |
+| `name` | 物品名；背包/写结果包含品级前缀，角色装备接口仅返回 ITEMDATABASE 名称（不含前缀） |
 | `category` | 类别索引 = ITEMDATABASE 记录下标（`UTIL_GetBitValue(flags,15,6)`；物品 id = category+30） |
 | `count` | 数量（`ITEM_GetCumulateCount`：可堆叠读 bit22-31 实际数量，装备返回 1） |
 | `item_type` | 物品类型五类（ITEMDATABASE +2 字节用途类型）：`equipment`（0-21 装备）/ `potion`（药水）/ `scroll`（卷轴）/ `gem`（宝石）/ `consumable`（其余消耗/材料/任务/货币） |
+| `position` | 装备位置名（ITEMCLASSBASE 文本 ID 联查）；无静态文本时为 `null` |
 | `need_level` | 所需等级（`ITEM_GetAbilityLevel`(0x1091f4)：读 ITEMCLASSBASE 记录 +3 int8；无等级概念的消耗品归 0） |
 | `rarity` | 稀有度档位 0-4（GetRarity，白绿蓝黄紫） |
 | `rarity_tier` | 档位名（白/绿/蓝/黄/紫，Kotlin 注入） |
-| `raw_rarity` | `I_TYPE` bits 2-5 的原始稀有度（0-15；未知时为 `null`） |
-| `prefix` | 按类别 class bits 与 `raw_rarity` 选择的名称前缀；不适用时为空字符串 |
+| `prefix_tier` | `I_TYPE` bits 2-5 的原始稀有度档（0-15；未知时为 `null`） |
+| `prefix` | 按变体、类别 class bits 与 `prefix_tier` 选择的名称前缀；不适用时为空字符串 |
 | `base` | 基础属性对象：`{damage 物攻, defense 物防, magic_rate 魔法伤害倍率}`；`magic_rate` 为原始值/100 显示（110 → 1.1） |
 | `bonus` | 词缀列表（type==0 节点，ITEMOPTINFOBASE 联查）：每项 `{id 词缀索引, name 词缀名, value 词缀值}` |
 | `gem` | 宝石对象：`{total_slots 总槽位(插槽等级), slots[{id, name, value}] 已镶宝石}`（type==1 节点） |
 | `chaos` | 混沌对象：`{is_chaos 是否混沌, level 混沌等级, rate 混沌成功率}` |
-| `enchant` | 附魔对象：`{id 附魔ID, level 附魔等级, effect 附魔名(ITEMENCHANTBASE 联查), options[{id,name,value}]}`；options 来自 option 链表 type=2 节点 |
+| `enchant` | Monster（variant 3）附魔数组：首项来自 `I_ENCHANT`（id/level），后续项来自 option 链表 type=2 节点；每项 `{id, level, effect}`，名称通过 ITEMOPTINFOBASE 联查。C18（variant 4）及其他变体固定为 `[]` |
 
-> 物品对象为统一结构（装备/消耗品/材料同构）：**缺失的标量字段置 `null`，列表字段恒为数组（无内容时空列表）**；`base`/`bonus`/`gem`/`chaos`/`enchant` 为重组后的可读对象，替代原位域拆解字段（`type_flags`/`raw_rarity`/`socket`/`enchant`/`chaos_*`/`options`/`option_ids`/`option_names`/`options_detailed`/`static_options`/`socket_info`/`enchant_info`/`chaos_info`）。`capacity` 袋容量 16 格；`occupied_slots` 占用数。
+> 物品对象为统一结构（装备/消耗品/材料同构）：**缺失的标量字段置 `null`，列表字段恒为数组（无内容时空列表）**；`base`/`bonus`/`gem`/`chaos`/`enchant` 为重组后的可读数据；`capacity` 袋容量 16 格；`occupied_slots` 占用数。
 
 > 写操作 result 中的 `slots[].item`、`equipment.item`、`inventory[].item` 复用上述完整 Item 结构或 `null`；外层只包含本次写入涉及或实测发生变化的槽，不是完整 Inventory/Party 快照。
 

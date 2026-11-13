@@ -380,13 +380,16 @@ object StaticData {
 
     /**
      * 物品域静态名称表（启动期下发 core.item owner）：
-     * 行式 `N|T|P|O|E|S\t<id>\t<已转义文本>`；文本用 [JSONObject.quote] 转义（与 native 侧迁移前的
+     * 行式 `N|T|P|C|O|E|S\t<id>\t<已转义文本>`；文本用 [JSONObject.quote] 转义（与 native 侧迁移前的
      * JSONObject 序列化同一实现），native 直接拼接即可保持成功响应逐字节不变。
      */
     fun buildItemStaticData(): String {
         val sb = StringBuilder(131072)
         val db = read("tables/ITEMDATABASE.json")
         val classBase = read("tables/ITEMCLASSBASE.json")
+        val textArr = read("text/zh-Hans.json")?.let {
+            try { JSONArray(it) } catch (e: Exception) { null }
+        }
         val classRecords = try {
             classBase?.let { JSONObject(it).getJSONArray("records") }
         } catch (e: Exception) {
@@ -411,6 +414,15 @@ object StaticData {
                     if (classByte != null) {
                         appendStaticEntry(sb, 'P', i, (classByte and 0x07).toString())
                     }
+                    val classNameLow = classRecord?.let { hexByte(it.optString("hex", ""), 0) }
+                    val classNameHigh = classRecord?.let { hexByte(it.optString("hex", ""), 1) }
+                    val classNameId = if (classNameLow != null && classNameHigh != null) {
+                        classNameLow or (classNameHigh shl 8)
+                    } else {
+                        null
+                    }
+                    val className = classNameId?.let { textArr?.optString(it, "") }.orEmpty()
+                    if (className.isNotEmpty()) appendStaticEntry(sb, 'C', i, className)
                 }
             }
         }
@@ -424,20 +436,12 @@ object StaticData {
         }
         // 技能名（StaticData.skillName 口径：text[1220+action_id]，空名称不下发）；
         // character_facts 的 party/{slot}/skills 富化复用同一行式表。
-        val textJson = read("text/zh-Hans.json")
-        if (textJson != null) {
-            val textArr = try {
-                JSONArray(textJson)
-            } catch (e: Exception) {
-                null
-            }
-            if (textArr != null) {
-                var action = 0
-                while (action < 2048 && 1220 + action < textArr.length()) {
-                    val name = textArr.optString(1220 + action, "")
-                    if (name.isNotEmpty()) appendStaticEntry(sb, 'S', action, name)
-                    action++
-                }
+        if (textArr != null) {
+            var action = 0
+            while (action < 2048 && 1220 + action < textArr.length()) {
+                val name = textArr.optString(1220 + action, "")
+                if (name.isNotEmpty()) appendStaticEntry(sb, 'S', action, name)
+                action++
             }
         }
         return sb.toString()

@@ -62,6 +62,8 @@ void append_inventory_item(std::string* out, int32_t slot,
     *out += std::to_string(item.type_flags);
     out->append(",\"raw_rarity\":");
     *out += std::to_string(item.raw_rarity);
+    out->append(",\"variant\":");
+    *out += std::to_string(item.variant_series);
     if ((item.fields & contracts::kQolItemInventoryHasCategory) != 0) {
         out->append(",\"category\":");
         *out += std::to_string(item.category);

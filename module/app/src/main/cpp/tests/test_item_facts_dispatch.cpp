@@ -86,12 +86,12 @@ constexpr char kShopJson[] =
 
 constexpr char kExpectedItem[] =
     "{\"slot\":0,\"name\":\"再生药水（小）\",\"category\":10,\"count\":3,"
-    "\"item_type\":\"potion\",\"need_level\":0,\"rarity\":0,\"rarity_tier\":\"白\","
-    "\"raw_rarity\":0,\"prefix\":\"\","
+    "\"item_type\":\"potion\",\"position\":null,\"need_level\":0,\"rarity\":0,\"rarity_tier\":\"白\","
+    "\"prefix_tier\":0,\"prefix\":\"\","
     "\"base\":{\"damage\":0,\"defense\":0,\"magic_rate\":0},\"bonus\":[],"
     "\"gem\":{\"total_slots\":0,\"slots\":[]},"
     "\"chaos\":{\"is_chaos\":false,\"level\":0,\"rate\":100},"
-    "\"enchant\":{\"id\":0,\"level\":0,\"effect\":null,\"options\":[]}}";
+    "\"enchant\":[]}";
 
 std::string expected_item_with_count(uint32_t count) {
     std::string item(kExpectedItem);
@@ -3155,6 +3155,7 @@ std::string frozen_inventory_json() {
                 s += "{\"slot\":" + std::to_string(j);
                 s += ",\"type_flags\":" + std::to_string(flags);
                 s += ",\"raw_rarity\":" + std::to_string((flags >> 2) & 0x0F);
+                s += ",\"variant\":0";
                 if (fn_get_bit != nullptr) {
                     s += ",\"category\":" + std::to_string(fn_get_bit(flags, 15, 6));
                 }
@@ -3259,7 +3260,15 @@ void test_inventory_owner_vs_legacy_golden() {
         const std::string legacy = build_inventory_json();
         const std::string frozen = frozen_inventory_json();
         // T2h-B0 golden（可证部分）：frozen 复刻 == legacy 实现，逐字节。
-        CHECK(frozen == legacy);
+        std::string frozen_legacy_shape = frozen;
+        size_t variant_position = 0;
+        while ((variant_position = frozen_legacy_shape.find(",\"variant\":", variant_position)) !=
+               std::string::npos) {
+            const size_t value_end = frozen_legacy_shape.find(',', variant_position + 1);
+            if (value_end == std::string::npos) break;
+            frozen_legacy_shape.erase(variant_position, value_end - variant_position);
+        }
+        CHECK(frozen_legacy_shape == legacy);
         // owner raw (item.state) equals the native legacy snapshot byte-for-byte.
         uint32_t raw_size = 0;
         CHECK(item_state_api->write_state_json(

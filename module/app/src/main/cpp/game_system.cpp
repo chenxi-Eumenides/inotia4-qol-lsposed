@@ -14,6 +14,7 @@
 #include "game/state/character_http.h"
 #include "game/state/choice_http.h"
 #include "game/state/game_state.h"
+#include "game/variants/game_variant.h"
 #include "game/state/quest_http.h"
 #include "game/state/save_http.h"
 #include "game/state/system_snapshot.h"
@@ -390,10 +391,6 @@ const char* character_static_text(contracts::QolItemStaticTextKind kind, int32_t
     return text;
 }
 
-const char* character_rarity_prefix(long long raw_rarity, int class_bits) {
-    return contracts::item_rarity_prefix(class_bits, static_cast<int>(raw_rarity));
-}
-
 // 迁移前 StaticData.rarityTierName（GetRarity 0-4 → 白/绿/蓝/黄/紫）。
 const char* character_rarity_tier(long long rarity) {
     switch (rarity) {
@@ -445,11 +442,43 @@ std::string character_option_list(void* item, int type) {
     return out;
 }
 
+std::string character_enchant_entries(void* item, long long enchant_id, long long enchant_level) {
+    std::string out = "[";
+    if (qol::game_variant().series != qol::GameSeries::kMonster) {
+        out += "]";
+        return out;
+    }
+    bool first = true;
+    auto append = [&out, &first](int id, int level) {
+        if (!first) out += ",";
+        first = false;
+        const char* effect = character_static_text(contracts::QolItemStaticTextKind::kOptionName, id);
+        out += "{\"id\":" + std::to_string(id) + ",\"level\":" + std::to_string(level) +
+               ",\"effect\":";
+        if (effect != nullptr) out += "\"" + std::string(effect) + "\"";
+        else out += "null";
+        out += "}";
+    };
+    if (enchant_id > 0) append(static_cast<int>(enchant_id), static_cast<int>(enchant_level));
+    uint8_t* node = *reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(item) + I_OPTION_LIST);
+    int count = 0;
+    while (node != nullptr && count < 32) {
+        const uint16_t raw = *reinterpret_cast<uint16_t*>(node + O_INDEX);
+        const int node_type = (raw >> 13) & 0x7;
+        const int id = raw & 0x7F;
+        const int value = *reinterpret_cast<int16_t*>(node + O_VALUE);
+        node = *reinterpret_cast<uint8_t**>(node + O_NEXT);
+        ++count;
+        if (node_type == 2) append(id, value);
+    }
+    out += "]";
+    return out;
+}
+
 // 迁移前 NameInjectorCore.restructureItem 的字段顺序与取值（入参为原生装备物品指针）。
 void append_character_equipment_item(std::string& out, void* item, int slot) {
     const uint8_t* it = reinterpret_cast<const uint8_t*>(item);
     const uint16_t flags = *reinterpret_cast<const uint16_t*>(it + I_TYPE);
-    const long long raw_rarity = (flags >> 2) & 0x0F;
     const bool has_category = fn_get_bit != nullptr;
     const long long category = has_category ? fn_get_bit(flags, 15, 6) : -1;
     const bool has_count = fn_get_cumulate_count != nullptr;
@@ -491,13 +520,7 @@ void append_character_equipment_item(std::string& out, void* item, int slot) {
     out += std::to_string(slot);
     field("name");
     if (base_name != nullptr) {
-        const char* class_text = category >= 0
-                                     ? character_static_text(
-                                           contracts::QolItemStaticTextKind::kItemPrefixClass,
-                                           static_cast<int32_t>(category))
-                                     : nullptr;
-        const int class_bits = class_text != nullptr ? std::atoi(class_text) : 0;
-        out += "\"" + std::string(character_rarity_prefix(raw_rarity, class_bits)) + base_name + "\"";
+        out += "\"" + std::string(base_name) + "\"";
     } else {
         out += "null";
     }
@@ -515,6 +538,13 @@ void append_character_equipment_item(std::string& out, void* item, int slot) {
         out += type_text != nullptr ? type_text : "consumable";
         out += "\"";
     }
+    field("position");
+    if (category >= 0) {
+        const char* position = character_static_text(contracts::QolItemStaticTextKind::kItemClassName,
+                                                      static_cast<int32_t>(category));
+        if (position != nullptr) out += "\"" + std::string(position) + "\"";
+        else out += "null";
+    } else out += "null";
     field("need_level");
     out += std::to_string(need_level < 0 ? 0 : need_level);
     field("rarity");
@@ -548,23 +578,7 @@ void append_character_equipment_item(std::string& out, void* item, int slot) {
     out += ",\"level\":" + std::to_string(chaos_level);
     out += ",\"rate\":" + std::to_string(chaos_rate) + "}";
     field("enchant");
-    out += "{\"id\":" + std::to_string(enchant_id);
-    out += ",\"level\":" + std::to_string(enchant_level);
-    out += ",\"effect\":";
-    if (enchant_id > 0) {
-        const char* effect = character_static_text(contracts::QolItemStaticTextKind::kEnchantEffect,
-                                                   static_cast<int32_t>(enchant_id));
-        if (effect != nullptr) {
-            out += "\"";
-            out += effect;
-            out += "\"";
-        } else {
-            out += "null";
-        }
-    } else {
-        out += "null";
-    }
-    out += "}";
+    out += character_enchant_entries(item, enchant_id, enchant_level);
     out += "}";
 }
 

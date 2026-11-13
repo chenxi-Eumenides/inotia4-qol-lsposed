@@ -148,6 +148,7 @@ struct QolItemInventoryView {
     // 附魔 type=2 节点列表；元素沿用通用词条结构。
     uint32_t enchant_option_count;
     QolItemInventoryOptionView enchant_options[kQolItemInventoryEnchantOptionCapacity];
+    int32_t variant_series;
 };
 
 static_assert(std::is_standard_layout<QolItemInventoryView>::value,
@@ -165,6 +166,7 @@ enum class QolItemStaticTextKind : int32_t {
     // party/{slot}/skills 富化需要它，复用同一行式下发通道以避免为单条查询新增 JNI。
     kSkillName = 4,
     kItemPrefixClass = 5,
+    kItemClassName = 6,
 };
 // 返回的是 JSON 已转义、不含外层引号的文本指针；存储只在启动期写入，运行期只读。
 using QolItemStaticTextFn = QolResult (*)(int32_t kind, int32_t id, const char** out_text);

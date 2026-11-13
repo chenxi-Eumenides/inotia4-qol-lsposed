@@ -81,7 +81,7 @@ constexpr char kPlayer[] = "{\"money\":100,\"leader_slot\":1,\"party_count\":3}"
 constexpr char kParty[] =
     "[{\"name\":\"凯恩\",\"class_name\":\"黑暗骑士\",\"level\":10,\"hp\":50,\"max_hp\":60,"
     "\"mp\":5,\"max_mp\":6,\"exp\":1,\"exp_next\":2,\"status_point\":3,"
-    "\"equipment\":[null,{\"slot\":1,\"name\":\"剑\"}],\"type\":0,\"class_idx\":0,"
+     "\"equipment\":[null,{\"slot\":1,\"name\":\"剑\",\"position\":null}],\"type\":0,\"class_idx\":0,"
     "\"name_id\":7},null]";
 constexpr char kSkills[] =
     "[{\"role\":0,\"skills\":[{\"action_id\":10,\"level\":1,\"skill_name\":\"火球\"}],"
@@ -91,7 +91,7 @@ constexpr char kMercenaries[] =
 constexpr char kMember0[] =
     "{\"name\":\"凯恩\",\"class_name\":\"黑暗骑士\",\"level\":10,\"hp\":50,\"max_hp\":60,"
     "\"mp\":5,\"max_mp\":6,\"exp\":1,\"exp_next\":2,\"status_point\":3,"
-    "\"equipment\":[null,{\"slot\":1,\"name\":\"剑\"}],\"type\":0,\"class_idx\":0,"
+    "\"equipment\":[null,{\"slot\":1,\"name\":\"剑\",\"position\":null}],\"type\":0,\"class_idx\":0,"
     "\"name_id\":7}";
 constexpr char kNotInGame[] = "{\"error\":\"not in game\"}";
 constexpr char kMember1[] =
@@ -118,11 +118,11 @@ const char* g_inventory_before_write_json =
     "{\"bags\":[{\"bag\":0,\"items\":[],\"capacity\":16,\"occupied_slots\":0}]}";
 const char* g_inventory_after_write_json =
     "{\"bags\":[{\"bag\":0,\"items\":[{\"slot\":2,\"name\":\"Potion\","
-    "\"category\":10,\"count\":1,\"item_type\":\"consumable\",\"need_level\":0,"
+    "\"category\":10,\"count\":1,\"item_type\":\"consumable\",\"position\":null,\"need_level\":0,"
     "\"rarity\":0,\"rarity_tier\":\"白\",\"base\":{\"damage\":0,\"defense\":0,"
     "\"magic_rate\":0},\"bonus\":[],\"gem\":{\"total_slots\":0,\"slots\":[]},"
     "\"chaos\":{\"is_chaos\":false,\"level\":0,\"rate\":100},"
-    "\"enchant\":{\"id\":0,\"level\":0,\"effect\":null}}],\"capacity\":16,"
+    "\"enchant\":[]}],\"capacity\":16,"
     "\"occupied_slots\":1}]}";
 bool g_item_state_available = true;
 bool g_item_state_parse_failure = false;
@@ -820,11 +820,11 @@ void test_operation_specific_result_goldens() {
           "{\"ok\":true,\"equipment\":{\"mercenary_slot\":7,\"slot\":0,"
           "\"item\":null},\"inventory\":[{\"bag\":0,\"slot\":2,\"item\":"
           "{\"slot\":2,\"name\":\"Potion\",\"category\":10,\"count\":1,"
-          "\"item_type\":\"consumable\",\"need_level\":0,\"rarity\":0,"
+          "\"item_type\":\"consumable\",\"position\":null,\"need_level\":0,\"rarity\":0,"
           "\"rarity_tier\":\"白\",\"base\":{\"damage\":0,\"defense\":0,"
           "\"magic_rate\":0},\"bonus\":[],\"gem\":{\"total_slots\":0,\"slots\":[]},"
           "\"chaos\":{\"is_chaos\":false,\"level\":0,\"rate\":100},"
-          "\"enchant\":{\"id\":0,\"level\":0,\"effect\":null}}}]}" && succeeded);
+          "\"enchant\":[]}}]}" && succeeded);
     CHECK(g_item_state_snapshot_reads == 2);
 
     g_item_state_available = false;
@@ -1146,8 +1146,9 @@ void test_lifecycle_and_responses() {
     CHECK(attributes_status == 200);
     CHECK(dispatch_get("/api/character/party/1/attributes") == "{\"attributes\":null}");
     CHECK(dispatch_get("/api/character/party/0/equipment") ==
-          "{\"equipment\":[null,{\"slot\":1,\"name\":\"剑\"}]}");
-    CHECK(dispatch_get("/api/character/party/0/equipment/1") == "{\"slot\":1,\"name\":\"剑\"}");
+          "{\"equipment\":[null,{\"slot\":1,\"name\":\"剑\",\"position\":null}]}");
+    CHECK(dispatch_get("/api/character/party/0/equipment/1") ==
+          "{\"slot\":1,\"name\":\"剑\",\"position\":null}");
     CHECK(dispatch_get("/api/character/party/0/skills") ==
           "{\"role\":0,\"skills\":[{\"action_id\":10,\"level\":1,\"skill_name\":\"火球\"}],"
           "\"unlock_bitmap\":0,\"active_skill_id\":-1,\"skill_points\":4}");

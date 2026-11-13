@@ -134,6 +134,54 @@ std::string option_list(const JsonValue& item, const contracts::QolItemPort* por
     return out;
 }
 
+std::string enchant_entries(const JsonValue& item, const contracts::QolItemPort* port) {
+    std::string out = "[";
+    bool first = true;
+    long long variant = 0;
+    (void)member_int(item, "variant", &variant);
+    if (variant != 3) {
+        out += "]";
+        return out;
+    }
+    long long id = 0;
+    long long level = 0;
+    if (member_int(item, "enchant_id", &id) && id > 0) {
+        (void)member_int(item, "enchant_level", &level);
+        Obj entry;
+        entry.integer("id", id);
+        entry.integer("level", level);
+        entry.text("effect", static_text(port, QolItemStaticTextKind::kOptionName,
+                                         static_cast<int32_t>(id)));
+        out += entry.object();
+        first = false;
+    }
+    const JsonValue* ids = item.find("option_ids");
+    const JsonValue* types = item.find("option_types");
+    const JsonValue* values = item.find("options");
+    if (ids != nullptr && ids->type == JsonValue::Type::kArray) {
+        for (size_t i = 0; i < ids->items.size(); ++i) {
+            long long option_id = -1;
+            long long option_type = 0;
+            long long option_value = 0;
+            if (!ids->items[i].as_int(&option_id) || option_id < 0 || types == nullptr ||
+                types->type != JsonValue::Type::kArray || i >= types->items.size() ||
+                !types->items[i].as_int(&option_type) || option_type != 2) continue;
+            if (values != nullptr && values->type == JsonValue::Type::kArray &&
+                i < values->items.size()) (void)values->items[i].as_int(&option_value);
+            if (!first) out += ",";
+            first = false;
+            Obj entry;
+            entry.integer("id", option_id);
+            entry.integer("level", option_value);
+            entry.text("effect", static_text(port, QolItemStaticTextKind::kOptionName,
+                                             static_cast<int32_t>(option_id)));
+            out += entry.object();
+        }
+    }
+    out += "]";
+    return out;
+}
+
 // 迁移前 NameInjectorCore.restructureItem 的字段顺序与取值。
 std::string enrich_item(const JsonValue& item, const contracts::QolItemPort* port) {
     long long category = -1;
@@ -149,12 +197,15 @@ std::string enrich_item(const JsonValue& item, const contracts::QolItemPort* por
                                 : nullptr;
     if (base_name != nullptr) {
         const char* prefix = "";
-        long long raw_rarity = -1;
-        if (member_int(item, "raw_rarity", &raw_rarity)) {
+        long long name_raw_rarity = -1;
+        if (member_int(item, "raw_rarity", &name_raw_rarity)) {
+            long long name_variant = 0;
+            (void)member_int(item, "variant", &name_variant);
             const char* class_text = static_text(port, QolItemStaticTextKind::kItemPrefixClass,
                                                  static_cast<int32_t>(category));
             const int class_bits = class_text == nullptr ? 0 : std::atoi(class_text);
-            prefix = contracts::item_rarity_prefix(class_bits, static_cast<int>(raw_rarity));
+            prefix = contracts::item_rarity_prefix(static_cast<int>(name_variant), class_bits,
+                                                   static_cast<int>(name_raw_rarity));
         }
         const std::string name = std::string(prefix) + base_name;
         out.text("name", name.c_str());
@@ -172,6 +223,8 @@ std::string enrich_item(const JsonValue& item, const contracts::QolItemPort* por
                                               static_cast<int32_t>(category))
                                 : nullptr;
     out.text("item_type", item_type == nullptr ? "consumable" : item_type);
+    out.text("position", has_category ? static_text(port, QolItemStaticTextKind::kItemClassName,
+                                                     static_cast<int32_t>(category)) : nullptr);
 
     long long need_level = 0;
     if (member_int(item, "need_level", &need_level)) {
@@ -193,16 +246,19 @@ std::string enrich_item(const JsonValue& item, const contracts::QolItemPort* por
 
     long long raw_rarity = 0;
     const bool has_raw_rarity = member_int(item, "raw_rarity", &raw_rarity);
-    if (has_raw_rarity) out.integer("raw_rarity", raw_rarity);
-    else out.null_value("raw_rarity");
+    if (has_raw_rarity) out.integer("prefix_tier", raw_rarity);
+    else out.null_value("prefix_tier");
     int class_bits = 0;
     if (has_category) {
         const char* class_text = static_text(port, QolItemStaticTextKind::kItemPrefixClass,
                                              static_cast<int32_t>(category));
         if (class_text != nullptr) class_bits = std::atoi(class_text);
     }
+    long long variant = 0;
+    (void)member_int(item, "variant", &variant);
     out.text("prefix", has_raw_rarity
-                            ? contracts::item_rarity_prefix(class_bits, static_cast<int>(raw_rarity))
+                            ? contracts::item_rarity_prefix(static_cast<int>(variant), class_bits,
+                                                            static_cast<int>(raw_rarity))
                             : "");
 
     Obj base;
@@ -237,21 +293,7 @@ std::string enrich_item(const JsonValue& item, const contracts::QolItemPort* por
     if (member_int(item, "chaos_rate", &chaos_rate)) chaos.integer("rate", chaos_rate); else chaos.null_value("rate");
     out.raw("chaos", chaos.object());
 
-    Obj enchant;
-    long long enchant_id = 0;
-    const bool has_enchant_id = member_int(item, "enchant_id", &enchant_id);
-    if (has_enchant_id) enchant.integer("id", enchant_id); else enchant.null_value("id");
-    long long enchant_level = 0;
-    if (member_int(item, "enchant_level", &enchant_level)) enchant.integer("level", enchant_level); else enchant.null_value("level");
-    if (has_enchant_id && enchant_id > 0) {
-        const char* effect = static_text(port, QolItemStaticTextKind::kEnchantEffect,
-                                         static_cast<int32_t>(enchant_id));
-        enchant.text("effect", effect);
-    } else {
-        enchant.null_value("effect");
-    }
-    enchant.raw("options", option_list(item, port, 2));
-    out.raw("enchant", enchant.object());
+    out.raw("enchant", enchant_entries(item, port));
 
     return out.object();
 }

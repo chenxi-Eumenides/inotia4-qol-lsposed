@@ -121,7 +121,7 @@ static_assert(offsetof(qol::contracts::QolItemInventoryView, enchant_option_coun
                   offsetof(qol::contracts::QolItemInventoryView, jewel_options) +
                       sizeof(qol::contracts::QolItemInventoryView::jewel_options),
               "enchant option list must follow the jewel option list");
-static_assert(sizeof(qol::contracts::QolItemInventoryView) == 1260,
+static_assert(sizeof(qol::contracts::QolItemInventoryView) == 1264,
               "inventory view must only contain the three split option lists");
 static_assert(qol::contracts::kQolItemInventoryHasOptionCompleteness == (1u << 7) &&
                   qol::contracts::kQolItemInventoryOptionsTruncated == (1u << 8) &&
@@ -243,7 +243,7 @@ int main() {
     CHECK(qol::contracts::kItemFactsVersion.major == 4 &&
           qol::contracts::kItemFactsVersion.minor == 0);
     CHECK(qol::contracts::kQolPortItemVersion.major == 5 &&
-          qol::contracts::kQolPortItemVersion.minor == 0);
+          qol::contracts::kQolPortItemVersion.minor == 1);
     CHECK(qol::contracts::kQolPortCharacterExtrasVersion.major == 1 &&
           qol::contracts::kQolPortCharacterExtrasVersion.minor == 3);
     qol::contracts::ItemFactsApi old_size_api{};
