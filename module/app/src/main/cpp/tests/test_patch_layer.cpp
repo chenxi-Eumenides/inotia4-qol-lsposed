@@ -1127,6 +1127,27 @@ void test_drop_pool_patch_registration() {
     }
 }
 
+void test_item_pool_patch_registration() {
+    g_base = kBase;
+    struct ItemPoolCase { const char* name; uintptr_t vma; uintptr_t offset; uint32_t expected; uint32_t replacement; };
+    constexpr ItemPoolCase patches[] = {
+        {"P_ITEMPOOL_CREATE_SIZE", F_ITEMPOOL_CREATE_VMA, ITEMPOOL_CREATE_SIZE_OFF, ITEMPOOL_CREATE_SIZE_WORD, ITEMPOOL_CREATE_SIZE_1638_WORD},
+        {"P_ITEMPOOL_INITIALIZE_LIMIT", F_ITEMPOOL_INITIALIZE_VMA, ITEMPOOL_INITIALIZE_LIMIT_OFF, ITEMPOOL_INITIALIZE_LIMIT_WORD, ITEMPOOL_INITIALIZE_LIMIT_1638_WORD},
+        {"P_ITEMPOOL_ALLOCATE_BOUND_HI", F_ITEMPOOL_ALLOCATE_VMA, ITEMPOOL_ALLOCATE_BOUND_HI_OFF, ITEMPOOL_ALLOCATE_BOUND_HI_WORD, ITEMPOOL_ALLOCATE_BOUND_HI_1638_WORD},
+        {"P_ITEMPOOL_ALLOCATE_BOUND_LO", F_ITEMPOOL_ALLOCATE_VMA, ITEMPOOL_ALLOCATE_BOUND_LO_OFF, ITEMPOOL_ALLOCATE_BOUND_LO_WORD, ITEMPOOL_ALLOCATE_BOUND_LO_1638_WORD},
+    };
+    for (const ItemPoolCase& patch : patches) {
+        PatchSite site{};
+        CHECK(qol::game::patch_site(patch.name, &site));
+        CHECK(site.addr == g_base + patch.vma + patch.offset);
+        CHECK(site.expected_word == patch.expected);
+        CHECK(site.replacement_word == patch.replacement);
+        CHECK(site.drop_pool_slots == 0);
+        CHECK(site.kind == qol::game::PatchKind::kWordReplace);
+    }
+    CHECK(ITEMPOOL_CAPACITY * ITEMPOOL_OBJECT_STRIDE == 0xfff0);
+}
+
 }  // namespace
 
 int main() {
@@ -1164,6 +1185,7 @@ int main() {
     test_ptr_slot_release_failure_keeps_owner();
     test_stack_limit_clamp_registration_and_roundtrip();
     test_drop_pool_patch_registration();
+    test_item_pool_patch_registration();
     std::printf("patch_layer: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

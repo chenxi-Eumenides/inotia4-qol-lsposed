@@ -178,6 +178,16 @@ void test_lifecycle_and_responses() {
     const auto& descriptor = qol::features::core_system::plugin_descriptor();
 
     CHECK(descriptor.requires_count == 0 && descriptor.optional_count == 2);
+    CHECK(descriptor.resources_count == 8 && descriptor.resources != nullptr);
+    for (uint32_t i = 0; i < descriptor.resources_count; ++i) {
+        const qol::contracts::ResourceClaim& claim = descriptor.resources[i];
+        CHECK(claim.mechanism == qol::contracts::ResourceMechanism::kCallPatch);
+        CHECK(claim.policy == qol::contracts::ResourcePolicy::kPrivate);
+        CHECK(claim.requirement == qol::contracts::ResourceRequirement::kOptional);
+        CHECK(claim.failure == qol::contracts::ResourceFailure::kFailSoft);
+        CHECK(claim.gate == nullptr && claim.handler == nullptr);
+        CHECK(claim.symbol != nullptr && std::strncmp(claim.symbol, "P_", 2) == 0);
+    }
     CHECK(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
     CHECK(descriptor.http_endpoint_count == 5 && descriptor.http_endpoints != nullptr);
     CHECK(descriptor.http_route_metadata_count == 0 && descriptor.http_route_metadata == nullptr);

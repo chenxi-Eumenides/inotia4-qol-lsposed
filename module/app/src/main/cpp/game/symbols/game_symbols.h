@@ -373,7 +373,26 @@ constexpr uintptr_t F_ITEMPOOL_FREE_VMA = 0x108160;     // void (void*) ITEMPOOL
 constexpr uintptr_t G_ITEMPOOL_BASE_GOT_VMA = 0x2f6000 + 0xc28;
 constexpr uintptr_t ITEMPOOL_POOL_VAR_VMA = 0x713510; // ITEMPOOL_pPool 变量地址；池基址 = *(g_base + 此偏移)
 constexpr size_t ITEMPOOL_OBJECT_STRIDE = 0x28;   // 池内每对象 40B
-constexpr size_t ITEMPOOL_CAPACITY = 300;         // 0x2ee0/0x28：ITEMPOOL_Create 0x10809c MEM_Malloc(0x2ee0)
+// ---- 物品对象池容量补丁点（扩容 300→1638 槽）----
+// 池是堆上连续数组：Create 分配、Initialize 逐对象初始化、Allocate 线性扫到池尾。
+// 三条必须同组：只改 Create 会在 Initialize 越过池尾；只改 Initialize 会把新增槽留成
+// 未初始化脏 flag；只改一半 Allocate 界会扫出池外。
+constexpr uintptr_t F_ITEMPOOL_INITIALIZE_VMA = 0x108040; // void ITEMPOOL_Initialize
+constexpr uintptr_t F_ITEMPOOL_CREATE_VMA = 0x108098;     // void ITEMPOOL_Create
+constexpr uintptr_t F_ITEMPOOL_ALLOCATE_VMA = 0x1080f8;   // void* ITEMPOOL_Allocate
+constexpr size_t ITEMPOOL_CREATE_SIZE_OFF = 0x4;
+constexpr uint32_t ITEMPOOL_CREATE_SIZE_WORD = 0xd285dc00;
+constexpr uint32_t ITEMPOOL_CREATE_SIZE_1638_WORD = 0xd29ffe00;
+constexpr size_t ITEMPOOL_INITIALIZE_LIMIT_OFF = 0x18;
+constexpr uint32_t ITEMPOOL_INITIALIZE_LIMIT_WORD = 0xd285dc15;
+constexpr uint32_t ITEMPOOL_INITIALIZE_LIMIT_1638_WORD = 0xd29ffe15;
+constexpr size_t ITEMPOOL_ALLOCATE_BOUND_HI_OFF = 0x18;
+constexpr uint32_t ITEMPOOL_ALLOCATE_BOUND_HI_WORD = 0x91400a61;
+constexpr uint32_t ITEMPOOL_ALLOCATE_BOUND_HI_1638_WORD = 0x91403c61;
+constexpr size_t ITEMPOOL_ALLOCATE_BOUND_LO_OFF = 0x1c;
+constexpr uint32_t ITEMPOOL_ALLOCATE_BOUND_LO_WORD = 0x913b8021;
+constexpr uint32_t ITEMPOOL_ALLOCATE_BOUND_LO_1638_WORD = 0x913fc021;
+constexpr size_t ITEMPOOL_CAPACITY = 1638;        // 0xfff0/0x28：三处补丁点把池扩到 0xfff0 字节
 constexpr size_t ITEMPOOL_USED_FLAG_OFFSET = 0x1c; // 对象 +0x1c bit0=占用（ITEMPOOL_Allocate 0x108128 tbnz #0）
 constexpr uintptr_t G_TOUCH_STATE_VMA = 0x301000 + 0xcf8; // TouchHandle 全局状态（匿名 .bss）：+0x30=拖动中控件 +0x50=释放参数(+0x50=释放控件 +0x58=拖动源控件 +0x60=释放坐标)
 constexpr size_t TOUCH_STATE_PREFIX_SIZE = 0x10;           // TouchHandle_ResetMovingControl 清零前缀

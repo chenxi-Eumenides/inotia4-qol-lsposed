@@ -547,9 +547,9 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | 工具/文档 | **已同步**：`symbolize_crash.py` 的 `btN` 改为按帧号自然排序（原字符串序会排成 bt0/bt1/bt10/bt11/bt2）；`docs/reference/logging.md` §7 更新方向、maps 校验与 LR 回退语义；`qol_crash.h` 头部「不展开调用栈」更正为 FP 链回溯 | 符号名还原仍是离线步骤（`llvm-symbolizer`），崩溃处理器内不做符号化 |
 | 验证 | **PASS（Host/编译/构建）**：`qol_log_tests` 119 passed / 0 failed（新增非 arm64 `backtrace=unavailable` 断言）；`clang++ --target=aarch64-linux-android24 -fsyntax-only -Wall -Wextra` 零告警；`scripts/build-debug.sh` → `output/inotia4_qol_lsposed_debug_2611101105_798dbb4fabf8.apk`（SHA-256 `798dbb4f…`） | **NOT_ACCEPTED（真机未验）**：需要一次真实崩溃确认 `bt1..btN` 连续、无伪造帧。本轮无可用崩溃样本，样本复现依赖 §5.34 之外的 c18 打怪路径 |
 
-### 5.35 world_tuning 地面掉落上限 32→127（2026-11-11；Host/静态/构建通过，真机待验）
+### 5.35 地面掉落上限 32→127（2026-11-11 建立；2026-11-14 owner 从 `world_tuning` 迁到 `core.system`）
 
-范围：`world_tuning` 启用期间把 `MAPITEMSYSTEM` 地面掉落池从 32 槽扩到 127 槽；不新增配置项或面板行。
+范围：`core.system` 常驻把 `MAPITEMSYSTEM` 地面掉落池从 32 槽扩到 127 槽；不新增配置项、feature 开关或面板行（迁移前由 `world_tuning` 私有 claim 提供）。
 
 | 验证项 | 当前结果 | 范围与未完成项 |
 |---|---|---|
@@ -571,3 +571,17 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | 构建 | **PASS（Debug）**：`scripts/build-debug.sh` → `output/inotia4_qol_lsposed_debug_2611131625_935a26efe832.apk`，SHA-256 `935a26efe83247a3e94f567771525aa272d281b5f715dd94bc7aa5de7659463b`。首次真机安装（16:21）报 `hook:CHAR_SetAction: symbol unresolved`，插件状态 `unsupported`；根因是 entry hook 走 `game/access/symbols.cpp` 的 `kHookEntrySymbols` 白名单，`F_CHAR_SET_ACTION_VMA`/`F_CHAR_START_ACTION_EX_VMA` 未登记，补登记后重建。 | `git diff --check` 通过 |
 | 真机 | **NOT_ACCEPTED（未执行）**：未安装本轮 Debug 包、未进档 | 待核验：①点击怪物自动攻击中按方向键，攻击动画继续、坐标继续变化、目标不丢；②目标走出攻击距离后，下一次普攻前目标清除并停战；③松键站定后仍按原版继续攻击同一目标；④切图/换人/目标死亡清除正常；⑤与 `better_move` 八向/全向同时开启时朝向、对齐、撞墙滑行正常；⑥眩晕/击退期间不可移动（269 掩码语义未被全局放开）；⑦关闭 feature 后行为与原版一致、`/api/system/resources` 四个资源回落 |
 | 风险评估 | **未消除**：移动中普攻是否自动连段取决于原版动作链，若动作链要求站立则移动中只保留首段攻击；方向变化时原版 1–2 帧对齐停顿仍存在 | 两项均需真机观察后决定是否追加动作结束补触发 / 对齐早退处理 |
+
+### 5.37 物品对象池 300→1638 槽与 make_item 池满兜底（2026-11-14；Host/静态/构建通过，真机待验）
+
+范围：`core.system` 常驻把 `ITEMPOOL` 物品对象池从 300 槽扩到 1638 槽（与 5.35 的地面掉落池同属该插件的池容量补丁，无开关）；`world_tuning` 的 `make_item_wrapper` 在池余量不足时不再进入原函数，消除 `ITEMSYSTEM_MakeItem` 完美道具分支的空指针崩溃。触发样本：`apk/logs/qol-crash-佣兵祭司技能打怪闪退.log`（`pc=libgame.so+0x10c978` = `ldrh w0,[x19,#0x8]`，`x19` 来自 `ITEMSYSTEM_CreatePerfectItem`，池 300/300 满时返回 null）。
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 机制 | **代码事实**：`ITEMPOOL` 是堆上连续数组（每对象 `0x28` B）。`ITEMPOOL_Create` `MEM_Malloc(0x2ee0)`、`ITEMPOOL_Initialize` 循环 300 次、`ITEMPOOL_Allocate` 从池基址扫到 `+0x2ee0`。四条 `kWordReplace`（`Create` 分配大小 `movz x0,#0x2ee0`→`#0xfff0`、`Initialize` 循环界 `movz x21,#0x2ee0`→`#0xfff0`、`Allocate` 上界 `add #0x2,lsl#12`+`add #0xee0`→`#0xf,lsl#12`+`#0xff0`）把池改为 1638×0x28=0xfff0。三条必须同组：只改 Create 会在 Initialize 越过池尾，只改 Initialize 会把新槽留成脏 flag，只改一半上界会扫出池外。 | 上限来自两条 `MOVZ #imm16` 单字补丁：1638 槽 = `0xfff0`，是 `0x28` 整数倍里能编码的最大值；再大需改为 hook `ITEMPOOL_Allocate`。 |
+| 兜底 | **代码事实**：`make_item_wrapper` 每次调用前读池余量，余量 ≤2 时直接返回空并写一条 `make_item skipped pool_used=… pool_capacity=…`（每次结算去重）；重抽循环按本地余量（造物 −1、`free_item` 成功 +1）在余量耗尽前退出。 | 池快照来自 `item_pool_usage`（GOT `0x2f6c28` → `ITEMPOOL_pPool` 两层解引用，`ITEMPOOL_CAPACITY` 同步为 1638）。 |
+| 变体一致性 | **静态 PASS**：原版 v1.3.2、C18L v603、monster v29、盗版大修 v0810、幻想 v1.2 五个 APK 的 arm64 `libgame.so` 在 `0x108058/0x10809c/0x108110/0x108114` 四处指令字与地址逐字一致，无需备用字；布局不同的变体按 expected 字校验失败后 fail-soft。 | 仅核对 arm64。 |
+| Host | **PASS**：`cmake --build build -j6 -k 0` 成功；`ctest --test-dir build --output-on-failure` → **167/167**。新增 `patch_layer_tests` 的四个 ITEMPOOL 站点断言（名称/地址/原字/替换字/1638×0x28==0xfff0）、`system_facts_dispatch_tests` 的 8 条 claim 断言、`world_tuning_feature_tests` 资源数 16→12、`host_adapter_tests` 的容量断言改用 `ITEMPOOL_CAPACITY`。 | 未覆盖 `ITEMPOOL_Create` 实际分配与 `MEM_Malloc` 换池（依赖游戏符号，host 无 fixture）。 |
+| 静态检查 | **PASS**：`uv run python scripts/maintenance/check_arch.py` 全部通过（0 error，29 条既有日志软告警）；`git diff --check` 通过。 | — |
+| 构建 | **PASS（Debug）**：`scripts/build-debug.sh` → `output/inotia4_qol_lsposed_debug_2611140137_d4f9f9e6b1eb.apk`，SHA-256 `d4f9f9e6b1eb4cf5f00a635b1b2d4d369ab9f89d9b47b0e774b942898f406f3c`。 | 构建包含同期未提交的日志域/编辑器迁移改动，APK 不代表本项单独验收。 |
+| 真机 | **NOT_ACCEPTED（未执行）**：未安装本轮 Debug 包、未复现祭司技能掉落。 | 待核验：①掉落数量 20 + 重抽 20 连打祭司佣兵技能不再闪退；②`/api/system/resources` 中 8 条池补丁 `live`；③切图/退出/新档后池重建为 1638 槽且 `ITEMPOOL` 用量统计正常；④池接近满时出现 `make_item skipped` 且游戏继续运行；⑤关闭 world_tuning 后地面掉落回落 32 槽、物品池仍 1638 槽。 |

@@ -9,7 +9,7 @@
 
 namespace qol::features::world_tuning {
 
-inline constexpr uint32_t kResourceCount = 16;
+inline constexpr uint32_t kResourceCount = 12;
 
 const contracts::PluginDescriptor& plugin_descriptor();
 

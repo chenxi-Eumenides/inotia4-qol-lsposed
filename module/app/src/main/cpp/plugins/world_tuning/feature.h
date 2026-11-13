@@ -57,10 +57,6 @@ inline constexpr const char* kResourceIdDropReroll258 = "patch:CHARSYSTEM_DropIt
 inline constexpr const char* kResourceIdDropReroll3B8 = "patch:CHARSYSTEM_DropItem+0x3b8";
 inline constexpr const char* kResourceIdDropReroll400 = "patch:CHARSYSTEM_DropItem+0x400";
 inline constexpr const char* kResourceIdDropReroll460 = "patch:CHARSYSTEM_DropItem+0x460";
-inline constexpr const char* kResourceIdDropPoolSlotCap = "patch:MAPITEMSYSTEM_AllocateSlot+0x18";
-inline constexpr const char* kResourceIdDropPoolCreate = "patch:MAPITEMSYSTEM_Create+0x4";
-inline constexpr const char* kResourceIdDropPoolInit = "patch:MAPITEMSYSTEM_Initialize+0x34";
-inline constexpr const char* kResourceIdDropPoolUnload = "patch:MAPITEMSYSTEM_Unload+0x28";
 
 // 门禁开关：true = 业务生效；false = wrapper 空转透传（fail-closed）。任意线程可读。
 void set_gate(bool enabled);

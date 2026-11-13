@@ -16,7 +16,7 @@
 - 药水冷却倍率（配置键 `potion_cooldown`）：缩放玩家药水冷却；
 - 技能冷却倍率（配置键 `skill_cooldown`）：缩放玩家技能冷却。
 
-此外，插件启用期间把地面掉落物上限从 32 槽提高到 127 槽（固定值，不占用 `rates` 配置项，也不产生新的面板行）。
+地面掉落物上限（32→127 槽）与物品对象池容量（300→1638 槽）由 `core.system` 常驻提供，不占用 `rates` 配置项，不随本插件启停，见 [`core.system`](core.system.md)。
 
 插件 id 由旧 `simple_mode` 改为 `world_tuning`，旧 `simple_mode.combat` feature 与旧配置不再迁移。除特别说明，文中路径均相对 `module/app/src/main/cpp/`。
 
@@ -27,7 +27,7 @@
 - `optional_requires` 3 项：`ui_panels` v1.3、`ui_components` v2.23、`item.use` v1.0；界面工具被停用时倍率仍生效，仅面板不可用；`item.use` 缺失时只影响药水冷却。
 - `ports` 1 项：`QOL_PORT_CHARACTER_EXTRAS` v1.3。
 - `provides` 0；JNI 0、HTTP route/endpoint 0。
-- `resources` 8 个入口 hook、4 个掉落 CMP `kInsnPatch` claims 与 4 个地面掉落池 `kWordReplace` claims，均为 `kOptional` + `kFailSoft`：单个落点不可用只影响对应行为，不会把插件置 `failed`。`hook:CHAR_AddDamage` / `hook:CHAR_GetActionCoolTime` 声明 `follow_trampoline=true`；monster v29 的 mod 会周期性重写伤害入口，冷却入口则跟随到隐藏段函数体。
+- `resources` 12 条：8 个入口 hook 与 4 个掉落 CMP `kInsnPatch` claims，均为 `kOptional` + `kFailSoft`：单个落点不可用只影响对应行为，不会把插件置 `failed`。`hook:CHAR_AddDamage` / `hook:CHAR_GetActionCoolTime` 声明 `follow_trampoline=true`；monster v29 的 mod 会周期性重写伤害入口，冷却入口则跟随到隐藏段函数体。
 - `validate_config` = `validate_rates_config`，只接受 `rates` 键。
 - 唯一 feature 为 entry（`plugins/world_tuning/plugin.cpp`）：
 
@@ -141,22 +141,10 @@ monster v29 的 `CHAR_AddDamage` 入口是 `b <隐藏段目标>`，且 mod 会�
 - 类别读取走 `QolGameHost.item_category`：C18 按 12bit 物品 id（`bits[6..16) | bits[1:0]<<10`）解码，其余变体（含 unknown）按原版 10bit。
 - 重掷产生的非保留物品经 `inventory_write.free_item` 立即释放；`read_only.item.*` 或 `free_item` 不可用时直接透传（fail-soft）。
 
-地面掉落上限：
+地面掉落与物品池容量：
 
-- 原版地面槽池固定 32 槽：`MAPITEMSYSTEM_Create` 以 `MEM_Malloc(0x400)` 建池（每槽 `0x20`），`MAPITEMSYSTEM_AllocateSlot` 在计数 `>0x1f` 时销毁最旧槽；计数是 `int8`，因此池理论最大 127 槽。插件把上限提高到 **127**。
-- 四个 `kWordReplace` 站点（owner=`plugins/world_tuning`，随插件启用/停用物理安装/还原）：
-
-| 站点 | VMA + 偏移 | 原字 → 新字 | 语义 |
-|---|---|---|---|
-| `P_MAPITEMSYSTEM_ALLOCATE_SLOT_CAP` | `F_MAPITEMSYSTEM_ALLOCATE_SLOT_VMA + 0x18` | `0x71007c1f` → `0x7101f81f` | `cmp w0,#0x1f` → `cmp w0,#0x7e` |
-| `P_MAPITEMSYSTEM_CREATE_POOL_SIZE` | `F_MAPITEMSYSTEM_CREATE_VMA + 0x4` | `0xd2808000` → `0xd281fc00` | `mov x0,#0x400` → `mov x0,#0xfe0` |
-| `P_MAPITEMSYSTEM_INITIALIZE_POOL_LIMIT` | `F_MAPITEMSYSTEM_INITIALIZE_VMA + 0x34` | `0xf110027f` → `0xf13f827f` | `cmp x19,#0x400` → `cmp x19,#0xfe0` |
-| `P_MAPITEMSYSTEM_UNLOAD_POOL_LIMIT` | `F_MAPITEMSYSTEM_UNLOAD_VMA + 0x28` | `0xf110027f` → `0xf13f827f` | `cmp x19,#0x400` → `cmp x19,#0xfe0` |
-
-- 四条必须同组生效：只扩比较值会写穿原 0x400 池；只扩池不扩 `Initialize`/`Unload` 循环界会在切图时越过池尾或漏掉新槽物品对象的释放。
-- 安装时宿主在游戏主线程先执行 `game::drop_pool_ensure_capacity(127)`：池已存在则 `MEM_Malloc(0xfe0)`、拷贝现有条目、`MEM_Free` 旧池并改写 `MAPITEMSYSTEM_pPool`；池尚未创建（`Create` 未跑）直接放行，由补丁后的 `Create` 分配大池；任一步失败则该条资源 fail-soft，四条同败，不会出现「只扩上限、池仍是 0x400」。
-- 变体一致性：四个指令字在 variant table 35 个登记构建中的 34 个（除 Original v1.4.0 外：原版 v1.3.2、C18 v0.2/v0.38b/v507–v603、Monster v19–v31/国庆比赛、大修 v0704–v0830、幻想 v1.2）逐字一致，VMA 也相同；Original v1.4.0 是不同布局（符号整体偏移），按 expected 字校验失败后 fail-soft 跳过，与该变体上其他 world_tuning 既有 hook 的行为一致。
-- 停用后四条字补丁物理还原，已扩大的池保留到下一次 `MAPITEMSYSTEM_Create`。停用时若地面仍有 >32 件掉落，原版 `Unload` 只清前 32 槽，其余槽的物品对象会残留在 ITEMPOOL；启用期间不受影响。
+- 地面掉落上限（32→127 槽）与物品对象池容量（300→1638 槽，每对象 `0x28` B）由 `core.system` 常驻的四条 `MAPITEMSYSTEM` 与四条 `ITEMPOOL` 字替换提供，站点字与生效语义见 [`core.system`](core.system.md)。本插件不再声明这两组资源。
+- 池满时原版 `ITEMSYSTEM_MakeItem` 在完美道具分支直接用 `ITEMSYSTEM_CreatePerfectItem` 的返回值解引用（`libgame.so+0x10c978` 的 `ldrh w0,[x19,#0x8]`），不判空即崩。本插件 `make_item_wrapper` 因此兜底：每次进入原函数前读一次池余量，余量 ≤2 时不再调用原函数、直接返回空，并在每次结算只写一条 `make_item skipped pool_used=… pool_capacity=…`；重抽循环按本地余量估算（成功造物 −1、`free_item` 成功 +1）提前退出，避免重抽把池推满。
 
 ## 生命周期与线程模型
 
@@ -181,7 +169,7 @@ monster v29 的 `CHAR_AddDamage` 入口是 `b <隐藏段目标>`，且 mod 会�
 ## 测试
 
 - `world_tuning_rates_tests`（`tests/test_world_tuning_rates.cpp`）：基础/扩展档位、显示文本、JSON 往返、0 值缩放与 1e-6 敌怪血量、配置非负范围、越界值分字段回退、未知字段忽略、重复/语法错误拒绝、旧配置 `move_speed`/`drop_quality` 键兼容、`validate_config`；另覆盖 K=1、K²、100% cap、负 threshold 与高 K 饱和无溢出。
-- `world_tuning_feature_tests`（`tests/test_world_tuning_feature.cpp`）：descriptor（16 资源、无 provides）、安装失败出口、门禁时序、伤害/经验/金币/血量 0 倍率、伤害矩阵、HP 缩放与幂等/倍率变更、阵营失败、残留 wrapper、entry 不可用分支；掉落数量 0/1/3/17 次调用与 warning、CMP helper 的 gate/TLS 隔离、重抽 0 不掉落、品质候选仍按 K 次调用及既有过滤/取最高/释放规则；掉落池四条字替换 claim 的 id/站点/机制/策略。
+- `world_tuning_feature_tests`（`tests/test_world_tuning_feature.cpp`）：descriptor（12 资源、无 provides）、安装失败出口、门禁时序、伤害/经验/金币/血量 0 倍率、伤害矩阵、HP 缩放与幂等/倍率变更、阵营失败、残留 wrapper、entry 不可用分支；掉落数量 0/1/3/17 次调用与 warning、CMP helper 的 gate/TLS 隔离、重抽 0 不掉落、品质候选仍按 K 次调用及既有过滤/取最高/释放规则。
 - `insn_patch_tests`（`tests/test_insn_patch.cpp`）：kind5 trampoline 保存/恢复寄存器与 LR、精确重放 CMP 后用 B 返回原 `b.cond`、expected-word 拒绝与物理还原。
 - `settings_contributions_tests` 编译本插件的空 contribution。
 

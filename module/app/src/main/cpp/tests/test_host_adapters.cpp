@@ -888,7 +888,7 @@ QolResult seam_log_write(int32_t, int32_t, const char*, const char* message,
 
 }  // namespace
 
-// ITEMPOOL 用量读取：用假 g_base 映射变量槽与 300 槽池，验证占用位统计与失败语义。
+// ITEMPOOL 用量读取：用假 g_base 映射变量槽与整池，验证占用位统计与失败语义。
 void test_item_pool_usage_fake_pool() {
     const uintptr_t saved_base = g_base;
     const uintptr_t saved_readable = reinterpret_cast<uintptr_t>(g_test_extra_readable);
@@ -912,7 +912,7 @@ void test_item_pool_usage_fake_pool() {
     uint32_t used = 0;
     uint32_t capacity = 0;
     assert(qol::game::item_pool_usage(&used, &capacity));
-    assert(used == 3 && capacity == 300);
+    assert(used == 3 && capacity == ITEMPOOL_CAPACITY);
 
     // 池变量为空：失败且输出归零，调用方按“未知”处理。
     *reinterpret_cast<void**>(image.data() + ITEMPOOL_POOL_VAR_VMA) = nullptr;
