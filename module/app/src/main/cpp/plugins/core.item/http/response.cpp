@@ -168,13 +168,10 @@ std::string enchant_entries(const JsonValue& item, const contracts::QolItemPort*
             const char* percent_text =
                 static_text(port, QolItemStaticTextKind::kItemOptionPercent, option_id_value);
             const bool percent = percent_text != nullptr && percent_text[0] == '1';
-            char display[32]{};
-            (void)contracts::item_option_display_text(percent, static_cast<int32_t>(option_value),
-                                                      display, sizeof(display));
             Obj entry;
             entry.integer("id", option_id);
             entry.integer("value", option_value);
-            entry.text("display", display);
+            entry.boolean("percent", percent);
             entry.text("effect", static_text(port, QolItemStaticTextKind::kOptionName,
                                              option_id_value));
             out += entry.object();

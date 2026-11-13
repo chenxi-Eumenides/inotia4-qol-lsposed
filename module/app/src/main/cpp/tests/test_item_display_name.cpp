@@ -28,11 +28,4 @@ int main() {
     }
     check(0, 3, -1, "");
     check(0, 5, 16, "");
-    char text[32]{};
-    assert(qol::contracts::item_option_display_text(true, 182, text, sizeof(text)) &&
-           std::strcmp(text, "18.2%") == 0);
-    assert(qol::contracts::item_option_display_text(true, -5, text, sizeof(text)) &&
-           std::strcmp(text, "-0.5%") == 0);
-    assert(qol::contracts::item_option_display_text(false, 42, text, sizeof(text)) &&
-           std::strcmp(text, "42") == 0);
 }

@@ -458,10 +458,8 @@ std::string character_enchant_entries(void* item, long long enchant_id, long lon
         const char* percent_text =
             character_static_text(contracts::QolItemStaticTextKind::kItemOptionPercent, id);
         const bool percent = percent_text != nullptr && percent_text[0] == '1';
-        char display[32]{};
-        (void)contracts::item_option_display_text(percent, value, display, sizeof(display));
         out += "{\"id\":" + std::to_string(id) + ",\"value\":" + std::to_string(value) +
-               ",\"display\":\"" + std::string(display) + "\",\"effect\":";
+               ",\"percent\":" + (percent ? "true" : "false") + ",\"effect\":";
         if (effect != nullptr) out += "\"" + std::string(effect) + "\"";
         else out += "null";
         out += "}";

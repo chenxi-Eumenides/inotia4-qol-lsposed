@@ -402,7 +402,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 | `bonus` | 词缀列表：`{id 词缀索引, name 词缀名, value 词缀值}` |
 | `gem` | 宝石：`{total_slots 总槽位, slots[{id, name, value}] 已镶宝石}` |
 | `chaos` | 混沌：`{is_chaos, level 混沌等级, rate 混沌成功率}` |
-| `enchant` | 附魔数组：Monster 为 `[{id, value, display, effect}]`（只含 option type=2 节点；`value` 为原始值，`display` 为游戏显示文本，如 `182` → `"18.2%"`；`effect` 由 `ITEMOPTINFOBASE` 联查）；C18 及其他变体固定 `[]`。`I_ENCHANT` 的 id/level 不是可见附魔行，不输出 |
+| `enchant` | 附魔数组：Monster 为 `[{id, value, percent, effect}]`（只含 option type=2 节点；`value` 为原始值，`percent=true` 表示按 0.1% 单位显示，如 `182` → `18.2%`，false 按整数显示；`effect` 由 `ITEMOPTINFOBASE` 联查）；C18 及其他变体固定 `[]`。`I_ENCHANT` 的 id/level 不是可见附魔行，不输出 |
 
 ### 5.4 Skills（技能）
 
