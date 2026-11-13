@@ -265,5 +265,57 @@ class CheckSymbolsGateTests(unittest.TestCase):
         self.assertIn("求值失败", errors.getvalue())
 
 
+class EntryHookRegistrationTests(unittest.TestCase):
+    def test_extract_direct_macro_and_branch_claims(self) -> None:
+        text = '''
+// {kComment, "F_COMMENT_VMA", contracts::ResourceMechanism::kEntryHook}
+const contracts::ResourceClaim kResources[] = {
+    {
+        kDirectId,
+        "F_DIRECT_VMA",
+        contracts::ResourceMechanism::kEntryHook,
+        contracts::ResourcePolicy::kPrivate,
+    },
+    {
+        "hook:branch",  // id
+#if QOL_DEVICE_PROBE
+        "elf-export:Branch",  // 严格导出分支
+#else
+        "F_BRANCH_VMA",  // 传统符号分支
+#endif
+        contracts::ResourceMechanism::kEntryHook,
+        contracts::ResourcePolicy::kPrivate,
+    },
+};
+#define CLAIM(ID, SYM, HANDLER) \\
+    {ID, SYM, contracts::ResourceMechanism::kEntryHook, HANDLER}
+const contracts::ResourceClaim kMore[] = {
+    CLAIM("hook:macro", "F_MACRO_VMA", macro_wrapper),
+    CLAIM("hook:macro_multi",
+          "F_MACRO_MULTI_VMA", macro_multi_wrapper),
+};
+'''
+        symbols = check_symbols.extract_entry_hook_symbols(text)
+        self.assertEqual(
+            set(symbols),
+            {"F_DIRECT_VMA", "F_BRANCH_VMA", "F_MACRO_VMA", "F_MACRO_MULTI_VMA"},
+        )
+
+    def test_unregistered_entry_symbol_fails_gate(self) -> None:
+        output = io.StringIO()
+        with mock.patch.object(
+            check_symbols, "load_hook_entry_symbols", return_value={"F_REGISTERED_VMA"}
+        ), mock.patch.object(
+            check_symbols,
+            "collect_plugin_entry_hook_symbols",
+            return_value={"plugins/demo/plugin.cpp": {"F_MISSING_VMA": 7}},
+        ), contextlib.redirect_stdout(output):
+            result = check_symbols.check_entry_hook_registration()
+
+        self.assertEqual(result, 1)
+        self.assertIn("❌ plugins/demo/plugin.cpp:7 F_MISSING_VMA", output.getvalue())
+        self.assertIn("未登记 1", output.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

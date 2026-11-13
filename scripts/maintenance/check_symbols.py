@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """分类并校验 libgame.so 符号 VMA 与 game_symbols.h 硬编码常量。
 
-两段式：
+分三步：
 1. 分类：解析 game_symbols.h 全部 `constexpr <type> <NAME> = <expr>;`，按类型与
    symbol_registry.h 注册关系分三类：
    - A 地址·具名：type == uintptr_t 且宏名已注册 → 可按 .dynsym 名动态解析；
@@ -10,6 +10,9 @@
    - C 布局/枚举：其余 type（size_t/int/uint32_t/uint8_t 等）→ 结构体偏移/枚举，
      非地址，不参与符号比对。
 2. 校验：仅对 A 类，用注册符号名在 SO 符号表查地址并与常量比对。
+3. 静态校验：插件所有 `kEntryHook` 资源声明的 symbol 必须登记在
+   game/access/symbols.cpp 的 `kHookEntrySymbols`；漏登记时 resolve_hook_entry 返回 0，
+   插件会被 preflight 判为 unsupported。`elf-export:` 声明走独立导出解析，不查该表。
 
 映射单一来源：cpp/symbol_registry.h（X-macro 注册表，SYM(宏名, 符号名) 行）。
 用法：uv run python scripts/maintenance/check_symbols.py [--all] [libgame.so 路径]
@@ -27,6 +30,8 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SO = ROOT / "apk" / "decoded" / "overhaul" / "lib" / "arm64-v8a" / "libgame.so"
 HEADER = ROOT / "module" / "app" / "src" / "main" / "cpp" / "game" / "symbols" / "game_symbols.h"
 REGISTRY = ROOT / "module" / "app" / "src" / "main" / "cpp" / "game" / "symbols" / "symbol_registry.h"
+SYMBOLS_CPP = ROOT / "module" / "app" / "src" / "main" / "cpp" / "game" / "access" / "symbols.cpp"
+PLUGINS = ROOT / "module" / "app" / "src" / "main" / "cpp" / "plugins"
 READELF = (
     ROOT / "tools" / "ndk" / "android-ndk-r26d" / "toolchains" / "llvm"
     / "prebuilt" / "linux-x86_64" / "bin" / "llvm-readelf"
@@ -39,6 +44,17 @@ _CONST_RE = re.compile(
 # 表达式求值：先替换常量引用，再用字符白名单校验，最后才 eval（禁止对任意输入直接 eval）。
 _IDENT_RE = re.compile(r"(?<![0-9A-Za-z_])[A-Za-z_][A-Za-z0-9_]*")
 _WHITELIST_RE = re.compile(r"[0-9a-fA-FxX+\-\s]+")
+
+# kEntryHook 资源 symbol 登记校验：只比对传统符号 ID 命名空间（F_*）；`elf-export:`
+# 声明由 game/access/symbols.cpp 的导出解析分支处理，不属于 kHookEntrySymbols。
+_HOOK_TABLE_RE = re.compile(r"kHookEntrySymbols\s*\[\s*\]\s*=\s*\{")
+_TABLE_ENTRY_RE = re.compile(r'\{\s*"([^"]+)"')
+_HOOK_MECHANISM_RE = re.compile(r"ResourceMechanism::kEntryHook")
+_MACRO_DEF_RE = re.compile(r"#define\s+([A-Z_][A-Z0-9_]*)\s*\(([^)]*)\)((?:[^\n]*\\\n)*[^\n]*)")
+_MACRO_SYMBOL_PARAM_RE = re.compile(r"\{\s*[^,{}]*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,")
+_STRING_RE = re.compile(r'"((?:[^"\\]|\\.)*)"')
+_SYMBOL_NAME_RE = re.compile(r"F_[A-Z0-9_]+")
+_PLUGIN_SUFFIXES = frozenset({".cpp", ".h", ".inc"})
 
 CAT_A = "A 地址·具名"
 CAT_B_GOT = "B 地址·静态(GOT槽)"
@@ -144,6 +160,235 @@ def fmt_value(const: Constant) -> str:
     return "无法求值" if const.value is None else f"0x{const.value:x}"
 
 
+def _mask_noncode(text: str) -> str:
+    """把注释与字符串/字符字面量替换为空格（保持长度和换行），便于括号与机制匹配。
+
+    资源声明的 reason 文本可能含逗号、括号或 `ResourceMechanism::kEntryHook` 字样，
+    直接在原文上匹配会产生误判；替换后位置与原文一一对应。
+    """
+    out = list(text)
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "/" and i + 1 < len(text) and text[i + 1] == "/":
+            while i < len(text) and text[i] != "\n":
+                out[i] = " "
+                i += 1
+        elif ch == "/" and i + 1 < len(text) and text[i + 1] == "*":
+            out[i] = out[i + 1] = " "
+            i += 2
+            while i < len(text):
+                if text[i] == "*" and i + 1 < len(text) and text[i + 1] == "/":
+                    break
+                if text[i] != "\n":
+                    out[i] = " "
+                i += 1
+            if i < len(text):
+                out[i] = " "
+                if i + 1 < len(text):
+                    out[i + 1] = " "
+                i += 2
+        elif ch in "\"'":
+            quote = ch
+            out[i] = " "
+            i += 1
+            while i < len(text):
+                cur = text[i]
+                if cur == "\\" and i + 1 < len(text):
+                    out[i] = out[i + 1] = " "
+                    i += 2
+                    continue
+                if cur == quote:
+                    out[i] = " "
+                    i += 1
+                    break
+                if cur != "\n":
+                    out[i] = " "
+                i += 1
+        else:
+            i += 1
+    return "".join(out)
+
+
+def _enclosing_initializer(masked: str, pos: int) -> tuple[int, int] | None:
+    """返回 pos 所在 `{...}` 初始化器的左右花括号下标（基于已屏蔽注释/字符串的文本）。"""
+    depth = 0
+    for i in range(pos - 1, -1, -1):
+        ch = masked[i]
+        if ch == "}":
+            depth += 1
+        elif ch == "{":
+            if depth == 0:
+                inner = 1
+                for j in range(i + 1, len(masked)):
+                    if masked[j] == "{":
+                        inner += 1
+                    elif masked[j] == "}":
+                        inner -= 1
+                        if inner == 0:
+                            return (i, j)
+                return None
+            depth -= 1
+    return None
+
+
+def _split_top_level_spans(masked: str, start: int, end: int) -> list[tuple[int, int]]:
+    """按顶层逗号切分 [start, end)，返回各字段在原文本中的下标区间。"""
+    spans: list[tuple[int, int]] = []
+    depth = 0
+    field_start = start
+    i = start
+    while i < end:
+        ch = masked[i]
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            spans.append((field_start, i))
+            field_start = i + 1
+        i += 1
+    spans.append((field_start, end))
+    return spans
+
+
+def _call_arg_spans(masked: str, open_index: int) -> list[tuple[int, int]] | None:
+    """从 `(` 下标起找到匹配的 `)`，返回实参区间。"""
+    depth = 0
+    for i in range(open_index, len(masked)):
+        ch = masked[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return _split_top_level_spans(masked, open_index + 1, i)
+    return None
+
+
+def _macro_symbol_parameter(params: str, body: str) -> int | None:
+    """识别资源声明宏中 `symbol` 参数的位置：宏体 `{ <id>, <symbol>, ...` 的第二字段。"""
+    match = _MACRO_SYMBOL_PARAM_RE.search(body)
+    if not match:
+        return None
+    names = [part.split("=")[0].strip() for part in params.split(",")]
+    try:
+        return names.index(match.group(1))
+    except ValueError:
+        return None
+
+
+def extract_entry_hook_symbols(text: str) -> dict[str, int]:
+    """提取一份源码中全部 kEntryHook 资源声明的 `F_*` symbol 及首次出现行号。
+
+    两类声明形态：
+    - 直接初始化 `{id, "F_XXX_VMA", ResourceMechanism::kEntryHook, ...}`：取机制字段
+      及其之前字段的 `F_*` 字符串字面量（`#if/#else` 备选 symbol 也在其中）；
+    - 宏声明 `#define X(id, symbol, ...) {id, symbol, ... kEntryHook ...}`：按宏体
+      识别 symbol 参数位置，再解析每个调用点的实参。
+    """
+    masked = _mask_noncode(text)
+    symbols: dict[str, int] = {}
+
+    def record(symbol: str, pos: int) -> None:
+        if _SYMBOL_NAME_RE.fullmatch(symbol):
+            symbols.setdefault(symbol, text.count("\n", 0, pos) + 1)
+
+    macro_specs: list[tuple[str, int]] = []
+    macro_spans: list[tuple[int, int]] = []
+    for match in _MACRO_DEF_RE.finditer(masked):
+        macro_spans.append((match.start(), match.end()))
+        if not _HOOK_MECHANISM_RE.search(match.group(3)):
+            continue
+        index = _macro_symbol_parameter(match.group(2), match.group(3))
+        if index is not None:
+            macro_specs.append((match.group(1), index))
+
+    def in_macro_definition(pos: int) -> bool:
+        return any(start <= pos < end for start, end in macro_spans)
+
+    for match in _HOOK_MECHANISM_RE.finditer(masked):
+        if in_macro_definition(match.start()):
+            continue
+        init = _enclosing_initializer(masked, match.start())
+        if init is None:
+            continue
+        fields = _split_top_level_spans(masked, init[0] + 1, init[1])
+        mechanism_field = next(
+            (i for i, (start, end) in enumerate(fields) if start <= match.start() < end),
+            None,
+        )
+        if mechanism_field is None:
+            continue
+        # 取机制字段及其之前的全部字符串：`#if/#else` 两条分支各自以逗号结尾时，
+        # 第二个 symbol 会落在机制字段内，只读第二字段会漏掉备选 symbol。
+        for field_start, field_end in fields[: mechanism_field + 1]:
+            for literal in _STRING_RE.finditer(text[field_start:field_end]):
+                record(literal.group(1), field_start + literal.start())
+
+    for name, index in macro_specs:
+        for call in re.finditer(r"\b" + re.escape(name) + r"\s*\(", masked):
+            if in_macro_definition(call.start()):
+                continue
+            open_index = masked.index("(", call.start())
+            args = _call_arg_spans(masked, open_index)
+            if args is None or index >= len(args):
+                continue
+            arg_start, arg_end = args[index]
+            for literal in _STRING_RE.finditer(text[arg_start:arg_end]):
+                record(literal.group(1), arg_start + literal.start())
+    return symbols
+
+
+def load_hook_entry_symbols(path: Path = SYMBOLS_CPP) -> set[str]:
+    """读取 game/access/symbols.cpp 的 kHookEntrySymbols 登记名集合。"""
+    text = path.read_text()
+    match = _HOOK_TABLE_RE.search(text)
+    if not match:
+        raise ValueError(f"{path} 未找到 kHookEntrySymbols 表")
+    end = text.find("};", match.end())
+    if end < 0:
+        raise ValueError(f"{path} 的 kHookEntrySymbols 表缺少结束符")
+    return {entry.group(1) for entry in _TABLE_ENTRY_RE.finditer(text, match.end(), end)}
+
+
+def collect_plugin_entry_hook_symbols(
+    plugins_dir: Path = PLUGINS,
+) -> dict[str, dict[str, int]]:
+    """遍历插件源码，返回 {相对路径: {symbol: 行号}}。"""
+    result: dict[str, dict[str, int]] = {}
+    for path in sorted(plugins_dir.rglob("*")):
+        if path.suffix not in _PLUGIN_SUFFIXES or not path.is_file():
+            continue
+        symbols = extract_entry_hook_symbols(path.read_text())
+        if symbols:
+            result[str(path.relative_to(ROOT))] = symbols
+    return result
+
+
+def check_entry_hook_registration() -> int:
+    """校验插件全部 kEntryHook 资源 symbol 已登记到 kHookEntrySymbols。"""
+    print()
+    print("== 插件 kEntryHook 符号登记校验（game/access/symbols.cpp）==")
+    try:
+        table = load_hook_entry_symbols()
+    except (OSError, ValueError) as exc:
+        print(f"❌ 无法读取 kHookEntrySymbols: {exc}")
+        return 1
+
+    total = 0
+    missing = 0
+    for path, symbols in collect_plugin_entry_hook_symbols().items():
+        for symbol, line in symbols.items():
+            total += 1
+            if symbol in table:
+                continue
+            missing += 1
+            print(f"❌ {path}:{line} {symbol} 未登记到 kHookEntrySymbols")
+    print(f"插件 kEntryHook 符号 {total} 处，已登记 {total - missing}，未登记 {missing}")
+    return 1 if missing else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="校验 game_symbols.h 中注册符号的 VMA")
     parser.add_argument("so", nargs="?", type=Path, default=DEFAULT_SO, help="目标 libgame.so 路径")
@@ -173,10 +418,12 @@ def main() -> int:
         for const in constants:
             print(f"[{classify(const, registered_macros)}] {const.name} = {fmt_value(const)} ({const.ctype})")
 
+    entry_failed = check_entry_hook_registration()
+
     if not so.exists():
         print()
         print(f"libgame.so 不存在: {so}")
-        print("分类已完成；符号校验需提供有效 libgame.so 路径。")
+        print("分类与 kEntryHook 登记校验已完成；符号地址校验需提供有效 libgame.so 路径。")
         return 1
 
     syms = read_symbols(so)
@@ -218,7 +465,7 @@ def main() -> int:
     print(f"\n比对统计：共 {total} 项，一致 {matched}，地址不一致 {changed}，缺失 {missing}")
     if changed:
         print(f"\n⚠️ {changed} 个符号地址变化：更新 game_symbols.h 中对应 _VMA 常量后重新构建")
-    return 1 if changed or missing else 0
+    return 1 if changed or missing or entry_failed else 0
 
 
 if __name__ == "__main__":
