@@ -400,6 +400,7 @@ decltype(fn_touch_handle_unuse_control_event_move) fn_touch_handle_unuse_control
 decltype(fn_touch_handle_use_control_event_on) fn_touch_handle_use_control_event_on = nullptr;
 decltype(fn_popupstate_push) fn_popupstate_push = nullptr;
 decltype(fn_uidesc_draw) fn_uidesc_draw = nullptr;
+decltype(fn_u_roll_dice_draw) fn_u_roll_dice_draw = nullptr;
 decltype(fn_grpx_set_font_color) fn_grpx_set_font_color = nullptr;
 decltype(fn_grpx_set_font_color_rgb) fn_grpx_set_font_color_rgb = nullptr;
 decltype(fn_grpx_draw_string_with_font) fn_grpx_draw_string_with_font = nullptr;
@@ -1033,8 +1034,12 @@ int main() {
                   "character info content rect must append after help option row");
     static_assert(offsetof(qol::contracts::QolUiAdapter, character_info_content_rect) +
                       sizeof(adapter->character_info_content_rect) ==
+                  offsetof(qol::contracts::QolUiAdapter, roll_dice_draw),
+                  "roll dice draw must append after character info content rect");
+    static_assert(offsetof(qol::contracts::QolUiAdapter, roll_dice_draw) +
+                      sizeof(adapter->roll_dice_draw) ==
                   sizeof(qol::contracts::QolUiAdapter),
-                  "character info content rect must remain the final adapter field");
+                  "roll dice draw must remain the final adapter field");
     uint64_t param[2]{};
     int source_control = 0;
     std::memcpy(&param[1], &source_control, sizeof(source_control));

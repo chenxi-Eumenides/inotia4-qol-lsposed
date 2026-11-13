@@ -20,6 +20,8 @@ struct QolInventoryExtrasReadApi {
     QolResult (*empty_bag_slot)(int32_t* out_slot);
     // INVEN_IsHavingEmptySlot（经 core.item hook，含扩展袋）；out_value != 0 表示可容纳 needed 个新物品。
     QolResult (*is_having_empty_slot)(int32_t needed, int32_t include_task_bag, int32_t* out_value);
+    // 返回游戏当前显示的原生袋号（raw，可能为 0..10）。
+    QolResult (*current_bag)(int32_t* out_bag);
 };
 
 struct QolInventoryExtrasPort {

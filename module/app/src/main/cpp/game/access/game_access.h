@@ -368,6 +368,8 @@ extern UiFillRoundRectFn fn_ui_fill_round_rect2;
 extern UiDrawStringHAlignFn fn_ui_draw_string_halign;
 extern UiDrawStringInWidthWithFontFn fn_ui_draw_string_in_width_with_font;
 extern UiDescDrawFn fn_uidesc_draw;
+extern AllocateItemUidFn fn_allocate_item_uid;
+extern UiDescDrawFn fn_u_roll_dice_draw;
 extern MwGraphicDrawStringFn fn_mw_graphic_draw_string;
 extern GrpSaveLcdFn fn_grp_save_lcd;
 extern GrpRestoreLcdFn fn_grp_restore_lcd;

@@ -54,6 +54,7 @@
 #include "plugins/extension_bag/ui/equip_hooks.h"
 #include "plugins/core.inventory/plugin.h"
 #include "plugins/core.item/plugin.h"
+#include "plugins/item_lab/plugin.h"
 #include "plugins/core.ui_state/plugin.h"
 #include "plugins/better_move/plugin.h"
 #include "plugins/push_all/plugin.h"
@@ -245,6 +246,7 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
     {&features::extension_bag::plugin_descriptor},
     {&features::core_inventory::plugin_descriptor},
     {&features::core_item::plugin_descriptor},
+    {&features::item_lab::plugin_descriptor},
     {&features::core_ui_state::plugin_descriptor},
     {&features::push_all::plugin_descriptor},
     {&features::better_move::plugin_descriptor},

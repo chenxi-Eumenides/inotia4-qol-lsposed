@@ -64,7 +64,11 @@ constexpr SiteEntry kSites[] = {
      F_GAMESTATE_SET_STATE_GAME_EXIT_CALL_OFF, 0x97febb3d, 0, PatchKind::kBlRedirect},
     // 自动出售入口按钮绘制宿主（owner=autosell）：+0x1cc 原 bl UIDesc_Draw 改指模块 wrapper。
     {"P_SCENE_DRAW_EQUIP_DESC", F_SCENE_DRAW_EQUIP_VMA, F_SCENE_DRAW_EQUIP_DESC_CALL_OFF,
-     F_SCENE_DRAW_EQUIP_DESC_CALL_WORD, 0, PatchKind::kBlRedirect},
+      F_SCENE_DRAW_EQUIP_DESC_CALL_WORD, 0, PatchKind::kBlRedirect},
+    // 新插件入口按钮绘制宿主，+0x1d0 原 bl UIRollDice_Draw。
+    {"P_SCENE_DRAW_EQUIP_ROLLDICE", F_SCENE_DRAW_EQUIP_VMA,
+     F_SCENE_DRAW_EQUIP_ROLLDICE_CALL_OFF, F_SCENE_DRAW_EQUIP_ROLLDICE_CALL_WORD, 0,
+     PatchKind::kBlRedirect},
 
     // ---- B2a-2：常驻 core patch 站点（原 game_patch_core.inc / game_patch_hub_login.inc）----
     // 位段缩窄 ×2（原 core.inc:15-16）：存档子物品检查位段避开数量高位段 a。

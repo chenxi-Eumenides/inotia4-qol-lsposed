@@ -180,7 +180,7 @@ game 层。
 | `place(item,target)` | detached 句柄与 `QolItemPlaceTarget {struct_size, ref, slot, flags}` | `QolItemPlaceOutcome {struct_size, status, ref, item, count, merged}`；原生写槽失败由 Host 释放，注册源导入失败保持 detached。 |
 | `discard_handle(item,count)` | 句柄与正数量 | `InventoryUseOutcome`；背包物品按数量移除，detached 整体释放。 |
 
-`create`：`payload` 非空且 `payload_size` 非零时按 `SAVE_LoadItem` 数据还原整件物品，否则按 `category` 新建；`flags` bit0 选择 perfect item。`count <= 0` 视为 1，`count > 1` 经计数编码写 canonical count，类别不可堆叠返回 `kUnsupported` 并释放已创建对象。
+`create`：`payload` 非空且 `payload_size` 非零时按 `SAVE_LoadItem` 数据还原整件物品，否则按 `category` 新建；`flags` bit0 选择 perfect item，`kQolItemCreateFlagAllocateUid`（bit1，`inventory.action` v3.4）要求 core.item 通过 `APPINFO_AllocateItemUID` 生成并覆盖 payload UID。`count <= 0` 视为 1，`count > 1` 经计数编码写 canonical count，类别不可堆叠返回 `kUnsupported` 并释放已创建对象。
 
 | 调用 | 成功 | 失败 | 所有权 |
 |---|---|---|---|

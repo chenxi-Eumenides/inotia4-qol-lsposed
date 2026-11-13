@@ -64,6 +64,11 @@ QolResult read_is_having_empty_slot(int32_t needed, int32_t include_task_bag,
     return contracts::ok();
 }
 
+QolResult read_current_bag(int32_t* out) {
+    if (out == nullptr) return error_result(kQolErrInvalidArgument, "invalid argument");
+    return qol::game::current_bag(out);
+}
+
 QolResult read_find_save_slot(const void* item, int32_t* out_slot) {
     return find_save_slot(item, out_slot);
 }
@@ -91,7 +96,7 @@ const contracts::QolInventoryExtrasPort kPort{
     contracts::kQolPortInventoryExtrasVersion,
     {&read_for_each_bag_slot, &read_bag_size, &read_is_empty_bag, &read_find_save_slot,
       &read_cursor_item, &read_detail_item, &read_bag_size_ref, &read_is_empty_bag_ref,
-      &read_empty_bag_slot, &read_is_having_empty_slot},
+      &read_empty_bag_slot, &read_is_having_empty_slot, &read_current_bag},
 };
 
 }  // namespace

@@ -138,6 +138,10 @@ QolResult load_item(const uint8_t* payload, uint32_t size, contracts::QolItemHan
     return qol::game::ops::load_item(payload, size, out_item);
 }
 
+QolResult allocate_item_uid(uint64_t* out_uid) {
+    return qol::game::ops::allocate_item_uid(out_uid);
+}
+
 QolResult place_item(const contracts::QolBagRef* ref, int32_t slot,
                      contracts::QolItemHandle item,
                      contracts::QolItemInventoryStateWriteResult* out) {
@@ -255,6 +259,7 @@ const contracts::QolItemInventoryStateWritePort kPort{
     &save_item,
     &apply_payload_mutation,
     &apply_payload,
+    &allocate_item_uid,
 };
 
 }  // namespace

@@ -131,6 +131,8 @@ constexpr size_t PICKUP_EVENT_OBJECT = 0x10;  // 掉落物对象指针
 // ---- 函数内 callsite 相对偏移 ----
 constexpr size_t F_SCENE_DRAW_EQUIP_END_CALL_OFF = 0x210;  // F_SCENE_DRAW_EQUIP_VMA 内 bl GRPX_End 调用点偏移（扩展背包占用）
 constexpr size_t F_SCENE_DRAW_EQUIP_DESC_CALL_OFF = 0x1cc; // F_SCENE_DRAW_EQUIP_VMA 内 bl UIDesc_Draw 调用点偏移（自动出售入口按钮绘制宿主，独立于扩展背包）
+constexpr size_t F_SCENE_DRAW_EQUIP_ROLLDICE_CALL_OFF = 0x1d0;
+constexpr uint32_t F_SCENE_DRAW_EQUIP_ROLLDICE_CALL_WORD = 0x97fe0859; // 四变体已核对
 
 // ---- 全局变量 VMA ----
 constexpr uintptr_t G_MONEY_VMA = 0x7134c0;        // int64 金币
@@ -283,6 +285,7 @@ constexpr uintptr_t F_PANEL_CHOICE_ENTER = 0x14a664;          // choice 选择�
 constexpr uintptr_t F_PANEL_INVENTORY_ENTER = 0x14a8b0;       // inventory 背包（可开）
 constexpr uintptr_t F_SCENE_PROCESS_EQUIP_VMA = 0x14ac2c;     // void () Scene_Process_POPUP_SC_EQUIP
 constexpr uintptr_t F_SCENE_DRAW_EQUIP_VMA = 0x14a9bc;        // void () Scene_Draw_POPUP_SC_EQUIP
+constexpr uintptr_t F_APPINFO_ALLOCATE_ITEM_UID_VMA = 0xd826c; // uint64_t () APPINFO_AllocateItemUID
 constexpr uintptr_t F_SCENE_EVENT_EQUIP_VMA = 0x14acd0;       // u64 (u64, u64, u64) Scene_Event_POPUP_SC_EQUIP
 constexpr uintptr_t F_PANEL_INPUT_COUNT_ENTER = 0x14ad98;     // input_count 数量输入（需物品上下文）
 constexpr uintptr_t F_PANEL_MERCENARY_ENTER = 0x14af14;       // mercenary 佣兵（可开）
@@ -959,6 +962,7 @@ constexpr uintptr_t F_XTEXTCTRL_SET_TEXT_CONTROL_VMA = 0xb181c;  // void (ctrl,t
 constexpr uintptr_t F_GRPX_GET_FONT_HEIGHT_VMA = 0x8fc04;  // uint64_t (uint32_t idx) GRPX_GetFontHeight：*(font表[[0x2f5968]]+idx*8)；描述刷新以 idx=0 取默认行高（readelf .dynsym 核对）
 constexpr uintptr_t F_CONTROLSCROLL_SET_OPTION_VMA = 0xab130;  // void (scroll, i64 content_extent, i64 max_delta)；重置拖动阈值为 1
 constexpr uintptr_t F_UIDESC_DRAW_VMA = 0xb56f4;      // void () UIDesc_Draw：物品详情面板绘制（Scene_Draw_POPUP_SC_EQUIP +0x1cc bl）
+constexpr uintptr_t F_UIROLLDICE_DRAW_VMA = 0xcccf0; // void () UIRollDice_Draw
 constexpr uintptr_t F_TOUCHHANDLE_SET_CURSOR_VMA = 0xa3b80;
 constexpr uintptr_t F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA = 0xb911c;
 // ---- 世界传送（world-teleport）----
@@ -1190,6 +1194,7 @@ using UiEquipUpdateCharEquipFn = void (*)();
 using UiDescSetOffFn = void (*)();
 using UiDescGetDataFn = void* (*)();
 using UiDescDrawFn = void (*)();  // UIDesc_Draw()
+using AllocateItemUidFn = uint64_t (*)();
 using UiEquipMakeDescFn = void (*)(void*, void*);  // UIEquip_MakeDesc(ctrl, 0)：读控件物品生成详情面板（袋标签二次点击原版语义）
 using UiPopupMsgCreateOkFromTextDataFn = void (*)(uint32_t, uint32_t, uint32_t, uint32_t);
 // ---- 佣兵徽章使用链 typedef（R-63）----

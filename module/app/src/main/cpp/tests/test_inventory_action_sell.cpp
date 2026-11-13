@@ -330,7 +330,7 @@ void test_api_v3_and_native_sell() {
     const auto& api = qol::features::core_item::kInventoryActionApi;
     CHECK(inventory_action_api_valid(&api));
     CHECK(api.struct_size == sizeof(InventoryActionApi));
-    CHECK(api.version_major == 3 && api.version_minor == 3);
+    CHECK(api.version_major == 3 && api.version_minor == 4);
 
     const InventorySellResult sold = api.sell({0, 0, 0}, g_item.item, 2, "test");
     CHECK(sold.status == InventorySellStatus::kOk);

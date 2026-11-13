@@ -137,6 +137,7 @@ decltype(fn_inven_save_item) fn_inven_save_item = nullptr;
 decltype(fn_inven_save_item_on_empty) fn_inven_save_item_on_empty = nullptr;
 decltype(fn_save_save_item) fn_save_save_item = nullptr;
 decltype(fn_save_load_item) fn_save_load_item = nullptr;
+decltype(fn_allocate_item_uid) fn_allocate_item_uid = nullptr;
 decltype(fn_itempool_free) fn_itempool_free = nullptr;
 decltype(fn_inven_move_item) fn_inven_move_item = nullptr;
 int g_move_item_calls = 0;

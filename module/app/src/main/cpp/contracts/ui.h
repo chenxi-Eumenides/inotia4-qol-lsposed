@@ -14,7 +14,7 @@ namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 2, kUiContractMinor = 23;
-constexpr uint16_t kUiAdapterMajor = 2, kUiAdapterMinor = 36;
+constexpr uint16_t kUiAdapterMajor = 2, kUiAdapterMinor = 37;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 2;
 constexpr uint32_t kUiStateMaxCustomPanels = 4;
@@ -832,6 +832,8 @@ struct QolUiAdapter {
     // 已避开左侧 5 维框、队伍页签、关闭 X、属性分配入口按钮与 +/-/重置；布局常量由宿主
     // 集中持有，消费方按设计分辨率 + 当前屏幕 inset 取用；面板未打开时返回值不应被使用。
     QolResult (*character_info_content_rect)(UiRect* out);
+    // Minor 37 append-only: 原版 UIRollDice_Draw，供背包页新绘制钩子复刻原调用。
+    QolResult (*roll_dice_draw)();
 };
 
 }  // namespace qol::contracts

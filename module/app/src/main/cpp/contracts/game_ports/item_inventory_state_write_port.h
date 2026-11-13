@@ -80,6 +80,7 @@ using QolItemInventoryStateApplyPayloadMutationFn = QolResult (*)(
 // option 结构必须一致；不改对象地址、不改槽位、不改 provider 存储。
 using QolItemInventoryStateApplyPayloadFn = QolResult (*)(
     QolItemHandle item, const uint8_t* payload, uint32_t payload_size);
+using QolItemInventoryStateAllocateUidFn = QolResult (*)(uint64_t* out_uid);
 
 struct QolItemInventoryStateWritePort {
     QolVersion abi_version;
@@ -106,6 +107,7 @@ struct QolItemInventoryStateWritePort {
     QolItemInventoryStateSaveItemFn save_item;
     QolItemInventoryStateApplyPayloadMutationFn apply_payload_mutation;
     QolItemInventoryStateApplyPayloadFn apply_payload;
+    QolItemInventoryStateAllocateUidFn allocate_item_uid;
 };
 
 // 1.2：尾部追加 SAVE_LoadItem、原生精确写槽与按句柄移除原语。
@@ -128,8 +130,9 @@ struct QolItemInventoryStateWritePort {
 // 调用方仍可 free_item。
 // 2.5：尾部追加 payload 字段写入。apply_payload_mutation 只改对象字段，供 core.item
 // 的 item.payload 在临时对象上生成新 payload。
-// 2.6：尾部追加 apply_payload。inventory.transfer.replace_item 用它把升阶 payload
+// 2.5：尾部追加 apply_payload。inventory.transfer.replace_item 用它把升阶 payload
 // 原地写回现有对象，保留对象地址/handle。
+// 2.6：尾部追加 allocator 原语，供 payload 创建路径请求游戏分配新 UID。
 constexpr uint32_t kQolItemInventoryStateWritePortSize = sizeof(QolItemInventoryStateWritePort);
 
 static_assert(std::is_standard_layout<QolItemInventoryStateGainedItem>::value,

@@ -672,6 +672,12 @@ QolResult uidesc_draw() {
     return contracts::ok();
 }
 
+QolResult roll_dice_draw() {
+    if (fn_u_roll_dice_draw == nullptr) return not_ready();
+    fn_u_roll_dice_draw();
+    return contracts::ok();
+}
+
 QolResult set_font_color(uint32_t color) {
     if (fn_grpx_set_font_color == nullptr) return not_ready();
     fn_grpx_set_font_color(color);
@@ -1911,8 +1917,9 @@ QolUiAdapter g_ui_adapter{
              // Minor 35 tail: native help-page option row background/pressed highlight.
              &draw_help_option_row,
              // Minor 36 tail: character-info content rect for click hit-testing.
-             &character_info_content_rect,
-           };
+              &character_info_content_rect,
+              &roll_dice_draw,
+            };
 
 }  // namespace
 

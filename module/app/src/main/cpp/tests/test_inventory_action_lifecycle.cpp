@@ -52,6 +52,9 @@ int g_create_calls = 0;
 int g_create_perfect_calls = 0;
 int g_free_calls = 0;
 int g_place_calls = 0;
+int g_allocate_calls = 0;
+uint64_t g_allocated_uid = 0;
+uint64_t g_last_loaded_uid = 0;
 int g_remove_calls = 0;
 int g_import_calls = 0;
 int g_save_calls = 0;
@@ -140,7 +143,17 @@ QolResult fake_load_item(const uint8_t* payload, uint32_t size, QolItemHandle* o
         return fail(kQolErrInvalidArgument, "bad payload");
     }
     g_last_payload_size = size;
+    if (size >= kItemPayloadHeaderSize) {
+        g_last_loaded_uid = item_payload_read_u64(payload + kItemPayloadUidOffset);
+    }
     *out_item = g_created;
+    return ok();
+}
+
+QolResult fake_allocate_item_uid(uint64_t* out_uid) {
+    ++g_allocate_calls;
+    if (out_uid == nullptr) return fail(kQolErrInvalidArgument, "out required");
+    *out_uid = g_allocated_uid;
     return ok();
 }
 
@@ -397,6 +410,9 @@ void reset_fixture() {
     g_create_perfect_calls = 0;
     g_free_calls = 0;
     g_place_calls = 0;
+    g_allocate_calls = 0;
+    g_allocated_uid = 0;
+    g_last_loaded_uid = 0;
     g_remove_calls = 0;
     g_import_calls = 0;
     g_place_slot = -99;
@@ -415,6 +431,7 @@ void reset_fixture() {
 
     g_write = {};
     g_write.load_item = &fake_load_item;
+    g_write.allocate_item_uid = &fake_allocate_item_uid;
     g_write.create_item = &fake_create_item;
     g_write.create_perfect_item = &fake_create_perfect_item;
     g_write.place_item = &fake_place_item;
@@ -465,6 +482,21 @@ void test_create_from_payload() {
     CHECK(outcome.item.slot == g_created.slot && outcome.item.generation == g_created.generation);
     CHECK(g_load_calls == 1 && g_last_payload_size == kSerializedSize);
     CHECK(g_create_calls == 0 && g_create_perfect_calls == 0 && g_free_calls == 0);
+}
+
+void test_create_from_payload_allocates_uid() {
+    reset_fixture();
+    uint8_t payload[kItemPayloadHeaderSize] = {};
+    payload[0] = static_cast<uint8_t>(kItemPayloadHeaderSize - 1);
+    g_allocated_uid = 0x1122334455667788ull;
+    const QolItemCreateSpec spec = make_create_spec(
+        0, 1, kQolItemCreateFlagAllocateUid, payload, kItemPayloadHeaderSize);
+    const QolItemCreateOutcome outcome =
+        qol::features::core_item::kInventoryActionApi.create(&spec);
+    CHECK(outcome.status == InventoryActionStatus::kOk);
+    CHECK(g_allocate_calls == 1 && g_load_calls == 1);
+    CHECK(g_last_payload_size == kItemPayloadHeaderSize);
+    CHECK(g_last_loaded_uid == g_allocated_uid);
 }
 
 void test_create_from_category() {
@@ -660,6 +692,7 @@ void test_api_size_compatibility() {
 
 int main() {
     test_create_from_payload();
+    test_create_from_payload_allocates_uid();
     test_create_from_category();
     test_create_count_and_failure_cleanup();
     test_create_rejects_invalid_spec();

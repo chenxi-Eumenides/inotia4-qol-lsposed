@@ -83,6 +83,13 @@ target_compile_features(item_payload_codec_tests PRIVATE cxx_std_17)
 set_target_properties(item_payload_codec_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME item_payload_codec_tests COMMAND item_payload_codec_tests)
 
+add_executable(item_lab_payload_tests test_item_lab_payload.cpp
+    ${CPP_DIR}/plugins/item_lab/spec.cpp)
+target_include_directories(item_lab_payload_tests PRIVATE ${CPP_DIR})
+target_compile_features(item_lab_payload_tests PRIVATE cxx_std_17)
+set_target_properties(item_lab_payload_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME item_lab_payload_tests COMMAND item_lab_payload_tests)
+
 add_executable(save_facts_plugin_tests
     test_save_facts_plugin.cpp
     ${CPP_DIR}/plugins/core.save/plugin.cpp

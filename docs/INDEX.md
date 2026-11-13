@@ -42,6 +42,8 @@
 
 模块平台兜底提示（非业务插件）：[`module_error_dialog`](reference/plugins/module_error_dialog.md)。
 
+新增插件参考：[`item_lab`](reference/plugins/item_lab.md)。
+
 ### `guides/`：操作指南
 
 说明读者如何完成一项任务，重点是步骤和操作结果。

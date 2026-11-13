@@ -18,7 +18,7 @@ namespace qol::contracts {
 
 constexpr const char* kInventoryActionCapabilityId = "inventory.action";
 constexpr uint16_t kInventoryActionVersionMajor = 3;
-constexpr uint16_t kInventoryActionVersionMinor = 3;
+constexpr uint16_t kInventoryActionVersionMinor = 4;
 
 // 空间与袋号固定为调用时刻的显式值；core.item 执行前会用 item_at 复核句柄。
 struct QolActionRef {
@@ -92,6 +92,8 @@ struct QolItemCreateSpec {
 };
 
 constexpr uint32_t kQolItemCreateFlagPerfect = 1u << 0;
+// 仅 payload 路径生效；载荷 UID 将被游戏 APPINFO_AllocateItemUID 的新值覆盖；调用方仍必须保证 payload 结构合法。
+constexpr uint32_t kQolItemCreateFlagAllocateUid = 1u << 1;
 
 // 落位请求：原生空间（original/variant）直接写槽，注册源空间经序列化导入。
 // ref.bag < 0 表示原生空间自动保存（INVEN_SaveItem 找槽并合并）；slot < 0 表示自动找槽。

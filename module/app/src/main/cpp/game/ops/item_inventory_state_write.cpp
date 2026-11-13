@@ -270,6 +270,17 @@ QolResult load_item(const uint8_t* payload, uint32_t size,
     return contracts::ok();
 }
 
+QolResult allocate_item_uid(uint64_t* out_uid) {
+    if (out_uid == nullptr) {
+        return transfer_error(kQolErrInvalidArgument, "invalid item uid output");
+    }
+    if (fn_allocate_item_uid == nullptr) {
+        return transfer_error(kQolErrNotReady, "item uid allocator unavailable");
+    }
+    *out_uid = fn_allocate_item_uid();
+    return contracts::ok();
+}
+
 // 生成 detached 物品：与 add_item 的创建路径相同，跳过 MakeItem 的 search_tbl 校验。
 QolResult create_item(int32_t category, int32_t arg1, int32_t arg2, int32_t arg3,
                       contracts::QolItemHandle* out_item) {

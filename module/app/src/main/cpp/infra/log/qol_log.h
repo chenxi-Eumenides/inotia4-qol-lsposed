@@ -19,7 +19,7 @@ enum class QolDomain : uint8_t {
     kSave, kSaveBackup, kAutosell, kCraft, kAttrRange, kUi, kConfig, kCatalog,
     kCustomRecipe,
     kWorldTuning,
-    kSpecialEquip,
+    kSpecialEquip, kItemLab,
 };
 
 // 文件 sink 单文件字节上限；写满后轮转为 `<path>.1`。

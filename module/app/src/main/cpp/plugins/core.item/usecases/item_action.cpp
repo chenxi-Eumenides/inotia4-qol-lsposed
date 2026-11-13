@@ -10,6 +10,7 @@
 #include "plugins/core.item/runtime/context.h"
 #include "../../../contracts/bag.h"
 #include "../../../contracts/inventory_transfer.h"
+#include "../../../contracts/item_payload_codec.h"
 
 namespace qol::features::core_item {
 const contracts::QolBagSource* find_bag_source(int32_t space_id);
@@ -505,11 +506,32 @@ contracts::QolItemCreateOutcome create(const contracts::QolItemCreateSpec* spec)
     contracts::QolItemHandle item = contracts::kInvalidItemHandle;
     QolResult operation{};
     if (use_payload) {
-        if (g_item_state_write->load_item == nullptr) {
+        if ((spec->flags & contracts::kQolItemCreateFlagAllocateUid) != 0) {
+            // UID 覆盖必须定位到固定偏移，因此只有该标志要求 payload 为 codec 结构。
+            if (spec->payload_size > contracts::kQolBagTransferPayloadCapacity ||
+                !contracts::item_payload_structurally_valid(spec->payload, spec->payload_size)) {
+                outcome.status = InventoryActionStatus::kInvalidRef;
+                return outcome;
+            }
+            if (g_item_state_write->allocate_item_uid == nullptr ||
+                g_item_state_write->load_item == nullptr) {
+                outcome.status = InventoryActionStatus::kUnsupported;
+                return outcome;
+            }
+            uint8_t bytes[contracts::kQolBagTransferPayloadCapacity];
+            std::memcpy(bytes, spec->payload, spec->payload_size);
+            uint64_t uid = 0;
+            operation = g_item_state_write->allocate_item_uid(&uid);
+            if (contracts::succeeded(operation)) {
+                contracts::item_payload_write_u64(bytes + contracts::kItemPayloadUidOffset, uid);
+                operation = g_item_state_write->load_item(bytes, spec->payload_size, &item);
+            }
+        } else if (g_item_state_write->load_item == nullptr) {
             outcome.status = InventoryActionStatus::kUnsupported;
             return outcome;
+        } else {
+            operation = g_item_state_write->load_item(spec->payload, spec->payload_size, &item);
         }
-        operation = g_item_state_write->load_item(spec->payload, spec->payload_size, &item);
     } else if ((spec->flags & contracts::kQolItemCreateFlagPerfect) != 0) {
         if (spec->category <= 0) {
             outcome.status = InventoryActionStatus::kInvalidRef;
