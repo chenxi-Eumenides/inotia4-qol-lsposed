@@ -56,6 +56,22 @@ bool create_by_category(int32_t category, int32_t count, contracts::QolBagRef ba
     ITEM_LAB_INFO("created expected=%s category=%d count=%d space=%d bag=%d slot=auto",expected,category,count,placed.ref.space_id,placed.ref.bag);
     return true;
 }
+void create_equipment(const EquipmentSpec& spec, contracts::QolBagRef bag,
+                      const char* expected) {
+    contracts::QolItemPayloadBlob blob{};
+    if (!build_equipment_payload(spec, &blob)) {
+        ITEM_LAB_WARN("equipment payload build failed expected=%s", expected);
+        return;
+    }
+    contracts::QolItemPayload payload{};
+    payload.struct_size = sizeof(payload);
+    payload.category = spec.category;
+    payload.count = 1;
+    payload.payload_size = blob.payload_size;
+    std::memcpy(payload.payload, blob.payload, blob.payload_size);
+    (void)place_payload(payload, bag, expected, spec.category, 1);
+}
+
 void create_jewel(contracts::QolBagRef bag) {
     const auto* action=inventory_action();
     if(!action||!action->create)return;
@@ -87,7 +103,8 @@ void item_lab_construct_all() {
     if(!has_slot0 && slot_result.code!=kQolErrNotFound){ITEM_LAB_WARN("slot0 read failed space=%d bag=%d code=%d",bag.space_id,bag.bag,slot_result.code);return;}
     contracts::QolBagInfo info{};
     if(!contracts::succeeded(access->native_bag_info(&bag,&info))){ITEM_LAB_WARN("bag info failed space=%d bag=%d",bag.space_id,bag.bag);return;}
-    const int needed=has_slot0?4:3;
+    // 固定构造 5 件（普通/宝石/2 合法装备/1 非法装备）；slot0 有物品时额外 1 件副本。
+    const int needed=has_slot0?6:5;
     if(info.capacity-info.occupied_slots<needed){ITEM_LAB_WARN("construct skipped reason=bag_full space=%d bag=%d capacity=%d occupied=%d needed=%d",bag.space_id,bag.bag,info.capacity,info.occupied_slots,needed);return;}
     if(has_slot0){
         contracts::QolItemPayload src{};
@@ -100,10 +117,14 @@ void item_lab_construct_all() {
     }
     create_by_category(5,7,bag,"potion-small category=5 count=7");
     create_jewel(bag);
-    contracts::QolItemPayloadBlob equip{};
-    if(build_equipment_payload(&equip)){
-        contracts::QolItemPayload payload{};payload.struct_size=sizeof(payload);payload.category=462;payload.count=1;payload.payload_size=equip.payload_size;std::memcpy(payload.payload,equip.payload,equip.payload_size);
-        place_payload(payload,bag,"equipment category=462 count=1 options=0:15,1:12,2:10 socket=0x30 enchant=0",462,1);
-    }else ITEM_LAB_WARN("equipment payload build failed expected=category462 options=0:15,1:12,2:10");
+    // 白色合法装备：0 原生词条、2 孔 0 镶嵌、无附魔。
+    create_equipment({462, 0, 2, 0, 0, 0, 0}, bag,
+                     "equip legal white category=462 rarity=0 native=0 socket=2/0 gem=0 enchant=0");
+    // 蓝色合法装备：2 原生词条、2 孔满镶嵌（2 个 type=1 节点）、1 个 type=2 附魔。
+    create_equipment({473, 2, 2, 2, 2, 2, 1}, bag,
+                     "equip legal blue category=473 rarity=2 native=2 socket=2/2 gem=2 enchant=1");
+    // 非法装备：紫色应 4 原生词条但只有 1；1 孔镶嵌未满却带附魔。
+    create_equipment({462, 4, 2, 1, 1, 1, 1}, bag,
+                     "equip illegal purple category=462 rarity=4 native=1(expected4) socket=2/1 gem=1 enchant=1(expected0)");
 }
 }
