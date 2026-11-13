@@ -246,8 +246,8 @@ std::string enrich_item(const JsonValue& item, const contracts::QolItemPort* por
 
     long long raw_rarity = 0;
     const bool has_raw_rarity = member_int(item, "raw_rarity", &raw_rarity);
-    if (has_raw_rarity) out.integer("prefix_tier", raw_rarity);
-    else out.null_value("prefix_tier");
+    if (has_raw_rarity) out.integer("prefix", raw_rarity);
+    else out.null_value("prefix");
     int class_bits = 0;
     if (has_category) {
         const char* class_text = static_text(port, QolItemStaticTextKind::kItemPrefixClass,
@@ -256,7 +256,7 @@ std::string enrich_item(const JsonValue& item, const contracts::QolItemPort* por
     }
     long long variant = 0;
     (void)member_int(item, "variant", &variant);
-    out.text("prefix", has_raw_rarity
+    out.text("prefix_tier", has_raw_rarity
                             ? contracts::item_rarity_prefix(static_cast<int>(variant), class_bits,
                                                             static_cast<int>(raw_rarity))
                             : "");

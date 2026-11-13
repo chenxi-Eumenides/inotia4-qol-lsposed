@@ -156,8 +156,8 @@
 | `need_level` | 所需等级（`ITEM_GetAbilityLevel`(0x1091f4)：读 ITEMCLASSBASE 记录 +3 int8；无等级概念的消耗品归 0） |
 | `rarity` | 稀有度档位 0-4（GetRarity，白绿蓝黄紫） |
 | `rarity_tier` | 档位名（白/绿/蓝/黄/紫，Kotlin 注入） |
-| `prefix_tier` | `I_TYPE` bits 2-5 的原始稀有度档（0-15；未知时为 `null`） |
-| `prefix` | 按变体、类别 class bits 与 `prefix_tier` 选择的名称前缀；不适用时为空字符串 |
+| `prefix` | `I_TYPE` bits 2-5 的原始稀有度档（0-15；未知时为 `null`），与 `rarity` 同为数值 |
+| `prefix_tier` | 按变体、类别 class bits 与 `prefix` 档选择的名称前缀；不适用时为空字符串，与 `rarity_tier` 同为名称 |
 | `base` | 基础属性对象：`{damage 物攻, defense 物防, magic_rate 魔法伤害倍率}`；`magic_rate` 为原始值/100 显示（110 → 1.1） |
 | `bonus` | 词缀列表（type==0 节点，ITEMOPTINFOBASE 联查）：每项 `{id 词缀索引, name 词缀名, value 词缀值}` |
 | `gem` | 宝石对象：`{total_slots 总槽位(插槽等级), slots[{id, name, value}] 已镶宝石}`（type==1 节点） |

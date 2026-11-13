@@ -87,7 +87,7 @@ constexpr char kShopJson[] =
 constexpr char kExpectedItem[] =
     "{\"slot\":0,\"name\":\"再生药水（小）\",\"category\":10,\"count\":3,"
     "\"item_type\":\"potion\",\"position\":null,\"need_level\":0,\"rarity\":0,\"rarity_tier\":\"白\","
-    "\"prefix_tier\":0,\"prefix\":\"\","
+    "\"prefix\":0,\"prefix_tier\":\"\","
     "\"base\":{\"damage\":0,\"defense\":0,\"magic_rate\":0},\"bonus\":[],"
     "\"gem\":{\"total_slots\":0,\"slots\":[]},"
     "\"chaos\":{\"is_chaos\":false,\"level\":0,\"rate\":100},"
