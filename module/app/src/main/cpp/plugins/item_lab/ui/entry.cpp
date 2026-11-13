@@ -40,7 +40,14 @@ QolResult layout(void* parent,contracts::UiRect* out,void*) {
         (qol::contracts::ui_theme::kNavBoxW-size)/2-(size+8);
     const int64_t yabs=qol::contracts::ui_theme::kNavBoxAbsY+
         (qol::contracts::ui_theme::kNavBoxH-size)/2;
-    *out={xabs-px,yabs-py,size,size};return contracts::ok();
+    *out={xabs-px,yabs-py,size,size};
+    static bool logged=false;
+    if(!logged){logged=true;ITEM_LAB_INFO("layout parent=%p parent_abs=(%lld,%lld) logical_w=%lld rect=(%lld,%lld,%lld,%lld)",
+        parent,static_cast<long long>(px),static_cast<long long>(py),
+        static_cast<long long>(logical_w),static_cast<long long>(out->x),
+        static_cast<long long>(out->y),static_cast<long long>(out->w),
+        static_cast<long long>(out->h));}
+    return contracts::ok();
 }
 void draw_button() {
     static bool warned_components=false;
