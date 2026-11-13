@@ -391,6 +391,32 @@ int main() {
     CHECK(std::strcmp(descriptor.provides[5].id,
                       qol::contracts::kItemPayloadCapabilityId) == 0);
     CHECK(descriptor.provides[5].iface != nullptr);
+    const auto* payload_api =
+        static_cast<const qol::contracts::ItemPayloadApi*>(descriptor.provides[5].iface);
+    CHECK(qol::contracts::kItemPayloadVersionMinor == 1);
+    CHECK(payload_api->build != nullptr);
+    CHECK(payload_api->decode != nullptr);
+    // build/decode 是无端口依赖的纯字节路径；decode 的输出结构由被调方填充 struct_size。
+    qol::contracts::QolItemPayloadBuildSpec build_spec{};
+    build_spec.struct_size = sizeof(build_spec);
+    build_spec.header.uid = 0x0102030405060708ull;
+    build_spec.header.type_flags = 0x0180;
+    build_spec.header.count_field = 0x00000064;
+    const qol::contracts::QolItemPayloadOption codec_option{0x0003, 17};
+    build_spec.options = &codec_option;
+    build_spec.option_count = 1;
+    qol::contracts::QolItemPayloadBlob payload_blob{};
+    CHECK(qol::contracts::succeeded(payload_api->build(&build_spec, &payload_blob)));
+    CHECK(payload_blob.payload_size ==
+          qol::contracts::kItemPayloadHeaderSize + qol::contracts::kItemPayloadOptionSize);
+    qol::contracts::QolItemPayloadDecoded decoded_payload{};
+    CHECK(qol::contracts::succeeded(
+        payload_api->decode(payload_blob.payload, payload_blob.payload_size, &decoded_payload)));
+    CHECK(decoded_payload.option_count == 1);
+    CHECK(decoded_payload.header.uid == build_spec.header.uid);
+    CHECK(decoded_payload.header.type_flags == build_spec.header.type_flags);
+    CHECK(decoded_payload.options[0].code == codec_option.code);
+    CHECK(decoded_payload.options[0].value == codec_option.value);
     CHECK(std::strcmp(descriptor.provides[6].id,
                       qol::contracts::kItemUseCapabilityId) == 0);
     CHECK(descriptor.provides[6].iface != nullptr);

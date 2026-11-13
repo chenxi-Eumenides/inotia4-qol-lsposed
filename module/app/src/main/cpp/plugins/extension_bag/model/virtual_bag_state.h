@@ -10,6 +10,7 @@
 #include <type_traits>
 
 #include "plugins/extension_bag/model/bag_catalog.h"
+#include "contracts/item_payload_codec.h"
 
 namespace virtual_bag {
 
@@ -66,9 +67,9 @@ constexpr int kMaxCapacity = 16;
 
 // SAVE_SaveItem 记录约束（objdump 确认）：u8 长度前缀 + 18B 头 + 4B×N 词缀，总长 ≤255。
 constexpr size_t kSerializedItemBuffer = 256;  // 固定字节数组容量（State 内禁止裸指针）
-constexpr size_t kMaxSerializedItem = 255;     // 可序列化最大总长（SAVE_SaveItem 返回值 uxtb 截断）
-constexpr size_t kPayloadHeaderSize = 19;      // 1 前缀 + 18 头（真实物品载荷最小长度）
-constexpr size_t kPayloadCountOffset = 11;     // 载荷内 u32 数量位域偏移（小端）
+constexpr size_t kMaxSerializedItem = qol::contracts::kItemPayloadMaxSize;
+constexpr size_t kPayloadHeaderSize = qol::contracts::kItemPayloadHeaderSize;
+constexpr size_t kPayloadCountOffset = qol::contracts::kItemPayloadCountFieldOffset;  // 载荷内 u32 数量位域偏移（小端）
 constexpr size_t kSerializedItemProbeBuffer = 1024;  // SaveItem 尾部写入校验窗口
 
 #include "plugins/extension_bag/model/virtual_bag_payload.h"

@@ -8,45 +8,12 @@
 namespace qol::features::core_item {
 namespace {
 
-constexpr uint32_t kPayloadHeaderSize = 19;
-constexpr uint16_t kSerializedOptionSemanticMask = 0xe07f;
-
 QolResult payload_error(int32_t code, const char* message) {
     return contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
 }
 
 bool valid_handle(contracts::QolItemHandle handle) {
     return handle.slot != 0 && handle.generation != 0;
-}
-
-bool length_prefix_valid(const uint8_t* payload, uint32_t size) {
-    return payload != nullptr && size >= kPayloadHeaderSize &&
-           size <= contracts::kQolBagTransferPayloadMaxSize &&
-           static_cast<uint32_t>(payload[0]) + 1u == size;
-}
-
-bool round_trip_semantically_matches(const uint8_t* source, const uint8_t* round_trip,
-                                     uint32_t size) {
-    if (source == nullptr || round_trip == nullptr || size < kPayloadHeaderSize) return false;
-    if (std::memcmp(source + 1, round_trip + 1, kPayloadHeaderSize - 1) != 0) return false;
-    const uint32_t option_bytes = size - kPayloadHeaderSize;
-    if (option_bytes % 4 != 0) return false;
-    const uint32_t option_count = option_bytes / 4;
-    for (uint32_t index = 0; index < option_count; ++index) {
-        const uint8_t* source_option =
-            source + kPayloadHeaderSize + static_cast<size_t>(index) * 4;
-        const uint8_t* round_option =
-            round_trip + kPayloadHeaderSize + static_cast<size_t>(index) * 4;
-        const uint16_t source_code = static_cast<uint16_t>(source_option[0]) |
-                                     (static_cast<uint16_t>(source_option[1]) << 8);
-        const uint16_t round_code = static_cast<uint16_t>(round_option[0]) |
-                                    (static_cast<uint16_t>(round_option[1]) << 8);
-        if (((source_code ^ round_code) & kSerializedOptionSemanticMask) != 0 ||
-            std::memcmp(source_option + 2, round_option + 2, 2) != 0) {
-            return false;
-        }
-    }
-    return true;
 }
 
 QolResult serialize_handle(contracts::QolItemHandle handle, uint8_t* out, uint32_t capacity,
@@ -61,7 +28,7 @@ QolResult serialize_handle(contracts::QolItemHandle handle, uint8_t* out, uint32
 QolResult validate_payload(const uint8_t* payload, uint32_t size,
                            contracts::QolItemPayloadValidation* out) {
     if (out != nullptr) *out = {};
-    if (!length_prefix_valid(payload, size)) {
+    if (!contracts::item_payload_structurally_valid(payload, size)) {
         return payload_error(kQolErrInvalidArgument, "invalid payload structure");
     }
     if (g_item_state_write == nullptr || g_item_state_write->load_item == nullptr ||
@@ -80,14 +47,15 @@ QolResult validate_payload(const uint8_t* payload, uint32_t size,
     const QolResult freed = g_item_state_write->free_item(temp);
     if (!contracts::succeeded(result)) return result;
     if (round_trip_size != size ||
-        !round_trip_semantically_matches(payload, round_trip.data(), size)) {
+        !contracts::item_payload_round_trip_semantically_matches(payload, round_trip.data(), size)) {
         return payload_error(kQolErrInvalidArgument, "payload round trip mismatch");
     }
     if (!contracts::succeeded(freed) && freed.code != kQolErrNotFound) return freed;
     if (out != nullptr) {
         out->struct_size = sizeof(contracts::QolItemPayloadValidation);
         out->consumed = size;
-        out->option_count = (size - kPayloadHeaderSize) / 4;
+        out->option_count = (size - contracts::kItemPayloadHeaderSize) /
+                            contracts::kItemPayloadOptionSize;
     }
     return contracts::ok();
 }
@@ -123,7 +91,7 @@ QolResult update_payload(const contracts::QolItemPayloadUpdateSpec* spec,
         uint32_t required = 0;
         QolResult result = serialize_handle(spec->source, nullptr, 0, &required);
         if (!contracts::succeeded(result)) return result;
-        if (required < kPayloadHeaderSize ||
+        if (required < contracts::kItemPayloadHeaderSize ||
             required > contracts::kQolBagTransferPayloadMaxSize) {
             return payload_error(kQolErrInternal, "source payload size invalid");
         }
@@ -134,7 +102,8 @@ QolResult update_payload(const contracts::QolItemPayloadUpdateSpec* spec,
             return payload_error(kQolErrInternal, "source payload size changed");
         }
     } else {
-        if (!length_prefix_valid(spec->base_payload, spec->base_payload_size)) {
+        if (!contracts::item_payload_structurally_valid(spec->base_payload,
+                                                        spec->base_payload_size)) {
             return payload_error(kQolErrInvalidArgument, "invalid base payload");
         }
         base_size = spec->base_payload_size;
@@ -158,7 +127,7 @@ QolResult update_payload(const contracts::QolItemPayloadUpdateSpec* spec,
         (void)g_item_state_write->free_item(temp);
         return result;
     }
-    if (required < kPayloadHeaderSize ||
+    if (required < contracts::kItemPayloadHeaderSize ||
         required > contracts::kQolBagTransferPayloadMaxSize) {
         (void)g_item_state_write->free_item(temp);
         return payload_error(kQolErrInternal, "updated payload size invalid");
@@ -217,6 +186,41 @@ QolResult api_validate(const uint8_t* payload, uint32_t payload_size,
     return validate_payload(payload, payload_size, out);
 }
 
+QolResult api_build(const contracts::QolItemPayloadBuildSpec* spec,
+                    contracts::QolItemPayloadBlob* out) {
+    if (spec == nullptr || out == nullptr ||
+        spec->struct_size < sizeof(contracts::QolItemPayloadBuildSpec) || spec->flags != 0) {
+        return payload_error(kQolErrInvalidArgument, "invalid payload build request");
+    }
+    *out = {};
+    out->struct_size = sizeof(contracts::QolItemPayloadBlob);
+    if (!contracts::item_payload_build(spec->header, spec->options, spec->option_count,
+                                       out->payload, sizeof(out->payload), &out->payload_size)) {
+        *out = {};
+        return payload_error(kQolErrInvalidArgument, "invalid payload build request");
+    }
+    return contracts::ok();
+}
+
+QolResult api_decode(const uint8_t* payload, uint32_t payload_size,
+                     contracts::QolItemPayloadDecoded* out) {
+    if (out == nullptr) {
+        return payload_error(kQolErrInvalidArgument, "invalid payload decode request");
+    }
+    *out = {};
+    out->struct_size = sizeof(contracts::QolItemPayloadDecoded);
+    if (!contracts::item_payload_decode(payload, payload_size, &out->header, out->options,
+                                        contracts::kItemPayloadMaxOptionCount,
+                                        &out->option_count)) {
+        *out = {};
+        out->struct_size = sizeof(contracts::QolItemPayloadDecoded);
+        return payload_error(kQolErrInvalidArgument, "invalid payload structure");
+    }
+    out->payload_size = payload_size;
+    out->flags = 0;
+    return contracts::ok();
+}
+
 }  // namespace
 
 const contracts::ItemPayloadApi& item_payload_api() {
@@ -226,6 +230,8 @@ const contracts::ItemPayloadApi& item_payload_api() {
         contracts::kItemPayloadVersionMinor,
         &api_update,
         &api_validate,
+        &api_build,
+        &api_decode,
     };
     return api;
 }

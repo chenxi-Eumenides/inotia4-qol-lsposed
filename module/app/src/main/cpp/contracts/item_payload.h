@@ -14,6 +14,7 @@
 #include <type_traits>
 
 #include "bag.h"
+#include "item_payload_codec.h"
 #include "item_handle.h"
 #include "result.h"
 
@@ -21,7 +22,7 @@ namespace qol::contracts {
 
 constexpr const char* kItemPayloadCapabilityId = "item.payload";
 constexpr uint16_t kItemPayloadVersionMajor = 1;
-constexpr uint16_t kItemPayloadVersionMinor = 0;
+constexpr uint16_t kItemPayloadVersionMinor = 1;
 
 // 与 game 层字段写入一一对应；值语义由 game 层按物品结构解释。
 enum class QolItemPayloadMutationKind : int32_t {
@@ -70,6 +71,29 @@ struct QolItemPayloadValidation {
     uint32_t option_count;
 };
 
+struct QolItemPayloadBuildSpec {
+    uint32_t struct_size;
+    QolItemPayloadHeader header;
+    const QolItemPayloadOption* options;
+    uint32_t option_count;
+    uint32_t flags;
+};
+
+struct QolItemPayloadBlob {
+    uint32_t struct_size;
+    uint32_t payload_size;
+    uint8_t payload[kQolBagTransferPayloadCapacity];
+};
+
+struct QolItemPayloadDecoded {
+    uint32_t struct_size;
+    uint32_t payload_size;
+    QolItemPayloadHeader header;
+    uint32_t option_count;
+    QolItemPayloadOption options[kItemPayloadMaxOptionCount];
+    uint32_t flags;
+};
+
 struct ItemPayloadApi {
     uint32_t struct_size;
     uint16_t version_major;
@@ -77,6 +101,9 @@ struct ItemPayloadApi {
     QolResult (*update)(const QolItemPayloadUpdateSpec* spec, QolItemPayload* out);
     QolResult (*validate)(const uint8_t* payload, uint32_t payload_size,
                           QolItemPayloadValidation* out);
+    QolResult (*build)(const QolItemPayloadBuildSpec* spec, QolItemPayloadBlob* out);
+    QolResult (*decode)(const uint8_t* payload, uint32_t payload_size,
+                        QolItemPayloadDecoded* out);
 };
 
 static_assert(std::is_standard_layout<QolItemPayloadMutation>::value,
@@ -95,11 +122,33 @@ static_assert(std::is_standard_layout<QolItemPayloadValidation>::value,
               "QolItemPayloadValidation must remain standard layout");
 static_assert(std::is_trivially_copyable<QolItemPayloadValidation>::value,
               "QolItemPayloadValidation must remain trivially copyable");
+static_assert(std::is_standard_layout<QolItemPayloadBuildSpec>::value,
+              "QolItemPayloadBuildSpec must remain standard layout");
+static_assert(std::is_trivially_copyable<QolItemPayloadBuildSpec>::value,
+              "QolItemPayloadBuildSpec must remain trivially copyable");
+static_assert(std::is_standard_layout<QolItemPayloadBlob>::value,
+              "QolItemPayloadBlob must remain standard layout");
+static_assert(std::is_trivially_copyable<QolItemPayloadBlob>::value,
+              "QolItemPayloadBlob must remain trivially copyable");
+static_assert(std::is_standard_layout<QolItemPayloadDecoded>::value,
+              "QolItemPayloadDecoded must remain standard layout");
+static_assert(std::is_trivially_copyable<QolItemPayloadDecoded>::value,
+              "QolItemPayloadDecoded must remain trivially copyable");
 
 inline bool item_payload_api_valid(const ItemPayloadApi* api) {
-    return api != nullptr && api->struct_size >= sizeof(ItemPayloadApi) &&
+    constexpr uint32_t kV10Size = static_cast<uint32_t>(
+        offsetof(ItemPayloadApi, validate) + sizeof(decltype(ItemPayloadApi::validate)));
+    return api != nullptr && api->struct_size >= kV10Size &&
            api->version_major == kItemPayloadVersionMajor &&
            api->update != nullptr && api->validate != nullptr;
+}
+
+inline bool item_payload_codec_api_valid(const ItemPayloadApi* api) {
+    constexpr uint32_t kCodecSize = static_cast<uint32_t>(
+        offsetof(ItemPayloadApi, decode) + sizeof(decltype(ItemPayloadApi::decode)));
+    return api != nullptr && api->struct_size >= kCodecSize &&
+           api->version_major == kItemPayloadVersionMajor && api->version_minor >= 1 &&
+           api->build != nullptr && api->decode != nullptr;
 }
 
 }  // namespace qol::contracts

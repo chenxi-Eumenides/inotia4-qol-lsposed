@@ -39,7 +39,7 @@
 |---|---:|---|
 | `item.facts` | 4.0 | 物品类别、权威 `item_type`、库存 view/count/编码、禁售和报价等事实。 |
 | `item.state` | 1.1 | raw/enriched 库存状态 JSON 与尺寸查询。 |
-| `item.payload` | 1.0 | 从物品句柄/base payload 应用类型化字段修改，生成新 payload；有 source 时原地更新源对象。 |
+| `item.payload` | 1.1 | 从物品句柄/base payload 应用类型化字段修改，生成新 payload（不修改源对象）；新增纯字节 build/decode。 |
 | `item.use` | 1.0 | `CHAR_UseItemEx` 使用后通知：订阅/注销回调，事件只含角色、物品、flag、result。 |
 | `inventory.action` | 3.3 | 移动、使用、丢弃、出售、装备、卸下、镶嵌，以及 detached 生成/落位/释放。 |
 | `inventory.slot` | 1.0 | resolve/view/remove 槽位查询面。 |
@@ -137,7 +137,7 @@ struct QolBagTransfer {
 
 payload 固定容量 256 字节，有效长度为 `1..255`，不得动态扩容。payload 是来源定义的序列化状态；`core.item` 只透传、不解释或改写。部分堆叠时 `count` 表示本次数量，目标须将 payload 中数量规范化为该值；接收端应在回调期间复制需保留的数据。
 
-## `item.payload` 1.0
+## `item.payload` 1.1
 
 `update` 从 `source` 句柄或 `base_payload` 取基准 payload，装载临时对象、按 mutation 写字段、
 重新序列化并做结构校验；不修改源对象。调用方随后把结果 payload 交给
@@ -145,6 +145,12 @@ payload 固定容量 256 字节，有效长度为 `1..255`，不得动态扩容�
 `QolBagSource::replace_item` 提交权威 descriptor。支持的 mutation 见 `contracts/item_payload.h`
 （jewel word、原生词条、数量、socket、enchant、magic rate）。`validate` 只保证长度前缀、
 loader 接受、`consumed == payload_size` 和重序列化结构等价，不校验词条/数值/品质/UID 语义。
+
+`build`/`decode` 提供纯字节编解码：头字段为 `uid`、`type_flags`、`count_field`、
+`magic_rate`、`socket`、`enchant`，词条按顺序保存 `code`/有符号 `value`。`build` 只生成
+符合字节布局的 payload，不执行 loader 校验；调用方需随后使用 `validate`。payload 字节布局
+的唯一权威源是 `contracts/item_payload_codec.h`；字段语义解释仍归 `item.facts.view` 与
+game 层。
 
 ## `item.use` 1.0
 
