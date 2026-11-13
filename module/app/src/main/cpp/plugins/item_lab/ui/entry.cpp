@@ -59,7 +59,12 @@ void draw_button() {
         if(!warned_components){warned_components=true;ITEM_LAB_WARN("components unavailable code=%d",components_result.code);}
         return;
     }
-    if(!item_lab_enabled()){if(c->anchored_button_set_visible)(void)c->anchored_button_set_visible(&g_entry,0);return;}
+    if(!item_lab_enabled()){
+        static bool warned_disabled=false;
+        if(!warned_disabled){warned_disabled=true;ITEM_LAB_WARN("draw disabled");}
+        if(c->anchored_button_set_visible)(void)c->anchored_button_set_visible(&g_entry,0);
+        return;
+    }
     if(!c->anchored_button_ensure||!c->anchored_button_draw)return;
     const contracts::UiIconButtonDesc button{{0,0,68,68},0x16,0x00,1,1,"造",&clicked,nullptr,0};
     const contracts::UiAnchoredButtonDesc desc{static_cast<uint32_t>(contracts::QolUiRootKind::kEquipBagContainer),button};

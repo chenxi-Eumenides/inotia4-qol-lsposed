@@ -114,7 +114,7 @@ QolResult sdk_result_write_error(const char* message, char* out, uint32_t capaci
 bool valid_log_level(int32_t level) { return level >= 0 && level <= 3; }
 
 bool valid_log_domain(int32_t domain) {
-    return domain >= 0 && domain <= static_cast<int32_t>(QolDomain::kSpecialEquip);
+    return domain >= 0 && domain <= static_cast<int32_t>(QolDomain::kItemLab);
 }
 
 QolResult sdk_log_write(int32_t level, int32_t domain, const char* source, const char* message,
