@@ -474,7 +474,7 @@ QolResult read_in_world(int32_t* out) {
 
 // 启动期下发的静态名称表：只在启动期写入，运行期只读；字符串是 JSON 已转义、不含外层引号
 // 的文本，handler 直接拼接即可与既有 Kotlin JSONObject 序列化保持一致。
-constexpr uint32_t kTextKindCount = 7;
+constexpr uint32_t kTextKindCount = 8;
 std::unordered_map<int32_t, std::string> g_item_text[kTextKindCount];
 std::mutex g_item_text_mutex;
 std::atomic<bool> g_item_text_ready{false};
@@ -557,6 +557,7 @@ void item_port_load_static_text(const char* payload) {
                 case 'S': kind = 4; break;
                 case 'P': kind = 5; break;
                 case 'C': kind = 6; break;
+                case 'V': kind = 7; break;
                 default: break;
             }
             const char* id_start = cursor + 2;

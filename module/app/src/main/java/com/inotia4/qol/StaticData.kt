@@ -430,6 +430,19 @@ object StaticData {
             val option = optionName(i) ?: continue
             if (option.isNotEmpty()) appendStaticEntry(sb, 'O', i, option)
         }
+        val opt = read("tables/ITEMOPTINFOBASE.json")
+        if (opt != null) {
+            try {
+                val records = JSONObject(opt).getJSONArray("records")
+                for (i in 0 until records.length()) {
+                    val record = records.optJSONObject(i) ?: continue
+                    val flag = hexByte(record.optString("hex", ""), 7) ?: continue
+                    appendStaticEntry(sb, 'V', i, if ((flag and 1) != 0) "1" else "0")
+                }
+            } catch (e: Exception) {
+                // 静态表缺失时保持空，选项值按整数显示。
+            }
+        }
         for (i in 1 until 64) {
             val effect = enchantName(i) ?: continue
             if (effect.isNotEmpty()) appendStaticEntry(sb, 'E', i, effect)

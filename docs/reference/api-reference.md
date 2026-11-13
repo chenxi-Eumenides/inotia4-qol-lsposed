@@ -164,7 +164,7 @@
 | `bonus` | 词缀列表（type==0 节点，ITEMOPTINFOBASE 联查）：每项 `{id 词缀索引, name 词缀名, value 词缀值}` |
 | `gem` | 宝石对象：`{total_slots 总槽位(插槽等级), slots[{id, name, value}] 已镶宝石}`（type==1 节点） |
 | `chaos` | 混沌对象：`{is_chaos 是否混沌, level 混沌等级, rate 混沌成功率}` |
-| `enchant` | Monster（variant 3）附魔数组：首项来自 `I_ENCHANT`（id/level），后续项来自 option 链表 type=2 节点；每项 `{id, level, effect}`，名称通过 ITEMOPTINFOBASE 联查。C18（variant 4）及其他变体固定为 `[]` |
+| `enchant` | Monster（variant 3）附魔数组：只包含 option 链表 type=2 节点，每项 `{id, value, display, effect}`；`value` 为节点原始值，`display` 按 `ITEMOPTINFOBASE` 的格式位输出（百分比项为 0.1% 单位，如 `182` → `"18.2%"`），`effect` 通过 ITEMOPTINFOBASE 联查。C18（variant 4）及其他变体固定为 `[]`。标量 `I_ENCHANT` 的 id/level 不属于可见附魔行，不输出。 |
 
 > 物品对象为统一结构（装备/消耗品/材料同构）：**缺失的标量字段置 `null`，列表字段恒为数组（无内容时空列表）**；`base`/`bonus`/`gem`/`chaos`/`enchant` 为重组后的可读数据；`capacity` 袋容量 16 格；`occupied_slots` 占用数。
 

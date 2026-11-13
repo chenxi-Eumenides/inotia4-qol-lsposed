@@ -41,6 +41,7 @@
 //   apk/game-apk/history/艾诺迪亚4_盗版大修_v0830.apk
 //   apk/game-apk/history/艾诺迪亚4_魔法使_v1.2.9.apk
 //   apk/game-apk/history/艾诺迪亚4_原版_v1.4.0.xapk
+//   apk/game-apk/history/艾诺迪亚4联机加亡灵法师.apk
 //
 // 排序：系列(original/overhaul/monster/c18/fantasy/unknown) → 版本标签 → md5
 // 能力位：bit0 kCapHiddenSegment / bit1 kCapWarehouse / bit2 kCapWarehouseInline / bit3 kCapC18NativeBagLayoutCandidate

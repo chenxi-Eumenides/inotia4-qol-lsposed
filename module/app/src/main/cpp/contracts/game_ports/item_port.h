@@ -167,6 +167,7 @@ enum class QolItemStaticTextKind : int32_t {
     kSkillName = 4,
     kItemPrefixClass = 5,
     kItemClassName = 6,
+    kItemOptionPercent = 7,
 };
 // 返回的是 JSON 已转义、不含外层引号的文本指针；存储只在启动期写入，运行期只读。
 using QolItemStaticTextFn = QolResult (*)(int32_t kind, int32_t id, const char** out_text);

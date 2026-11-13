@@ -147,16 +147,8 @@ std::string enchant_entries(const JsonValue& item, const contracts::QolItemPort*
     }
     long long id = 0;
     long long level = 0;
-    if (member_int(item, "enchant_id", &id) && id > 0) {
-        (void)member_int(item, "enchant_level", &level);
-        Obj entry;
-        entry.integer("id", id);
-        entry.integer("level", level);
-        entry.text("effect", static_text(port, QolItemStaticTextKind::kOptionName,
-                                         static_cast<int32_t>(id)));
-        out += entry.object();
-        first = false;
-    }
+    (void)id;
+    (void)level;
     const JsonValue* ids = item.find("option_ids");
     const JsonValue* types = item.find("option_types");
     const JsonValue* values = item.find("options");
@@ -172,11 +164,19 @@ std::string enchant_entries(const JsonValue& item, const contracts::QolItemPort*
                 i < values->items.size()) (void)values->items[i].as_int(&option_value);
             if (!first) out += ",";
             first = false;
+            const int32_t option_id_value = static_cast<int32_t>(option_id);
+            const char* percent_text =
+                static_text(port, QolItemStaticTextKind::kItemOptionPercent, option_id_value);
+            const bool percent = percent_text != nullptr && percent_text[0] == '1';
+            char display[32]{};
+            (void)contracts::item_option_display_text(percent, static_cast<int32_t>(option_value),
+                                                      display, sizeof(display));
             Obj entry;
             entry.integer("id", option_id);
-            entry.integer("level", option_value);
+            entry.integer("value", option_value);
+            entry.text("display", display);
             entry.text("effect", static_text(port, QolItemStaticTextKind::kOptionName,
-                                             static_cast<int32_t>(option_id)));
+                                             option_id_value));
             out += entry.object();
         }
     }

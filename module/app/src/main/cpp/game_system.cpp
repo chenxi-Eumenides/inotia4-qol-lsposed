@@ -443,23 +443,29 @@ std::string character_option_list(void* item, int type) {
 }
 
 std::string character_enchant_entries(void* item, long long enchant_id, long long enchant_level) {
+    (void)enchant_id;
+    (void)enchant_level;
     std::string out = "[";
     if (qol::game_variant().series != qol::GameSeries::kMonster) {
         out += "]";
         return out;
     }
     bool first = true;
-    auto append = [&out, &first](int id, int level) {
+    auto append = [&out, &first](int id, int value) {
         if (!first) out += ",";
         first = false;
         const char* effect = character_static_text(contracts::QolItemStaticTextKind::kOptionName, id);
-        out += "{\"id\":" + std::to_string(id) + ",\"level\":" + std::to_string(level) +
-               ",\"effect\":";
+        const char* percent_text =
+            character_static_text(contracts::QolItemStaticTextKind::kItemOptionPercent, id);
+        const bool percent = percent_text != nullptr && percent_text[0] == '1';
+        char display[32]{};
+        (void)contracts::item_option_display_text(percent, value, display, sizeof(display));
+        out += "{\"id\":" + std::to_string(id) + ",\"value\":" + std::to_string(value) +
+               ",\"display\":\"" + std::string(display) + "\",\"effect\":";
         if (effect != nullptr) out += "\"" + std::string(effect) + "\"";
         else out += "null";
         out += "}";
     };
-    if (enchant_id > 0) append(static_cast<int>(enchant_id), static_cast<int>(enchant_level));
     uint8_t* node = *reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(item) + I_OPTION_LIST);
     int count = 0;
     while (node != nullptr && count < 32) {
