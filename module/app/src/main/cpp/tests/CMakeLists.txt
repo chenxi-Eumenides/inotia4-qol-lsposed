@@ -2374,6 +2374,16 @@ set_target_properties(popup_blocker_plugin_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME popup_blocker_plugin_tests COMMAND popup_blocker_plugin_tests)
 
+add_executable(combat_move_plugin_tests
+    test_combat_move_plugin.cpp
+    ${CPP_DIR}/plugins/combat_move/plugin.cpp
+)
+target_include_directories(combat_move_plugin_tests PRIVATE ${CPP_DIR})
+target_compile_features(combat_move_plugin_tests PRIVATE cxx_std_17)
+set_target_properties(combat_move_plugin_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME combat_move_plugin_tests COMMAND combat_move_plugin_tests)
+
 add_executable(better_move_tests
     test_better_move.cpp
 )

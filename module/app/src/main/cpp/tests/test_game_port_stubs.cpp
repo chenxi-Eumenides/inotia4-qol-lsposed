@@ -30,6 +30,8 @@
 #include "contracts/game_ports/character_state_port.h"
 #include "contracts/game_ports/move_merge_port.h"
 #include "contracts/game_ports/movement_input_port.h"
+#include "contracts/game_ports/combat_move_port.h"
+#include "contracts/game_ports/ports.h"
 #include "game/ops/game_ops_common.h"
 #include "game/state/game_state.h"
 
@@ -48,7 +50,10 @@ const contracts::QolMovementInputPort kMovementInputPort{
     contracts::kQolPortMovementInputVersion,
     {nullptr, nullptr, nullptr, nullptr, nullptr, &movement_input_set_enabled,
      nullptr, nullptr, nullptr, nullptr, &movement_input_set_mode,
-     &movement_input_set_step}};
+      &movement_input_set_step}};
+const contracts::QolCombatMovePort kCombatMovePort{
+    contracts::kQolPortCombatMoveVersion, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr};
 const contracts::QolWorldPort kWorldPort{{1, 0}, {}};
 contracts::QolItemPort kItemPort{contracts::kQolPortItemVersion,
                                  sizeof(contracts::QolItemPort), {}};
@@ -134,6 +139,7 @@ const contracts::QolMoveMergePort kMoveMergePort{contracts::kQolMoveMergePortVer
 
 const contracts::QolQuestPort& quest_port() { return kQuestPort; }
 const contracts::QolMovementInputPort& movement_input_port() { return kMovementInputPort; }
+const contracts::QolCombatMovePort& combat_move_port() { return kCombatMovePort; }
 const contracts::QolWorldPort& world_port() { return kWorldPort; }
 const contracts::QolItemPort& item_port() { return kItemPort; }
 void test_set_item_port_version(::QolVersion version) { kItemPort.abi_version = version; }

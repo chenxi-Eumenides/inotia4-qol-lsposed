@@ -25,7 +25,8 @@ constexpr size_t C_NEXT_EXP = 0x320; // int64 升级所需经验
 constexpr size_t C_STATUS = 0x311;   // u8 状态码 (0=队伍 1=城镇NPC/佣兵 2=怪物/召唤物, frida 实测)
 constexpr size_t C_SKILL_LIST = 0x2A0;    // 已学战斗技能链表头（节点见 S_* 偏移）
 constexpr size_t C_SKILL_BMP = 0x2B0;     // u16 技能解锁位图
-constexpr size_t C_ACTIVE_SKILL = 0x280;  // 当前激活技能节点指针
+constexpr size_t C_ACTIVE_SKILL = 0x280;  // CHAR_SetAction 写入的当前动作节点指针（技能激活也落此字段）
+constexpr size_t C_ACTIVE_PLAYER_FLAG = 0x2FA;  // u8：0=当前出战主角，非0=其他队员（PLAYER_SetActivePlayer 0x121a7c：旧主角置1、新主角置0）
 constexpr size_t C_SKILL_POINTS = 0x328;  // int8 剩余技能点
 constexpr size_t C_MERC_SLOT = 0x352;     // s8 佣兵槽索引（-1=非佣兵, frida 实测）
 constexpr size_t C_PATH_LIST = 0x2F0;     // 寻路结果 PATHLIST 链表头（节点 +0x00 u16 网格x/+0x02 u16 网格y/+0x08 next）
@@ -625,6 +626,8 @@ constexpr uintptr_t G_KEYSET_DATA_VMA = 0x713540;           // KEYSET_nData (i32
 constexpr uintptr_t G_KEY_BPRESSED_VMA = 0x7135a0;          // KEY_bPressed (u8) 当前按键按住有效位（UIPlay_ButtonDirection 写；GAMESTATE_PressKey 读并清）
 constexpr uintptr_t F_UIPLAY_BUTTON_DIRECTION_VMA = 0xc66d4; // uint64_t (void* ctrl, uint64_t event, int64_t point[2], uint64_t p3) 方向摇杆事件
 constexpr uintptr_t F_GAMESTATE_PRESSKEYPLAY_VMA = 0x9cfc0;  // void (int32_t key) 游戏内按键处理（fpPressKey；方向键→CHAR_Move）
+constexpr uint32_t F_GAMESTATE_PRESSKEYPLAY_KEEP_TARGET_CALL_OFF = 0x1d4;
+constexpr uint32_t F_GAMESTATE_PRESSKEYPLAY_KEEP_TARGET_CALL_WORD = 0x9400fd70;  // bl CHAR_SetTarget
 constexpr uintptr_t F_SGL_GET_SCREEN_HEIGHT_VMA = 0x954f8;   // int () 游戏渲染屏幕高度
 constexpr uintptr_t F_TOUCH_HANDLE_GET_CONTROL_OFFSET_VMA = 0xa3190; // void* () TouchHandle 全局坐标偏移（前两字段 int64 x/y）
 constexpr uintptr_t F_CONTROL_OBJECT_GET_ABSOLUTE_POINT_VMA = 0x9e6b4; // {int64 x,y} (void* ctrl) 控件绝对左上角（递归父链）
@@ -712,6 +715,8 @@ constexpr uintptr_t F_CHANGE_MAP_VMA = 0x114fc4;       // void (int32, int32, in
 // ---- 合法操作函数 VMA（v0.3.1，玩家游戏内可做的事，见 control-capability.md §5.1）----
 constexpr uintptr_t F_MOVE_AS_PATH_VMA = 0xe9db8;      // int (void*) 沿已存路径移动（读 +0x2f0 PATHLIST）
 constexpr uintptr_t F_CHAR_MOVE_VMA = 0xe9808;         // int (void*, int, int, u8) 方向键移动（mode 0=下/1=左/2=上/3=右，delta 像素/帧，flag 方向键状态）
+constexpr uint32_t CHAR_MOVE_IS_NO_MOVE_CALL_OFF = 0x40;
+constexpr uint32_t CHAR_MOVE_IS_NO_MOVE_CALL_WORD = 0x97ffde5b;  // bl CHAR_IsNoMove
 // 推动增强 patch 点（CHAR_Move + 0x180，2026-09-16 反汇编确证）：
 // 原指令 `cbz w0, +0xe9944`（CHAR_IsCurrentActionStand(blocker)==0 → 不推）。
 // 置 NOP 后 blocker 无论动作状态都进入推动分支（3 候选方向 SearchPath + SetActionID(2)），
@@ -739,6 +744,12 @@ constexpr uint32_t GAMESTATE_PRESSKEY_RELEASE_STOP_WORD = 0x17fffffb;   // b 0x1
 // 全向移动：CHAR_SetAction 从走路切其他动作时，未对齐分支 `mov w0,#1`
 // 改为直接继续正常动作切换，避免攻击/停止被 8px 闸门吞掉。
 constexpr uintptr_t F_CHAR_SET_ACTION_VMA = 0xe7630;
+constexpr uintptr_t F_CHAR_START_ACTION_EX_VMA = 0xe8950;  // int32 (void*, void* action, int32 flag)
+constexpr uintptr_t F_CHAR_IS_DEFAULT_ATTACK_VMA = 0xda18c;  // int32 (void*, void*)
+constexpr uintptr_t F_CHAR_GET_DISTANCE_VMA = 0xdda14;  // int32 (void*, void*)
+constexpr uintptr_t F_CHAR_GET_ACT_DISTANCE_VMA = 0xe0fa4;  // int32 (void*, void* action)
+constexpr uintptr_t F_CHAR_IS_NO_MOVE_VMA = 0xe11b4;  // int32 (void*)
+constexpr uintptr_t F_CHAR_IS_ACTION_WALK_VMA = 0xe757c;  // int32 (void*, void* action)
 constexpr uint32_t CHAR_SET_ACTION_ALIGN_OFF = 0x26c;
 constexpr uint32_t CHAR_SET_ACTION_ALIGN_WORD = 0x52800020;  // mov w0,#1
 constexpr uint32_t CHAR_SET_ACTION_CONTINUE_WORD = 0x17ffff83;  // b 0xe76a8
@@ -1311,6 +1322,11 @@ using SceneDrawCharinfoFn = void (*)();
 // ---- 合法操作函数签名 ----
 using MoveAsPathFn = int (*)(void*);
 using CharMoveFn = int (*)(void*, int, int, unsigned char);
+using CharIsDefaultAttackFn = int32_t (*)(void*, void*);
+using CharGetDistanceFn = int32_t (*)(void*, void*);
+using CharGetActDistanceFn = int32_t (*)(void*, void*);
+using CharIsNoMoveFn = int32_t (*)(void*);
+using CharIsActionWalkFn = int32_t (*)(void*, void*);
 using CharPickItemAllFn = int (*)(void*, int32_t);
 using CharGetAreaRectFn = void (*)(void*, int, int, int16_t*);
 using MemMallocFn = void* (*)(size_t);

@@ -557,3 +557,15 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | 静态检查 | **PASS**：`git diff --check` 通过；`check_arch.py --only check_layers/offsets/jni/resources/symbols/http_routes/log_policy` 结果 PASS（0 error，69 条既有 warn）。 | — |
 | 构建 | **PASS**：`scripts/build-debug.sh` → `output/inotia4_qol_lsposed_debug_2611111725_5d054bf87168.apk`，SHA-256 `5d054bf871685d59bd96383a64d709905f0a7a31521c3dddbe47e4b938689a95`（含四字校验：布局不符的变体不触碰 GOT 槽）。 | — |
 | 真机 | **NOT_ACCEPTED（未执行）**：未安装本轮 Debug 包。 | 待核验：启用 world_tuning 前后地面同屏堆叠 >32 件不吞旧掉落、切换地图/退出无崩溃与泄漏、`/api/world/map/drops` 数量可超过 32；停用后恢复 32 上限。 |
+
+### 5.36 combat_move 战斗优化（2026-11-13；Host/静态/构建通过，真机待验）
+
+范围：新增 `combat_move` 插件，开启后移动不清除普攻目标、不把攻击动作替换为走路动作，并在每次普攻出手前按动作攻击距离判定，超距则清目标并停战。
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| Host | **PASS**：`cmake -S module/app/src/main/cpp/tests -B .tmp/combat-move/host && cmake --build .tmp/combat-move/host -j4`；`ctest --test-dir .tmp/combat-move/host --output-on-failure` → **168/168**（首次 `core_settings_config_store_tests` 因 `${CMAKE_CURRENT_BINARY_DIR}/config-native-owner` 不存在而 abort，`mkdir -p` 后复跑通过；与本次改动无关） | 新增 `combat_move_plugin_tests` 覆盖：默认关闭、kGameplay、4 资源机制、攻击移动态抑制走路、怪物 type 不进入攻击移动态、范围门取消与放行、call-patch 资源 id 返回 0、端口不可用 fail-closed |
+| 静态检查 | **PASS**：`uv run python scripts/maintenance/check_arch.py` → 全部通过（layers/offsets/jni/resources/symbols/http_routes/log_policy；符号比对 502 项一致） | — |
+| 构建 | **PASS（Debug）**：`scripts/build-debug.sh` → `output/inotia4_qol_lsposed_debug_2611131602_63554a7cf356.apk`，SHA-256 `63554a7cf356196fc55e1884364555ca3abce40b248067e6c9726f7b77ae32d2` | `git diff --check` 通过 |
+| 真机 | **NOT_ACCEPTED（未执行）**：未安装本轮 Debug 包、未进档 | 待核验：①点击怪物自动攻击中按方向键，攻击动画继续、坐标继续变化、目标不丢；②目标走出攻击距离后，下一次普攻前目标清除并停战；③松键站定后仍按原版继续攻击同一目标；④切图/换人/目标死亡清除正常；⑤与 `better_move` 八向/全向同时开启时朝向、对齐、撞墙滑行正常；⑥眩晕/击退期间不可移动（269 掩码语义未被全局放开）；⑦关闭 feature 后行为与原版一致、`/api/system/resources` 四个资源回落 |
+| 风险评估 | **未消除**：移动中普攻是否自动连段取决于原版动作链，若动作链要求站立则移动中只保留首段攻击；方向变化时原版 1–2 帧对齐停顿仍存在 | 两项均需真机观察后决定是否追加动作结束补触发 / 对齐早退处理 |

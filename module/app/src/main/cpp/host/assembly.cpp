@@ -57,6 +57,7 @@
 #include "plugins/item_lab/plugin.h"
 #include "plugins/core.ui_state/plugin.h"
 #include "plugins/better_move/plugin.h"
+#include "plugins/combat_move/plugin.h"
 #include "plugins/push_all/plugin.h"
 #include "plugins/popup_blocker/plugin.h"
 #include "plugins/damage_widen/plugin.h"
@@ -250,6 +251,7 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
     {&features::core_ui_state::plugin_descriptor},
     {&features::push_all::plugin_descriptor},
     {&features::better_move::plugin_descriptor},
+    {&features::combat_move::plugin_descriptor},
     {&features::popup_blocker::plugin_descriptor},
     {&features::damage_widen::plugin_descriptor},
     {&features::core_quest::plugin_descriptor},

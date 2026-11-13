@@ -417,6 +417,11 @@ bool bridge_init() {
         g_base + fn_resolve("F_MEMORYTEXT_GET_TEXT_VMA", F_MEMORYTEXT_GET_TEXT_VMA));
     fn_move_as_path = reinterpret_cast<MoveAsPathFn>(g_base + fn_resolve("F_MOVE_AS_PATH_VMA", F_MOVE_AS_PATH_VMA));
     fn_char_move = reinterpret_cast<CharMoveFn>(g_base + fn_resolve("F_CHAR_MOVE_VMA", F_CHAR_MOVE_VMA));
+    fn_char_is_default_attack = reinterpret_cast<CharIsDefaultAttackFn>(g_base + fn_resolve("F_CHAR_IS_DEFAULT_ATTACK_VMA", F_CHAR_IS_DEFAULT_ATTACK_VMA));
+    fn_char_get_distance = reinterpret_cast<CharGetDistanceFn>(g_base + fn_resolve("F_CHAR_GET_DISTANCE_VMA", F_CHAR_GET_DISTANCE_VMA));
+    fn_char_get_act_distance = reinterpret_cast<CharGetActDistanceFn>(g_base + fn_resolve("F_CHAR_GET_ACT_DISTANCE_VMA", F_CHAR_GET_ACT_DISTANCE_VMA));
+    fn_char_is_no_move = reinterpret_cast<CharIsNoMoveFn>(g_base + fn_resolve("F_CHAR_IS_NO_MOVE_VMA", F_CHAR_IS_NO_MOVE_VMA));
+    fn_char_is_action_walk = reinterpret_cast<CharIsActionWalkFn>(g_base + fn_resolve("F_CHAR_IS_ACTION_WALK_VMA", F_CHAR_IS_ACTION_WALK_VMA));
     fn_char_pick_item_all = reinterpret_cast<CharPickItemAllFn>(g_base + fn_resolve("F_CHAR_PICK_ITEM_ALL_VMA", F_CHAR_PICK_ITEM_ALL_VMA));
     fn_char_get_area_rect = reinterpret_cast<CharGetAreaRectFn>(g_base + fn_resolve("F_CHAR_GET_AREA_RECT_VMA", F_CHAR_GET_AREA_RECT_VMA));
     fn_mem_malloc = reinterpret_cast<MemMallocFn>(g_base + fn_resolve("F_MEM_MALLOC_VMA", F_MEM_MALLOC_VMA));

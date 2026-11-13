@@ -125,6 +125,7 @@ descriptor 只注册一个 `page` entry feature：
 | `custom_recipe` | `custom_recipe.recipes` | 自定义合成 | 0 | Gameplay | toggle | -1 | — |
 | `better_move` | `better_move.direction` | 移动优化 | 0 | Gameplay | choice | 0 | — |
 | `better_move` | `better_move.step` | 移动步长 | 0 | Gameplay | choice | 0 | — |
+| `combat_move` | `combat_move.enabled` | 战斗优化 | 0 | Gameplay | toggle | 0 | — |
 | `extension_bag` | `extension_bag.extended_bag` | 额外背包 | 1 | Gameplay | toggle | -2 | — |
 | `extension_bag` | `move_merge.drag_merge` | 拖动合并 | 1 | BasicOptimization | toggle | 0 | 自 `core.item` 迁入 |
 | `module_health` | `module_health.enabled` | Module health | 1 | Hidden | toggle | 0 | — |

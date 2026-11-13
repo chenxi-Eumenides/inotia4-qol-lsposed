@@ -116,6 +116,7 @@ add_library(gamebridge SHARED
     game/input/eight_way_move.cpp
     game/input/eight_way_draw.cpp
     game/adapter_ports/movement_input_port.cpp
+    game/adapter_ports/combat_move_port.cpp
     core/native/game_cache.cpp
     core/native/module_save.cpp
     game/access/world_read.cpp

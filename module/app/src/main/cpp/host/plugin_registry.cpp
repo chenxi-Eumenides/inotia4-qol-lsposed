@@ -27,6 +27,7 @@
 #include "contracts/game_ports/save_call_port.h"
 #include "contracts/game_ports/save_port.h"
 #include "contracts/game_ports/world_port.h"
+#include "contracts/game_ports/combat_move_port.h"
 #include "contracts/ownership.h"
 #include "game/access/patches.h"
 #include "game/access/ptr_slots.h"
@@ -52,6 +53,7 @@
 #include "game/adapter_ports/character_http_port.h"
 #include "game/adapter_ports/save_write_port.h"
 #include "game/adapter_ports/movement_input_port.h"
+#include "game/adapter_ports/combat_move_port.h"
 #include "game/adapter_ports/save_transaction_port.h"
 #include "game/adapter_ports/world_write_port.h"
 #include "game/adapter_ports/choice_write_port.h"
@@ -334,6 +336,11 @@ bool available_port(contracts::QolPortId id, AvailablePort* out) {
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
         return true;
     }
+    if (id == contracts::QolPortId::QOL_PORT_COMBAT_MOVE) {
+        const auto& port = qol::game::combat_move_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
     if (id == contracts::QolPortId::QOL_PORT_CHOICE_WRITE) {
         const auto& port = qol::game::choice_write_port();
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
@@ -508,6 +515,12 @@ bool resolve_plugin_ports(uint32_t index) {
         // 移动输入端口为 better_move 私有：输入 hook 与 CHAR_Move 调用点只允许该插件声明。
         if (requirement.id == contracts::QolPortId::QOL_PORT_MOVEMENT_INPUT &&
             (plugin.id == nullptr || std::strcmp(plugin.id, "better_move") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_COMBAT_MOVE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "combat_move") != 0)) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;
