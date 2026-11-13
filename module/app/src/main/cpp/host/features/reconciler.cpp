@@ -1,6 +1,7 @@
 #include "reconciler.h"
 
 #include "host/owner_identity.h"
+#include "host/plugin_registry.h"
 #include "infra/capabilities.h"
 #include "infra/log/qol_log.h"
 #include <cstring>
@@ -254,8 +255,9 @@ uint32_t FeatureReconciler::step() {
         }
         if (dependency_dirty_) { dependency_dirty_ = false; ++batch_; }
     }
-    const char* order[32]{};
-    const auto count = feature_registry_order(order, 32);
+    // 容量必须覆盖全部内置插件，否则超出部分永远不参与依赖/激活判定。
+    const char* order[kHostMaxPlugins]{};
+    const auto count = feature_registry_order(order, kHostMaxPlugins);
     // A dependency becoming available is a one-shot topology event equivalent to
     // notify_dependency_changed(): bump the batch so a dependent's failed/blocked
     // activation is retried exactly once, never per-frame. This is the production

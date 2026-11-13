@@ -96,7 +96,7 @@ extern const contracts::QolGameHost g_game_host;
 
 namespace {
 
-constexpr uint32_t kMaxPlugins = 32;
+constexpr uint32_t kMaxPlugins = kHostMaxPlugins;
 constexpr uint32_t kMaxPortsPerPlugin = 8;
 constexpr uint32_t kMaxErrorText = 96;
 constexpr uint32_t kNoPlugin = kMaxPlugins;

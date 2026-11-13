@@ -10,11 +10,12 @@
 
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
+#include "host/plugin_registry.h"
 
 namespace qol::host {
 namespace {
 
-constexpr uint32_t kMaxOwners = 32;
+constexpr uint32_t kMaxOwners = kHostMaxPlugins;
 constexpr uint32_t kMaxRoutesPerOwner = 256;
 constexpr uint32_t kNoOwner = kMaxOwners;
 

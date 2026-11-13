@@ -11,6 +11,8 @@
 
 #include "contracts/plugin.h"
 #include "contracts/ownership.h"
+#include "host/http_endpoint_binder.h"
+#include "host/owner_identity.h"
 #include "hooks/registry.h"
 #include "hooks/transaction.h"
 #include "infra/capabilities.h"
@@ -1195,6 +1197,23 @@ void test_duplicate_capability_provider_ownership() {
     CHECK(qol::infra::unsubscribe(sub));
 }
 
+void test_registration_capacity_matches_host_limit() {
+    reset_all();
+    // owner 槽位不随 registry reset 释放，本用例独占 owner 表。
+    qol::host::http_endpoint_binder_reset_for_test();
+    qol::host::owner_identity_reset_for_test();
+    static char ids[qol::host::kHostMaxPlugins + 1][16];
+    for (uint32_t i = 0; i <= qol::host::kHostMaxPlugins; ++i) {
+        std::snprintf(ids[i], sizeof(ids[i]), "cap_%u", i);
+    }
+    for (uint32_t i = 0; i < qol::host::kHostMaxPlugins; ++i) {
+        CHECK(register_plugin(make_descriptor(ids[i], nullptr, 0, nullptr, 0)));
+    }
+    CHECK(plugin_count() == qol::host::kHostMaxPlugins);
+    CHECK(!register_plugin(make_descriptor(ids[qol::host::kHostMaxPlugins], nullptr, 0, nullptr, 0)));
+    CHECK(plugin_count() == qol::host::kHostMaxPlugins);
+}
+
 }  // namespace
 
 int main() {
@@ -1228,6 +1247,7 @@ int main() {
     test_last_failure_code_keeps_notready_on_failed_terminal();
     test_last_failure_code_permanent_error_is_generic();
     test_duplicate_capability_provider_ownership();
+    test_registration_capacity_matches_host_limit();
     std::printf("plugin_registry: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

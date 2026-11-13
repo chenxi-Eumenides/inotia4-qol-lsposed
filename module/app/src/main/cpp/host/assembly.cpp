@@ -29,6 +29,7 @@
 #include "host/legacy_json_builders.h"
 #include "host/owner_cache_builder.h"
 #include "host/owner_identity.h"
+#include "host/plugin_registry.h"
 #include "host/save_route.h"
 #include "host/config_platform_bridge.h"
 #include "host/features/production.h"
@@ -215,6 +216,13 @@ uint32_t g_registered_plugins = 0;
 uint32_t g_registration_failures = 0;
 uint32_t g_install_failures = 0;
 
+// 注册阶段失败统一上报模块初始化健康位：模块健康视图与水印据此判定异常。
+// 只写日志会让装配失败在界面上不可见（水印保持正常）。
+void mark_registration_failed() {
+    ++g_registration_failures;
+    module_health_set_fact(contracts::QolModuleHealthBit::kModuleInitialization, true, true);
+}
+
 using PluginDescriptorFn = const contracts::PluginDescriptor& (*)();
 using RegisterSettingsFn = QolResult (*)(const contracts::QolHostSdk*);
 
@@ -269,6 +277,13 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
 #endif
     {nullptr},
 };
+
+constexpr uint32_t kBuiltInPluginCount =
+    sizeof(kBuiltInPlugins) / sizeof(kBuiltInPlugins[0]) - 1;  // 末位 nullptr
+// 内建描述符多于注册表容量时，装配会在列表中段失败且表现为「某个插件注册失败」，
+// 真实原因（容量不足）不可见；容量不足必须在构建期暴露。
+static_assert(kBuiltInPluginCount <= kHostMaxPlugins,
+              "kBuiltInPlugins exceeds host plugin registry capacity");
 
 using MechanismOutcome = qol::hooks::TxDeps::MechanismOutcome;
 
@@ -741,11 +756,14 @@ bool assembly_init() {
     });
     infra::commands_set_lifecycle_handler(&lifecycle_apply);
 
-    for (const BuiltInPlugin& plugin : kBuiltInPlugins) {
-        if (plugin.descriptor == nullptr) break;
+    // 注册进度游标：单个插件的注册、sidecar 绑定与 feature 元数据全部成功后才推进。
+    // 装配失败后的重试从此处继续；重复登记已完成的插件会以重复 id 再次失败，掩盖真实原因。
+    static uint32_t registration_cursor = 0;
+    for (uint32_t index = registration_cursor; index < kBuiltInPluginCount; ++index) {
+        const BuiltInPlugin& plugin = kBuiltInPlugins[index];
         const auto& descriptor = plugin.descriptor();
         if (!register_plugin(descriptor)) {
-            ++g_registration_failures;
+            mark_registration_failed();
             QOL_LOG_WARN(QolDomain::kCore,
                           "assembly: plugin descriptor registration failed id=%s",
                           descriptor.id != nullptr ? descriptor.id : "(null)");
@@ -753,7 +771,7 @@ bool assembly_init() {
         }
         if (plugin.store_namespace != nullptr &&
             !bind_plugin_store(descriptor, plugin.store_namespace)) {
-            ++g_registration_failures;
+            mark_registration_failed();
             QOL_LOG_WARN(QolDomain::kCore, "assembly: owner store binding failed");
             return false;
         }
@@ -761,7 +779,7 @@ bool assembly_init() {
         // Explicit feature metadata only; a descriptor without features is a migration gap.
         const auto feature_result = production_feature_register(descriptor);
         if (!feature_result.ok()) {
-            ++g_registration_failures;
+            mark_registration_failed();
             QOL_LOG_WARN(QolDomain::kCore,
                           "assembly: feature metadata missing for %s reason=%.*s",
                           descriptor.id, static_cast<int>(feature_result.message.size()),
@@ -771,15 +789,16 @@ bool assembly_init() {
         // 授权来自装配 sidecar；registry 以注册身份定位 owner，不解释插件提交的名称，
         // 也不向插件提供授权入口。
         if (plugin.slot_operation_allowed && !bind_plugin_slot_operation(descriptor)) {
-            ++g_registration_failures;
+            mark_registration_failed();
             QOL_LOG_WARN(QolDomain::kCore, "assembly: slot operation binding failed");
             return false;
         }
         if (plugin.save_route_allowed && !bind_plugin_save_route(descriptor)) {
-            ++g_registration_failures;
+            mark_registration_failed();
             QOL_LOG_WARN(QolDomain::kCore, "assembly: save route binding failed");
             return false;
         }
+        registration_cursor = index + 1;
     }
 
     // Host-owned platform/module config owner: enables /api/config/list, /api/config/set and the

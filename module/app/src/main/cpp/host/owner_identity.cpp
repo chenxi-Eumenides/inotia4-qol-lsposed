@@ -1,4 +1,5 @@
 #include "host/owner_identity.h"
+#include "host/plugin_registry.h"
 
 #include <array>
 #include <condition_variable>
@@ -26,7 +27,7 @@ struct Owner {
     uint64_t pending_token = 0;
     bool finishing_resume = false;
 };
-std::array<Owner, 32> g_owners;
+std::array<Owner, kHostMaxPlugins> g_owners;
 std::mutex g_mutex;
 std::condition_variable g_condition;
 uint64_t g_next_token = 1;
