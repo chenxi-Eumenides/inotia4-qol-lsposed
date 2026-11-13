@@ -432,6 +432,11 @@ QolResult read_inventory_item_view(contracts::QolItemHandle handle,
                        static_cast<int32_t>(contracts::QolItemInventoryOptionType::kJewel) &&
                    out->jewel_option_count < contracts::kQolItemInventoryJewelOptionCapacity) {
             out->jewel_options[out->jewel_option_count++] = entry;
+        } else if (entry.type ==
+                       static_cast<int32_t>(contracts::QolItemInventoryOptionType::kEnchant) &&
+                   out->enchant_option_count < contracts::kQolItemInventoryEnchantOptionCapacity) {
+            out->enchant_options[out->enchant_option_count++] = entry;
+            out->fields |= contracts::kQolItemInventoryHasEnchantOptions;
         }
         ++enumerated;
         const auto* next = *reinterpret_cast<const uint8_t* const*>(option + O_NEXT);
@@ -468,7 +473,7 @@ QolResult read_in_world(int32_t* out) {
 
 // 启动期下发的静态名称表：只在启动期写入，运行期只读；字符串是 JSON 已转义、不含外层引号
 // 的文本，handler 直接拼接即可与既有 Kotlin JSONObject 序列化保持一致。
-constexpr uint32_t kTextKindCount = 5;
+constexpr uint32_t kTextKindCount = 6;
 std::unordered_map<int32_t, std::string> g_item_text[kTextKindCount];
 std::mutex g_item_text_mutex;
 std::atomic<bool> g_item_text_ready{false};
@@ -549,6 +554,7 @@ void item_port_load_static_text(const char* payload) {
                 case 'O': kind = 2; break;
                 case 'E': kind = 3; break;
                 case 'S': kind = 4; break;
+                case 'P': kind = 5; break;
                 default: break;
             }
             const char* id_start = cursor + 2;

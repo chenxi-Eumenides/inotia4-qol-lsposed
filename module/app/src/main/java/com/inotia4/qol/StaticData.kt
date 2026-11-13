@@ -380,12 +380,18 @@ object StaticData {
 
     /**
      * 物品域静态名称表（启动期下发 core.item owner）：
-     * 行式 `N|T|O|E\t<id>\t<已转义文本>`；文本用 [JSONObject.quote] 转义（与 native 侧迁移前的
+     * 行式 `N|T|P|O|E|S\t<id>\t<已转义文本>`；文本用 [JSONObject.quote] 转义（与 native 侧迁移前的
      * JSONObject 序列化同一实现），native 直接拼接即可保持成功响应逐字节不变。
      */
     fun buildItemStaticData(): String {
         val sb = StringBuilder(131072)
         val db = read("tables/ITEMDATABASE.json")
+        val classBase = read("tables/ITEMCLASSBASE.json")
+        val classRecords = try {
+            classBase?.let { JSONObject(it).getJSONArray("records") }
+        } catch (e: Exception) {
+            null
+        }
         if (db != null) {
             val records = try {
                 JSONObject(db).getJSONArray("records")
@@ -399,6 +405,12 @@ object StaticData {
                     // 前缀+""；native 必须能查到空值才能保持同一判定分支。
                     appendStaticEntry(sb, 'N', i, record.optString("text_0", ""))
                     appendStaticEntry(sb, 'T', i, itemType(i))
+                    val classIndex = hexByte(record.optString("hex", ""), 2)
+                    val classRecord = classIndex?.let { classRecords?.optJSONObject(it) }
+                    val classByte = classRecord?.let { hexByte(it.optString("hex", ""), 2) }
+                    if (classByte != null) {
+                        appendStaticEntry(sb, 'P', i, (classByte and 0x07).toString())
+                    }
                 }
             }
         }
@@ -429,6 +441,13 @@ object StaticData {
             }
         }
         return sb.toString()
+    }
+
+    private fun hexByte(hex: String, index: Int): Int? {
+        val bytes = hex.replace(Regex("[^0-9A-Fa-f]"), "")
+        val start = index * 2
+        if (index < 0 || start + 2 > bytes.length) return null
+        return bytes.substring(start, start + 2).toIntOrNull(16)
     }
 
     /**

@@ -25,8 +25,10 @@
 #include "contracts/game_ports/choice_write_port.h"
 #include "contracts/game_ports/ui_write_port.h"
 #include "contracts/game_ports/world_write_port.h"
+#include "contracts/item_display_name.h"
 #include "infra/store.h"
 
+#include <cstdlib>
 #include <mutex>
 #include <utility>
 
@@ -388,20 +390,8 @@ const char* character_static_text(contracts::QolItemStaticTextKind kind, int32_t
     return text;
 }
 
-// 迁移前 StaticData.rarityPrefix（raw_rarity → 品质前缀）。
-const char* character_rarity_prefix(long long raw_rarity) {
-    switch (raw_rarity) {
-        case 0: return "生锈的 ";
-        case 1: return "陈旧的 ";
-        case 3: return "太古的 ";
-        case 4: return "锐利的 ";
-        case 5: return "打磨的 ";
-        case 6: return "工匠的 ";
-        case 7: return "钢铁 ";
-        case 8: return "钛金 ";
-        case 9: return "秘银 ";
-        default: return "";
-    }
+const char* character_rarity_prefix(long long raw_rarity, int class_bits) {
+    return contracts::item_rarity_prefix(class_bits, static_cast<int>(raw_rarity));
 }
 
 // 迁移前 StaticData.rarityTierName（GetRarity 0-4 → 白/绿/蓝/黄/紫）。
@@ -501,7 +491,13 @@ void append_character_equipment_item(std::string& out, void* item, int slot) {
     out += std::to_string(slot);
     field("name");
     if (base_name != nullptr) {
-        out += "\"" + std::string(character_rarity_prefix(raw_rarity)) + base_name + "\"";
+        const char* class_text = category >= 0
+                                     ? character_static_text(
+                                           contracts::QolItemStaticTextKind::kItemPrefixClass,
+                                           static_cast<int32_t>(category))
+                                     : nullptr;
+        const int class_bits = class_text != nullptr ? std::atoi(class_text) : 0;
+        out += "\"" + std::string(character_rarity_prefix(raw_rarity, class_bits)) + base_name + "\"";
     } else {
         out += "null";
     }

@@ -43,7 +43,7 @@
 
 ## Item 查询
 
-`query_item` 通过 `item.facts` 依序读取 category、jewel/equip 分类和一次 `QolItemInventoryView`；属性条目由 `native_options[]` 与 `jewel_options[]` 依次处理（原生列表在前），不按 id 去重，也不对失败条目重读或跳过；合并 `options[]` 已删除，未知 option type 不进入任何列表。view 同时提供当前恒空的 `enchant_options[]`。category 与分类字段是该调用中的独立 facts 读取，view 本身只取一次。见 `plugins/attribute_quality/feature.cpp:142-165,267-332`。
+`query_item` 通过 `item.facts` 依序读取 category、jewel/equip 分类和一次 `QolItemInventoryView`；属性条目由 `native_options[]` 与 `jewel_options[]` 依次处理（原生列表在前），不按 id 去重，也不对失败条目重读或跳过；合并 `options[]` 已删除，未知 option type 不进入任何列表。`enchant_options[]` 投影 type=2 节点；无节点时为空。category 与分类字段是该调用中的独立 facts 读取，view 本身只取一次。见 `plugins/attribute_quality/feature.cpp:142-165,267-332`。
 
 一次 `query_item` 只取一次 facts view；每个受支持的 Jewel/StoredOption 范围仍分别运行 capture，不共享一次范围捕获覆盖整批条目。
 
@@ -53,7 +53,7 @@
 | 装备内储存词缀 | `count=native_option_count+jewel_option_count`，最多 32 项；按原生、宝石列表顺序记录 `ordinal`、id、type、value。只有存储 `type==0` 会探测范围；`type==1` 原位返回 `Unsupported` status，不会挤掉后续项；未知 type 不进入 view。ability-level 符号缺失由 adapter 返回 `-1`/NotReady；provider 缺 `HasNeedLevel` 有效位也返回 NotReady。 |
 | 非宝石、非装备 | 返回 Unsupported。 |
 
-`ItemFactsApi::view` 需要 `kQolItemInventoryHasOptionCompleteness`；缺位返回 NotReady。`complete` 只由 `kQolItemInventoryOptionsTruncated` 决定：它表示枚举是否完整，不代表每个属性探测成功。单项探测或固定表失败保留在该项 `status` 中，后续项仍处理；结构/输入/事实快照错误则由外层 `QolResult` 返回。`ordinal` 只表示本次 view 的遍历位置，不是跨查询身份，也不代表 UI 行号。view 容量和 bit7/bit8 定义见 `contracts/game_ports/item_port.h:53-107`；`native_options[]`/`jewel_options[]` 由 type 0/1 投影且可空，`enchant_options[]` 在附魔属性未解码前恒为空且不置 bit11。生产适配器在达到 32 项且 `next != nullptr` 时设置 truncated，见 `game/adapter_ports/item_port.cpp:302-325`。
+`ItemFactsApi::view` 需要 `kQolItemInventoryHasOptionCompleteness`；缺位返回 NotReady。`complete` 只由 `kQolItemInventoryOptionsTruncated` 决定：它表示枚举是否完整，不代表每个属性探测成功。单项探测或固定表失败保留在该项 `status` 中，后续项仍处理；结构/输入/事实快照错误则由外层 `QolResult` 返回。`ordinal` 只表示本次 view 的遍历位置，不是跨查询身份，也不代表 UI 行号。view 容量和 bit7/bit8 定义见 `contracts/game_ports/item_port.h:53-107`；三个 options 数组分别投影 type 0/1/2，均可为空；bit11 在存在 type=2 节点时置位。生产适配器在达到 32 项且 `next != nullptr` 时设置 truncated，见 `game/adapter_ports/item_port.cpp:302-325`。
 
 ## 当前词缀上下文查询
 

@@ -155,11 +155,13 @@
 | `need_level` | 所需等级（`ITEM_GetAbilityLevel`(0x1091f4)：读 ITEMCLASSBASE 记录 +3 int8；无等级概念的消耗品归 0） |
 | `rarity` | 稀有度档位 0-4（GetRarity，白绿蓝黄紫） |
 | `rarity_tier` | 档位名（白/绿/蓝/黄/紫，Kotlin 注入） |
+| `raw_rarity` | `I_TYPE` bits 2-5 的原始稀有度（0-15；未知时为 `null`） |
+| `prefix` | 按类别 class bits 与 `raw_rarity` 选择的名称前缀；不适用时为空字符串 |
 | `base` | 基础属性对象：`{damage 物攻, defense 物防, magic_rate 魔法伤害倍率}`；`magic_rate` 为原始值/100 显示（110 → 1.1） |
 | `bonus` | 词缀列表（type==0 节点，ITEMOPTINFOBASE 联查）：每项 `{id 词缀索引, name 词缀名, value 词缀值}` |
 | `gem` | 宝石对象：`{total_slots 总槽位(插槽等级), slots[{id, name, value}] 已镶宝石}`（type==1 节点） |
 | `chaos` | 混沌对象：`{is_chaos 是否混沌, level 混沌等级, rate 混沌成功率}` |
-| `enchant` | 附魔对象：`{id 附魔ID, level 附魔等级, effect 附魔名(ITEMENCHANTBASE 联查)}` |
+| `enchant` | 附魔对象：`{id 附魔ID, level 附魔等级, effect 附魔名(ITEMENCHANTBASE 联查), options[{id,name,value}]}`；options 来自 option 链表 type=2 节点 |
 
 > 物品对象为统一结构（装备/消耗品/材料同构）：**缺失的标量字段置 `null`，列表字段恒为数组（无内容时空列表）**；`base`/`bonus`/`gem`/`chaos`/`enchant` 为重组后的可读对象，替代原位域拆解字段（`type_flags`/`raw_rarity`/`socket`/`enchant`/`chaos_*`/`options`/`option_ids`/`option_names`/`options_detailed`/`static_options`/`socket_info`/`enchant_info`/`chaos_info`）。`capacity` 袋容量 16 格；`occupied_slots` 占用数。
 

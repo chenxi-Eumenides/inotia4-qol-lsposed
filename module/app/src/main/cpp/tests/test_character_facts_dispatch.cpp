@@ -81,7 +81,7 @@ constexpr char kPlayer[] = "{\"money\":100,\"leader_slot\":1,\"party_count\":3}"
 constexpr char kParty[] =
     "[{\"name\":\"凯恩\",\"class_name\":\"黑暗骑士\",\"level\":10,\"hp\":50,\"max_hp\":60,"
     "\"mp\":5,\"max_mp\":6,\"exp\":1,\"exp_next\":2,\"status_point\":3,"
-    "\"equipment\":[null,{\"slot\":1,\"name\":\"钢铁 剑\"}],\"type\":0,\"class_idx\":0,"
+    "\"equipment\":[null,{\"slot\":1,\"name\":\"剑\"}],\"type\":0,\"class_idx\":0,"
     "\"name_id\":7},null]";
 constexpr char kSkills[] =
     "[{\"role\":0,\"skills\":[{\"action_id\":10,\"level\":1,\"skill_name\":\"火球\"}],"
@@ -91,7 +91,7 @@ constexpr char kMercenaries[] =
 constexpr char kMember0[] =
     "{\"name\":\"凯恩\",\"class_name\":\"黑暗骑士\",\"level\":10,\"hp\":50,\"max_hp\":60,"
     "\"mp\":5,\"max_mp\":6,\"exp\":1,\"exp_next\":2,\"status_point\":3,"
-    "\"equipment\":[null,{\"slot\":1,\"name\":\"钢铁 剑\"}],\"type\":0,\"class_idx\":0,"
+    "\"equipment\":[null,{\"slot\":1,\"name\":\"剑\"}],\"type\":0,\"class_idx\":0,"
     "\"name_id\":7}";
 constexpr char kNotInGame[] = "{\"error\":\"not in game\"}";
 constexpr char kMember1[] =
@@ -1146,8 +1146,8 @@ void test_lifecycle_and_responses() {
     CHECK(attributes_status == 200);
     CHECK(dispatch_get("/api/character/party/1/attributes") == "{\"attributes\":null}");
     CHECK(dispatch_get("/api/character/party/0/equipment") ==
-          "{\"equipment\":[null,{\"slot\":1,\"name\":\"钢铁 剑\"}]}");
-    CHECK(dispatch_get("/api/character/party/0/equipment/1") == "{\"slot\":1,\"name\":\"钢铁 剑\"}");
+          "{\"equipment\":[null,{\"slot\":1,\"name\":\"剑\"}]}");
+    CHECK(dispatch_get("/api/character/party/0/equipment/1") == "{\"slot\":1,\"name\":\"剑\"}");
     CHECK(dispatch_get("/api/character/party/0/skills") ==
           "{\"role\":0,\"skills\":[{\"action_id\":10,\"level\":1,\"skill_name\":\"火球\"}],"
           "\"unlock_bitmap\":0,\"active_skill_id\":-1,\"skill_points\":4}");

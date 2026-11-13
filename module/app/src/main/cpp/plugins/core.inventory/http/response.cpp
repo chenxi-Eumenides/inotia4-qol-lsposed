@@ -1,6 +1,9 @@
 #include "response.h"
 
+#include <cstdlib>
 #include <string>
+
+#include "contracts/item_display_name.h"
 
 #include "json_lite.h"
 #include "plugins/core.inventory/usecases/item_helpers.h"
@@ -69,22 +72,6 @@ bool member_int(const JsonValue& object, const char* key, long long* out) {
 bool member_bool(const JsonValue& object, const char* key, bool* out) {
     const JsonValue* value = object.find(key);
     return value != nullptr && value->as_bool(out);
-}
-
-// 迁移前 rarityPrefix（StaticData.kt）：raw_rarity → 品质前缀。
-const char* rarity_prefix(long long raw_rarity) {
-    switch (raw_rarity) {
-        case 0: return "生锈的 ";
-        case 1: return "陈旧的 ";
-        case 3: return "太古的 ";
-        case 4: return "锐利的 ";
-        case 5: return "打磨的 ";
-        case 6: return "工匠的 ";
-        case 7: return "钢铁 ";
-        case 8: return "钛金 ";
-        case 9: return "秘银 ";
-        default: return "";
-    }
 }
 
 // 迁移前 rarityTierName（StaticData.kt）：GetRarity 0-4 → 白/绿/蓝/黄/紫。
@@ -162,11 +149,12 @@ std::string enrich_item(const JsonValue& item, const contracts::QolItemPort* por
                                 : nullptr;
     if (base_name != nullptr) {
         const char* prefix = "";
-        bool equip = false;
         long long raw_rarity = -1;
-        if (member_bool(item, "equip", &equip) && equip &&
-            member_int(item, "raw_rarity", &raw_rarity)) {
-            prefix = rarity_prefix(raw_rarity);
+        if (member_int(item, "raw_rarity", &raw_rarity)) {
+            const char* class_text = static_text(port, QolItemStaticTextKind::kItemPrefixClass,
+                                                 static_cast<int32_t>(category));
+            const int class_bits = class_text == nullptr ? 0 : std::atoi(class_text);
+            prefix = contracts::item_rarity_prefix(class_bits, static_cast<int>(raw_rarity));
         }
         const std::string name = std::string(prefix) + base_name;
         out.text("name", name.c_str());
@@ -202,6 +190,20 @@ std::string enrich_item(const JsonValue& item, const contracts::QolItemPort* por
     } else {
         out.null_value("rarity_tier");
     }
+
+    long long raw_rarity = 0;
+    const bool has_raw_rarity = member_int(item, "raw_rarity", &raw_rarity);
+    if (has_raw_rarity) out.integer("raw_rarity", raw_rarity);
+    else out.null_value("raw_rarity");
+    int class_bits = 0;
+    if (has_category) {
+        const char* class_text = static_text(port, QolItemStaticTextKind::kItemPrefixClass,
+                                             static_cast<int32_t>(category));
+        if (class_text != nullptr) class_bits = std::atoi(class_text);
+    }
+    out.text("prefix", has_raw_rarity
+                            ? contracts::item_rarity_prefix(class_bits, static_cast<int>(raw_rarity))
+                            : "");
 
     Obj base;
     long long damage = 0;
@@ -248,6 +250,7 @@ std::string enrich_item(const JsonValue& item, const contracts::QolItemPort* por
     } else {
         enchant.null_value("effect");
     }
+    enchant.raw("options", option_list(item, port, 2));
     out.raw("enchant", enchant.object());
 
     return out.object();

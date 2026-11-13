@@ -115,14 +115,15 @@ void append_inventory_item(std::string* out, int32_t slot,
     out->append(",\"chaos_rate\":");
     *out += std::to_string(item.chaos_rate);
 
-    // JSON 保持既有 options/option_ids/option_types 三个平行数组；条目按原生、宝石
-    // 列表顺序拼接。附魔列表当前无数据，不参与投影；未知 type 不进入任何列表。
+    // JSON 保持既有 options/option_ids/option_types 三个平行数组；条目按原生、宝石、附魔
+    // 列表顺序拼接。未知 type 不进入任何列表。
     const contracts::QolItemInventoryOptionView* const lists[] = {
-        item.native_options, item.jewel_options};
-    const uint32_t counts[] = {item.native_option_count, item.jewel_option_count};
+        item.native_options, item.jewel_options, item.enchant_options};
+    const uint32_t counts[] = {item.native_option_count, item.jewel_option_count,
+                               item.enchant_option_count};
     const auto append_option_field = [&](auto value_of) {
         uint32_t emitted = 0;
-        for (uint32_t list = 0; list < 2; ++list) {
+        for (uint32_t list = 0; list < 3; ++list) {
             for (uint32_t index = 0; index < counts[list]; ++index) {
                 if (emitted++ != 0) out->push_back(',');
                 *out += std::to_string(value_of(lists[list][index]));

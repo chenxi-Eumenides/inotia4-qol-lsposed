@@ -89,6 +89,7 @@ constexpr uint32_t kQolItemInventoryEnchantOptionCapacity = 32;
 enum class QolItemInventoryOptionType : int32_t {
     kNative = 0,
     kJewel = 1,
+    kEnchant = 2,
 };
 
 enum QolItemInventoryViewField : uint32_t {
@@ -101,7 +102,7 @@ enum QolItemInventoryViewField : uint32_t {
     kQolItemInventoryHasJewelAttributeType = 1u << 6,
     kQolItemInventoryHasOptionCompleteness = 1u << 7,
     kQolItemInventoryOptionsTruncated = 1u << 8,
-    // 分词列表可用位：原生/宝石列表由本次枚举投影得到（可为空）；附魔无解码数据时不置位。
+    // 分词列表可用位：各来源列表由本次枚举投影得到；附魔 type=2 有节点时置位。
     kQolItemInventoryHasNativeOptions = 1u << 9,
     kQolItemInventoryHasJewelOptions = 1u << 10,
     kQolItemInventoryHasEnchantOptions = 1u << 11,
@@ -144,8 +145,7 @@ struct QolItemInventoryView {
     QolItemInventoryOptionView native_options[kQolItemInventoryNativeOptionCapacity];
     uint32_t jewel_option_count;
     QolItemInventoryOptionView jewel_options[kQolItemInventoryJewelOptionCapacity];
-    // 附魔列表当前显式为空（count=0 且无有效位），元素暂沿用通用词条结构，
-    // 待属性数据解码后再细化。
+    // 附魔 type=2 节点列表；元素沿用通用词条结构。
     uint32_t enchant_option_count;
     QolItemInventoryOptionView enchant_options[kQolItemInventoryEnchantOptionCapacity];
 };
@@ -164,6 +164,7 @@ enum class QolItemStaticTextKind : int32_t {
     // 技能名（action_id → 名称）：与物品名同为启动期静态文本；character_facts 的
     // party/{slot}/skills 富化需要它，复用同一行式下发通道以避免为单条查询新增 JNI。
     kSkillName = 4,
+    kItemPrefixClass = 5,
 };
 // 返回的是 JSON 已转义、不含外层引号的文本指针；存储只在启动期写入，运行期只读。
 using QolItemStaticTextFn = QolResult (*)(int32_t kind, int32_t id, const char** out_text);

@@ -707,7 +707,7 @@ void test_inventory_option_view_completeness(
         assert((view.fields & qol::contracts::kQolItemInventoryHasEnchantOptions) == 0);
     }
 
-    // 混合 type：原生/宝石列表按 type 投影，未知 type 不进入任何列表，附魔列表显式为空。
+    // 混合 type：原生/宝石/附魔列表分别按 type 投影。
     constexpr uint32_t kMixedLength = 4;
     constexpr int32_t kMixedTypes[kMixedLength] = {0, 1, 2, 0};
     for (uint32_t i = 0; i < kMixedLength; ++i) {
@@ -727,11 +727,12 @@ void test_inventory_option_view_completeness(
     assert(mixed_view.jewel_option_count == 1);
     assert(mixed_view.jewel_options[0].type == 1 && mixed_view.jewel_options[0].id == 1 &&
            mixed_view.jewel_options[0].value == 601);
-    assert(mixed_view.enchant_option_count == 0);
+    assert(mixed_view.enchant_option_count == 1);
+    assert(mixed_view.enchant_options[0].type == 2 && mixed_view.enchant_options[0].id == 2 &&
+           mixed_view.enchant_options[0].value == 602);
     assert((mixed_view.fields & qol::contracts::kQolItemInventoryHasNativeOptions) != 0);
     assert((mixed_view.fields & qol::contracts::kQolItemInventoryHasJewelOptions) != 0);
-    assert((mixed_view.fields & qol::contracts::kQolItemInventoryHasEnchantOptions) == 0);
-    // type 2 只计入枚举总量，不落入任何分词列表。
+    assert((mixed_view.fields & qol::contracts::kQolItemInventoryHasEnchantOptions) != 0);
     for (uint32_t i = 0; i < mixed_view.native_option_count; ++i) {
         assert(mixed_view.native_options[i].type == 0);
     }

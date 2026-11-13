@@ -87,10 +87,11 @@ constexpr char kShopJson[] =
 constexpr char kExpectedItem[] =
     "{\"slot\":0,\"name\":\"再生药水（小）\",\"category\":10,\"count\":3,"
     "\"item_type\":\"potion\",\"need_level\":0,\"rarity\":0,\"rarity_tier\":\"白\","
+    "\"raw_rarity\":0,\"prefix\":\"\","
     "\"base\":{\"damage\":0,\"defense\":0,\"magic_rate\":0},\"bonus\":[],"
     "\"gem\":{\"total_slots\":0,\"slots\":[]},"
     "\"chaos\":{\"is_chaos\":false,\"level\":0,\"rate\":100},"
-    "\"enchant\":{\"id\":0,\"level\":0,\"effect\":null}}";
+    "\"enchant\":{\"id\":0,\"level\":0,\"effect\":null,\"options\":[]}}";
 
 std::string expected_item_with_count(uint32_t count) {
     std::string item(kExpectedItem);
@@ -113,7 +114,7 @@ std::string expected_item_at_slot(uint32_t slot, uint32_t count, bool equip = fa
         const std::string old_name = "\"name\":\"再生药水（小）\"";
         const size_t name_position = item.find(old_name);
         if (name_position != std::string::npos) {
-            item.replace(name_position, old_name.size(), "\"name\":\"生锈的 再生药水（小）\"");
+            item.replace(name_position, old_name.size(), "\"name\":\"再生药水（小）\"");
         }
     }
     return item;
@@ -2335,11 +2336,13 @@ void test_lifecycle_and_responses() {
     CHECK(dispatch_get("/api/item/inventory", &status) == expected_inventory);
     CHECK(status == 200);
 
-    // A physical ref/handle lookup failure must not publish a partial inventory with the slot
-    // silently omitted. Retain the last complete snapshot until a full serialization succeeds.
+    // Bag metadata lookup failure degrades that bag to an empty zero-capacity snapshot.
     g_item_ref_result = kQolErrNotReady;
     CHECK(run_scheduler(101));
-    CHECK(dispatch_get("/api/item/inventory", &status) == expected_inventory);
+    const std::string degraded_inventory = dispatch_get("/api/item/inventory", &status);
+    CHECK(degraded_inventory.find("\"capacity\":0,\"occupied_slots\":0") !=
+          std::string::npos);
+    CHECK(degraded_inventory.find("\"items\":[]") != std::string::npos);
     CHECK(status == 200);
     g_item_ref_result = kQolOk;
 

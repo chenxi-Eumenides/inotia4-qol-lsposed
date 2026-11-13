@@ -2,6 +2,7 @@
 #include "plugins/core.inventory/api/access.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -36,6 +37,20 @@ bool item_is_not_found(const QolResult& result) {
 
 bool item_is_unavailable(const QolResult& result) {
     return result.code == kQolErrUnsupported || result.code == kQolErrNotReady;
+}
+
+void log_snapshot_failure(int32_t space, int32_t bag, const QolResult& result,
+                          const char* reason) {
+    if (g_sdk == nullptr || g_sdk->log.write == nullptr) return;
+    char line[512];
+    const int length = std::snprintf(line, sizeof(line),
+                                     "fail op=snapshot_read space=%d bag=%d code=%d result=%d reason=%s",
+                                     space, bag, result.code, result.ok, reason);
+    if (length <= 0) return;
+    const uint32_t size = static_cast<uint32_t>(length < static_cast<int>(sizeof(line))
+                                                    ? length
+                                                    : sizeof(line) - 1);
+    (void)g_sdk->log.write(2, 5, "core.inventory", line, size);
 }
 
 QolResult read_space_count(int32_t space_id, const contracts::QolBagSource* source,
@@ -80,7 +95,8 @@ QolResult append_item_record(const contracts::QolInventoryItemRef& item, int32_t
     uint32_t count = 0;
     bool count_present = false;
     if (!effective_item_count(item.item, view.count_supported != 0, &count, &count_present)) {
-        return error_result(kQolErrNotReady, "item count unavailable");
+        count_present = false;
+        count = 0;
     }
     if (count_present) view.count_supported = 1;
     snapshot->items.push_back(
@@ -99,9 +115,16 @@ QolResult read_bag(int32_t space_id, int32_t bag,
     contracts::QolBagInfo info{};
     const QolResult info_result = source != nullptr ? source->info(bag, &info)
                                                     : inventory_access_api().native_bag_info(&ref, &info);
-    if (!contracts::succeeded(info_result)) return info_result;
+    if (!contracts::succeeded(info_result)) {
+        log_snapshot_failure(space_id, bag, info_result, "bag_info");
+        *out_bag = bags::BagSnapshot{space_id, bag, 0, 0, {}};
+        return contracts::ok();
+    }
     if (info.capacity < 0 || info.occupied_slots < 0) {
-        return error_result(kQolErrInvalidArgument, "invalid bag info");
+        const QolResult invalid = error_result(kQolErrInvalidArgument, "invalid bag info");
+        log_snapshot_failure(space_id, bag, invalid, "invalid_bag_info");
+        *out_bag = bags::BagSnapshot{space_id, bag, 0, 0, {}};
+        return contracts::ok();
     }
 
     bags::BagSnapshot snapshot{space_id, bag, info.capacity, info.occupied_slots, {}};
@@ -120,11 +143,15 @@ QolResult read_bag(int32_t space_id, int32_t bag,
                                               : inventory_access_api().native_item_at(&ref, slot, &item);
             if (!contracts::succeeded(item_result)) {
                 if (item_is_not_found(item_result)) continue;
-                return item_result;
+                log_snapshot_failure(space_id, bag, item_result, "item_at");
+                continue;
             }
             const QolResult result = append_item_record(item, space_id, bag, info.capacity,
                                                         &snapshot);
-            if (!contracts::succeeded(result)) return result;
+            if (!contracts::succeeded(result)) {
+                log_snapshot_failure(space_id, bag, result, "item_view");
+                continue;
+            }
         }
     }
     std::sort(snapshot.items.begin(), snapshot.items.end(),
@@ -146,7 +173,7 @@ QolResult append_space(int32_t space_id, int32_t count,
         if (contracts::succeeded(result)) {
             has_space_items = true;
         } else if (!item_is_unavailable(result)) {
-            return result;
+            log_snapshot_failure(space_id, -1, result, "for_each_item");
         }
     } else if (contracts::qol_inventory_access_api_valid(&inventory_access_api())) {
         SpaceItems context{space_id, &space_items};
@@ -155,7 +182,7 @@ QolResult append_space(int32_t space_id, int32_t count,
         if (contracts::succeeded(result)) {
             has_space_items = true;
         } else if (!item_is_unavailable(result)) {
-            return result;
+            log_snapshot_failure(space_id, -1, result, "for_each_space_slot");
         }
     }
 
@@ -163,7 +190,10 @@ QolResult append_space(int32_t space_id, int32_t count,
         bags::BagSnapshot bag_snapshot{};
         const QolResult result = read_bag(space_id, bag, source, &space_items, has_space_items,
                                           &bag_snapshot);
-        if (!contracts::succeeded(result)) return result;
+        if (!contracts::succeeded(result)) {
+            log_snapshot_failure(space_id, bag, result, "read_bag");
+            return result;
+        }
         snapshot->bags.push_back(std::move(bag_snapshot));
     }
     return contracts::ok();
@@ -174,20 +204,34 @@ QolResult append_space(int32_t space_id, int32_t count,
 QolResult read_inventory() {
     if (g_port == nullptr || g_port->read.in_world == nullptr ||
         g_port->read.inventory_item_view == nullptr || g_port->read.money == nullptr) {
-        return not_ready();
+        const QolResult unavailable = not_ready();
+        log_snapshot_failure(-1, -1, unavailable, "item_port_unavailable");
+        return unavailable;
     }
     if (g_port->read.static_ready != nullptr) {
         int32_t ready = 0;
         const QolResult ready_result = g_port->read.static_ready(&ready);
-        if (!contracts::succeeded(ready_result)) return ready_result;
-        if (ready == 0) return not_ready();
+        if (!contracts::succeeded(ready_result)) {
+            log_snapshot_failure(-1, -1, ready_result, "static_ready");
+            return ready_result;
+        }
+        if (ready == 0) {
+            const QolResult unavailable = not_ready();
+            log_snapshot_failure(-1, -1, unavailable, "static_data_not_ready");
+            return unavailable;
+        }
     }
     int32_t in_world = 0;
     const QolResult world_result = g_port->read.in_world(&in_world);
-    if (!contracts::succeeded(world_result)) return world_result;
+    if (!contracts::succeeded(world_result)) {
+        log_snapshot_failure(-1, -1, world_result, "in_world");
+        return world_result;
+    }
     if (in_world == 0) {
         bags::inventory_snapshot_store().clear();
-        return not_ready();
+        const QolResult unavailable = not_ready();
+        log_snapshot_failure(-1, -1, unavailable, "not_in_world");
+        return unavailable;
     }
 
     auto next = std::make_shared<bags::InventorySnapshot>();
@@ -197,9 +241,15 @@ QolResult read_inventory() {
         const contracts::QolBagSource* source = find_bag_source(space_id);
         int32_t count = 0;
         const QolResult count_result = read_space_count(space_id, source, &count);
-        if (!contracts::succeeded(count_result)) return count_result;
+        if (!contracts::succeeded(count_result)) {
+            log_snapshot_failure(space_id, -1, count_result, "space_count");
+            return count_result;
+        }
         const QolResult append_result = append_space(space_id, count, source, next.get());
-        if (!contracts::succeeded(append_result)) return append_result;
+        if (!contracts::succeeded(append_result)) {
+            log_snapshot_failure(space_id, -1, append_result, "append_space");
+            return append_result;
+        }
     }
     for (uint32_t index = 0; index < registered_bag_source_count(); ++index) {
         const contracts::QolBagSource* source = registered_bag_source_at(index);
@@ -208,12 +258,21 @@ QolResult read_inventory() {
         }
         int32_t count = 0;
         const QolResult count_result = read_space_count(source->space_id, source, &count);
-        if (!contracts::succeeded(count_result)) return count_result;
+        if (!contracts::succeeded(count_result)) {
+            log_snapshot_failure(source->space_id, -1, count_result, "space_count");
+            return count_result;
+        }
         const QolResult append_result = append_space(source->space_id, count, source, next.get());
-        if (!contracts::succeeded(append_result)) return append_result;
+        if (!contracts::succeeded(append_result)) {
+            log_snapshot_failure(source->space_id, -1, append_result, "append_space");
+            return append_result;
+        }
     }
     const QolResult money_result = g_port->read.money(&next->money);
-    if (!contracts::succeeded(money_result)) return money_result;
+    if (!contracts::succeeded(money_result)) {
+        log_snapshot_failure(-1, -1, money_result, "money");
+        return money_result;
+    }
 
     bags::SnapshotStore& store = bags::inventory_snapshot_store();
     next->epoch = store.bump_epoch();

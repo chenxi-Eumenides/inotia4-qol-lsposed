@@ -21,6 +21,12 @@ find_package(JNI REQUIRED)
 
 set(CPP_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
+add_executable(item_display_name_tests test_item_display_name.cpp)
+target_include_directories(item_display_name_tests PRIVATE ${CPP_DIR})
+target_compile_features(item_display_name_tests PRIVATE cxx_std_17)
+set_target_properties(item_display_name_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME item_display_name_tests COMMAND item_display_name_tests)
+
 # core.custom_ui 组件源清单：Host 测试直接编译插件源码，集中定义避免新增 TU 时漏 target。
 set(CORE_CUSTOM_UI_COMPONENTS_SOURCES
     ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp
