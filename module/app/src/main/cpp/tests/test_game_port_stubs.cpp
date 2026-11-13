@@ -53,7 +53,7 @@ const contracts::QolMovementInputPort kMovementInputPort{
       &movement_input_set_step}};
 const contracts::QolCombatMovePort kCombatMovePort{
     contracts::kQolPortCombatMoveVersion, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-    nullptr, nullptr, nullptr, nullptr, nullptr};
+    nullptr, nullptr, nullptr, nullptr};
 const contracts::QolWorldPort kWorldPort{{1, 0}, {}};
 contracts::QolItemPort kItemPort{contracts::kQolPortItemVersion,
                                  sizeof(contracts::QolItemPort), {}};

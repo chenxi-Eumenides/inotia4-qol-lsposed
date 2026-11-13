@@ -19,7 +19,6 @@ struct QolCombatMovePort {
     int32_t (*action_range)(void* character, const void* action);
     int32_t (*is_no_move)(void* character);
     void (*set_target)(void* character, void* target);
-    void (*stop_combat)(void* character);
 };
 
 static_assert(std::is_standard_layout<QolCombatMovePort>::value,

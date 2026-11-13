@@ -12,10 +12,10 @@
 | `patch:GAMESTATE_PressKeyPlay+0x1d4` | `P_GAMESTATE_PRESSKEYPLAY_KEEP_TARGET` | call patch（BL 重定向） | 攻击移动态下忽略 `CHAR_SetTarget(ch, 0)` |
 | `patch:CHAR_Move+0x40` | `P_CHAR_MOVE_IS_NO_MOVE` | call patch（BL 重定向） | 攻击移动态下让 `CHAR_IsNoMove` 结果为可移动 |
 | `hook:CHAR_SetAction` | `F_CHAR_SET_ACTION_VMA` | entry hook | 攻击移动态下丢弃走路动作切换 |
-| `hook:CHAR_StartActionEx` | `F_CHAR_START_ACTION_EX_VMA` | entry hook | 普攻出手前的距离门与取消 |
+| `hook:CHAR_StartActionEx` | `F_CHAR_START_ACTION_EX_VMA` | entry hook | 普攻出手前的距离门（超距取消本次出手，保留目标） |
 
-私有端口 `QOL_PORT_COMBAT_MOVE`（v1.0，仅 `combat_move` 可声明）。端口只提供只读判定和两个受控写原语
-（`set_target`、`stop_combat`）；游戏调用全部在 `game/adapter_ports/combat_move_port.cpp` 内完成。
+私有端口 `QOL_PORT_COMBAT_MOVE`（v1.0，仅 `combat_move` 可声明）。端口只提供只读判定和一个受控写原语
+（`set_target`，用于非锁定态透传清目标）；游戏调用全部在 `game/adapter_ports/combat_move_port.cpp` 内完成。
 
 ## 2. 攻击移动态判定
 
@@ -36,15 +36,19 @@ enabled
 `CHAR_StartActionEx` 入口：
 
 ```
-非攻击移动主角 / 非默认攻击动作 / 目标为空 → 原函数
-距离 > CHAR_GetActDistance(ch, 本次动作) → CHAR_SetTarget(ch, 0) + CHAR_StopCombat(ch)，返回 0
+target_locked && 本次动作为默认攻击
+  且 距离 > effective_range(动作攻击距离) → 返回 0（取消本次出手，不清目标、不停战）
 否则 → 原函数
 ```
 
+- `target_locked` = 开关开启 && 当前出战主角（`ch+0x2FA == 0` 且 `ch+0x09 type == 0`）&& `ch+0x278` 目标非空。
+  保留目标不依赖当前动作，因此取消出手后进入空闲仍不会在移动时被清锁。
+- `attacking` = `target_locked` && `ch+0x280` 当前动作为默认攻击；只有它触发走路动作抑制与移动放行。
+- 余量：`margin% = clamp(10 + (13 - range) * 10, 10, 100)`，`effective_range = range + range * margin% / 100`。
+  取值来自 ACTDATABASE 基础攻击动作距离 `+0x05`（现为 4/6/12/13）：4→+100%、6→+80%、8→+60%、12→+20%、13→+10%。
 - 距离用 `CHAR_GetDistance`，范围用 `CHAR_GetActDistance`（动作表距离 + attr75），与
   `CHAR_ProcessNormalAIOnCombat` 构造目标列表时同口径。
-- `CHAR_StopCombat` 只清战斗标志、移除仇恨并复位动作，不清目标，因此先显式 `CHAR_SetTarget(ch,0)`。
-- `thread_local` 重入标志覆盖 `stop_combat` 触发的动作切换，避免二次进入范围门。
+- 超距只取消本次动作启动，不调用 `CHAR_SetTarget`/`CHAR_StopCombat`；回到范围内后由原版动作链再次尝试。
 
 ## 4. 关键常量（C18 arm64）
 
