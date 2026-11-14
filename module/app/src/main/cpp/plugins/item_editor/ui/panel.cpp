@@ -417,12 +417,14 @@ void draw_fixed_category_row() {
 void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
     const auto* adapter = ui();
     if (adapter == nullptr || index >= g_left_row_count) return;
+    const bool enabled = g_left_rows[index] != LeftRowKind::kQuantity ||
+                         g_draft.stackable;
     int64_t abs_x = 0, abs_y = 0;
     if (adapter->control_absolute_origin == nullptr ||
         !succeeded(adapter->control_absolute_origin(row, &abs_x, &abs_y))) return;
     if (adapter->draw_help_option_row != nullptr) {
         int32_t pressed = 0;
-        if (adapter->control_pressed != nullptr)
+        if (enabled && adapter->control_pressed != nullptr)
             (void)adapter->control_pressed(row, &pressed);
         (void)adapter->draw_help_option_row({abs_x + 4, abs_y + 2, 308, 44}, 0,
                                             static_cast<uint8_t>(pressed != 0));
@@ -478,13 +480,14 @@ void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
         default:
             return;
     }
-    draw_text(row, text, 16, 14, kText, 0, 0);
+    draw_text(row, text, 16, 14, enabled ? kText : kMuted, 0, 0);
 }
 void left_info_selected(void*, uint32_t index) {
     if (index >= g_left_row_count ||
         g_left_rows[index] != LeftRowKind::kQuantity ||
         !item_class_valid(g_draft.class_index) ||
-        item_class_is_equipment(g_draft.class_index)) return;
+        item_class_is_equipment(g_draft.class_index) ||
+        !g_draft.stackable) return;
     g_quantity_card_open_requested = true;
 }
 
@@ -1052,6 +1055,8 @@ void apply_item_card_action() {
                 g_draft.defense = stats.defense;
                 g_draft.magic_rate = stats.magic_rate;
                 g_draft.need_level = stats.need_level;
+                g_draft.stackable = stats.stackable != 0;
+                if (!g_draft.stackable) g_draft.count = 1;
             } else {
                 char message[128]{};
                 std::snprintf(message,sizeof(message),
@@ -1077,8 +1082,8 @@ void quantity_adjust_clicked(void* user) {
     const auto* delta = static_cast<const int32_t*>(user);
     if (delta == nullptr) return;
     const int64_t adjusted = static_cast<int64_t>(g_quantity_value) + *delta;
-    g_quantity_value = static_cast<int32_t>(std::max<int64_t>(1,
-        std::min<int64_t>(999,adjusted)));
+    g_quantity_value = static_cast<int32_t>(std::clamp<int64_t>(
+        adjusted,1,stack_limit_max_count()));
 }
 void quantity_confirm_clicked(void*) {
     g_quantity_card_pending_action = QuantityCardAction::kConfirm;
@@ -1108,11 +1113,12 @@ bool create_quantity_card() {
     if (c == nullptr || adapter == nullptr || c->panel_create == nullptr ||
         c->button_create == nullptr || adapter->set_draw_proc == nullptr ||
         !item_class_valid(g_draft.class_index) ||
-        item_class_is_equipment(g_draft.class_index)) {
+        item_class_is_equipment(g_draft.class_index) ||
+        !g_draft.stackable) {
         log_panel("op=quantity_card_create result=failed stage=precondition code=-1");
         return false;
     }
-    g_quantity_value = std::max(1,std::min(999,g_draft.count));
+    g_quantity_value = std::clamp(g_draft.count,1,stack_limit_max_count());
     const UiRect panel = panel_rect();
     const UiRect card_rect{panel.x+(panel.w-420)/2,panel.y+(panel.h-250)/2,420,250};
     const UiPanelDesc card{card_rect,{0,0,420,250},0,0};
@@ -1219,8 +1225,7 @@ void draw_quantity_card() {
     }
     char quantity[48]{};
     std::snprintf(quantity,sizeof(quantity),"数量：%d",g_quantity_value);
-    draw_text(g_quantity_card_root,"修改数量",210,18,kGold,2,2);
-    draw_text(g_quantity_card_root,quantity,210,56,kText,2,2);
+    draw_text(g_quantity_card_root,quantity,210,36,kText,2,2);
     for (uint32_t index = 0; index < 8; ++index)
         draw_quantity_card_button(g_quantity_adjust_buttons[index],
             kQuantityLabels[index],88,42);
@@ -1233,9 +1238,10 @@ void apply_quantity_action() {
     g_quantity_card_pending_action = QuantityCardAction::kNone;
     const bool changed = action == QuantityCardAction::kConfirm &&
         item_class_valid(g_draft.class_index) &&
-        !item_class_is_equipment(g_draft.class_index);
+        !item_class_is_equipment(g_draft.class_index) &&
+        g_draft.stackable;
     if (changed) {
-        g_draft.count = g_quantity_value;
+        g_draft.count = std::clamp(g_quantity_value,1,stack_limit_max_count());
         g_draft.dirty = true;
     }
     destroy_quantity_card();

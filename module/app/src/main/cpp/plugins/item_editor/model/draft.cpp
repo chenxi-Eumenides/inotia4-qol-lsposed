@@ -85,6 +85,7 @@ void draft_clear(ItemEditorDraft* draft) {
     *draft = {};
     draft->item_type = contracts::QolItemType::kUnknown;
     draft->count = 1;
+    draft->stackable = true;
     draft->raw_rarity = kDefaultRawRarity;
     draft->chaos_rate = kDefaultChaosRate;
     draft->jewel_attribute_type = -1;
@@ -98,6 +99,7 @@ void draft_load(ItemEditorDraft* draft, contracts::QolItemHandle source,
     draft->source = source;
     draft->source_valid = source.slot != 0 && source.generation != 0;
     draft->class_index = item_class_valid(class_index) ? class_index : -1;
+    draft->stackable = view.count_supported != 0;
     const bool has_category = (view.fields & contracts::kQolItemInventoryHasCategory) != 0 ||
                               view.category > 0;
     draft->item_id = has_category && view.category >= 0 ? view.category : -1;
@@ -148,6 +150,7 @@ bool draft_change_class(ItemEditorDraft* draft, int32_t class_index) {
         // 装备族之间保留装备数据；从物品族进入装备族只保留空装备骨架。
         if (!old_equipment) reset_equipment_fields(draft);
         draft->count = 1;
+        draft->stackable = false;
         reset_jewel_fields(draft);
         if (!old_equipment || old_group != new_group)
             draft->prefix_class_bits = new_group == ItemClassGroup::kWeapon ? 3 : 5;
@@ -155,6 +158,7 @@ bool draft_change_class(ItemEditorDraft* draft, int32_t class_index) {
         // 物品族不保留装备专属数据；数量可迁移，宝石属性只在宝石类之间保留。
         reset_equipment_fields(draft);
         draft->count = kept_count;
+        draft->stackable = true;
         const bool gem_to_gem = old_group == ItemClassGroup::kItem &&
                                 new_group == ItemClassGroup::kItem &&
                                 old_class == kItemClassGem && class_index == kItemClassGem;

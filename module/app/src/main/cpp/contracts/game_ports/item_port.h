@@ -181,6 +181,7 @@ struct QolItemBaseStats {
     int32_t defense;
     int32_t magic_rate;
     int32_t need_level;
+    int32_t stackable;
 };
 
 struct QolItemPortReadApi {

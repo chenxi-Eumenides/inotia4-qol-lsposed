@@ -14,6 +14,7 @@ constexpr const char* kPanelId = "item_editor";
 constexpr const char* kResourceId = "patch:SCENE_DRAW_EQUIP+0x1d0";
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolItemPort* g_item_port = nullptr;
+contracts::QolOwnerToken g_owner_token{};
 std::atomic<bool> g_feature_enabled{false};
 std::atomic<bool> g_enabled{false};
 
@@ -77,7 +78,9 @@ int install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         return 1;
     }
-    return contracts::succeeded(g_sdk->panels.register_provider(&kProvider)) ? 0 : 1;
+    if (!contracts::succeeded(g_sdk->panels.register_provider(&kProvider))) return 1;
+    g_owner_token = ctx.owner_token;
+    return 0;
 }
 void deactivate(contracts::PluginContext&) {
     g_feature_enabled.store(false, std::memory_order_release);
@@ -86,6 +89,7 @@ void deactivate(contracts::PluginContext&) {
     if (g_sdk != nullptr && g_sdk->panels.unregister_owner != nullptr)
         (void)g_sdk->panels.unregister_owner(kPluginId);
     g_item_port = nullptr;
+    g_owner_token = {};
     g_sdk = nullptr;
 }
 void on_enabled(contracts::PluginContext&) {
@@ -114,6 +118,20 @@ const contracts::PluginDescriptor kDescriptor{
 const contracts::PluginDescriptor& plugin_descriptor() { return kDescriptor; }
 const contracts::QolHostSdk* host_sdk() { return g_sdk; }
 const contracts::QolItemPort* item_port() { return g_item_port; }
+int32_t stack_limit_max_count() {
+    const auto* api = contracts::feature_if_available(host_sdk());
+    if (api == nullptr || api->read_feature == nullptr) return 99;
+    const auto* control = contracts::feature_control_if_available(host_sdk());
+    if (control == nullptr || control->read_owner_availability == nullptr) return 99;
+    contracts::FeatureOwnerAvailability availability{};
+    if (!contracts::succeeded(control->read_owner_availability(
+            control->context, "stack_limit", &availability)) ||
+        availability != contracts::FeatureOwnerAvailability::kAvailable) return 99;
+    uint8_t enabled = 0;
+    const QolResult result = api->read_feature(api->context,g_owner_token,
+        "stack_limit","stack_limit.limit_999",&enabled);
+    return contracts::succeeded(result) && enabled != 0 ? 999 : 99;
+}
 bool provider_open() { refresh_enabled(); return g_enabled.load(std::memory_order_acquire); }
 void provider_close() { panel_destroy(); }
 bool provider_active() { return panel_is_active(); }

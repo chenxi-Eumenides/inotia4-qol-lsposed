@@ -39,6 +39,7 @@ struct ItemEditorDraft {
     int32_t prefix_class_bits = 0;
 
     int32_t count = 1;
+    bool stackable = true;
     int32_t raw_rarity = kDefaultRawRarity;
     int32_t socket_total = 0;
     int32_t socket_filled = 0;
