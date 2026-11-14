@@ -257,6 +257,7 @@ decltype(fn_imgsys_get_loc) fn_imgsys_get_loc = &fake_loc;
 decltype(fn_get_group_title_img_type) fn_get_group_title_img_type = &fake_title_image_unit;
 decltype(fn_sgl_draw_texture_part_ex) fn_sgl_draw_texture_part_ex = &fake_draw;
 decltype(fn_grpx_get_font_height) fn_grpx_get_font_height = &fake_font_height;
+decltype(fn_grpx_get_text_width) fn_grpx_get_text_width = nullptr;
 decltype(fn_grpx_set_clip) fn_grpx_set_clip = &fake_set_clip;
 decltype(fn_grpx_reset_clip) fn_grpx_reset_clip = &fake_reset_clip;
 decltype(fn_grpx_set_font_color_rgb) fn_grpx_set_font_color_rgb = &fake_set_font_color;

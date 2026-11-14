@@ -404,6 +404,7 @@ decltype(fn_u_roll_dice_draw) fn_u_roll_dice_draw = nullptr;
 decltype(fn_grpx_set_font_color) fn_grpx_set_font_color = nullptr;
 decltype(fn_grpx_set_font_color_rgb) fn_grpx_set_font_color_rgb = nullptr;
 decltype(fn_grpx_draw_string_with_font) fn_grpx_draw_string_with_font = nullptr;
+decltype(fn_grpx_get_text_width) fn_grpx_get_text_width = nullptr;
 uint64_t fake_font_height(uint32_t) { return 16; }
 decltype(fn_grpx_get_font_height) fn_grpx_get_font_height = &fake_font_height;
 decltype(fn_grpx_draw_part) fn_grpx_draw_part = nullptr;
@@ -1088,8 +1089,12 @@ int main() {
                   "item detail open must append after inline color from code");
     static_assert(offsetof(qol::contracts::QolUiAdapter, item_detail_open) +
                       sizeof(adapter->item_detail_open) ==
+                  offsetof(qol::contracts::QolUiAdapter, text_width),
+                  "text width must append after item detail open");
+    static_assert(offsetof(qol::contracts::QolUiAdapter, text_width) +
+                      sizeof(adapter->text_width) ==
                   sizeof(qol::contracts::QolUiAdapter),
-                  "item detail open must remain the final adapter field");
+                  "text width must remain the final adapter field");
     uint64_t param[2]{};
     int source_control = 0;
     std::memcpy(&param[1], &source_control, sizeof(source_control));
