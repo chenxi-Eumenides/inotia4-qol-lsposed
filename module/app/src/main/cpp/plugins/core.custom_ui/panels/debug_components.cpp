@@ -39,7 +39,7 @@ constexpr int64_t kLeftCategoryGap = 8;
 constexpr uint32_t kStyleControlCount = 6;
 constexpr uint32_t kOpacityStep = 10;
 constexpr uint32_t kOpacityMax = 100;
-constexpr uint32_t kCategoryCount = 8;
+constexpr uint32_t kCategoryCount = 9;
 constexpr uint32_t kCategoryBox = 0;
 constexpr uint32_t kCategoryText = 1;
 constexpr uint32_t kCategoryArrow = 2;
@@ -48,6 +48,7 @@ constexpr uint32_t kCategoryButton = 4;
 constexpr uint32_t kCategoryBackNav = 5;
 constexpr uint32_t kCategoryRestricted = 6;
 constexpr uint32_t kCategoryItem = 7;
+constexpr uint32_t kCategoryTextDraw = 8;
 constexpr uint32_t kMaxPageHandles = 24;
 
 struct FillColorOption {
@@ -85,9 +86,10 @@ constexpr uint32_t kCommandHasFill = 1u << 1;
 constexpr uint32_t kCommandHasAlpha = 1u << 2;
 constexpr uint32_t kCommandFillShift = 3;
 constexpr uint32_t kCommandAlphaShift = 19;
-constexpr uint64_t kCommandHasPage = 1ull << 29;
+// Page index 8 needs a four-bit field; keep its presence flag outside that nibble.
+constexpr uint64_t kCommandHasPage = 1ull << 30;
 constexpr uint64_t kCommandPageShift = 26;
-constexpr uint64_t kCommandPageMask = 0x7u;
+constexpr uint64_t kCommandPageMask = 0xFu;
 constexpr uint64_t kCommandHasTextSubpage = 1ull << 32;
 constexpr uint64_t kCommandTextSubpageShift = 33;
 constexpr uint64_t kCommandTextSubpageMask = 0x1u;
@@ -124,7 +126,7 @@ constexpr FillColorOption kFillColors[] = {
 constexpr uint32_t kFillColorCount = sizeof(kFillColors) / sizeof(kFillColors[0]);
 constexpr const char* kCategoryNames[kCategoryCount] = {
     "方框", "文本按钮", "箭头按钮", "图标按钮", "普通控件按钮", "返回/导航",
-    "列表/主菜单专用", "物品图标/格子"};
+    "列表/主菜单专用", "物品图标/格子", "文本绘制"};
 constexpr size_t kStyledContainerApiSize =
     offsetof(contracts::QolUiComponents, draw_container_styled) +
     sizeof(((contracts::QolUiComponents*)nullptr)->draw_container_styled);
@@ -134,6 +136,15 @@ constexpr size_t kFlatButtonApiSize =
 constexpr size_t kItemComponentsApiSize =
     offsetof(contracts::QolUiComponents, item_slot_set_quality) +
     sizeof(((contracts::QolUiComponents*)nullptr)->item_slot_set_quality);
+constexpr size_t kControlTextApiSize =
+    offsetof(contracts::QolUiComponents, draw_control_text) +
+    sizeof(decltype(contracts::QolUiComponents::draw_control_text));
+constexpr size_t kTextWidthApiSize =
+    offsetof(contracts::QolUiAdapter, text_width) +
+    sizeof(decltype(contracts::QolUiAdapter::text_width));
+constexpr size_t kControlOriginApiSize =
+    offsetof(contracts::QolUiAdapter, control_absolute_origin) +
+    sizeof(decltype(contracts::QolUiAdapter::control_absolute_origin));
 
 contracts::UiRect g_panel_rect{0, 0, 960, 640};
 contracts::UiRect g_panel_area_rect{};
@@ -617,6 +628,10 @@ bool build_item_page(const contracts::QolUiComponents* components) {
     return true;
 }
 
+bool build_text_draw_page(const contracts::QolUiComponents*) {
+    return true;
+}
+
 bool build_native_button_page(const contracts::QolUiComponents* components) {
     const int64_t left = g_right_panel_rect.x + 32;
     const int64_t max_width = g_right_panel_rect.w - 64;
@@ -704,6 +719,7 @@ bool rebuild_page(int32_t category) {
         case static_cast<int32_t>(kCategoryArrow): ok = build_arrow_page(components); break;
         case static_cast<int32_t>(kCategoryIcon): ok = build_icon_page(components); break;
         case static_cast<int32_t>(kCategoryItem): ok = build_item_page(components); break;
+        case static_cast<int32_t>(kCategoryTextDraw): ok = build_text_draw_page(components); break;
         case static_cast<int32_t>(kCategoryButton): ok = build_native_button_page(components); break;
         case static_cast<int32_t>(kCategoryBackNav): ok = build_back_nav_page(components); break;
         default: ok = true; break;
@@ -992,6 +1008,159 @@ void draw_right_page_text(const contracts::QolUiAdapter* adapter,
             right_x, right_y + 490, 0, 0);
         (void)adapter->draw_string_with_font("选中框 loc 39；有物品示例 item_id=5（恢复药水（小））。",
             right_x, right_y + 516, 0, 0);
+    } else if (g_selected_category == kCategoryTextDraw) {
+        set_color(contracts::ui_theme::kTextNormal);
+        char status[96]{};
+        std::snprintf(status,sizeof(status),"adapter=%d.%d components=%u.%u",
+            adapter_major(),adapter_minor(),
+            components == nullptr ? 0u : static_cast<unsigned>(components->major),
+            components == nullptr ? 0u : static_cast<unsigned>(components->minor));
+        (void)adapter->draw_string_with_font(status,right_x,right_y+52,0,0);
+
+        (void)adapter->draw_string_with_font("align 基准（同一 x）",
+            right_x,right_y+75,0,0);
+        const int32_t align_x = static_cast<int32_t>(g_right_panel_rect.x+240);
+        static constexpr const char* kAlignLabels[] = {
+            "align=0 左对齐", "align=1 右对齐", "align=2 居中"};
+        constexpr int32_t kAlignValues[] = {0,1,2};
+        for (uint32_t i = 0; i < 3; ++i) {
+            const int32_t y = static_cast<int32_t>(right_y+95+
+                static_cast<int64_t>(i)*22);
+            (void)adapter->draw_string_with_font(kAlignLabels[i],right_x,y,0,0);
+            if (adapter->fill_rect != nullptr)
+                (void)adapter->fill_rect({align_x,y-4,1,32},
+                    contracts::ui_theme::kFrameGold);
+            (void)adapter->draw_string_with_font("文本 Align",align_x,y,
+                kAlignValues[i],0);
+        }
+        (void)adapter->draw_string_with_font(
+            "align=0 起点=x；align=1 终点=x；align=2 中心=x",
+            right_x,right_y+160,0,0);
+
+        (void)adapter->draw_string_with_font("font 档位（相同文本，效果对照）",
+            right_x,right_y+183,0,0);
+        constexpr int32_t kFontY[] = {204,232,268,308};
+        for (int32_t font = 0; font < 4; ++font) {
+            char label[16]{};
+            std::snprintf(label,sizeof(label),"font=%d",font);
+            const int32_t y = static_cast<int32_t>(right_y+kFontY[font]);
+            (void)adapter->draw_string_with_font(label,right_x,y,0,0);
+            (void)adapter->draw_string_with_font("Font 0/1/2/3 示例",
+                right_x+110,y,0,font);
+        }
+
+        (void)adapter->draw_string_with_font("颜色（RGB）",
+            right_x,right_y+344,0,0);
+        constexpr uint32_t kDemoColors[] = {
+            contracts::ui_theme::kTextGold,
+            contracts::ui_theme::kTextNormal,
+            contracts::ui_theme::kTextDisabled,
+            contracts::ui_theme::kError};
+        constexpr const char* kDemoColorNames[] = {"金","白","灰","红"};
+        for (uint32_t i = 0; i < 4; ++i) {
+            const uint32_t color = kDemoColors[i];
+            char label[48]{};
+            std::snprintf(label,sizeof(label),"%s RGB(%d,%d,%d)",
+                kDemoColorNames[i],color_channel(color,0),color_channel(color,8),
+                color_channel(color,16));
+            const int32_t y = static_cast<int32_t>(right_y+366+
+                static_cast<int64_t>(i)*22);
+            set_color(contracts::ui_theme::kTextNormal);
+            (void)adapter->draw_string_with_font(label,right_x,y,0,0);
+            set_color(color);
+            (void)adapter->draw_string_with_font("颜色示例",
+                right_x+190,y,0,0);
+        }
+
+        (void)adapter->draw_string_with_font("text_width 与右对齐",
+            right_x,right_y+456,0,0);
+        const bool text_width_available = adapter->minor >= 40 &&
+            adapter->size >= kTextWidthApiSize && adapter->text_width != nullptr;
+        int32_t measured_width = 0;
+        const QolResult width_result = text_width_available
+            ? adapter->text_width("右对齐宽度测试",0,&measured_width)
+            : contracts::error(kQolErrNotReady,"text_width unavailable",23);
+        if (text_width_available && contracts::succeeded(width_result) &&
+            measured_width >= 0 && measured_width <= 480) {
+            char width_text[48]{};
+            std::snprintf(width_text,sizeof(width_text),"W=%d",measured_width);
+            set_color(contracts::ui_theme::kTextNormal);
+            (void)adapter->draw_string_with_font(width_text,right_x,right_y+478,0,0);
+            const int32_t width_x = static_cast<int32_t>(g_right_panel_rect.x+480);
+            const int32_t width_y = static_cast<int32_t>(right_y+500);
+            if (adapter->fill_rect != nullptr)
+                (void)adapter->fill_rect({width_x,width_y-4,1,32},
+                    contracts::ui_theme::kFrameGold);
+            set_color(contracts::ui_theme::kTextNormal);
+            (void)adapter->draw_string_with_font("右对齐宽度测试",width_x,width_y,1,0);
+            set_color(contracts::ui_theme::kTextGold);
+            (void)adapter->draw_string_with_font("右对齐宽度测试",
+                width_x-measured_width,width_y,0,0);
+            set_color(contracts::ui_theme::kTextNormal);
+            (void)adapter->draw_string_with_font("align=1 的终点与 align=0 的终点应重合",
+                right_x,right_y+522,0,0);
+        } else {
+            set_color(contracts::ui_theme::kTextNormal);
+            if (!text_width_available) {
+                (void)adapter->draw_string_with_font(
+                    "text_width 不可用（需要 adapter minor 40）",
+                    right_x,right_y+478,0,0);
+            } else if (!contracts::succeeded(width_result)) {
+                char failure[56]{};
+                std::snprintf(failure,sizeof(failure),
+                    "text_width 调用失败 code=%d",width_result.code);
+                (void)adapter->draw_string_with_font(failure,right_x,right_y+478,0,0);
+            } else {
+                char invalid_width[56]{};
+                std::snprintf(invalid_width,sizeof(invalid_width),
+                    "W=%d，超出演示范围",measured_width);
+                (void)adapter->draw_string_with_font(invalid_width,
+                    right_x,right_y+478,0,0);
+            }
+        }
+
+        (void)adapter->draw_string_with_font("draw_control_text 对比",
+            right_x,right_y+544,0,0);
+        const int32_t control_y = static_cast<int32_t>(right_y+562);
+        const int64_t control_text_origin_size =
+            offsetof(contracts::QolUiAdapter,control_absolute_origin) +
+            sizeof(decltype(contracts::QolUiAdapter::control_absolute_origin));
+        int64_t root_x = 0;
+        int64_t root_y = 0;
+        const bool root_origin_available = adapter->size >= control_text_origin_size &&
+            adapter->control_absolute_origin != nullptr &&
+            contracts::succeeded(adapter->control_absolute_origin(g_root,&root_x,&root_y));
+        const int32_t direct_x = static_cast<int32_t>(g_right_panel_rect.x+32);
+        const int32_t local_x = root_origin_available
+            ? static_cast<int32_t>(g_right_panel_rect.x+32-root_x) : 0;
+        const int32_t local_y = root_origin_available
+            ? static_cast<int32_t>(control_y-root_y) : 0;
+        const bool control_text_available = components != nullptr &&
+            components->size >= kControlTextApiSize &&
+            components->draw_control_text != nullptr && root_origin_available;
+        if (control_text_available) {
+            const QolResult result = components->draw_control_text(
+                g_root,"draw_control_text",local_x,local_y,
+                contracts::ui_theme::kTextGold,0,0);
+            if (contracts::succeeded(result)) {
+                set_color(contracts::ui_theme::kTextNormal);
+                (void)adapter->draw_string_with_font("draw_string_with_font",
+                    direct_x+244,control_y,0,0);
+            } else {
+                char failure[48]{};
+                std::snprintf(failure,sizeof(failure),
+                    "draw_control_text 调用失败 code=%d",result.code);
+                set_color(contracts::ui_theme::kTextNormal);
+                (void)adapter->draw_string_with_font(failure,right_x,control_y,0,0);
+            }
+        } else {
+            set_color(contracts::ui_theme::kTextNormal);
+            (void)adapter->draw_string_with_font("draw_control_text 接口/根控件原点不可用",
+                right_x,control_y,0,0);
+        }
+        (void)adapter->draw_string_with_font(
+            "控件绝对原点+局部偏移；draw_string_with_font 使用绝对坐标",
+            right_x,right_y+568,0,0);
     } else if (g_selected_category == kCategoryButton) {
         set_color(contracts::ui_theme::kTextNormal);
         const int64_t max_width = g_right_panel_rect.w - 64;
