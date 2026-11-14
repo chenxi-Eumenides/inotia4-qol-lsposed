@@ -393,7 +393,7 @@ void draw_right_row(void*, uint32_t row_index, QolUiHandle row, uint8_t) {
         name = "空";
     }
     draw_text(row, name, 20, 26, enabled ? kText : kMuted);
-    draw_text(row, value, 300, 26, value_color, 2, 1);
+    draw_text(row, value, 300, 26, value_color, 1, 1);
     draw_text(row, "×", 366, 18, enabled ? kGold : kMuted, 1, 2);
 }
 
@@ -414,7 +414,7 @@ void draw_name_row(const char* value) {
               static_cast<int32_t>(rect.y + 14), enabled ? kText : kMuted, 0, 0);
     draw_text(g_root, value == nullptr ? "" : value,
               static_cast<int32_t>(rect.x + rect.w - 16),
-              static_cast<int32_t>(rect.y + 14), enabled ? kText : kMuted, 2, 0);
+              static_cast<int32_t>(rect.y + 14), enabled ? kText : kMuted, 1, 0);
 }
 void draw_fixed_category_row() {
     const auto* adapter = ui();
@@ -431,7 +431,7 @@ void draw_fixed_category_row() {
     char value[120]{};
     format_category_row(value,sizeof(value));
     draw_text(g_category_row,"类别",16,14,kText,0,0);
-    draw_text(g_category_row,value,300,14,kText,2,0);
+    draw_text(g_category_row,value,300,14,kText,1,0);
 }
 void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
     const auto* adapter = ui();
@@ -512,7 +512,7 @@ void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
             return;
     }
     draw_text(row, key, 16, 14, enabled ? kText : kMuted, 0, 0);
-    draw_text(row, value, 300, 14, enabled ? kText : kMuted, 2, 0);
+    draw_text(row, value, 300, 14, enabled ? kText : kMuted, 1, 0);
 }
 void resolve_variant_series() {
     if (g_draft.source_valid && g_draft.variant_series != 0) return;
@@ -1544,19 +1544,21 @@ bool create_prefix_card() {
     return true;
 }
 void draw_prefix_card_button(QolUiHandle button,const char* label,
-                             int32_t width,int32_t height,bool selected) {
+                             int32_t width,int32_t height,bool selected,
+                             bool enabled = true) {
     const auto* adapter = ui();
     if (adapter == nullptr || button == nullptr) return;
     int64_t abs_x = 0,abs_y = 0;
     if (adapter->control_absolute_origin == nullptr ||
         !succeeded(adapter->control_absolute_origin(button,&abs_x,&abs_y))) return;
     int32_t pressed = 0;
-    if (adapter->control_pressed != nullptr)
+    if (enabled && adapter->control_pressed != nullptr)
         (void)adapter->control_pressed(button,&pressed);
     if (adapter->draw_help_option_row != nullptr)
         (void)adapter->draw_help_option_row({abs_x,abs_y,width,height},
             static_cast<uint8_t>(selected),static_cast<uint8_t>(pressed != 0));
-    draw_text(button,label,width/2,height/2-8,selected ? kGold : kText,2,0);
+    draw_text(button,label,width/2,height/2-8,
+        selected ? kGold : (enabled ? kText : kMuted),2,0);
 }
 void draw_prefix_card() {
     if (g_prefix_card_root == nullptr) return;
@@ -1595,9 +1597,9 @@ void draw_prefix_card() {
         draw_prefix_card_button(g_prefix_buttons[index],label,138,42,
             raw == g_prefix_selected_raw);
     }
-    draw_prefix_card_button(g_prefix_confirm,"确定",110,42,
+    draw_prefix_card_button(g_prefix_confirm,"确定",110,42,false,
         g_prefix_selected_raw >= 0);
-    draw_prefix_card_button(g_prefix_cancel,"取消",110,42,true);
+    draw_prefix_card_button(g_prefix_cancel,"取消",110,42,false,true);
 }
 void apply_prefix_card_action() {
     if (g_prefix_card_pending_action == PrefixCardAction::kNone) return;
