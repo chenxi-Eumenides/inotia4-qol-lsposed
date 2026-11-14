@@ -96,6 +96,7 @@ struct Component {
     UiRect paint_local{};
     int32_t item_id = -1;
     int32_t item_count = -1;
+    int32_t item_quality = -1;
     uint32_t item_flags = 0;
 };
 
@@ -2569,7 +2570,8 @@ QolResult item_icon_draw(contracts::QolUiHandle handle) {
 
 QolResult item_slot_create(const contracts::UiItemSlotDesc* desc,
                            contracts::QolUiHandle parent, contracts::QolUiHandle* out) {
-    if (desc == nullptr || parent == nullptr || !valid_item_id(desc->item_id)) {
+    if (desc == nullptr || parent == nullptr || !valid_item_id(desc->item_id) ||
+        desc->quality < -1 || desc->quality > 4) {
         return invalid_argument();
     }
     const QolResult result = create_component(ComponentKind::kItemSlot, 2, desc->rect, parent,
@@ -2580,6 +2582,7 @@ QolResult item_slot_create(const contracts::UiItemSlotDesc* desc,
     component->item_id = desc->item_id;
     component->item_count = desc->count;
     component->item_flags = desc->flags;
+    component->item_quality = desc->quality;
     return contracts::ok();
 }
 
@@ -2600,6 +2603,16 @@ QolResult item_slot_set_flags(contracts::QolUiHandle handle, uint32_t flags) {
     if (!contracts::succeeded(lookup)) return lookup;
     if (component->kind != ComponentKind::kItemSlot) return unsupported();
     component->item_flags = flags;
+    return contracts::ok();
+}
+
+QolResult item_slot_set_quality(contracts::QolUiHandle handle, int32_t quality) {
+    if (quality < -1 || quality > 4) return invalid_argument();
+    Component* component = nullptr;
+    const QolResult lookup = require_component(handle, &component);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (component->kind != ComponentKind::kItemSlot) return unsupported();
+    component->item_quality = quality;
     return contracts::ok();
 }
 
@@ -2704,6 +2717,19 @@ QolResult item_slot_draw(contracts::QolUiHandle handle) {
                                 static_cast<int32_t>(component->rect.h - 20),
                                 dimmed ? 0xFF99928Au : 0xFFF2E8D5u, 2, 1);
     }
+    if (component->item_quality >= 0) {
+        if (g_adapter->fill_rect == nullptr) return not_ready();
+        static constexpr uint32_t kQualityColors[5] = {
+            0xFFF5F5F5u, 0xFF4CC85Au, 0xFF4C8DFFu, 0xFFFFD24Cu, 0xFFB36BFFu};
+        const int64_t badge_x = x + component->rect.w - 16;
+        const int64_t badge_y = y + 2;
+        result = g_adapter->fill_rect({badge_x, badge_y, 14, 14}, 0xFF101010u);
+        if (!contracts::succeeded(result)) return result;
+        result = g_adapter->fill_rect(
+            {badge_x + 1, badge_y + 1, 12, 12},
+            kQualityColors[component->item_quality]);
+        if (!contracts::succeeded(result)) return result;
+    }
     return contracts::ok();
 }
 
@@ -2795,6 +2821,7 @@ const contracts::QolUiComponents kUiComponents{
     &item_slot_set,
     &item_slot_draw,
     &item_slot_set_flags,
+    &item_slot_set_quality,
 };
 
 }  // namespace

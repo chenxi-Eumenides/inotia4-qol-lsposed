@@ -7,6 +7,7 @@ namespace qol::features::item_editor {
 inline constexpr uint32_t kResourceCount = 1;
 const contracts::PluginDescriptor& plugin_descriptor();
 const contracts::QolHostSdk* host_sdk();
+const contracts::QolGameHost* game_host();
 const contracts::QolItemPort* item_port();
 int32_t stack_limit_max_count();
 void item_editor_equip_draw_wrapper();

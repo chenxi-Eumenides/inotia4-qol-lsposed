@@ -132,8 +132,8 @@ constexpr size_t kFlatButtonApiSize =
     offsetof(contracts::QolUiComponents, flat_text_button_create) +
     sizeof(((contracts::QolUiComponents*)nullptr)->flat_text_button_create);
 constexpr size_t kItemComponentsApiSize =
-    offsetof(contracts::QolUiComponents, item_slot_draw) +
-    sizeof(((contracts::QolUiComponents*)nullptr)->item_slot_draw);
+    offsetof(contracts::QolUiComponents, item_slot_set_quality) +
+    sizeof(((contracts::QolUiComponents*)nullptr)->item_slot_set_quality);
 
 contracts::UiRect g_panel_rect{0, 0, 960, 640};
 contracts::UiRect g_panel_area_rect{};
@@ -576,9 +576,10 @@ bool build_icon_page(const contracts::QolUiComponents* components) {
 
 bool item_components_available(const contracts::QolUiComponents* components) {
     return components != nullptr && components->major == contracts::kUiContractMajor &&
-        components->minor >= 26 && components->size >= kItemComponentsApiSize &&
+        components->minor >= 27 && components->size >= kItemComponentsApiSize &&
         components->item_icon_create != nullptr && components->item_icon_draw != nullptr &&
-        components->item_slot_create != nullptr && components->item_slot_draw != nullptr;
+        components->item_slot_create != nullptr && components->item_slot_draw != nullptr &&
+        components->item_slot_set_quality != nullptr;
 }
 
 bool build_item_page(const contracts::QolUiComponents* components) {
@@ -595,17 +596,17 @@ bool build_item_page(const contracts::QolUiComponents* components) {
 
     const contracts::UiItemSlotDesc slots[] = {
         {{left + 138, first_row, 74, 74}, -1, -1,
-            contracts::kUiItemSlotShowFrame},
+            contracts::kUiItemSlotShowFrame, -1},
         {{left + 250, first_row, 74, 74}, 5, -1,
-            contracts::kUiItemSlotShowFrame},
+            contracts::kUiItemSlotShowFrame, 0},
         {{left + 362, first_row, 74, 74}, 5, -1,
-            contracts::kUiItemSlotShowFrame | contracts::kUiItemSlotSelected},
+            contracts::kUiItemSlotShowFrame, 1},
         {{left + 60, second_row, 74, 74}, 5, -1,
-            contracts::kUiItemSlotShowFrame | contracts::kUiItemSlotDimmed},
+            contracts::kUiItemSlotShowFrame, 2},
         {{left + 190, second_row, 74, 74}, 5, -1,
-            contracts::kUiItemSlotShowFrame},
-        {{left + 330, second_row, 96, 96}, 5, -1,
-            contracts::kUiItemSlotShowFrame},
+            contracts::kUiItemSlotShowFrame, 3},
+        {{left + 330, second_row, 74, 74}, 5, -1,
+            contracts::kUiItemSlotShowFrame, 4},
     };
     for (uint32_t i = 0; i < sizeof(slots) / sizeof(slots[0]); ++i) {
         handle = nullptr;
@@ -970,18 +971,18 @@ void draw_right_page_text(const contracts::QolUiAdapter* adapter,
     } else if (g_selected_category == kCategoryItem) {
         set_color(contracts::ui_theme::kTextNormal);
         if (!item_components_available(components)) {
-            (void)adapter->draw_string_with_font("组件接口不可用（需要 minor 26）",
+            (void)adapter->draw_string_with_font("组件接口不可用（需要 minor 27）",
                 right_x, right_y + 88, 0, 0);
         } else {
             const int32_t first_row_y = static_cast<int32_t>(right_y + 96 + 82);
             const int32_t second_row_y = static_cast<int32_t>(right_y + 272 + 104);
             (void)adapter->draw_string_with_font("item_icon", right_x + 34, first_row_y, 0, 0);
             (void)adapter->draw_string_with_font("空槽", right_x + 138, first_row_y, 0, 0);
-            (void)adapter->draw_string_with_font("有物品", right_x + 250, first_row_y, 0, 0);
-            (void)adapter->draw_string_with_font("选中", right_x + 362, first_row_y, 0, 0);
-            (void)adapter->draw_string_with_font("灰显", right_x + 60, second_row_y, 0, 0);
-            (void)adapter->draw_string_with_font("74", right_x + 190, second_row_y, 0, 0);
-            (void)adapter->draw_string_with_font("96", right_x + 330, second_row_y, 0, 0);
+            (void)adapter->draw_string_with_font("白", right_x + 250, first_row_y, 0, 0);
+            (void)adapter->draw_string_with_font("绿", right_x + 362, first_row_y, 0, 0);
+            (void)adapter->draw_string_with_font("蓝", right_x + 60, second_row_y, 0, 0);
+            (void)adapter->draw_string_with_font("黄", right_x + 190, second_row_y, 0, 0);
+            (void)adapter->draw_string_with_font("紫", right_x + 330, second_row_y, 0, 0);
         }
         (void)adapter->draw_string_with_font("两个组件均只接收 item_id；空槽使用 -1。",
             right_x, right_y + 438, 0, 0);

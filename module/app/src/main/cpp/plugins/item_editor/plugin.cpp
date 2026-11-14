@@ -13,6 +13,7 @@ constexpr const char* kPluginId = "item_editor";
 constexpr const char* kPanelId = "item_editor";
 constexpr const char* kResourceId = "patch:SCENE_DRAW_EQUIP+0x1d0";
 const contracts::QolHostSdk* g_sdk = nullptr;
+const contracts::QolGameHost* g_game = nullptr;
 const contracts::QolItemPort* g_item_port = nullptr;
 contracts::QolOwnerToken g_owner_token{};
 std::atomic<bool> g_feature_enabled{false};
@@ -65,6 +66,7 @@ int install(contracts::PluginContext& ctx) {
     if (ctx.sdk == nullptr || ctx.ports == nullptr || ctx.port_count != 1 || ctx.ports[0] == nullptr ||
         ctx.sdk->panels.register_provider == nullptr) return 1;
     g_sdk = ctx.sdk;
+    g_game = ctx.game;
     g_item_port = static_cast<const contracts::QolItemPort*>(ctx.ports[0]);
     if (!contracts::qol_item_port_draw_icon_size_valid(g_item_port) ||
         !contracts::qol_item_port_class_index_size_valid(g_item_port) ||
@@ -75,10 +77,16 @@ int install(contracts::PluginContext& ctx) {
         g_item_port->read.read_item_base_stats == nullptr ||
         g_item_port->read.draw_icon == nullptr) {
         g_item_port = nullptr;
+        g_game = nullptr;
         g_sdk = nullptr;
         return 1;
     }
-    if (!contracts::succeeded(g_sdk->panels.register_provider(&kProvider))) return 1;
+    if (!contracts::succeeded(g_sdk->panels.register_provider(&kProvider))) {
+        g_item_port = nullptr;
+        g_game = nullptr;
+        g_sdk = nullptr;
+        return 1;
+    }
     g_owner_token = ctx.owner_token;
     return 0;
 }
@@ -89,6 +97,7 @@ void deactivate(contracts::PluginContext&) {
     if (g_sdk != nullptr && g_sdk->panels.unregister_owner != nullptr)
         (void)g_sdk->panels.unregister_owner(kPluginId);
     g_item_port = nullptr;
+    g_game = nullptr;
     g_owner_token = {};
     g_sdk = nullptr;
 }
@@ -117,6 +126,7 @@ const contracts::PluginDescriptor kDescriptor{
 }
 const contracts::PluginDescriptor& plugin_descriptor() { return kDescriptor; }
 const contracts::QolHostSdk* host_sdk() { return g_sdk; }
+const contracts::QolGameHost* game_host() { return g_game; }
 const contracts::QolItemPort* item_port() { return g_item_port; }
 int32_t stack_limit_max_count() {
     const auto* api = contracts::feature_if_available(host_sdk());

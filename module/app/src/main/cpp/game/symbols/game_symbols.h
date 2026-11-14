@@ -251,8 +251,12 @@ constexpr uintptr_t G_SKILL_INFO_DATA_GOT_VMA = 0x2f4000 + 0x9e0;      // 技能
 constexpr uintptr_t G_SKILL_INFO_SIZE_GOT_VMA = 0x2f6000 + 0x150;      // 技能信息表记录大小（u8，=32B）
 constexpr uintptr_t G_SKILL_MAXLVL_MAP_DATA_GOT_VMA = 0x2f3000 + 0x758; // max_level→角色偏移映射表（双层解引用；记录+9=角色偏移，CHAR_GetActMaxLevel 用）
 constexpr uintptr_t G_SKILL_MAXLVL_MAP_SIZE_GOT_VMA = 0x2f6000 + 0xe68; // max_level 映射表记录大小（u8，=11B）
-constexpr uintptr_t G_ITEMCLASS_DATA_GOT_VMA = 0x2f4000 + 0xcf0;       // ITEMCLASSBASE 数据（双层解引用；记录+2=槽位表索引、+7 bit4=不可装备；运行时 23B/条 vs JSON 31B）
-constexpr uintptr_t G_ITEMCLASS_SIZE_GOT_VMA = 0x2f5000 + 0x308;       // ITEMCLASSBASE 记录大小（u8）
+constexpr uintptr_t G_ITEMCLASS_DATA_GOT_VMA = 0x2f4000 + 0xcf0;       // 旧名保留：实际指向 ITEMDATABASE 数据（双层解引用；记录+2=类别索引、+7 bit4=不可装备；运行时 23B/条）
+constexpr uintptr_t G_ITEMCLASS_SIZE_GOT_VMA = 0x2f5000 + 0x308;       // 旧名保留：实际为 ITEMDATABASE 记录大小（u8=23）
+// ITEMCLASSBASE 真表（ITEM_GetIconImage / ITEMSYSTEM_CreateItem 使用）：指针槽双层解引用，
+// 运行时 31B/条；+0xB 为武器魔法倍率。
+constexpr uintptr_t G_ITEMCLASSBASE_DATA_GOT_VMA = 0x2f5000 + 0x2912;
+constexpr uintptr_t G_ITEMCLASSBASE_SIZE_GOT_VMA = 0x2f3000 + 0x1048;
 constexpr uintptr_t G_EQUIP_SLOT_TABLE_DATA_GOT_VMA = 0x2f5000 + 0xb60; // 装备槽位表数据（双层解引用；记录+4=最终槽位 0头/1护手/2斗篷/3体/4鞋/5主手/6副手/7项链/8戒指；CHAR_FindEquipSlot 0xe4fd0）
 constexpr uintptr_t G_EQUIP_SLOT_TABLE_SIZE_GOT_VMA = 0x2f3000 + 0x418; // 装备槽位表记录大小（u8）
 constexpr uintptr_t G_LEVEL_ATTR_IDX_GOT_VMA = 0x2f3000 + 0xe70;       // 等级驱动属性索引表（双层解引用；索引 u8×9 → 公式表；CHAR_UpdateAttr 0xdfb30 id28/id30）

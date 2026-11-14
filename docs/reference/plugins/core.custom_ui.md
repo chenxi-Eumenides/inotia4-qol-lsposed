@@ -10,7 +10,7 @@
 
 | capability | 版本 | 内容 |
 |---|---:|---|
-| `ui_components` | 2.26 | `QolUiComponents`：原生控件/组件创建与销毁、文本与列表、滚动列表、帮助页、导航/箭头/图标/文本按钮工厂、锚定控件、容器与形状绘制、物品图标/格子组件；Major 2 起唯一容器入口为 `draw_container_styled`（minor 23 槽），minor 24 追加 `item_icon_*` / `item_slot_*`，minor 26 将其改为 item_id-only |
+| `ui_components` | 2.27 | `QolUiComponents`：原生控件/组件创建与销毁、文本与列表、滚动列表、帮助页、导航/箭头/图标/文本按钮工厂、锚定控件、容器与形状绘制、物品图标/格子组件；Major 2 起唯一容器入口为 `draw_container_styled`（minor 23 槽），minor 24 追加物品组件，minor 26 将其改为 item_id-only，minor 27 追加格子品质角标 |
 | `ui_panels` | 1.3 | `UiPanelsApi`：`open/close/active/block_reason/deactivate_owner/back`，逻辑栈深 4 |
 | `ui_choice` | 1.1 | `UiChoiceApi`：原生 UICHOICE 的 `open/active/close`；1.1 尾追加稳定 `dialog_type_id` |
 | `ui_confirmation` | 1.1 | `UiConfirmationApi`：单 owner Yes/No 原生弹窗的 `open/active/close`；1.1 尾追加 `open_text`（显式正文） |
@@ -106,7 +106,7 @@
 - 触摸分发 `dispatch_touch`（`:422`）只在根矩形内命中子组件，不穿透原生控件。
 - 文本按钮工厂：`text_button_create_impl` 承载校验与创建（`:692`），遗留入口 `text_button_create`（`:766`）；`capsule_`/`decorated_`/`compact_capsule_`/`main_menu_decorated_` 为显式外观工厂（`:1549-1637`）。遗留 `text_button_draw`（`:906`）仍按 decorated 紧凑比例绘制，`height = min(rect.h, rect.w × 48 / 220)`（`:965`）。
 - 图标/箭头/导航按钮：`icon_button_*`（`:1096-1214`）、`arrow_button_*`（`:1003-1095`）、`nav_button_*`（`:1640-1733`）。导航按钮点击一律延迟请求弹栈顶，`on_click` 只是附加通知。
-- 物品图标/格子：minor 26 的 `item_icon_create/set/draw` 与 `item_slot_create/set/draw` 只接收 `item_id`（负值为空），不接收物品句柄或地址；`item_slot` 在图标外绘制背景框、选中态、灰显态与数量。格底与选中框复用游戏原生 `UI_003`（unit 15：loc 41 为 74×74 格底，loc 39 为选中外框），仅 `kUiItemSlotShowFrame` 开启时绘制格底。图标绘制目标为 64×64 左上角，组件在 rect 内居中；`ITEM_DrawByIDPorting @0x106834` 的 mode=2 在 x 方向居中且 y 减 30，因此适配层分别补偿 `+32`、`+30`。该入口直接查 `ITEMDATABASE` 后由 IMGSYS group 23–31 绘制，不构造临时物品、不触发 `ITEM_IsRealBroken`、不依赖 SNASYS；先按 `ITEMDATABASE_nRecordCount` 做下标边界检查。实现经 `QOL_PORT_ITEM` 5.2 只读绘制，不持有物品指针生命周期。
+- 物品图标/格子：minor 26 的 `item_icon_create/set/draw` 与 `item_slot_create/set/draw` 只接收 `item_id`（负值为空），不接收物品句柄或地址；`item_slot` 在图标外绘制背景框、选中态、灰显态、数量，并可由 minor 27 的 `item_slot_set_quality` 设置 0..4 右上品质色块（负值不显示）。格底与选中框复用游戏原生 `UI_003`（unit 15：loc 41 为 74×74 格底，loc 39 为选中外框），仅 `kUiItemSlotShowFrame` 开启时绘制格底。图标绘制目标为 64×64 左上角，组件在 rect 内居中；`ITEM_DrawByIDPorting @0x106834` 的 mode=2 在 x 方向居中且 y 减 30，因此适配层分别补偿 `+32`、`+30`。该入口直接查 `ITEMDATABASE` 后由 IMGSYS group 23–31 绘制，不构造临时物品、不触发 `ITEM_IsRealBroken`、不依赖 SNASYS；先按 `ITEMDATABASE_nRecordCount` 做下标边界检查。实现经 `QOL_PORT_ITEM` 5.2 只读绘制，不持有物品指针生命周期。
   `kUiNavButtonAuto` 的绘制判定：`ui_panels_depth() > 1` **或** PopupHost 快照存在原生面板基线（`original_popup_count_ > 0`，即模块面板叠在原版面板之上，经 `ui_panels_has_original_popup_baseline()` 查询；无 host 时返回 false）→ 显示返回箭头；否则（深 1 且无原生基线）显示关闭 X。`kUiNavButtonForceClose` / `kUiNavButtonForceBack` 不受该判定影响。
 
 ### 3.2 面板注册与导航

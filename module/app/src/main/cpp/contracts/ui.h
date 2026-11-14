@@ -13,7 +13,7 @@
 namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
-constexpr uint16_t kUiContractMajor = 2, kUiContractMinor = 26;
+constexpr uint16_t kUiContractMajor = 2, kUiContractMinor = 27;
 constexpr uint16_t kUiAdapterMajor = 2, kUiAdapterMinor = 39;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 2;
@@ -382,6 +382,7 @@ struct UiItemSlotDesc {
     int32_t item_id;   // ITEMDATABASE 下标；<0 = 空
     int32_t count;  // -1 = 不显示/由调用方维护
     uint32_t flags;
+    int32_t quality;  // 0..4 品质角标；<0 不显示
 };
 
 struct QolUiComponents {
@@ -563,6 +564,8 @@ struct QolUiComponents {
     QolResult (*item_slot_draw)(QolUiHandle);
     // Minor 25 append-only: 更新格子的 flags（ShowFrame/Selected/ShowOuterFrame 等）。
     QolResult (*item_slot_set_flags)(QolUiHandle, uint32_t flags);
+    // Minor 27 append-only: 设置 item_slot 品质角标（0..4；<0 不显示）。
+    QolResult (*item_slot_set_quality)(QolUiHandle, int32_t quality);
 };
 
 using QolUiDrawFn = void (*)(void* control);

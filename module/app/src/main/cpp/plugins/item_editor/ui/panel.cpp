@@ -3,6 +3,7 @@
 #include "../../../contracts/panels.h"
 #include "../../../contracts/ui.h"
 #include "../../../contracts/ui_theme.h"
+#include "../../../contracts/item_equipment_limits.h"
 #include "../../../contracts/attribute_quality.h"
 #include "../../../contracts/game_ports/item_port.h"
 #include "../../../contracts/log_domain.h"
@@ -88,6 +89,16 @@ QuantityCardAction g_quantity_card_pending_action = QuantityCardAction::kNone;
 int32_t g_quantity_deltas[] = {-1,-10,-100,-1000,1,10,100,1000};
 constexpr const char* kQuantityLabels[] = {
     "-1","-10","-100","-1000","+1","+10","+100","+1000"};
+QolUiHandle g_prefix_card_root = nullptr;
+QolUiHandle g_prefix_buttons[15]{};
+int32_t g_prefix_option_raw[15]{};
+uint32_t g_prefix_option_count = 0;
+QolUiHandle g_prefix_confirm = nullptr;
+QolUiHandle g_prefix_cancel = nullptr;
+bool g_prefix_card_open_requested = false;
+int32_t g_prefix_selected_raw = -1;
+enum class PrefixCardAction : uint8_t { kNone, kConfirm, kCancel };
+PrefixCardAction g_prefix_card_pending_action = PrefixCardAction::kNone;
 std::atomic<bool> g_active{false};
 
 const QolUiComponents* components() {
@@ -95,8 +106,12 @@ const QolUiComponents* components() {
     if (sdk == nullptr || sdk->capabilities.require == nullptr) return nullptr;
     const void* value = nullptr;
     if (!succeeded(sdk->capabilities.require(kUiComponentsCapabilityId,
-            {kUiContractMajor, kUiContractMinor}, &value))) return nullptr;
-    return static_cast<const QolUiComponents*>(value);
+            {kUiContractMajor, 27}, &value))) return nullptr;
+    const auto* api = static_cast<const QolUiComponents*>(value);
+    constexpr size_t required_size = offsetof(QolUiComponents,item_slot_set_quality) +
+        sizeof(decltype(QolUiComponents::item_slot_set_quality));
+    return api != nullptr && api->minor >= 27 &&
+        api->size >= required_size ? api : nullptr;
 }
 const QolUiAdapter* ui() { return host_sdk() == nullptr ? nullptr : host_sdk()->ui; }
 UiRect panel_rect() {
@@ -135,9 +150,9 @@ void build_left_rows() {
             g_left_rows[g_left_row_count++] = LeftRowKind::kDamage;
         if (g_draft.defense != 0)
             g_left_rows[g_left_row_count++] = LeftRowKind::kDefense;
-        const int64_t magic_damage =
-            static_cast<int64_t>(g_draft.damage) * g_draft.magic_rate / 100;
-        if (magic_damage != 0)
+        const int64_t magic_scaled =
+            static_cast<int64_t>(g_draft.damage) * g_draft.magic_rate;
+        if (magic_scaled != 0)
             g_left_rows[g_left_row_count++] = LeftRowKind::kMagicDamage;
         g_left_rows[g_left_row_count++] = LeftRowKind::kRequiredLevel;
         g_left_rows[g_left_row_count++] = LeftRowKind::kChaosLevel;
@@ -482,13 +497,31 @@ void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
     }
     draw_text(row, text, 16, 14, enabled ? kText : kMuted, 0, 0);
 }
+void resolve_variant_series() {
+    if (g_draft.source_valid && g_draft.variant_series != 0) return;
+    const auto* game = game_host();
+    if (game == nullptr || game->target.query_variant == nullptr) return;
+    QolTargetVariant variant{};
+    if (succeeded(game->target.query_variant(&variant)))
+        g_draft.variant_series = static_cast<int32_t>(variant.id);
+}
 void left_info_selected(void*, uint32_t index) {
-    if (index >= g_left_row_count ||
-        g_left_rows[index] != LeftRowKind::kQuantity ||
-        !item_class_valid(g_draft.class_index) ||
-        item_class_is_equipment(g_draft.class_index) ||
-        !g_draft.stackable) return;
-    g_quantity_card_open_requested = true;
+    if (index >= g_left_row_count) return;
+    switch (g_left_rows[index]) {
+        case LeftRowKind::kQuantity:
+            if (!item_class_valid(g_draft.class_index) ||
+                item_class_is_equipment(g_draft.class_index) ||
+                !g_draft.stackable) return;
+            g_quantity_card_open_requested = true;
+            return;
+        case LeftRowKind::kPrefix:
+            if (g_draft.prefix_class_bits == 0) return;
+            resolve_variant_series();
+            g_prefix_card_open_requested = true;
+            return;
+        default:
+            return;
+    }
 }
 
 void category_card_noop_draw(void*) {}
@@ -845,7 +878,7 @@ bool create_item_card() {
     // 可见格池使用真正的 core.custom_ui item_slot 组件；池先建，列表行按钮后建，
     // 触摸仍优先命中行按钮。每帧按滚动位移重排并只绘制可见项。
     for (auto& slot : g_item_card_slots) {
-        const UiItemSlotDesc desc{{0,-200,74,74},-1,-1,kUiItemSlotShowFrame};
+        const UiItemSlotDesc desc{{0,-200,74,74},-1,-1,kUiItemSlotShowFrame,-1};
         result = c->item_slot_create(&desc,g_item_card_root,&slot);
         if (!succeeded(result)) {
             char message[128]{};
@@ -987,6 +1020,11 @@ void draw_item_card_slots(const QolUiComponents* c, const QolUiAdapter* adapter,
         (void)adapter->set_clip(static_cast<int32_t>(view_x), static_cast<int32_t>(view_y),
                                 static_cast<int32_t>(view_x + view_w),
                                 static_cast<int32_t>(view_y + view_h));
+    if (c->item_slot_set_quality != nullptr) {
+        for (const QolUiHandle slot : g_item_card_slots) {
+            if (slot != nullptr) (void)c->item_slot_set_quality(slot,-1);
+        }
+    }
     size_t pool_index = 0;
     for (size_t index = 0; index < g_item_card_ids.size() &&
                            pool_index < g_item_card_slots.size(); ++index) {
@@ -1283,8 +1321,15 @@ void rebuild_item_slot() {
     g_icon_hit_button = nullptr;
     const uint32_t slot_flags = kUiItemSlotShowFrame |
         (item_class_valid(g_draft.class_index) ? 0u : kUiItemSlotDimmed);
-    const UiItemSlotDesc icon{{243,68,74,74},g_draft.item_id,0,slot_flags};
-    (void)c->item_slot_create(&icon,g_root,&g_icon_slot);
+    const int32_t quality = item_class_is_equipment(g_draft.class_index)
+        ? contracts::item_rarity_from_raw_prefix(g_draft.raw_rarity) : -1;
+    const int32_t displayed_quality = c->item_slot_set_quality == nullptr
+        ? -1 : quality;
+    const UiItemSlotDesc icon{{243,68,74,74},g_draft.item_id,0,slot_flags,
+        displayed_quality};
+    if (succeeded(c->item_slot_create(&icon,g_root,&g_icon_slot)) &&
+        g_icon_slot != nullptr && c->item_slot_set_quality != nullptr)
+        (void)c->item_slot_set_quality(g_icon_slot,quality);
     const UiButtonDesc hit{{243,68,74,74},"",0,&item_slot_clicked,nullptr};
     if (succeeded(c->button_create(&hit,g_root,&g_icon_hit_button))) {
         if (!succeeded(adapter->set_draw_proc(g_icon_hit_button,&category_card_noop_draw))) {
@@ -1313,10 +1358,203 @@ void apply_category_card_action() {
     }
 }
 
+void prefix_option_clicked(void* user) {
+    const auto* raw = static_cast<const int32_t*>(user);
+    if (raw == nullptr || *raw < 0 || *raw > 14) return;
+    g_prefix_selected_raw = *raw;
+}
+void prefix_confirm_clicked(void*) {
+    if (g_prefix_selected_raw >= 0)
+        g_prefix_card_pending_action = PrefixCardAction::kConfirm;
+}
+void prefix_cancel_clicked(void*) {
+    g_prefix_card_pending_action = PrefixCardAction::kCancel;
+}
+void destroy_prefix_card() {
+    const auto* c = components();
+    if (c != nullptr && c->destroy != nullptr) {
+        for (auto& button : g_prefix_buttons) {
+            if (button != nullptr) (void)c->destroy(button);
+            button = nullptr;
+        }
+        if (g_prefix_confirm != nullptr) (void)c->destroy(g_prefix_confirm);
+        if (g_prefix_cancel != nullptr) (void)c->destroy(g_prefix_cancel);
+        if (g_prefix_card_root != nullptr) (void)c->destroy(g_prefix_card_root);
+    }
+    for (auto& button : g_prefix_buttons) button = nullptr;
+    g_prefix_confirm = nullptr;
+    g_prefix_cancel = nullptr;
+    g_prefix_card_root = nullptr;
+    g_prefix_option_count = 0;
+    g_prefix_selected_raw = -1;
+}
+void build_prefix_options() {
+    g_prefix_option_count = 0;
+    for (int32_t raw = 0; raw <= 14; ++raw) {
+        if (g_draft.variant_series == 4 &&
+            g_draft.prefix_class_bits == 3 && raw < 10 && raw != 2) continue;
+        const char* prefix = contracts::item_rarity_prefix(
+            g_draft.variant_series,g_draft.prefix_class_bits,raw);
+        if (raw != 2 && (prefix == nullptr || prefix[0] == '\0')) continue;
+        g_prefix_option_raw[g_prefix_option_count++] = raw;
+    }
+}
+bool prefix_raw_available(int32_t raw) {
+    for (uint32_t index = 0; index < g_prefix_option_count; ++index) {
+        if (g_prefix_option_raw[index] == raw) return true;
+    }
+    return false;
+}
+bool create_prefix_card() {
+    const auto* c = components();
+    const auto* adapter = ui();
+    if (c == nullptr || adapter == nullptr || c->panel_create == nullptr ||
+        c->button_create == nullptr || adapter->set_draw_proc == nullptr ||
+        g_draft.prefix_class_bits == 0) {
+        log_panel("op=prefix_card_create result=failed stage=precondition code=-1");
+        return false;
+    }
+    resolve_variant_series();
+    build_prefix_options();
+    g_prefix_selected_raw = prefix_raw_available(g_draft.raw_rarity)
+        ? g_draft.raw_rarity : -1;
+    const UiRect panel = panel_rect();
+    const UiRect card_rect{panel.x+(panel.w-420)/2,panel.y+(panel.h-360)/2,420,360};
+    const UiPanelDesc card{card_rect,{0,0,420,360},0,0};
+    QolResult result = c->panel_create(&card,nullptr,&g_prefix_card_root);
+    if (!succeeded(result)) {
+        char message[112]{};
+        std::snprintf(message,sizeof(message),
+            "op=prefix_card_create result=failed stage=card_root code=%d",result.code);
+        log_panel(message);
+        return false;
+    }
+    for (uint32_t index = 0; index < g_prefix_option_count; ++index) {
+        const int32_t column = static_cast<int32_t>(index % 3);
+        const int32_t row = static_cast<int32_t>(index / 3);
+        const UiButtonDesc button{{12+column*132,54+row*50,126,44},"",0,
+            &prefix_option_clicked,&g_prefix_option_raw[index]};
+        result = c->button_create(&button,g_prefix_card_root,&g_prefix_buttons[index]);
+        if (!succeeded(result)) {
+            char message[112]{};
+            std::snprintf(message,sizeof(message),
+                "op=prefix_card_create result=failed stage=option_button code=%d index=%u",
+                result.code,index);
+            log_panel(message);
+            return false;
+        }
+        result = adapter->set_draw_proc(g_prefix_buttons[index],&category_card_noop_draw);
+        if (!succeeded(result)) {
+            char message[112]{};
+            std::snprintf(message,sizeof(message),
+                "op=prefix_card_create result=failed stage=option_draw code=%d index=%u",
+                result.code,index);
+            log_panel(message);
+            return false;
+        }
+    }
+    const UiButtonDesc confirm{{86,310,110,42},"",0,
+        &prefix_confirm_clicked,nullptr};
+    result = c->button_create(&confirm,g_prefix_card_root,&g_prefix_confirm);
+    if (!succeeded(result)) {
+        char message[112]{};
+        std::snprintf(message,sizeof(message),
+            "op=prefix_card_create result=failed stage=confirm_button code=%d",result.code);
+        log_panel(message);
+        return false;
+    }
+    result = adapter->set_draw_proc(g_prefix_confirm,&category_card_noop_draw);
+    if (!succeeded(result)) {
+        log_panel("op=prefix_card_create result=failed stage=confirm_draw code=-1");
+        return false;
+    }
+    const UiButtonDesc cancel{{224,310,110,42},"",0,
+        &prefix_cancel_clicked,nullptr};
+    result = c->button_create(&cancel,g_prefix_card_root,&g_prefix_cancel);
+    if (!succeeded(result)) {
+        char message[112]{};
+        std::snprintf(message,sizeof(message),
+            "op=prefix_card_create result=failed stage=cancel_button code=%d",result.code);
+        log_panel(message);
+        return false;
+    }
+    result = adapter->set_draw_proc(g_prefix_cancel,&category_card_noop_draw);
+    if (!succeeded(result)) {
+        log_panel("op=prefix_card_create result=failed stage=cancel_draw code=-1");
+        return false;
+    }
+    return true;
+}
+void draw_prefix_card_button(QolUiHandle button,const char* label,
+                             int32_t width,int32_t height,bool selected) {
+    const auto* adapter = ui();
+    if (adapter == nullptr || button == nullptr) return;
+    int64_t abs_x = 0,abs_y = 0;
+    if (adapter->control_absolute_origin == nullptr ||
+        !succeeded(adapter->control_absolute_origin(button,&abs_x,&abs_y))) return;
+    int32_t pressed = 0;
+    if (adapter->control_pressed != nullptr)
+        (void)adapter->control_pressed(button,&pressed);
+    if (adapter->draw_help_option_row != nullptr)
+        (void)adapter->draw_help_option_row({abs_x,abs_y,width,height},
+            static_cast<uint8_t>(selected),static_cast<uint8_t>(pressed != 0));
+    draw_text(button,label,width/2,height/2-8,selected ? kGold : kText,2,0);
+}
+void draw_prefix_card() {
+    if (g_prefix_card_root == nullptr) return;
+    const auto* adapter = ui();
+    const auto* c = components();
+    if (adapter == nullptr || c == nullptr) return;
+    const UiRect panel = panel_rect();
+    const UiRect card{panel.x+(panel.w-420)/2,panel.y+(panel.h-360)/2,420,360};
+    if (adapter->fill_rect_alpha != nullptr)
+        (void)adapter->fill_rect_alpha({panel.x,panel.y,panel.w,panel.h},0x0000,40);
+    if (c->draw_container_styled != nullptr) {
+        const UiContainerStyleDesc style{card,0x0000,60,1};
+        (void)c->draw_container_styled(&style);
+    }
+    draw_text(g_prefix_card_root,"选择前缀",210,18,kGold,2,2);
+    for (uint32_t index = 0; index < g_prefix_option_count; ++index) {
+        const int32_t raw = g_prefix_option_raw[index];
+        const char* prefix = raw == 2 ? "无" : contracts::item_rarity_prefix(
+            g_draft.variant_series,g_draft.prefix_class_bits,raw);
+        if (prefix == nullptr) prefix = "";
+        char label[64]{};
+        const size_t length = std::strlen(prefix);
+        size_t trimmed = length;
+        while (trimmed > 0 && prefix[trimmed - 1] == ' ') --trimmed;
+        std::snprintf(label,sizeof(label),"%.*s（%d）",
+            static_cast<int>(trimmed),prefix,raw);
+        draw_prefix_card_button(g_prefix_buttons[index],label,126,44,
+            raw == g_prefix_selected_raw);
+    }
+    draw_prefix_card_button(g_prefix_confirm,"确定",110,42,
+        g_prefix_selected_raw >= 0);
+    draw_prefix_card_button(g_prefix_cancel,"取消",110,42,true);
+}
+void apply_prefix_card_action() {
+    if (g_prefix_card_pending_action == PrefixCardAction::kNone) return;
+    const PrefixCardAction action = g_prefix_card_pending_action;
+    g_prefix_card_pending_action = PrefixCardAction::kNone;
+    const bool changed = action == PrefixCardAction::kConfirm &&
+        prefix_raw_available(g_prefix_selected_raw);
+    if (changed) {
+        g_draft.raw_rarity = g_prefix_selected_raw;
+        g_draft.dirty = true;
+    }
+    destroy_prefix_card();
+    if (changed) {
+        build_left_rows();
+        rebuild_left_list();
+        rebuild_item_slot();
+    }
+}
+
 void destroy() {
     destroy_item_card();
     destroy_category_card();
     destroy_quantity_card();
+    destroy_prefix_card();
     const auto* c = components();
     if (c != nullptr && c->destroy != nullptr) {
         if (g_list != nullptr) (void)c->destroy(g_list);
@@ -1341,12 +1579,15 @@ void destroy() {
     g_item_card_pending_action = ItemCardAction::kNone;
     g_quantity_card_open_requested = false;
     g_quantity_card_pending_action = QuantityCardAction::kNone;
+    g_prefix_card_open_requested = false;
+    g_prefix_card_pending_action = PrefixCardAction::kNone;
     g_active.store(false, std::memory_order_release);
 }
 bool create() {
     const auto* c = components();
     if (c == nullptr || c->panel_create == nullptr || c->scroll_list_create == nullptr ||
         c->nav_button_create == nullptr || c->button_create == nullptr) return false;
+    resolve_variant_series();
     const UiRect panel = panel_rect();
     const UiPanelDesc desc{{panel.x,panel.y,panel.w,panel.h},
         {0,0,panel.x*2+panel.w,640},0,0};
@@ -1377,6 +1618,7 @@ bool create() {
 
 void panel_enter() {
     read_item();
+    resolve_variant_series();
     build_left_rows();
     if (!create()) { destroy(); panel_request_close(); return; }
     g_active.store(true, std::memory_order_release);
@@ -1393,22 +1635,37 @@ void panel_process() {
     apply_category_card_action();
     apply_item_card_action();
     apply_quantity_action();
-    if (g_quantity_card_open_requested) {
+    apply_prefix_card_action();
+    if (g_prefix_card_open_requested) {
+        g_prefix_card_open_requested = false;
+        g_card_open_requested = false;
+        g_item_card_open_requested = false;
+        g_quantity_card_open_requested = false;
+        destroy_quantity_card();
+        destroy_category_card();
+        destroy_item_card();
+        if (!create_prefix_card()) destroy_prefix_card();
+    } else if (g_quantity_card_open_requested) {
         g_quantity_card_open_requested = false;
         g_card_open_requested = false;
         g_item_card_open_requested = false;
+        destroy_prefix_card();
         destroy_category_card();
         destroy_item_card();
         if (!create_quantity_card()) destroy_quantity_card();
     } else if (g_item_card_open_requested) {
         g_item_card_open_requested = false;
         g_card_open_requested = false;
+        g_prefix_card_open_requested = false;
         destroy_quantity_card();
+        destroy_prefix_card();
         destroy_category_card();
         if (!create_item_card()) destroy_item_card();
     } else if (g_card_open_requested) {
         g_card_open_requested = false;
+        g_prefix_card_open_requested = false;
         destroy_quantity_card();
+        destroy_prefix_card();
         destroy_item_card();
         if (!create_category_card()) {
             destroy_category_card();
@@ -1438,7 +1695,9 @@ void panel_process() {
     else std::snprintf(text,sizeof(text),"名称：");
     draw_name_row(text);
     draw_fixed_category_row();
-    if (g_card_root == nullptr && g_item_card_root == nullptr) {
+    if (g_card_root == nullptr && g_item_card_root == nullptr &&
+        g_quantity_card_root == nullptr &&
+        g_prefix_card_root == nullptr) {
         if (g_left_list != nullptr) (void)c->scroll_list_process(g_left_list);
         (void)c->scroll_list_process(g_list);
     }
@@ -1448,6 +1707,7 @@ void panel_process() {
     if (g_card_root != nullptr) draw_category_card();
     if (g_item_card_root != nullptr) draw_item_card();
     if (g_quantity_card_root != nullptr) draw_quantity_card();
+    if (g_prefix_card_root != nullptr) draw_prefix_card();
     if (adapter->end_frame != nullptr) (void)adapter->end_frame();
 }
 void panel_f3() { panel_destroy(); }
@@ -1455,6 +1715,10 @@ void panel_f4() {}
 uint32_t panel_event(uint64_t event,uint64_t param,uint64_t param2) {
     const auto* c=components(); if(!g_active.load(std::memory_order_acquire)||g_root==nullptr||c==nullptr||c->dispatch_native_event==nullptr)return 1;
     uint32_t consumed=0;
+    if (g_prefix_card_root != nullptr) {
+        (void)c->dispatch_native_event(g_prefix_card_root,event,param,param2,&consumed);
+        return consumed != 0 ? consumed : 1;
+    }
     if (g_quantity_card_root != nullptr) {
         (void)c->dispatch_native_event(g_quantity_card_root,event,param,param2,&consumed);
         return consumed != 0 ? consumed : 1;
