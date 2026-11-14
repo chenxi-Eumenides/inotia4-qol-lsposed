@@ -807,7 +807,7 @@ bool create_item_card() {
     // 可见格池使用真正的 core.custom_ui item_slot 组件；池先建，列表行按钮后建，
     // 触摸仍优先命中行按钮。每帧按滚动位移重排并只绘制可见项。
     for (auto& slot : g_item_card_slots) {
-        const UiItemSlotDesc desc{{0,-200,74,74},{},-1,kUiItemSlotShowFrame};
+        const UiItemSlotDesc desc{{0,-200,74,74},-1,-1,kUiItemSlotShowFrame};
         result = c->item_slot_create(&desc,g_item_card_root,&slot);
         if (!succeeded(result)) {
             char message[128]{};
@@ -960,10 +960,7 @@ void draw_item_card_slots(const QolUiComponents* c, const QolUiAdapter* adapter,
         if (slot == nullptr) continue;
         const int32_t item_id = g_item_card_ids[index];
         (void)c->set_rect(slot, {87 + column * 196, static_cast<int32_t>(local_y), 74, 74});
-        QolUiItemRef ref{};
-        ref.source = static_cast<uint32_t>(QolUiItemSource::kItemId);
-        ref.item_id = item_id;
-        (void)c->item_slot_set(slot, &ref, -1);
+        (void)c->item_slot_set(slot, item_id, -1);
         const uint32_t flags = kUiItemSlotShowFrame |
             (item_id == g_item_card_selected_id ? kUiItemSlotSelected : 0u);
         (void)c->item_slot_set_flags(slot, flags);
@@ -1043,19 +1040,7 @@ void rebuild_item_slot() {
         (void)c->destroy(g_icon_hit_button);
     g_icon_slot = nullptr;
     g_icon_hit_button = nullptr;
-    QolUiItemRef ref{};
-    if (draft_has_item(g_draft)) {
-        // 来源物品仍在且 category 未变时优先用真实 handle，保持与背包完全一致的图标；
-        // 只有选择到其他具体物品后才按 category 绘制。
-        if (g_draft.source_valid && g_draft.item_id == g_draft.source_item_id) {
-            ref.source = static_cast<uint32_t>(QolUiItemSource::kHandle);
-            ref.handle = g_draft.source;
-        } else {
-            ref.source = static_cast<uint32_t>(QolUiItemSource::kItemId);
-            ref.item_id = g_draft.item_id;
-        }
-    }
-    const UiItemSlotDesc icon{{243,68,74,74},ref,0,kUiItemSlotShowFrame};
+    const UiItemSlotDesc icon{{243,68,74,74},g_draft.item_id,0,kUiItemSlotShowFrame};
     (void)c->item_slot_create(&icon,g_root,&g_icon_slot);
     const UiButtonDesc hit{{243,68,74,74},"",0,&item_slot_clicked,nullptr};
     if (succeeded(c->button_create(&hit,g_root,&g_icon_hit_button))) {

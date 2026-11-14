@@ -551,10 +551,10 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
             const auto* count_slot = reinterpret_cast<const uint16_t*>(
                 g_base + G_ITEMDATABASE_N_RECORD_COUNT_VMA);
             if (count_slot == nullptr || category >= *count_slot) return;
-            // ITEM_DrawByIDPorting 内部把 y 减去 30；这里补偿到与 ITEM_DrawPorting
-            // 的 (+5,+5) 图标落点一致。它直接查 ITEMDATABASE，不依赖物品实例或 SNASYS。
+            // x,y 是 64×64 图标左上角；ITEM_DrawByIDPorting 内部 mode=2 在 x 方向居中，
+            // 并把 y 减去 30，因此传入中心 x 与补偿后的 y。
             if (fn_item_draw_by_id_porting != nullptr) {
-                fn_item_draw_by_id_porting(category, x + 5, y + 35, draw_type, 0, 0);
+                fn_item_draw_by_id_porting(category, x + 32, y + 30, draw_type, 0, 0);
                 return;
             }
             if (fn_itemdata_draw == nullptr) return;

@@ -34,7 +34,6 @@ struct ItemEditorDraft {
 
     int32_t class_index = -1;  // ITEMCLASSBASE 0..35，-1 未选
     int32_t item_id = -1;      // ITEMDATABASE 下标，-1 已丢弃/未选
-    int32_t source_item_id = -1;  // 装载时来源物品的 category，用于复用原 handle 图标
     contracts::QolItemType item_type = contracts::QolItemType::kUnknown;
     int32_t variant_series = 0;
     int32_t prefix_class_bits = 0;

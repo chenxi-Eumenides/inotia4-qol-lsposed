@@ -101,7 +101,6 @@ void draft_load(ItemEditorDraft* draft, contracts::QolItemHandle source,
     const bool has_category = (view.fields & contracts::kQolItemInventoryHasCategory) != 0 ||
                               view.category > 0;
     draft->item_id = has_category && view.category >= 0 ? view.category : -1;
-    draft->source_item_id = draft->item_id;
     draft->item_type = item_type;
     draft->variant_series = view.variant_series;
     draft->count = view.count_supported != 0 && view.effective_count > 0

@@ -586,6 +586,7 @@ QolResult draw_icon_address(uintptr_t item_address, int32_t x, int32_t y, int32_
 
 QolResult draw_icon_id(int32_t category, int32_t x, int32_t y, int32_t draw_type, int32_t flip) {
     if (category < 0) return error_result(kQolErrInvalidArgument, "invalid item id");
+    // x,y 是 64×64 图标左上角。
     // 按 ITEMDATABASE 下标直接走 IMGSYS；不构造临时物品，因此不触发
     // ITEM_IsRealBroken 的损坏图标分支，也不依赖 SNASYS sprite 表。
     if (g_draw_icon_id_fn == nullptr) return not_ready();

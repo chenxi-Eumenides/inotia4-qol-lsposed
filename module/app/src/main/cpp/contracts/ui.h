@@ -13,7 +13,7 @@
 namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
-constexpr uint16_t kUiContractMajor = 2, kUiContractMinor = 25;
+constexpr uint16_t kUiContractMajor = 2, kUiContractMinor = 26;
 constexpr uint16_t kUiAdapterMajor = 2, kUiAdapterMinor = 39;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 2;
@@ -363,22 +363,10 @@ struct UiHelpPageDesc {
     void* user;
 };
 
-// 可复用物品显示组件：同一 item ref 可来自 handle、游戏物品地址或 ITEMDATABASE 类别 ID。
-enum class QolUiItemSource : uint32_t {
-    kNone = 0,
-    kHandle = 1,
-    kAddress = 2,
-    kItemId = 3,
-};
-struct QolUiItemRef {
-    uint32_t source;       // QolUiItemSource
-    QolItemHandle handle;  // source=kHandle
-    uintptr_t address;     // source=kAddress；必须是游戏拥有的物品对象地址
-    int32_t item_id;      // source=kItemId；ITEMDATABASE 下标
-};
+// 可复用物品显示组件只使用 ITEMDATABASE 下标；item_id < 0 表示空。
 struct UiItemIconDesc {
     UiRect rect;
-    QolUiItemRef item;
+    int32_t item_id;   // ITEMDATABASE 下标；<0 = 空
     uint32_t flags;
 };
 enum UiItemSlotFlags : uint32_t {
@@ -391,7 +379,7 @@ enum UiItemSlotFlags : uint32_t {
 };
 struct UiItemSlotDesc {
     UiRect rect;
-    QolUiItemRef item;
+    int32_t item_id;   // ITEMDATABASE 下标；<0 = 空
     int32_t count;  // -1 = 不显示/由调用方维护
     uint32_t flags;
 };
@@ -566,12 +554,12 @@ struct QolUiComponents {
     QolResult (*draw_circle)(const UiShapeDesc*);
     // Minor 23 append-only: native-textured container with configurable fill and ornaments.
     QolResult (*draw_container_styled)(const UiContainerStyleDesc*);
-    // Minor 24 tail: 可复用物品图标/格子组件。
+    // Minor 24 tail: 可复用物品图标/格子组件（minor 26 改为 item_id-only）。
     QolResult (*item_icon_create)(const UiItemIconDesc*, QolUiHandle parent, QolUiHandle* out);
-    QolResult (*item_icon_set)(QolUiHandle, const QolUiItemRef*);
+    QolResult (*item_icon_set)(QolUiHandle, int32_t item_id);
     QolResult (*item_icon_draw)(QolUiHandle);
     QolResult (*item_slot_create)(const UiItemSlotDesc*, QolUiHandle parent, QolUiHandle* out);
-    QolResult (*item_slot_set)(QolUiHandle, const QolUiItemRef*, int32_t count);
+    QolResult (*item_slot_set)(QolUiHandle, int32_t item_id, int32_t count);
     QolResult (*item_slot_draw)(QolUiHandle);
     // Minor 25 append-only: 更新格子的 flags（ShowFrame/Selected/ShowOuterFrame 等）。
     QolResult (*item_slot_set_flags)(QolUiHandle, uint32_t flags);
