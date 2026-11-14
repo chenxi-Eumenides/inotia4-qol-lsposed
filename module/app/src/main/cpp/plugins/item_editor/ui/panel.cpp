@@ -31,7 +31,6 @@ constexpr uint32_t kText = 0xFFD5E8F2u;
 constexpr uint32_t kGold = contracts::ui_theme::kTextGold;
 constexpr uint32_t kMuted = 0xFF727A81u;
 enum class LeftRowKind : uint8_t {
-    kCategory,
     kQuantity,
     kPrefix,
     kEnchantDurability,
@@ -50,6 +49,7 @@ QolUiHandle g_close = nullptr;
 QolUiHandle g_icon_slot = nullptr;
 QolUiHandle g_icon_hit_button = nullptr;
 QolUiHandle g_name_row = nullptr;
+QolUiHandle g_category_row = nullptr;
 QolUiHandle g_card_root = nullptr;
 QolUiHandle g_card_footer_root = nullptr;
 QolUiHandle g_card_list = nullptr;
@@ -58,7 +58,7 @@ QolUiHandle g_card_cancel = nullptr;
 QolUiHandle g_card_buttons[kItemClassCount]{};
 int32_t g_card_button_classes[kItemClassCount]{};
 ItemEditorDraft g_draft{};
-LeftRowKind g_left_rows[11]{};
+LeftRowKind g_left_rows[9]{};
 uint32_t g_left_row_count = 0;
 int32_t g_card_selected_class = -1;
 bool g_card_open_requested = false;
@@ -101,7 +101,11 @@ UiRect panel_rect() {
     return {(logical_w-kPanelW)/2, (640-kPanelH)/2, kPanelW, kPanelH};
 }
 void noop_click(void*) {}
-void item_slot_clicked(void*) { g_item_card_open_requested = true; }
+void item_slot_clicked(void*) {
+    if (!item_class_valid(g_draft.class_index)) return;
+    g_item_card_open_requested = true;
+}
+void category_row_clicked(void*) { g_card_open_requested = true; }
 
 void log_panel(const char* message) {
     const auto* sdk = host_sdk();
@@ -112,7 +116,6 @@ void log_panel(const char* message) {
 
 void build_left_rows() {
     g_left_row_count = 0;
-    g_left_rows[g_left_row_count++] = LeftRowKind::kCategory;
     if (item_class_is_equipment(g_draft.class_index)) {
         constexpr LeftRowKind equipment_rows[] = {
             LeftRowKind::kPrefix,
@@ -192,6 +195,33 @@ const char* static_text(QolItemStaticTextKind kind, int32_t id) {
     if (port != nullptr && port->read.static_text != nullptr &&
         succeeded(port->read.static_text(static_cast<int32_t>(kind), id, &text))) return text;
     return nullptr;
+}
+void format_category_row(char* text, size_t capacity) {
+    if (text == nullptr || capacity == 0) return;
+    if (!draft_has_item(g_draft)) {
+        if (item_class_valid(g_draft.class_index)) {
+            const char* class_name = static_text(
+                QolItemStaticTextKind::kItemClassList, g_draft.class_index);
+            std::snprintf(text,capacity,"类别：%s",
+                class_name == nullptr ? "未知类别" : class_name);
+        } else {
+            std::snprintf(text,capacity,"类别：");
+        }
+        return;
+    }
+    const char* type_name = item_type_name(g_draft.item_type);
+    const int32_t type_id = static_cast<int32_t>(g_draft.item_type);
+    if (item_class_is_equipment(g_draft.class_index)) {
+        const char* class_name = static_text(
+            QolItemStaticTextKind::kItemClassName, g_draft.item_id);
+        if (class_name != nullptr && class_name[0] != '\0')
+            std::snprintf(text,capacity,"类别：%s（%s） (id:%d)",
+                type_name,class_name,type_id);
+        else
+            std::snprintf(text,capacity,"类别：%s (id:%d)",type_name,type_id);
+    } else {
+        std::snprintf(text,capacity,"类别：%s (id:%d)",type_name,type_id);
+    }
 }
 void draw_text(QolUiHandle control, const char* text, int32_t x, int32_t y,
                uint32_t color, int32_t align = 0, int32_t font = 1) {
@@ -344,8 +374,9 @@ void draw_name_row(const char* text) {
     const auto* adapter = ui();
     if (adapter == nullptr || g_name_row == nullptr) return;
     constexpr UiRect rect{122,152,316,48};
+    const bool enabled = item_class_valid(g_draft.class_index);
     int32_t pressed = 0;
-    if (adapter->control_pressed != nullptr)
+    if (enabled && adapter->control_pressed != nullptr)
         (void)adapter->control_pressed(g_name_row, &pressed);
     if (adapter->draw_help_option_row != nullptr) {
         const UiRect panel = panel_rect();
@@ -353,7 +384,23 @@ void draw_name_row(const char* text) {
             rect.w, rect.h}, 0, static_cast<uint8_t>(pressed != 0));
     }
     draw_text(g_root, text, static_cast<int32_t>(rect.x + 16),
-              static_cast<int32_t>(rect.y + 14), kText, 0, 0);
+              static_cast<int32_t>(rect.y + 14), enabled ? kText : kMuted, 0, 0);
+}
+void draw_fixed_category_row() {
+    const auto* adapter = ui();
+    if (adapter == nullptr || g_category_row == nullptr) return;
+    int64_t abs_x = 0,abs_y = 0;
+    if (adapter->control_absolute_origin == nullptr ||
+        !succeeded(adapter->control_absolute_origin(g_category_row,&abs_x,&abs_y))) return;
+    int32_t pressed = 0;
+    if (adapter->control_pressed != nullptr)
+        (void)adapter->control_pressed(g_category_row,&pressed);
+    if (adapter->draw_help_option_row != nullptr)
+        (void)adapter->draw_help_option_row({abs_x,abs_y,316,48},0,
+            static_cast<uint8_t>(pressed != 0));
+    char text[160]{};
+    format_category_row(text,sizeof(text));
+    draw_text(g_category_row,text,16,14,kText,0,0);
 }
 void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
     const auto* adapter = ui();
@@ -370,33 +417,6 @@ void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
     }
     char text[160]{};
     switch (g_left_rows[index]) {
-        case LeftRowKind::kCategory: {
-            if (!draft_has_item(g_draft)) {
-                if (item_class_valid(g_draft.class_index)) {
-                    const char* class_name = static_text(
-                        QolItemStaticTextKind::kItemClassList, g_draft.class_index);
-                    std::snprintf(text, sizeof(text), "类别：%s",
-                        class_name == nullptr ? "未知类别" : class_name);
-                } else {
-                    std::snprintf(text, sizeof(text), "类别：");
-                }
-                break;
-            }
-            const char* type_name = item_type_name(g_draft.item_type);
-            const int32_t type_id = static_cast<int32_t>(g_draft.item_type);
-            if (item_class_is_equipment(g_draft.class_index)) {
-                const char* class_name = static_text(
-                    QolItemStaticTextKind::kItemClassName, g_draft.item_id);
-                if (class_name != nullptr && class_name[0] != '\0')
-                    std::snprintf(text, sizeof(text), "类别：%s（%s） (id:%d)",
-                        type_name, class_name, type_id);
-                else
-                    std::snprintf(text, sizeof(text), "类别：%s (id:%d)", type_name, type_id);
-            } else {
-                std::snprintf(text, sizeof(text), "类别：%s (id:%d)", type_name, type_id);
-            }
-            break;
-        }
         case LeftRowKind::kQuantity:
             std::snprintf(text, sizeof(text), "数量：%d", g_draft.count);
             break;
@@ -461,10 +481,6 @@ void category_card_confirm_clicked(void*) {
 }
 void category_card_cancel_clicked(void*) {
     g_card_pending_action = CategoryCardAction::kCancel;
-}
-void left_info_selected(void*, uint32_t index) {
-    if (index < g_left_row_count && g_left_rows[index] == LeftRowKind::kCategory)
-        g_card_open_requested = true;
 }
 bool category_card_row_classes(uint32_t row, int32_t* first, int32_t* count) {
     if (first == nullptr || count == nullptr) return false;
@@ -955,7 +971,7 @@ void draw_item_card_slots(const QolUiComponents* c, const QolUiAdapter* adapter,
         const int32_t row = static_cast<int32_t>(index / 3);
         const int32_t column = static_cast<int32_t>(index % 3);
         const int64_t local_y = 16 + static_cast<int64_t>(row) * 122 - offset + 5;
-        if (local_y + 74 <= 16 || local_y >= 416) continue;
+        if (local_y + 74 <= 16 || local_y + 74 > 416) continue;
         const QolUiHandle slot = g_item_card_slots[pool_index++];
         if (slot == nullptr) continue;
         const int32_t item_id = g_item_card_ids[index];
@@ -1016,8 +1032,9 @@ void rebuild_left_list() {
     if (c == nullptr || c->scroll_list_create == nullptr) return;
     if (g_left_list != nullptr && c->destroy != nullptr) (void)c->destroy(g_left_list);
     g_left_list = nullptr;
-    const UiScrollListDesc list{{122,210,316,290},48,g_left_row_count,-1,
-        &draw_left_info_row,&left_info_selected,nullptr};
+    if (g_left_row_count == 0) return;
+    const UiScrollListDesc list{{122,268,316,232},48,g_left_row_count,-1,
+        &draw_left_info_row,nullptr,nullptr};
     (void)c->scroll_list_create(&list,g_root,&g_left_list);
 }
 void rebuild_right_list() {
@@ -1040,7 +1057,9 @@ void rebuild_item_slot() {
         (void)c->destroy(g_icon_hit_button);
     g_icon_slot = nullptr;
     g_icon_hit_button = nullptr;
-    const UiItemSlotDesc icon{{243,68,74,74},g_draft.item_id,0,kUiItemSlotShowFrame};
+    const uint32_t slot_flags = kUiItemSlotShowFrame |
+        (item_class_valid(g_draft.class_index) ? 0u : kUiItemSlotDimmed);
+    const UiItemSlotDesc icon{{243,68,74,74},g_draft.item_id,0,slot_flags};
     (void)c->item_slot_create(&icon,g_root,&g_icon_slot);
     const UiButtonDesc hit{{243,68,74,74},"",0,&item_slot_clicked,nullptr};
     if (succeeded(c->button_create(&hit,g_root,&g_icon_hit_button))) {
@@ -1079,6 +1098,7 @@ void destroy() {
         if (g_left_list != nullptr) (void)c->destroy(g_left_list);
         if (g_icon_slot != nullptr) (void)c->destroy(g_icon_slot);
         if (g_icon_hit_button != nullptr) (void)c->destroy(g_icon_hit_button);
+        if (g_category_row != nullptr) (void)c->destroy(g_category_row);
         if (g_name_row != nullptr) (void)c->destroy(g_name_row);
         if (g_root != nullptr) (void)c->destroy(g_root);
     }
@@ -1086,6 +1106,7 @@ void destroy() {
     g_left_list = nullptr;
     g_icon_slot = nullptr;
     g_icon_hit_button = nullptr;
+    g_category_row = nullptr;
     g_name_row = nullptr;
     g_root = nullptr;
     g_close = nullptr;
@@ -1109,8 +1130,13 @@ bool create() {
     if (!succeeded(c->button_create(&name_button, g_root, &g_name_row))) return false;
     if (ui() != nullptr && ui()->set_draw_proc != nullptr)
         (void)ui()->set_draw_proc(g_name_row, [](void*) {});
+    const UiButtonDesc category_button{{122,210,316,48},"",0,
+        &category_row_clicked,nullptr};
+    if (!succeeded(c->button_create(&category_button,g_root,&g_category_row))) return false;
+    const auto* adapter = ui();
+    if (adapter == nullptr || adapter->set_draw_proc == nullptr ||
+        !succeeded(adapter->set_draw_proc(g_category_row,&category_card_noop_draw))) return false;
     rebuild_left_list();
-    if (g_left_list == nullptr) return false;
     rebuild_right_list();
     if (g_list == nullptr) return false;
     const UiNavButtonDesc close{{contracts::ui_theme::kNavBoxAbsX - panel.x,
@@ -1174,11 +1200,12 @@ void panel_process() {
             name == nullptr ? "" : name,g_draft.item_id);
     else std::snprintf(text,sizeof(text),"名称：");
     draw_name_row(text);
+    draw_fixed_category_row();
     if (g_card_root == nullptr && g_item_card_root == nullptr) {
-        (void)c->scroll_list_process(g_left_list);
+        if (g_left_list != nullptr) (void)c->scroll_list_process(g_left_list);
         (void)c->scroll_list_process(g_list);
     }
-    (void)c->scroll_list_draw(g_left_list);
+    if (g_left_list != nullptr) (void)c->scroll_list_draw(g_left_list);
     (void)c->scroll_list_draw(g_list);
     if (c->nav_button_draw != nullptr) (void)c->nav_button_draw(g_close);
     if (g_card_root != nullptr) draw_category_card();
