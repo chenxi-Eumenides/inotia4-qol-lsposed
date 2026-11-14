@@ -426,6 +426,16 @@ object StaticData {
                 }
             }
         }
+        if (classRecords != null) {
+            for (i in 0 until classRecords.length()) {
+                val record = classRecords.optJSONObject(i) ?: continue
+                val classNameLow = hexByte(record.optString("hex", ""), 0) ?: continue
+                val classNameHigh = hexByte(record.optString("hex", ""), 1) ?: continue
+                val classNameId = classNameLow or (classNameHigh shl 8)
+                val name = textArr?.optString(classNameId, "").orEmpty()
+                if (name.isNotEmpty()) appendStaticEntry(sb, 'L', i, name)
+            }
+        }
         for (i in 0 until 64) {
             val option = optionName(i) ?: continue
             if (option.isNotEmpty()) appendStaticEntry(sb, 'O', i, option)

@@ -65,6 +65,8 @@ int install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_item_port = static_cast<const contracts::QolItemPort*>(ctx.ports[0]);
     if (!contracts::qol_item_port_draw_icon_size_valid(g_item_port) ||
+        !contracts::qol_item_port_class_index_size_valid(g_item_port) ||
+        g_item_port->read.item_class_index == nullptr ||
         g_item_port->read.detail_item_context == nullptr ||
         g_item_port->read.inventory_item_view == nullptr ||
         g_item_port->read.draw_icon == nullptr) {

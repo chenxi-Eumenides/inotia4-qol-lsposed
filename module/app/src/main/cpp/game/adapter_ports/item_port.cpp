@@ -68,6 +68,27 @@ QolResult read_category(contracts::QolItemHandle handle, int32_t* out) {
     return contracts::ok();
 }
 
+QolResult read_item_class_index(contracts::QolItemHandle handle, int32_t* out_index) {
+    if (out_index == nullptr) return error_result(kQolErrInvalidArgument, "invalid class output");
+    int32_t category = 0;
+    const QolResult category_result = read_category(handle, &category);
+    if (!contracts::succeeded(category_result)) return category_result;
+    if (g_base == 0) return not_ready();
+    auto* data_slot = reinterpret_cast<void**>(g_base + G_ITEMDATABASE_DATA_VMA);
+    auto* size_slot = reinterpret_cast<uint8_t*>(g_base + G_ITEMDATABASE_N_RECORD_SIZE_VMA);
+    if (!game_memory_accessible(data_slot, sizeof(*data_slot), 'r') ||
+        !game_memory_accessible(size_slot, sizeof(*size_slot), 'r')) {
+        return not_ready();
+    }
+    auto* data = static_cast<uint8_t*>(*data_slot);
+    const uint32_t record_size = *size_slot;
+    if (data == nullptr || record_size < 3) return not_ready();
+    auto* record = data + static_cast<uintptr_t>(category) * record_size;
+    if (!game_memory_accessible(record, 3, 'r')) return not_ready();
+    *out_index = record[2];
+    return contracts::ok();
+}
+
 QolResult read_item_type(contracts::QolItemHandle handle, contracts::QolItemType* out) {
     if (out == nullptr) return error_result(kQolErrInvalidArgument, "invalid item type output");
     void* item = nullptr;
@@ -477,7 +498,7 @@ QolResult read_in_world(int32_t* out) {
 
 // 启动期下发的静态名称表：只在启动期写入，运行期只读；字符串是 JSON 已转义、不含外层引号
 // 的文本，handler 直接拼接即可与既有 Kotlin JSONObject 序列化保持一致。
-constexpr uint32_t kTextKindCount = 8;
+constexpr uint32_t kTextKindCount = 9;
 std::unordered_map<int32_t, std::string> g_item_text[kTextKindCount];
 std::mutex g_item_text_mutex;
 std::atomic<bool> g_item_text_ready{false};
@@ -580,7 +601,8 @@ const contracts::QolItemPort kItemPort{
          &read_effective_cumulate_count, nullptr, &read_count_limit,
            &read_count_encoding, &read_quote, &read_serialize_item,
            &read_free_item, &read_native_bag_layout, &read_bag_capacity,
-           &read_slot_occupied, &draw_icon, &draw_icon_address, &draw_icon_id},
+           &read_slot_occupied, &draw_icon, &draw_icon_address, &draw_icon_id,
+           &read_item_class_index},
 };
 
 }  // namespace
@@ -616,6 +638,7 @@ void item_port_load_static_text(const char* payload) {
                 case 'P': kind = 5; break;
                 case 'C': kind = 6; break;
                 case 'V': kind = 7; break;
+                case 'L': kind = 8; break;
                 default: break;
             }
             const char* id_start = cursor + 2;

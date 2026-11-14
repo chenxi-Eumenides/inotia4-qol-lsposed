@@ -241,8 +241,8 @@ int main() {
                       qol::contracts::kItemFactsVersion.minor == 0,
                   "item.facts adapter fixture expects v4.0");
     static_assert(qol::contracts::kQolPortItemVersion.major == 5 &&
-                      qol::contracts::kQolPortItemVersion.minor == 2,
-                  "Item Port adapter fixture expects v5.2");
+                      qol::contracts::kQolPortItemVersion.minor == 3,
+                  "Item Port adapter fixture expects v5.3");
     static_assert(offsetof(qol::contracts::AttributeQualityApi, query_option_context) ==
                       offsetof(qol::contracts::AttributeQualityApi, query_item) +
                           sizeof(qol::contracts::AttributeQualityQueryItemFn),

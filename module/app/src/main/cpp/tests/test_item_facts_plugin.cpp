@@ -243,7 +243,7 @@ int main() {
     CHECK(qol::contracts::kItemFactsVersion.major == 4 &&
           qol::contracts::kItemFactsVersion.minor == 0);
     CHECK(qol::contracts::kQolPortItemVersion.major == 5 &&
-          qol::contracts::kQolPortItemVersion.minor == 2);
+          qol::contracts::kQolPortItemVersion.minor == 3);
     CHECK(qol::contracts::kQolPortCharacterExtrasVersion.major == 1 &&
           qol::contracts::kQolPortCharacterExtrasVersion.minor == 3);
     qol::contracts::ItemFactsApi old_size_api{};
@@ -263,10 +263,12 @@ int main() {
     CHECK(qol::contracts::qol_item_port_size_valid(&old_item_port));
     CHECK(!qol::contracts::qol_item_port_count_encoding_size_valid(&old_item_port));
     CHECK(!qol::contracts::qol_item_port_quote_size_valid(&old_item_port));
+    CHECK(!qol::contracts::qol_item_port_class_index_size_valid(&old_item_port));
     old_item_port.struct_size = sizeof(old_item_port);
     CHECK(qol::contracts::qol_item_port_size_valid(&old_item_port));
     CHECK(qol::contracts::qol_item_port_count_encoding_size_valid(&old_item_port));
     CHECK(qol::contracts::qol_item_port_quote_size_valid(&old_item_port));
+    CHECK(qol::contracts::qol_item_port_class_index_size_valid(&old_item_port));
     CHECK(!qol::contracts::satisfies(qol::contracts::kItemFactsVersion, {1, 1}));
     CHECK(!qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {1, 4}));
     CHECK(!qol::contracts::satisfies(qol::contracts::kItemFactsVersion, {2, 0}));
