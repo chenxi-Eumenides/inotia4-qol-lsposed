@@ -2717,18 +2717,24 @@ QolResult item_slot_draw(contracts::QolUiHandle handle) {
                                 static_cast<int32_t>(component->rect.h - 20),
                                 dimmed ? 0xFF99928Au : 0xFFF2E8D5u, 2, 1);
     }
-    if (component->item_quality >= 0) {
-        if (g_adapter->fill_rect == nullptr) return not_ready();
-        static constexpr uint32_t kQualityColors[5] = {
-            0xFFF5F5F5u, 0xFF4CC85Au, 0xFF4C8DFFu, 0xFFFFD24Cu, 0xFFB36BFFu};
-        const int64_t badge_x = x + component->rect.w - 16;
-        const int64_t badge_y = y + 2;
-        result = g_adapter->fill_rect({badge_x, badge_y, 14, 14}, 0xFF101010u);
-        if (!contracts::succeeded(result)) return result;
-        result = g_adapter->fill_rect(
-            {badge_x + 1, badge_y + 1, 12, 12},
-            kQualityColors[component->item_quality]);
-        if (!contracts::succeeded(result)) return result;
+    // 背包格品质角标复用 ControlItem_Draw 的原生 unit 0x10 贴图：
+    // loc 5/6/7/8 = 绿/蓝/黄/紫；品质 0（白）游戏本身不画角标。
+    if (component->item_quality > 0) {
+        if (g_adapter->image_unit_load == nullptr || g_adapter->image_group == nullptr ||
+            g_adapter->image_loc == nullptr || g_adapter->draw_part == nullptr) {
+            return not_ready();
+        }
+        (void)g_adapter->image_unit_load(0x10);
+        contracts::QolUiHandle badge_group = nullptr;
+        contracts::QolUiHandle badge_loc = nullptr;
+        if (contracts::succeeded(g_adapter->image_group(0x10, &badge_group)) &&
+            contracts::succeeded(g_adapter->image_loc(0x10, 4 + component->item_quality,
+                                                      &badge_loc)) &&
+            badge_group != nullptr && badge_loc != nullptr) {
+            result = g_adapter->draw_part(badge_group, static_cast<int32_t>(x),
+                                          static_cast<int32_t>(y), badge_loc, 0, 1);
+            if (!contracts::succeeded(result)) return result;
+        }
     }
     return contracts::ok();
 }
