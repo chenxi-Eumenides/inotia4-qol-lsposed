@@ -621,6 +621,10 @@ QolResult detail_item_context(contracts::QolItemDetailContext* out_context) {
     void* control = nullptr;
     QolResult result = detail_context(&desc_type, &bag, &control);
     if (!contracts::succeeded(result)) return result;
+    // 关闭详情时 desc_type 为 0xff（按 int32 读为 255）；此时 cursor 仍可能是 0，
+    // 不能把它当成已选中首格。仅 0/1/2 是有效详情类型。
+    if (desc_type < 0 || desc_type > 2 || bag < 0)
+        return error_result(kQolErrNotFound, "detail not open");
     int32_t slot = -1;
     result = cursor_index(control, &slot);
     if (!contracts::succeeded(result)) return result;

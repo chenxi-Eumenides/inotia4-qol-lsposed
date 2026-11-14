@@ -1,4 +1,5 @@
 #include "game/access/game_access.h"
+#include "game/adapter_ports/item_port.h"
 #include "game/access/item_handle_registry.h"
 #include "game/symbols/symbol_resolver.h"
 #include "game/variants/game_variant.h"
@@ -532,6 +533,29 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     fn_touch_handle_set_cursor = reinterpret_cast<TouchHandleSetCursorFn>(g_base + fn_resolve("F_TOUCHHANDLE_SET_CURSOR_VMA", F_TOUCHHANDLE_SET_CURSOR_VMA));
     fn_ui_equip_inven_item_control_event_proc = reinterpret_cast<UiEquipInvenItemControlEventProcFn>(g_base + fn_resolve("F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA", F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA));
     fn_item_draw_porting = reinterpret_cast<ItemDrawPortingFn>(g_base + fn_resolve("F_ITEM_DRAW_PORTING_VMA", F_ITEM_DRAW_PORTING_VMA));
+    fn_itemdata_draw = reinterpret_cast<ItemDataDrawFn>(g_base + fn_resolve("F_ITEMDATA_DRAW_VMA", F_ITEMDATA_DRAW_VMA));
+    qol::game::item_port_bind_draw_icon(
+        [](void* item, int32_t x, int32_t y, int32_t draw_type, int32_t flip) {
+            if (fn_item_draw_porting != nullptr) fn_item_draw_porting(item, x, y, draw_type, flip);
+        },
+        [](uintptr_t item_address, int32_t x, int32_t y, int32_t draw_type, int32_t flip) {
+            if (fn_item_draw_porting != nullptr && item_address != 0) {
+                fn_item_draw_porting(reinterpret_cast<void*>(item_address), x, y, draw_type, flip);
+            }
+        },
+        [](int32_t category, int32_t x, int32_t y, int32_t draw_type, int32_t flip) {
+            (void)draw_type;
+            (void)flip;
+            if (fn_itemdata_draw == nullptr || category < 0 || g_base == 0) return;
+            auto* data_slot = reinterpret_cast<void**>(g_base + G_ITEMDATABASE_DATA_VMA);
+            auto* size_slot = reinterpret_cast<uint8_t*>(g_base + G_ITEMDATABASE_N_RECORD_SIZE_VMA);
+            void* data = *data_slot;
+            const uint32_t record_size = *size_slot;
+            if (data == nullptr || record_size == 0) return;
+            auto* record = static_cast<uint8_t*>(data) +
+                           static_cast<uintptr_t>(category) * record_size;
+            fn_itemdata_draw(record, x, y);
+        });
     fn_make_mix = reinterpret_cast<MakeMixFn>(g_base + fn_resolve("F_MAKE_MIX_VMA", F_MAKE_MIX_VMA));
     fn_get_cost = reinterpret_cast<GetCostFn>(g_base + fn_resolve("F_GET_COST_VMA", F_GET_COST_VMA));
     fn_uimix_start_mix = reinterpret_cast<UIMixStartMixFn>(g_base + fn_resolve("F_UIMIX_START_MIX_VMA", F_UIMIX_START_MIX_VMA));
@@ -617,6 +641,9 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     fn_ctrl_get_data = reinterpret_cast<ControlObjectGetDataFn>(g_base + fn_resolve("F_CONTROL_OBJECT_GET_DATA_VMA", F_CONTROL_OBJECT_GET_DATA_VMA));
     fn_ctrl_set_active = reinterpret_cast<ControlObjectSetActiveFn>(g_base + fn_resolve("F_CONTROL_OBJECT_SET_ACTIVE_VMA", F_CONTROL_OBJECT_SET_ACTIVE_VMA));
     fn_ctrl_btn_draw = reinterpret_cast<ControlButtonDrawFn>(g_base + fn_resolve("F_CONTROL_BUTTON_DRAW_VMA", F_CONTROL_BUTTON_DRAW_VMA));
+    fn_x_textctrl_get_color_from_code = reinterpret_cast<XTextCtrlGetColorFromCodeFn>(
+        g_base + fn_resolve("F_X_TEXTCTRL_GET_COLOR_FROM_CODE_VMA",
+                            F_X_TEXTCTRL_GET_COLOR_FROM_CODE_VMA));
     // 识别当前 libgame.so 变体/能力（离线表查表）。必须在 qol_log_init() 之后：
     // 日志 sink 未初始化时发出的日志会被丢弃。
     // 表匹配用磁盘上的 so 文件 md5，不受模块内存补丁影响，故无需先于补丁执行。

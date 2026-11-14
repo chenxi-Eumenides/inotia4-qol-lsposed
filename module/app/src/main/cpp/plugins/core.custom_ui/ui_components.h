@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "../../contracts/ui.h"
+#include "../../contracts/game_ports/item_port.h"
 
 namespace qol::features::core_ui {
 
@@ -12,6 +13,8 @@ using UiDrawProc = contracts::QolUiDrawFn;
 
 // 组件实现只保存宿主注入的 UI 表，不直接依赖游戏内部头文件。
 bool ui_components_bind(const contracts::QolUiAdapter* adapter);
+// 物品图标/格子组件的只读绘制来源；由 core.custom_ui 安装期注入 QOL_PORT_ITEM。
+void ui_components_bind_item_port(const contracts::QolItemPort* item_port);
 void ui_components_unbind();
 const contracts::QolUiComponents* ui_components_api();
 // 是否处于组件回调（点击/触摸事件）内：此时创建/销毁需延迟到帧安全点，

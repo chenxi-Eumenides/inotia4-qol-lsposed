@@ -126,10 +126,14 @@ std::string option_list(const JsonValue& item, const contracts::QolItemPort* por
         first = false;
         const char* name = static_text(port, QolItemStaticTextKind::kOptionName,
                                        static_cast<int32_t>(id));
+        const char* percent_text = static_text(port, QolItemStaticTextKind::kItemOptionPercent,
+                                               static_cast<int32_t>(id));
+        const bool percent = percent_text != nullptr && percent_text[0] == '1';
         Obj entry;
         entry.integer("id", id);
-        entry.text("name", name == nullptr ? "" : name);
+        entry.text("name", name == nullptr || name[0] == '\0' ? "未知" : name);
         entry.integer("value", value);
+        entry.boolean("percent", percent);
         out += entry.object();
     }
     out += "]";
@@ -172,8 +176,9 @@ std::string enchant_entries(const JsonValue& item, const contracts::QolItemPort*
             entry.integer("id", option_id);
             entry.integer("value", option_value);
             entry.boolean("percent", percent);
-            entry.text("effect", static_text(port, QolItemStaticTextKind::kOptionName,
-                                             option_id_value));
+            const char* effect = static_text(port, QolItemStaticTextKind::kOptionName,
+                                             option_id_value);
+            entry.text("effect", effect == nullptr || effect[0] == '\0' ? "未知" : effect);
             out += entry.object();
         }
     }

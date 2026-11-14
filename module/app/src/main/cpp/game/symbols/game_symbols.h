@@ -984,6 +984,7 @@ constexpr uintptr_t F_UIEQUIP_DRAW_VMA = 0xb764c;
 constexpr uintptr_t F_UIEQUIP_DRAW_INVEN_ITEM_VMA = 0xb6fac;
 constexpr uintptr_t F_UIEQUIP_DRAW_INVEN_BAG_VMA = 0xb7284;
 constexpr uintptr_t F_ITEM_DRAW_PORTING_VMA = 0x10644c; // void (item*, x, y, type, flip) 原版物品图标/数量绘制
+constexpr uintptr_t F_ITEMDATA_DRAW_VMA = 0x1056f4; // void (ITEMDATABASE record*, x, y) 按类别记录绘制物品图标
 constexpr uintptr_t F_CONTROL_ITEM_DRAW_VMA = 0xaaedc;  // void (void* ctrl) ControlItem_Draw：图标 + 稀有度贴图；数量由内部 bl ITEM_DrawPorting 以 show_count=1 画出（0xaaf24 mov w4,#1）
 constexpr uintptr_t F_UIDESC_SET_OFF_VMA = 0xb2b48;
 constexpr uintptr_t F_UIDESC_GET_DATA_VMA = 0xb2bd0;  // void* UIDesc_GetData()：当前 desc 面板物品对象（ButtonEquipExe b7c2c 同源）
@@ -1237,6 +1238,7 @@ using TouchHandleResetMovingControlFn = void (*)();
 using TouchHandleResetSelectedControlFn = uint64_t (*)();
 using UiEquipInvenItemControlEventProcFn = uint64_t (*)(void*, uint64_t, void*, void*);
 using ItemDrawPortingFn = void (*)(void*, int32_t, int32_t, int32_t, int32_t);
+using ItemDataDrawFn = void (*)(void*, int32_t, int32_t);  // ITEMDATA_Draw(record, x, y)
 using ControlItemDrawFn = void (*)(void*);  // ControlItem_Draw(ctrl)
 using SetExpFn = void (*)(void*, int32_t);
 using SetLevelFn = int (*)(void*, int32_t);   // CHAR_SetLevel(0xe05a0)：返回 1=成功（升级/同级）/ 0=降级拒绝
@@ -1512,6 +1514,15 @@ using UIMixSetTypeFn = void (*)(int64_t);                     // UIMix_SetType(t
 using XTextCtrlSetTextControlFn = void (*)(void* ctrl, const char* text, uint32_t max_len,
                                            uint32_t field_c, uint32_t field_10,
                                            int32_t field_14);  // 0xb3028-0xb3044 实参组 (ctrl,text,0x166,0,0,-1)
+
+// ---- 游戏内联颜色码（item_editor 复用游戏内联色码取色）----
+// X_TEXTCTRL_GetColorFromCode：uint32 (uint32 code)。b10f4 反汇编：code-'A'≤0x18 时查
+// .rodata 颜色表（monster 表址 0x24a1b0），否则返回 0xFF000000；返回 0xAABBGGRR packed
+// color。调用点 X_TEXTCTRL_CreateImgString b13d8：`ldrb w0,[x27,#1]` 后 `bl b10f4`，
+// 即文本中色码标记字符的下一字节为颜色码。实测 'G'=0xFF808080 'W'=0xFFFFFFFF
+// 'C'=0xFF00FF00 'L'=0xFFC81200 'V'=0xFFFF009C 'Y'=0xFF00FFFC。
+constexpr uintptr_t F_X_TEXTCTRL_GET_COLOR_FROM_CODE_VMA = 0xb10f4;  // X_TEXTCTRL_GetColorFromCode
+using XTextCtrlGetColorFromCodeFn = uint32_t (*)(uint32_t);
 
 // ---- 自动出售阶段 A：GAMESTATE_DrawPlay draw-end 宿主调用点（auto-sell）----
 // 符号存在性已用 NDK r26d llvm-objdump 核对：GAMESTATE_DrawPlay@0x9d6cc。

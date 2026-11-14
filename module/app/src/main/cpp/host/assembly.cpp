@@ -44,6 +44,7 @@
 #include "plugins/attribute_quality/plugin.h"
 #include "plugins/attribute_range_display/plugin.h"
 #include "plugins/autosell/plugin.h"
+#include "plugins/item_editor/plugin.h"
 #include "plugins/settings/plugin.h"
 #include "plugins/core.custom_ui/plugin.h"
 #include "plugins/core.api/plugin.h"
@@ -57,7 +58,6 @@
 #include "plugins/extension_bag/ui/equip_hooks.h"
 #include "plugins/core.inventory/plugin.h"
 #include "plugins/core.item/plugin.h"
-#include "plugins/item_lab/plugin.h"
 #include "plugins/core.ui_state/plugin.h"
 #include "plugins/better_move/plugin.h"
 #include "plugins/combat_move/plugin.h"
@@ -260,6 +260,8 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
                         features::attribute_range_display::kResourceCount),
     with_resource_count(&features::autosell::plugin_descriptor,
                         features::autosell::kResourceCount),
+    with_resource_count(&features::item_editor::plugin_descriptor,
+                        features::item_editor::kResourceCount),
     {&features::core_api::plugin_descriptor},
     with_resource_count(&features::core_settings::plugin_descriptor,
                         features::core_settings::kResourceCount),
@@ -273,8 +275,6 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
                         features::core_inventory::kResourceCount),
     with_resource_count(&features::core_item::plugin_descriptor,
                         features::core_item::kResourceCount),
-    with_resource_count(&features::item_lab::plugin_descriptor,
-                        features::item_lab::kResourceCount),
     {&features::core_ui_state::plugin_descriptor},
     with_resource_count(&features::push_all::plugin_descriptor,
                         features::push_all::kResourceCount),

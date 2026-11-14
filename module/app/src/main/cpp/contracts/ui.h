@@ -13,8 +13,8 @@
 namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
-constexpr uint16_t kUiContractMajor = 2, kUiContractMinor = 23;
-constexpr uint16_t kUiAdapterMajor = 2, kUiAdapterMinor = 37;
+constexpr uint16_t kUiContractMajor = 2, kUiContractMinor = 24;
+constexpr uint16_t kUiAdapterMajor = 2, kUiAdapterMinor = 38;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 2;
 constexpr uint32_t kUiStateMaxCustomPanels = 4;
@@ -363,6 +363,37 @@ struct UiHelpPageDesc {
     void* user;
 };
 
+// 可复用物品显示组件：同一 item ref 可来自 handle、游戏物品地址或 ITEMDATABASE 类别 ID。
+enum class QolUiItemSource : uint32_t {
+    kNone = 0,
+    kHandle = 1,
+    kAddress = 2,
+    kItemId = 3,
+};
+struct QolUiItemRef {
+    uint32_t source;       // QolUiItemSource
+    QolItemHandle handle;  // source=kHandle
+    uintptr_t address;     // source=kAddress；必须是游戏拥有的物品对象地址
+    int32_t item_id;      // source=kItemId；ITEMDATABASE 下标
+};
+struct UiItemIconDesc {
+    UiRect rect;
+    QolUiItemRef item;
+    uint32_t flags;
+};
+enum UiItemSlotFlags : uint32_t {
+    kUiItemSlotShowFrame = 1u << 0,
+    kUiItemSlotShowCount = 1u << 1,
+    kUiItemSlotSelected = 1u << 2,
+    kUiItemSlotDimmed = 1u << 3,
+};
+struct UiItemSlotDesc {
+    UiRect rect;
+    QolUiItemRef item;
+    int32_t count;  // -1 = 不显示/由调用方维护
+    uint32_t flags;
+};
+
 struct QolUiComponents {
     /* 由 core.ui 实现并提供（U11-2）；本 lane 只定义 */
     uint32_t size;
@@ -533,6 +564,13 @@ struct QolUiComponents {
     QolResult (*draw_circle)(const UiShapeDesc*);
     // Minor 23 append-only: native-textured container with configurable fill and ornaments.
     QolResult (*draw_container_styled)(const UiContainerStyleDesc*);
+    // Minor 24 tail: 可复用物品图标/格子组件。
+    QolResult (*item_icon_create)(const UiItemIconDesc*, QolUiHandle parent, QolUiHandle* out);
+    QolResult (*item_icon_set)(QolUiHandle, const QolUiItemRef*);
+    QolResult (*item_icon_draw)(QolUiHandle);
+    QolResult (*item_slot_create)(const UiItemSlotDesc*, QolUiHandle parent, QolUiHandle* out);
+    QolResult (*item_slot_set)(QolUiHandle, const QolUiItemRef*, int32_t count);
+    QolResult (*item_slot_draw)(QolUiHandle);
 };
 
 using QolUiDrawFn = void (*)(void* control);
@@ -834,6 +872,10 @@ struct QolUiAdapter {
     QolResult (*character_info_content_rect)(UiRect* out);
     // Minor 37 append-only: 原版 UIRollDice_Draw，供背包页新绘制钩子复刻原调用。
     QolResult (*roll_dice_draw)();
+    // Minor 38 tail: 游戏内联颜色码 → 游戏实际 ABGR packed color（0xAABBGGRR）。
+    // code 为内联色码字符（'G','W','C','L','V','Y' 等），仅 0..255 有效；取色与
+    // 游戏文本渲染同源，无符号时返回 NotReady 且不写 out_color。
+    QolResult (*inline_color_from_code)(int32_t code, uint32_t* out_color);
 };
 
 }  // namespace qol::contracts

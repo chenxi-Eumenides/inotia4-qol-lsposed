@@ -685,15 +685,15 @@ int main() {
           g_loaded_image_units[2] == 0x0f && g_loaded_image_units[3] == 0x59);
 
     Control* root = root_control();
-    CHECK(root != nullptr && root->kind == 0 && root->children.size() == 14);
+    CHECK(root != nullptr && root->kind == 0 && root->children.size() == 15);
     CHECK(rect_matches(root->rect, panel_rect));
-    CHECK(g_live == 15);
+    CHECK(g_live == 16);
     Control* panel_nav_control = root->children[0].get();
     g_nav_control = panel_nav_control;
     CHECK(panel_nav_control->kind == 1 && panel_nav_control->click != nullptr);
     CHECK(rect_matches(panel_nav_control->rect, panel_nav));
-    Control* category_controls[7]{};
-    for (size_t i = 0; i < 7; ++i) {
+    Control* category_controls[8]{};
+    for (size_t i = 0; i < 8; ++i) {
         category_controls[i] = root->children[i + 1].get();
         CHECK(category_controls[i]->kind == 1 && category_controls[i]->click != nullptr);
         CHECK(category_controls[i]->rect.x == 134 &&
@@ -701,7 +701,7 @@ int main() {
               category_controls[i]->rect.w == 236 && category_controls[i]->rect.h == 48);
     }
     Control* style_controls[6]{};
-    for (size_t i = 0; i < 6; ++i) style_controls[i] = root->children[i + 8].get();
+    for (size_t i = 0; i < 6; ++i) style_controls[i] = root->children[i + 9].get();
     const auto assert_style_control_rects = [&]() {
         const int64_t color_x[] = {446, 570, 446, 570};
         const int64_t color_y[] = {442, 442, 494, 494};
@@ -770,7 +770,7 @@ int main() {
     };
     const auto assert_flat_button_fills = [&](size_t extra_native_outlines = 0,
                                               bool include_style_controls = true) {
-        const size_t base_fill_count = include_style_controls ? 66 : 36;
+        const size_t base_fill_count = include_style_controls ? 71 : 41;
         CHECK(g_fill_draws == static_cast<int>(base_fill_count + extra_native_outlines) &&
               g_fill_rects.size() == base_fill_count + extra_native_outlines &&
               g_fill_colors.size() == base_fill_count + extra_native_outlines);
@@ -796,8 +796,8 @@ int main() {
                 }
             }
         };
-        assert_button_fills(category_controls, 7, 1);
-        if (include_style_controls) assert_button_fills(style_controls, 6, 36);
+        assert_button_fills(category_controls, 8, 1);
+        if (include_style_controls) assert_button_fills(style_controls, 6, 41);
     };
     const auto assert_native_button_outlines = [&](Control* const* controls,
                                                     int32_t pressed_index) {
@@ -816,7 +816,7 @@ int main() {
             const uint32_t color = static_cast<int32_t>(i) == pressed_index
                 ? qol::contracts::ui_theme::kOk : qol::contracts::ui_theme::kFrameGold;
             for (size_t edge = 0; edge < 4; ++edge) {
-                const size_t index = 36 + i * 4 + edge;
+                const size_t index = 41 + i * 4 + edge;
                 CHECK(rect_matches(g_fill_rects[index], expected[edge]));
                 CHECK(g_fill_colors[index] == color);
             }
@@ -1457,12 +1457,12 @@ int main() {
     right_panel = right_panel_1422;
     preview = preview_1422;
     root = root_control();
-    CHECK(root != nullptr && root->kind == 0 && root->children.size() == 14);
-    CHECK(rect_matches(root->rect, panel_rect_1422) && g_live == 15);
+    CHECK(root != nullptr && root->kind == 0 && root->children.size() == 15);
+    CHECK(rect_matches(root->rect, panel_rect_1422) && g_live == 16);
     panel_nav_control = root->children[0].get();
     g_nav_control = panel_nav_control;
     CHECK(rect_matches(panel_nav_control->rect, panel_nav));
-    for (size_t i = 0; i < 7; ++i) category_controls[i] = root->children[i + 1].get();
+    for (size_t i = 0; i < 8; ++i) category_controls[i] = root->children[i + 1].get();
     for (size_t i = 0; i < 6; ++i) style_controls[i] = find_child_at(box_style_rects[i]);
     assert_style_control_rects();
     CHECK(origin(root, &root_x, &root_y).code == kQolOk);

@@ -239,3 +239,8 @@ bool ui_draw_item_porting(void* item, int32_t x, int32_t y, int32_t a, int32_t b
     fn_item_draw_porting(item, x, y, a, b);
     return true;
 }
+
+uint32_t ui_inline_color_from_code(uint32_t code) {
+    if (fn_x_textctrl_get_color_from_code == nullptr) return 0;
+    return fn_x_textctrl_get_color_from_code(code);
+}

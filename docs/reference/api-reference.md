@@ -161,12 +161,12 @@
 | `prefix` | `I_TYPE` bits 2-5 的原始稀有度档（0-15；未知时为 `null`），与 `rarity` 同为数值 |
 | `prefix_tier` | 按变体、类别 class bits 与 `prefix` 档选择的名称前缀；不适用时为空字符串，与 `rarity_tier` 同为名称 |
 | `base` | 基础属性对象：`{damage 物攻, defense 物防, magic_rate 魔法伤害倍率}`；`magic_rate` 为原始值/100 显示（110 → 1.1） |
-| `bonus` | 词缀列表（type==0 节点，ITEMOPTINFOBASE 联查）：每项 `{id 词缀索引, name 词缀名, value 词缀值}` |
-| `gem` | 宝石对象：`{total_slots 总槽位(插槽等级), slots[{id, name, value}] 已镶宝石}`（type==1 节点） |
-| `chaos` | 混沌对象：`{is_chaos 是否混沌, level 混沌等级, rate 混沌成功率}` |
+| `bonus` | 词缀列表（type==0 节点，ITEMOPTINFOBASE 联查）：每项 `{id 词缀索引, name 词缀名, value 词缀值, percent 是否百分比}` |
+| `gem` | 宝石对象：`{total_slots 总槽位(插槽等级), slots[{id, name, value, percent}] 已镶宝石}`（type==1 节点） |
+| `chaos` | 混沌对象：`{is_chaos, level, rate}`。`is_chaos` 对应 `I_ENCHANT` bit0（混沌材料标记）或 bit1（混沌道具本体）；`level` 为混沌等级（有符号低字节），`rate` 为混沌数值率，默认 100，游戏按 `属性值 × rate / 100` 应用，不是成功率。非混沌物品 level=0、rate=100 |
 | `enchant` | Monster（variant 3）附魔数组：只包含 option 链表 type=2 节点，每项 `{id, value, percent, effect}`；`value` 为节点原始值，`percent` 为是否按百分比显示（true 时游戏按 0.1% 单位显示，如 `182` → `18.2%`；false 时按整数显示），`effect` 通过 ITEMOPTINFOBASE 联查。C18（variant 4）及其他变体固定为 `[]`。标量 `I_ENCHANT` 的 id/level 不属于可见附魔行，不输出。 |
 
-> 物品对象为统一结构（装备/消耗品/材料同构）：**缺失的标量字段置 `null`，列表字段恒为数组（无内容时空列表）**；`base`/`bonus`/`gem`/`chaos`/`enchant` 为重组后的可读数据；`capacity` 袋容量 16 格；`occupied_slots` 占用数。
+> 物品对象为统一结构（装备/消耗品/材料同构）：**缺失的标量字段置 `null`，列表字段恒为数组（无内容时空列表）**；`base`/`bonus`/`gem`/`chaos`/`enchant` 为重组后的可读数据；`capacity` 袋容量 16 格；`occupied_slots` 占用数。`bonus`/`gem.slots` 的 `percent` 与 `enchant.percent` 同口径：true 时原始值按 0.1% 单位显示（如 `182` → `18.2%`），false 时按整数显示。C18（variant 4）的 ITEMOPTINFOBASE 新增词条 37..88 复用同名基础词条的显示名与百分比口径；Monster 及其他变体不解析这些 C18 词条。任何变体查不到名称的词条统一输出 `未知`。
 
 > 写操作 result 中的 `slots[].item`、`equipment.item`、`inventory[].item` 复用上述完整 Item 结构或 `null`；外层只包含本次写入涉及或实测发生变化的槽，不是完整 Inventory/Party 快照。
 

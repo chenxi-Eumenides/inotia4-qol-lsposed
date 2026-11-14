@@ -14,6 +14,7 @@
 #include "contracts/ui_choice.h"
 #include "contracts/ui_confirmation.h"
 #include "contracts/game_ports/choice_port.h"
+#include "contracts/game_ports/item_port.h"
 #include "contracts/ui.h"
 
 namespace {
@@ -54,6 +55,7 @@ char g_dialog_labels[6][64]{};
 uint32_t g_dialog_option_count = 0;
 
 QolChoicePort g_choice_port{};
+qol::contracts::QolItemPort g_item_port_stub{};
 qol::contracts::QolHostSdk g_sdk{};
 uint8_t g_confirmation_popup_active = 0;
 qol::contracts::QolUiPopupMsgCallbackFn g_confirmation_ok = nullptr;
@@ -388,7 +390,9 @@ void fake_button_original(void* control) {
 
 bool setup_choice_feature() {
     static qol::contracts::QolUiAdapter ui{};
-    static const void* ports[] = {&g_choice_port};
+    g_item_port_stub.abi_version = qol::contracts::kQolPortItemVersion;
+    g_item_port_stub.struct_size = sizeof(g_item_port_stub);
+    static const void* ports[] = {&g_choice_port, &g_item_port_stub};
     ui.size = sizeof(ui);
     ui.major = qol::contracts::kUiAdapterMajor;
     ui.minor = qol::contracts::kUiAdapterMinor;
@@ -407,7 +411,7 @@ bool setup_choice_feature() {
     qol::contracts::PluginContext context{};
     context.sdk = &g_sdk;
     context.ports = ports;
-    context.port_count = 1;
+    context.port_count = 2;
     const bool installed = qol::features::core_ui::plugin_descriptor().install(context) == 0;
     qol::features::core_ui::native_choice_set_installed(true);
     return installed;
@@ -584,10 +588,13 @@ void test_plugin_manifest() {
     CHECK(d.provides[2].iface != nullptr);
     CHECK(std::strcmp(d.provides[3].id, qol::contracts::kUiConfirmationCapabilityId) == 0);
     CHECK(d.provides[3].iface != nullptr);
-    CHECK(d.port_count == 1 && d.ports != nullptr);  // 仅 QOL_PORT_CHOICE
+    CHECK(d.port_count == 2 && d.ports != nullptr);  // QOL_PORT_CHOICE + QOL_PORT_ITEM
     CHECK(d.ports[0].id == qol::contracts::QolPortId::QOL_PORT_CHOICE);
     CHECK(d.ports[0].range.major == qol::contracts::kQolPortChoiceVersion.major);
     CHECK(d.ports[0].range.min_minor == qol::contracts::kQolPortChoiceVersion.minor);
+    CHECK(d.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
+    CHECK(d.ports[1].range.major == qol::contracts::kQolPortItemVersion.major);
+    CHECK(d.ports[1].range.min_minor == qol::contracts::kQolPortItemVersion.minor);
     const auto* api = static_cast<const UiChoiceApi*>(d.provides[2].iface);
     CHECK(api->open != nullptr && api->active != nullptr && api->close != nullptr);
     CHECK(!api->active());
@@ -631,10 +638,10 @@ qol::contracts::PluginContext& fixture_context() {
     static qol::contracts::PluginContext context{};
     static bool initialized = false;
     if (!initialized) {
-        static const void* ports[] = {&g_choice_port};  // 对象地址稳定，reset 只改字段
+        static const void* ports[] = {&g_choice_port, &g_item_port_stub};
         context.sdk = &g_sdk;
         context.ports = ports;
-        context.port_count = 1;
+        context.port_count = 2;
         initialized = true;
     }
     return context;

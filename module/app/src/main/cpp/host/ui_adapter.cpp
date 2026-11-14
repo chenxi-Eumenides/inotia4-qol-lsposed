@@ -678,6 +678,17 @@ QolResult roll_dice_draw() {
     return contracts::ok();
 }
 
+// Minor 38 tail：游戏内联颜色码取色（0xAABBGGRR）。色值与游戏文本渲染同源（同一
+// X_TEXTCTRL_GetColorFromCode）；wrapper 返回 0 表示符号未解析，此时不写 out_color。
+QolResult inline_color_from_code(int32_t code, uint32_t* out_color) {
+    if (out_color == nullptr) return invalid_argument();
+    if (code < 0 || code > 255) return invalid_argument();
+    const uint32_t color = ui_inline_color_from_code(static_cast<uint32_t>(code));
+    if (color == 0) return not_ready();
+    *out_color = color;
+    return contracts::ok();
+}
+
 QolResult set_font_color(uint32_t color) {
     if (fn_grpx_set_font_color == nullptr) return not_ready();
     fn_grpx_set_font_color(color);
@@ -1919,6 +1930,8 @@ QolUiAdapter g_ui_adapter{
              // Minor 36 tail: character-info content rect for click hit-testing.
               &character_info_content_rect,
               &roll_dice_draw,
+             // Minor 38 tail: game inline color code → native ABGR packed color.
+             &inline_color_from_code,
             };
 
 }  // namespace

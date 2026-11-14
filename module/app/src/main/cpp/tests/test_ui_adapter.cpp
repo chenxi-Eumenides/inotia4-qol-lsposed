@@ -480,6 +480,8 @@ bool ui_reset_touch_selected() { return false; }
 const char* ui_screen() { return "test"; }
 bool ui_draw_control_title_image_part(void*, int32_t) { return true; }
 void ui_show_text_popup(int32_t) {}
+uint32_t g_fake_inline_color = 0;
+uint32_t ui_inline_color_from_code(uint32_t) { return g_fake_inline_color; }
 bool ui_control_is_moving(void*, int32_t* out_moving) {
     if (out_moving != nullptr) *out_moving = 0;
     return true;
@@ -688,6 +690,21 @@ int main() {
     CHECK(content_rect.y == g_fake_res_height + 153);
     CHECK(content_rect.w == 205 && content_rect.h == 411);
     CHECK(adapter->character_info_content_rect(nullptr).code == kQolErrInvalidArgument);
+    // Minor 38 tail: 内联颜色码取色（0xAABBGGRR）。out 非空、code 0..255；wrapper 返回 0
+    // （符号未解析）时 NotReady 且不写 out_color。
+    {
+        uint32_t inline_color = 0xdeadbeef;
+        g_fake_inline_color = 0;
+        CHECK(adapter->inline_color_from_code('G', &inline_color).code == kQolErrNotReady);
+        CHECK(inline_color == 0xdeadbeef);
+        g_fake_inline_color = 0xFF808080u;
+        CHECK(adapter->inline_color_from_code('G', &inline_color).ok == kQolOk);
+        CHECK(inline_color == 0xFF808080u);
+        CHECK(adapter->inline_color_from_code('G', nullptr).code == kQolErrInvalidArgument);
+        CHECK(adapter->inline_color_from_code(-1, &inline_color).code == kQolErrInvalidArgument);
+        CHECK(adapter->inline_color_from_code(256, &inline_color).code == kQolErrInvalidArgument);
+        g_fake_inline_color = 0;
+    }
     // 加点模式（P+0x40 != 0）右侧详细框不绘制，命中矩形必须失效；普通模式与
     // 内存不可读场景保持原矩形。
     {
@@ -1038,8 +1055,12 @@ int main() {
                   "roll dice draw must append after character info content rect");
     static_assert(offsetof(qol::contracts::QolUiAdapter, roll_dice_draw) +
                       sizeof(adapter->roll_dice_draw) ==
+                  offsetof(qol::contracts::QolUiAdapter, inline_color_from_code),
+                  "inline color from code must append after roll dice draw");
+    static_assert(offsetof(qol::contracts::QolUiAdapter, inline_color_from_code) +
+                      sizeof(adapter->inline_color_from_code) ==
                   sizeof(qol::contracts::QolUiAdapter),
-                  "roll dice draw must remain the final adapter field");
+                  "inline color from code must remain the final adapter field");
     uint64_t param[2]{};
     int source_control = 0;
     std::memcpy(&param[1], &source_control, sizeof(source_control));

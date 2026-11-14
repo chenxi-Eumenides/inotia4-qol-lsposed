@@ -1,3 +1,4 @@
+#include "contracts/log_domain.h"
 #include "debug_components.h"
 
 #if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
@@ -38,7 +39,7 @@ constexpr int64_t kLeftCategoryGap = 8;
 constexpr uint32_t kStyleControlCount = 6;
 constexpr uint32_t kOpacityStep = 10;
 constexpr uint32_t kOpacityMax = 100;
-constexpr uint32_t kCategoryCount = 7;
+constexpr uint32_t kCategoryCount = 8;
 constexpr uint32_t kCategoryBox = 0;
 constexpr uint32_t kCategoryText = 1;
 constexpr uint32_t kCategoryArrow = 2;
@@ -46,7 +47,8 @@ constexpr uint32_t kCategoryIcon = 3;
 constexpr uint32_t kCategoryButton = 4;
 constexpr uint32_t kCategoryBackNav = 5;
 constexpr uint32_t kCategoryRestricted = 6;
-constexpr uint32_t kMaxPageHandles = 20;
+constexpr uint32_t kCategoryItem = 7;
+constexpr uint32_t kMaxPageHandles = 24;
 
 struct FillColorOption {
     const char* name;
@@ -121,13 +123,17 @@ constexpr FillColorOption kFillColors[] = {
     {"黑色", 0x0000}, {"灰色", 0x8410}, {"白色", 0xFFFF}, {"红色", 0xF800}};
 constexpr uint32_t kFillColorCount = sizeof(kFillColors) / sizeof(kFillColors[0]);
 constexpr const char* kCategoryNames[kCategoryCount] = {
-    "方框", "文本按钮", "箭头按钮", "图标按钮", "普通控件按钮", "返回/导航", "列表/主菜单专用"};
+    "方框", "文本按钮", "箭头按钮", "图标按钮", "普通控件按钮", "返回/导航",
+    "列表/主菜单专用", "物品图标/格子"};
 constexpr size_t kStyledContainerApiSize =
     offsetof(contracts::QolUiComponents, draw_container_styled) +
     sizeof(((contracts::QolUiComponents*)nullptr)->draw_container_styled);
 constexpr size_t kFlatButtonApiSize =
     offsetof(contracts::QolUiComponents, flat_text_button_create) +
     sizeof(((contracts::QolUiComponents*)nullptr)->flat_text_button_create);
+constexpr size_t kItemComponentsApiSize =
+    offsetof(contracts::QolUiComponents, item_slot_draw) +
+    sizeof(((contracts::QolUiComponents*)nullptr)->item_slot_draw);
 
 contracts::UiRect g_panel_rect{0, 0, 960, 640};
 contracts::UiRect g_panel_area_rect{};
@@ -146,7 +152,8 @@ contracts::QolUiHandle g_category_controls[kCategoryCount]{};
 contracts::QolUiHandle g_style_controls[kStyleControlCount]{};
 struct PageHandle {
     contracts::QolUiHandle handle = nullptr;
-    uint8_t kind = 0;  // 0 text/flat, 1 arrow, 2 icon, 3 native button, 4 back, 5 nav, 6 back preview.
+    uint8_t kind = 0;  // 0 text/flat, 1 arrow, 2 icon, 3 native button, 4 back, 5 nav,
+                       // 6 back preview, 7 item icon, 8 item slot.
     contracts::UiRect rect{};
 };
 PageHandle g_page_handles[kMaxPageHandles]{};
@@ -187,7 +194,7 @@ PendingStyleUpdate g_pending_open_style{};
 
 void debug_log(const char* message) {
     if (g_sdk == nullptr || g_sdk->log.write == nullptr || message == nullptr) return;
-    (void)g_sdk->log.write(1, 12, "core.custom_ui/debug_components", message,
+    (void)g_sdk->log.write(1, static_cast<int32_t>(QolDomain::kUi), "core.custom_ui/debug_components", message,
                            static_cast<uint32_t>(std::strlen(message)));
 }
 
@@ -567,6 +574,55 @@ bool build_icon_page(const contracts::QolUiComponents* components) {
     return true;
 }
 
+bool item_components_available(const contracts::QolUiComponents* components) {
+    return components != nullptr && components->major == contracts::kUiContractMajor &&
+        components->minor >= 24 && components->size >= kItemComponentsApiSize &&
+        components->item_icon_create != nullptr && components->item_icon_draw != nullptr &&
+        components->item_slot_create != nullptr && components->item_slot_draw != nullptr;
+}
+
+bool build_item_page(const contracts::QolUiComponents* components) {
+    if (!item_components_available(components)) return true;
+
+    const int64_t left = g_right_panel_rect.x;
+    const int64_t first_row = g_right_panel_rect.y + 96;
+    const int64_t second_row = g_right_panel_rect.y + 272;
+    const contracts::QolUiItemRef empty_item{
+        static_cast<uint32_t>(contracts::QolUiItemSource::kNone), {}, 0, -1};
+    const contracts::QolUiItemRef example_item{
+        static_cast<uint32_t>(contracts::QolUiItemSource::kItemId), {}, 0, 5};
+
+    const contracts::UiItemIconDesc icon_desc{{left + 48, first_row, 48, 48}, example_item, 0};
+    contracts::QolUiHandle handle = nullptr;
+    if (!contracts::succeeded(components->item_icon_create(&icon_desc, g_root, &handle)) ||
+        handle == nullptr) return false;
+    add_page_handle(components, handle, 7);
+
+    const contracts::UiItemSlotDesc slots[] = {
+        {{left + 148, first_row, 74, 74}, empty_item, -1,
+            contracts::kUiItemSlotShowFrame},
+        {{left + 262, first_row, 74, 74}, example_item, -1,
+            contracts::kUiItemSlotShowFrame},
+        {{left + 374, first_row, 74, 74}, example_item, -1,
+            contracts::kUiItemSlotShowFrame | contracts::kUiItemSlotSelected},
+        {{left + 76, second_row, 74, 74}, example_item, -1,
+            contracts::kUiItemSlotShowFrame | contracts::kUiItemSlotDimmed},
+        {{left + 202, second_row, 48, 48}, example_item, -1,
+            contracts::kUiItemSlotShowFrame},
+        {{left + 292, second_row, 74, 74}, example_item, -1,
+            contracts::kUiItemSlotShowFrame},
+        {{left + 398, second_row, 96, 96}, example_item, -1,
+            contracts::kUiItemSlotShowFrame},
+    };
+    for (uint32_t i = 0; i < sizeof(slots) / sizeof(slots[0]); ++i) {
+        handle = nullptr;
+        if (!contracts::succeeded(components->item_slot_create(&slots[i], g_root, &handle)) ||
+            handle == nullptr) return false;
+        add_page_handle(components, handle, 8);
+    }
+    return true;
+}
+
 bool build_native_button_page(const contracts::QolUiComponents* components) {
     const int64_t left = g_right_panel_rect.x + 32;
     const int64_t max_width = g_right_panel_rect.w - 64;
@@ -653,6 +709,7 @@ bool rebuild_page(int32_t category) {
         case static_cast<int32_t>(kCategoryText): ok = build_text_page(components); break;
         case static_cast<int32_t>(kCategoryArrow): ok = build_arrow_page(components); break;
         case static_cast<int32_t>(kCategoryIcon): ok = build_icon_page(components); break;
+        case static_cast<int32_t>(kCategoryItem): ok = build_item_page(components); break;
         case static_cast<int32_t>(kCategoryButton): ok = build_native_button_page(components); break;
         case static_cast<int32_t>(kCategoryBackNav): ok = build_back_nav_page(components); break;
         default: ok = true; break;
@@ -732,6 +789,8 @@ void draw_page_handles(const contracts::QolUiAdapter* adapter,
         switch (entry.kind) {
             case 1: if (components->arrow_button_draw) (void)components->arrow_button_draw(entry.handle); break;
             case 2: if (components->icon_button_draw) (void)components->icon_button_draw(entry.handle); break;
+            case 7: if (components->item_icon_draw) (void)components->item_icon_draw(entry.handle); break;
+            case 8: if (components->item_slot_draw) (void)components->item_slot_draw(entry.handle); break;
             case 3: {
                 // The native control has no DrawProc; draw_control intentionally produces no
                 // default skin. The outline below is debug-only hitbox visualization.
@@ -915,6 +974,29 @@ void draw_right_page_text(const contracts::QolUiAdapter* adapter,
             right_x, static_cast<int32_t>(base + size + 222), 0, 0);
         (void)adapter->draw_string_with_font("图集缺失时显示 fallback 文本。",
             right_x, static_cast<int32_t>(base + size + 248), 0, 0);
+    } else if (g_selected_category == kCategoryItem) {
+        set_color(contracts::ui_theme::kTextNormal);
+        if (!item_components_available(components)) {
+            (void)adapter->draw_string_with_font("组件接口不可用（需要 minor 24）",
+                right_x, right_y + 88, 0, 0);
+        } else {
+            const int32_t first_row_y = static_cast<int32_t>(right_y + 96 + 84);
+            const int32_t second_row_y = static_cast<int32_t>(right_y + 272 + 104);
+            (void)adapter->draw_string_with_font("item_icon", right_x + 48, first_row_y, 0, 0);
+            (void)adapter->draw_string_with_font("空槽", right_x + 148, first_row_y, 0, 0);
+            (void)adapter->draw_string_with_font("有物品", right_x + 262, first_row_y, 0, 0);
+            (void)adapter->draw_string_with_font("选中", right_x + 374, first_row_y, 0, 0);
+            (void)adapter->draw_string_with_font("灰显", right_x + 76, second_row_y, 0, 0);
+            (void)adapter->draw_string_with_font("48", right_x + 202, second_row_y, 0, 0);
+            (void)adapter->draw_string_with_font("74", right_x + 292, second_row_y, 0, 0);
+            (void)adapter->draw_string_with_font("96", right_x + 398, second_row_y, 0, 0);
+        }
+        (void)adapter->draw_string_with_font("原生格底：unit 15 loc 41（74×74）；空槽也显示格底。",
+            right_x, right_y + 438, 0, 0);
+        (void)adapter->draw_string_with_font("选中框：unit 15 loc 39；格子缩放保持等比。",
+            right_x, right_y + 464, 0, 0);
+        (void)adapter->draw_string_with_font("物品示例：kItemId = 5（恢复药水（小））。",
+            right_x, right_y + 490, 0, 0);
     } else if (g_selected_category == kCategoryButton) {
         set_color(contracts::ui_theme::kTextNormal);
         const int64_t max_width = g_right_panel_rect.w - 64;

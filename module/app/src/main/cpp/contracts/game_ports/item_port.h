@@ -215,6 +215,16 @@ struct QolItemPortReadApi {
     QolResult (*bag_capacity)(const QolBagRef* ref, int32_t* out_capacity);
     // 5.0：槽是否被占用（槽地址可读且物品指针非空）；不可读返回 NotReady。
     QolResult (*slot_occupied)(const QolBagRef* ref, int32_t slot, int32_t* out_occupied);
+    // 5.2：按 handle 直接调用原版 ITEM_DrawPorting 绘制物品图标。坐标为主线程
+    // 当前帧的逻辑坐标；插件不得自行猜测类别到图集的映射。
+    QolResult (*draw_icon)(QolItemHandle item, int32_t x, int32_t y, int32_t draw_type,
+                           int32_t flip);
+    // 5.2：供可复用 UI 组件按游戏物品地址/类别 ID 绘制图标。address 必须是游戏拥有的
+    // 物品对象地址（调用方负责生命周期）；category 为 ITEMDATABASE 下标。
+    QolResult (*draw_icon_address)(uintptr_t item_address, int32_t x, int32_t y,
+                                   int32_t draw_type, int32_t flip);
+    QolResult (*draw_icon_id)(int32_t category, int32_t x, int32_t y, int32_t draw_type,
+                              int32_t flip);
 };
 
 struct QolItemPort {
@@ -254,6 +264,13 @@ inline bool qol_item_port_transfer_size_valid(const QolItemPort* port) {
     constexpr uint32_t kRequiredSize = static_cast<uint32_t>(
         offsetof(QolItemPort, read) + offsetof(QolItemPortReadApi, serialize_item) +
         sizeof(decltype(QolItemPortReadApi::serialize_item)));
+    return port != nullptr && port->struct_size >= kRequiredSize;
+}
+
+inline bool qol_item_port_draw_icon_size_valid(const QolItemPort* port) {
+    constexpr uint32_t kRequiredSize = static_cast<uint32_t>(
+        offsetof(QolItemPort, read) + offsetof(QolItemPortReadApi, draw_icon_id) +
+        sizeof(decltype(QolItemPortReadApi::draw_icon_id)));
     return port != nullptr && port->struct_size >= kRequiredSize;
 }
 

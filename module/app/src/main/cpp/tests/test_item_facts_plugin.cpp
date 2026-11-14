@@ -243,7 +243,7 @@ int main() {
     CHECK(qol::contracts::kItemFactsVersion.major == 4 &&
           qol::contracts::kItemFactsVersion.minor == 0);
     CHECK(qol::contracts::kQolPortItemVersion.major == 5 &&
-          qol::contracts::kQolPortItemVersion.minor == 1);
+          qol::contracts::kQolPortItemVersion.minor == 2);
     CHECK(qol::contracts::kQolPortCharacterExtrasVersion.major == 1 &&
           qol::contracts::kQolPortCharacterExtrasVersion.minor == 3);
     qol::contracts::ItemFactsApi old_size_api{};

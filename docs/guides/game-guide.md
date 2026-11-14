@@ -399,10 +399,10 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 | `rarity`/`rarity_tier` | 稀有度档位 0-4 / 档位名（白绿蓝黄紫） |
 | `prefix`/`prefix_tier` | 前缀档 0-15（`I_TYPE` bits2-5）/ 前缀名（按变体与 ITEMCLASSBASE class bits 选择；C18 含精金/神铸/弑神/天命/星陨） |
 | `base` | 基础属性：`{damage 物攻, defense 物防, magic_rate 魔法伤害倍率(原始值/100)}` |
-| `bonus` | 词缀列表：`{id 词缀索引, name 词缀名, value 词缀值}` |
-| `gem` | 宝石：`{total_slots 总槽位, slots[{id, name, value}] 已镶宝石}` |
-| `chaos` | 混沌：`{is_chaos, level 混沌等级, rate 混沌成功率}` |
-| `enchant` | 附魔数组：Monster 为 `[{id, value, percent, effect}]`（只含 option type=2 节点；`value` 为原始值，`percent=true` 表示按 0.1% 单位显示，如 `182` → `18.2%`，false 按整数显示；`effect` 由 `ITEMOPTINFOBASE` 联查）；C18 及其他变体固定 `[]`。`I_ENCHANT` 的 id/level 不是可见附魔行，不输出 |
+| `bonus` | 词缀列表：`{id 词缀索引, name 词缀名, value 词缀值, percent 是否百分比}` |
+| `gem` | 宝石：`{total_slots 总槽位, slots[{id, name, value, percent}] 已镶宝石}` |
+| `chaos` | 混沌：`{is_chaos, level, rate}`。`is_chaos` 对应 `I_ENCHANT` bit0（材料标记）或 bit1（本体）；`level` 为混沌等级，`rate` 为混沌数值率（默认 100，按 `属性值 × rate / 100` 应用，不是成功率）；非混沌 level=0、rate=100 |
+| `enchant` | 附魔数组：Monster 为 `[{id, value, percent, effect}]`（只含 option type=2 节点；`value` 为原始值，`percent=true` 表示按 0.1% 单位显示，如 `182` → `18.2%`，false 按整数显示；`effect` 由 `ITEMOPTINFOBASE` 联查）；C18 及其他变体固定 `[]`。`I_ENCHANT` 的 id/level 不是可见附魔行，不输出。C18 词条 37..88 复用同名基础词条的显示名与百分比；Monster 不解析 C18 词条，查不到名称时输出 `未知` |
 
 ### 5.4 Skills（技能）
 

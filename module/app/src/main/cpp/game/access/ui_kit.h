@@ -96,3 +96,7 @@ bool ui_draw_item_porting(void* item, int32_t x, int32_t y, int32_t a, int32_t b
 // 原版单按钮文本弹窗（word_id 文案）。内部按 game_symbols 解析创建入口；基址未就绪
 // 或符号未解析时静默返回。调用方须在释放扩展锁后调用（锁内零 UI）。
 void ui_show_text_popup(int32_t text_id);
+
+// 游戏内联颜色码 → 游戏实际 ABGR packed color（0xAABBGGRR）。code 为色码字符
+// （'G','W','C','L','V','Y' 等）；符号未解析时返回 0（调用方据此判 NotReady）。
+uint32_t ui_inline_color_from_code(uint32_t code);

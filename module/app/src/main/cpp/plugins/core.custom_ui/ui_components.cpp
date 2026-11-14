@@ -1,10 +1,12 @@
 #include "ui_components.h"
 
 #include "../../contracts/ui_theme.h"
+#include "../../contracts/game_ports/item_port.h"
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -36,6 +38,8 @@ enum class ComponentKind : uint8_t {
     kArrowButton,
     kFlatTextButton,
     kIconButton,
+    kItemIcon,
+    kItemSlot,
 };
 
 struct Component;
@@ -90,9 +94,13 @@ struct Component {
     bool show_background = true;
     std::string fallback_text;
     UiRect paint_local{};
+    contracts::QolUiItemRef item_ref{};
+    int32_t item_count = -1;
+    uint32_t item_flags = 0;
 };
 
 const contracts::QolUiAdapter* g_adapter = nullptr;
+const contracts::QolItemPort* g_item_port = nullptr;
 std::unordered_map<contracts::QolUiHandle, Component*> g_components;
 std::vector<std::unique_ptr<Component>> g_roots;
 uint32_t g_callback_depth = 0;
@@ -458,6 +466,8 @@ QolResult dispatch_touch(contracts::QolUiHandle root_handle, uint32_t phase, int
         case ComponentKind::kArrowButton:
         case ComponentKind::kFlatTextButton:
         case ComponentKind::kIconButton:
+        case ComponentKind::kItemIcon:
+        case ComponentKind::kItemSlot:
             break;
         case ComponentKind::kPanel:
         case ComponentKind::kLabel:
@@ -2504,6 +2514,203 @@ QolResult back_request() {
     return contracts::ok();
 }
 
+bool valid_item_ref(const contracts::QolUiItemRef& item) {
+    switch (static_cast<contracts::QolUiItemSource>(item.source)) {
+        case contracts::QolUiItemSource::kNone: return true;
+        case contracts::QolUiItemSource::kHandle: return item.handle.slot != 0;
+        case contracts::QolUiItemSource::kAddress: return item.address != 0;
+        case contracts::QolUiItemSource::kItemId: return item.item_id >= 0;
+        default: return false;
+    }
+}
+
+QolResult draw_item_ref(const contracts::QolUiItemRef& item, int32_t x, int32_t y) {
+    if (!valid_item_ref(item)) return invalid_argument();
+    if (g_item_port == nullptr) return not_ready();
+    switch (static_cast<contracts::QolUiItemSource>(item.source)) {
+        case contracts::QolUiItemSource::kNone:
+            return contracts::ok();
+        case contracts::QolUiItemSource::kHandle:
+            if (g_item_port->read.draw_icon == nullptr) return unsupported();
+            return g_item_port->read.draw_icon(item.handle, x, y, 0, 0);
+        case contracts::QolUiItemSource::kAddress:
+            if (g_item_port->read.draw_icon_address == nullptr) return unsupported();
+            return g_item_port->read.draw_icon_address(item.address, x, y, 0, 0);
+        case contracts::QolUiItemSource::kItemId:
+            if (g_item_port->read.draw_icon_id == nullptr) return unsupported();
+            return g_item_port->read.draw_icon_id(item.item_id, x, y, 0, 0);
+        default:
+            return invalid_argument();
+    }
+}
+
+QolResult item_icon_create(const contracts::UiItemIconDesc* desc,
+                           contracts::QolUiHandle parent, contracts::QolUiHandle* out) {
+    if (desc == nullptr || parent == nullptr || !valid_item_ref(desc->item)) {
+        return invalid_argument();
+    }
+    const QolResult result = create_component(ComponentKind::kItemIcon, 2, desc->rect, parent,
+                                              nullptr, 0, nullptr, nullptr, nullptr, out);
+    if (!contracts::succeeded(result)) return result;
+    Component* component = find_component(*out);
+    if (component == nullptr) return not_ready();
+    component->item_ref = desc->item;
+    component->item_flags = desc->flags;
+    return contracts::ok();
+}
+
+QolResult item_icon_set(contracts::QolUiHandle handle, const contracts::QolUiItemRef* item) {
+    if (item == nullptr || !valid_item_ref(*item)) return invalid_argument();
+    Component* component = nullptr;
+    const QolResult lookup = require_component(handle, &component);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (component->kind != ComponentKind::kItemIcon) return unsupported();
+    component->item_ref = *item;
+    return contracts::ok();
+}
+
+QolResult item_icon_draw(contracts::QolUiHandle handle) {
+    Component* component = nullptr;
+    const QolResult lookup = require_component(handle, &component);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (component->kind != ComponentKind::kItemIcon) return unsupported();
+    if (g_adapter == nullptr || g_adapter->control_absolute_origin == nullptr) return not_ready();
+    int64_t x = 0, y = 0;
+    const QolResult origin = g_adapter->control_absolute_origin(handle, &x, &y);
+    if (!contracts::succeeded(origin)) return origin;
+    return draw_item_ref(component->item_ref, static_cast<int32_t>(x), static_cast<int32_t>(y));
+}
+
+QolResult item_slot_create(const contracts::UiItemSlotDesc* desc,
+                           contracts::QolUiHandle parent, contracts::QolUiHandle* out) {
+    if (desc == nullptr || parent == nullptr || !valid_item_ref(desc->item)) {
+        return invalid_argument();
+    }
+    const QolResult result = create_component(ComponentKind::kItemSlot, 2, desc->rect, parent,
+                                              nullptr, 0, nullptr, nullptr, nullptr, out);
+    if (!contracts::succeeded(result)) return result;
+    Component* component = find_component(*out);
+    if (component == nullptr) return not_ready();
+    component->item_ref = desc->item;
+    component->item_count = desc->count;
+    component->item_flags = desc->flags;
+    return contracts::ok();
+}
+
+QolResult item_slot_set(contracts::QolUiHandle handle, const contracts::QolUiItemRef* item,
+                        int32_t count) {
+    if (item == nullptr || !valid_item_ref(*item)) return invalid_argument();
+    Component* component = nullptr;
+    const QolResult lookup = require_component(handle, &component);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (component->kind != ComponentKind::kItemSlot) return unsupported();
+    component->item_ref = *item;
+    component->item_count = count;
+    return contracts::ok();
+}
+
+QolResult item_slot_draw(contracts::QolUiHandle handle) {
+    Component* component = nullptr;
+    const QolResult lookup = require_component(handle, &component);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (component->kind != ComponentKind::kItemSlot) return unsupported();
+    constexpr size_t kScaledDrawEnd = offsetof(contracts::QolUiAdapter, draw_part_scaled) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->draw_part_scaled);
+    if (!on_main_thread() || g_adapter->minor < 24 || g_adapter->size < kScaledDrawEnd ||
+        g_adapter->image_unit_load == nullptr || g_adapter->image_group == nullptr ||
+        g_adapter->image_loc == nullptr || g_adapter->image_loc_size == nullptr ||
+        g_adapter->draw_part_scaled == nullptr ||
+        g_adapter->control_absolute_origin == nullptr) return not_ready();
+
+    constexpr int32_t kItemSlotImageUnit = 15;
+    constexpr int32_t kItemSlotBackgroundLoc = 41;
+    constexpr int32_t kItemSlotSelectedLoc = 39;
+    constexpr int32_t kMaximumImageScale = 400;
+    const QolResult loaded = g_adapter->image_unit_load(kItemSlotImageUnit);
+    if (!contracts::succeeded(loaded)) return not_ready();
+
+    int64_t x = 0, y = 0;
+    const QolResult origin = g_adapter->control_absolute_origin(handle, &x, &y);
+    if (!contracts::succeeded(origin)) return origin;
+    const bool dimmed = (component->item_flags & contracts::kUiItemSlotDimmed) != 0;
+    const bool selected = (component->item_flags & contracts::kUiItemSlotSelected) != 0;
+    const bool frame = (component->item_flags & contracts::kUiItemSlotShowFrame) != 0;
+
+    QolResult result = contracts::ok();
+    if (frame) {
+        contracts::QolUiHandle group = nullptr;
+        contracts::QolUiHandle background = nullptr;
+        result = g_adapter->image_group(kItemSlotImageUnit, &group);
+        if (contracts::succeeded(result)) {
+            result = g_adapter->image_loc(kItemSlotImageUnit, kItemSlotBackgroundLoc,
+                                          &background);
+        }
+        int32_t background_width = 0, background_height = 0;
+        if (contracts::succeeded(result)) {
+            result = g_adapter->image_loc_size(kItemSlotImageUnit, kItemSlotBackgroundLoc,
+                                               &background_width, &background_height);
+        }
+        if (!contracts::succeeded(result) || group == nullptr || background == nullptr ||
+            background_width <= 0 ||
+            background_height <= 0 || component->rect.w <= 0) return not_ready();
+        const int64_t background_scale = std::clamp(
+            static_cast<int64_t>(component->rect.w) * 100 / background_width,
+            int64_t{1}, static_cast<int64_t>(kMaximumImageScale));
+        if (x < INT32_MIN || x > INT32_MAX || y < INT32_MIN || y > INT32_MAX) return not_ready();
+        result = g_adapter->draw_part_scaled(group, static_cast<int32_t>(x),
+                                            static_cast<int32_t>(y), background, 1, 0,
+                                            static_cast<int32_t>(background_scale));
+        if (!contracts::succeeded(result)) return result;
+
+        if (selected) {
+            contracts::QolUiHandle selection_frame = nullptr;
+            result = g_adapter->image_loc(kItemSlotImageUnit, kItemSlotSelectedLoc,
+                                          &selection_frame);
+            int32_t frame_width = 0, frame_height = 0;
+            if (contracts::succeeded(result)) {
+                result = g_adapter->image_loc_size(kItemSlotImageUnit, kItemSlotSelectedLoc,
+                                                   &frame_width, &frame_height);
+            }
+            if (!contracts::succeeded(result) || selection_frame == nullptr || frame_width <= 0 ||
+                frame_height <= 0) return not_ready();
+            const int64_t frame_scale = std::clamp(
+                (static_cast<int64_t>(component->rect.w) + 10) * 100 / frame_width,
+                int64_t{1}, static_cast<int64_t>(kMaximumImageScale));
+            const int64_t frame_draw_width = static_cast<int64_t>(frame_width) * frame_scale / 100;
+            const int64_t frame_draw_height = static_cast<int64_t>(frame_height) * frame_scale / 100;
+            const int64_t frame_x = x - (frame_draw_width - component->rect.w) / 2;
+            const int64_t frame_y = y - (frame_draw_height - component->rect.h) / 2;
+            if (frame_x < INT32_MIN || frame_x > INT32_MAX || frame_y < INT32_MIN ||
+                frame_y > INT32_MAX) return not_ready();
+            result = g_adapter->draw_part_scaled(group, static_cast<int32_t>(frame_x),
+                static_cast<int32_t>(frame_y), selection_frame, 1, 0,
+                static_cast<int32_t>(frame_scale));
+            if (!contracts::succeeded(result)) return result;
+        }
+    }
+
+    if (dimmed && g_adapter->fill_rect_alpha != nullptr) {
+        result = g_adapter->fill_rect_alpha(
+            {x, y, component->rect.w, component->rect.h}, 0xFF000000u, 32);
+        if (!contracts::succeeded(result)) return result;
+    }
+    const QolResult icon = draw_item_ref(component->item_ref, static_cast<int32_t>(x),
+                                         static_cast<int32_t>(y));
+    if (!contracts::succeeded(icon) &&
+        static_cast<contracts::QolUiItemSource>(component->item_ref.source) !=
+            contracts::QolUiItemSource::kNone) {
+        return icon;
+    }
+    if ((component->item_flags & contracts::kUiItemSlotShowCount) != 0 && component->item_count > 1) {
+        char text[24]{};
+        std::snprintf(text, sizeof(text), "%d", component->item_count);
+        (void)draw_control_text(handle, text, static_cast<int32_t>(component->rect.w - 4),
+                                static_cast<int32_t>(component->rect.h - 20),
+                                dimmed ? 0xFF99928Au : 0xFFF2E8D5u, 2, 1);
+    }
+    return contracts::ok();
+}
+
 const contracts::QolUiComponents kUiComponents{
     sizeof(contracts::QolUiComponents),
     contracts::kUiContractMajor,
@@ -2584,6 +2791,13 @@ const contracts::QolUiComponents kUiComponents{
     &draw_circle_shape,
     // Minor 23 tail: independently styled native-textured container.
     &draw_container_styled,
+    // Minor 24 tail: reusable item icon/slot components.
+    &item_icon_create,
+    &item_icon_set,
+    &item_icon_draw,
+    &item_slot_create,
+    &item_slot_set,
+    &item_slot_draw,
 };
 
 }  // namespace
@@ -2602,6 +2816,10 @@ bool ui_components_bind(const contracts::QolUiAdapter* adapter) {
     g_adapter = adapter;
     ui_panels_set_callback_probe(&ui_components_in_callback);
     return true;
+}
+
+void ui_components_bind_item_port(const contracts::QolItemPort* item_port) {
+    g_item_port = item_port;
 }
 
 void ui_components_unbind() {
@@ -2623,6 +2841,7 @@ void ui_components_unbind() {
     }
     ui_panels_set_callback_probe(nullptr);
     g_adapter = nullptr;
+    g_item_port = nullptr;
     g_components.clear();
     g_roots.clear();
     g_unbind_pending = false;

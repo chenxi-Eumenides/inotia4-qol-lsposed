@@ -390,12 +390,15 @@ QolResult read_inventory_item_view(contracts::QolItemHandle handle,
     const uint16_t enchant = *reinterpret_cast<const uint16_t*>(bytes + I_ENCHANT);
     out->enchant = enchant;
     out->enchant_remaining = (enchant >> 2) & 0x0F;
-    out->chaos = (enchant & 1u) != 0 ? 1 : 0;
+    // 游戏 ITEM_GetChaosValueRate/ITEM_GetChaosLevel 以 I_ENCHANT bit0|bit1 判定混沌；
+    // 非混沌物品的 count 位域不是混沌数据，固定返回 level=0 / rate=100。
+    out->chaos = (enchant & 0x3u) != 0 ? 1 : 0;
     out->enchant_id = (enchant >> 11) & 0x1F;
     out->enchant_level = (enchant >> 6) & 0x1F;
     const uint32_t count_field = *reinterpret_cast<const uint32_t*>(bytes + I_COUNT);
-    out->chaos_level = count_field & 0xFF;
-    out->chaos_rate = (count_field >> 8) & 0xFF;
+    out->chaos_level = out->chaos != 0
+        ? static_cast<int32_t>(static_cast<int8_t>(count_field & 0xFF)) : 0;
+    out->chaos_rate = out->chaos != 0 ? static_cast<int32_t>((count_field >> 8) & 0xFF) : 100;
     out->jewel_value = static_cast<int32_t>(count_field & 0x7FF);
     out->jewel_attribute_type = static_cast<int32_t>((count_field >> 18) & 0x3F);
     out->fields |= contracts::kQolItemInventoryHasJewelValue |
@@ -479,6 +482,24 @@ std::unordered_map<int32_t, std::string> g_item_text[kTextKindCount];
 std::mutex g_item_text_mutex;
 std::atomic<bool> g_item_text_ready{false};
 
+// C18 的 ITEMOPTINFOBASE 有 89 条；37..88 是新增档位，名称与百分比口径复用
+// Monster 的同名基础词条。Monster/其他变体不映射，避免把 C18 词条误解析成已知词条。
+constexpr int16_t kC18OptionBaseId[] = {
+    12, 13, 13, 14, 15, 15, 15, 16, 16, 16, 16, 17, 17, 17, 18, 19, 20, 20,
+    21, 22, 22, 23, 24, 25, 25, 26, 27, 28, 28, 29, 30, 31, 32, 33, 34, 35,
+    36, 0, 5, 20, 2, 1, 15, 21, 11, 20, 0, 12, 2, 1, 5, 15};
+static_assert(sizeof(kC18OptionBaseId) / sizeof(kC18OptionBaseId[0]) == 52,
+              "C18 option table must cover ids 37..88");
+
+int32_t option_static_id(int32_t kind, int32_t id) {
+    if ((kind == static_cast<int32_t>(contracts::QolItemStaticTextKind::kOptionName) ||
+         kind == static_cast<int32_t>(contracts::QolItemStaticTextKind::kItemOptionPercent)) &&
+        qol::game_variant().series == qol::GameSeries::kC18 && id >= 37 && id <= 88) {
+        return kC18OptionBaseId[id - 37];
+    }
+    return id;
+}
+
 QolResult read_static_text(int32_t kind, int32_t id, const char** out_text) {
     if (out_text == nullptr || kind < 0 || kind >= static_cast<int32_t>(kTextKindCount)) {
         return error_result(kQolErrInvalidArgument, "invalid argument");
@@ -486,7 +507,7 @@ QolResult read_static_text(int32_t kind, int32_t id, const char** out_text) {
     *out_text = nullptr;
     std::lock_guard<std::mutex> lock(g_item_text_mutex);
     const auto& table = g_item_text[kind];
-    const auto it = table.find(id);
+    const auto it = table.find(option_static_id(kind, id));
     if (it == table.end()) return error_result(kQolErrNotFound, "text not found");
     *out_text = it->second.c_str();
     return contracts::ok();
@@ -519,6 +540,36 @@ QolResult read_static_ready(int32_t* out_ready) {
     return contracts::ok();
 }
 
+// 绘制函数由游戏启动期注入，避免 adapter port 直接引用 game_access 全局符号。
+ItemDrawIconFn g_draw_icon_fn = nullptr;
+ItemDrawIconAddressFn g_draw_icon_address_fn = nullptr;
+ItemDrawIconIdFn g_draw_icon_id_fn = nullptr;
+
+QolResult draw_icon(contracts::QolItemHandle handle, int32_t x, int32_t y, int32_t draw_type,
+                    int32_t flip) {
+    void* item = nullptr;
+    const QolResult resolution = resolve_item_handle(handle, &item);
+    if (!contracts::succeeded(resolution)) return resolution;
+    if (g_draw_icon_fn == nullptr) return not_ready();
+    g_draw_icon_fn(item, x, y, draw_type, flip);
+    return contracts::ok();
+}
+
+QolResult draw_icon_address(uintptr_t item_address, int32_t x, int32_t y, int32_t draw_type,
+                            int32_t flip) {
+    if (item_address == 0) return error_result(kQolErrInvalidArgument, "invalid item address");
+    if (g_draw_icon_address_fn == nullptr) return not_ready();
+    g_draw_icon_address_fn(item_address, x, y, draw_type, flip);
+    return contracts::ok();
+}
+
+QolResult draw_icon_id(int32_t category, int32_t x, int32_t y, int32_t draw_type, int32_t flip) {
+    if (category < 0) return error_result(kQolErrInvalidArgument, "invalid item id");
+    if (g_draw_icon_id_fn == nullptr) return not_ready();
+    g_draw_icon_id_fn(category, x, y, draw_type, flip);
+    return contracts::ok();
+}
+
 const contracts::QolItemPort kItemPort{
     contracts::kQolPortItemVersion,
     sizeof(contracts::QolItemPort),
@@ -529,12 +580,19 @@ const contracts::QolItemPort kItemPort{
          &read_effective_cumulate_count, nullptr, &read_count_limit,
            &read_count_encoding, &read_quote, &read_serialize_item,
            &read_free_item, &read_native_bag_layout, &read_bag_capacity,
-           &read_slot_occupied},
+           &read_slot_occupied, &draw_icon, &draw_icon_address, &draw_icon_id},
 };
 
 }  // namespace
 
 const contracts::QolItemPort& item_port() { return kItemPort; }
+
+void item_port_bind_draw_icon(ItemDrawIconFn handle_fn, ItemDrawIconAddressFn address_fn,
+                              ItemDrawIconIdFn id_fn) {
+    g_draw_icon_fn = handle_fn;
+    g_draw_icon_address_fn = address_fn;
+    g_draw_icon_id_fn = id_fn;
+}
 
 // 解析 Kotlin 下发的行式负载：每行 `<kind>\t<id>\t<escaped-text>`；kind 为 N/T/O/E。
 // 只按真实制表符与换行切分；文本本身已被 JSON 转义（含 \t/\n 也变成两字符），不含真实控制符。

@@ -1,3 +1,4 @@
+#include "contracts/log_domain.h"
 #include "plugin.h"
 
 #include <cstdint>
@@ -9,6 +10,7 @@
 #include "../../contracts/ui_choice.h"
 #include "../../contracts/ui_confirmation.h"
 #include "../../contracts/ui.h"
+#include "../../contracts/game_ports/item_port.h"
 #include "feature.h"
 #include "panels/debug_components.h"
 #include "panels/debug_scroll.h"
@@ -162,6 +164,9 @@ static_assert(kResourceCount == (sizeof(kResources) / sizeof(kResources[0])),
 const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_CHOICE,
      {contracts::kQolPortChoiceVersion.major, contracts::kQolPortChoiceVersion.minor}},
+    // 物品图标/格子组件需要按 handle/地址/类别 ID 绘制原版图标。
+    {contracts::QolPortId::QOL_PORT_ITEM,
+     {contracts::kQolPortItemVersion.major, contracts::kQolPortItemVersion.minor}},
 };
 
 #if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
@@ -214,12 +219,14 @@ int plugin_install(contracts::PluginContext& ctx) {
     }
     ui_panels_bind_sdk(ctx.sdk);
     text_mechanism_bind(ctx.sdk);
-    // 选择控件需要游戏侧原语端口；缺失即 install 失败（宿主不启用、资源不装）。
-    if (ctx.ports == nullptr || ctx.port_count < 1 || ctx.ports[0] == nullptr) {
+    // 选择控件与物品图标组件需要游戏侧原语端口；缺失即 install 失败（宿主不启用、资源不装）。
+    if (ctx.ports == nullptr || ctx.port_count < 2 || ctx.ports[0] == nullptr ||
+        ctx.ports[1] == nullptr) {
         plugin_install_rollback(ctx, false, false);
         return 1;
     }
     g_choice_port = static_cast<const contracts::QolChoicePort*>(ctx.ports[0]);
+    ui_components_bind_item_port(static_cast<const contracts::QolItemPort*>(ctx.ports[1]));
     if (!ui_confirmation_bind(ctx.sdk->ui, ctx.game, ctx.sdk)) {
         plugin_install_rollback(ctx, false, false);
         return 1;
@@ -271,7 +278,7 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
         ui_confirmation_set_installed(false);
         if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
             static constexpr char message[] = "confirmation overlay registration failed; disabled";
-            (void)g_sdk->log.write(2, 12, "core.custom_ui/plugin", message,
+            (void)g_sdk->log.write(2, static_cast<int32_t>(QolDomain::kUi), "core.custom_ui/plugin", message,
                                    sizeof(message) - 1);
         }
     }
@@ -351,7 +358,7 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_fill_status,
     &custom_ui_resource_ready,
     kPorts,
-    1,
+    2,
     nullptr,         // deprecated http_queries（Debug commands are typed endpoints below）
     0,
     kFeatures,

@@ -432,11 +432,15 @@ std::string character_option_list(void* item, int type) {
         if (node_type != type) continue;
         const char* name =
             character_static_text(contracts::QolItemStaticTextKind::kOptionName, id);
+        const char* percent_text =
+            character_static_text(contracts::QolItemStaticTextKind::kItemOptionPercent, id);
+        const bool percent = percent_text != nullptr && percent_text[0] == '1';
         if (!first) out += ",";
         first = false;
         out += "{\"id\":" + std::to_string(id) + ",\"name\":\"";
-        out += name != nullptr ? name : "";
-        out += "\",\"value\":" + std::to_string(value) + "}";
+        out += name != nullptr && name[0] != '\0' ? name : "未知";
+        out += "\",\"value\":" + std::to_string(value) +
+               ",\"percent\":" + (percent ? "true" : "false") + "}";
     }
     out += "]";
     return out;
@@ -500,12 +504,12 @@ void append_character_equipment_item(std::string& out, void* item, int slot) {
                                      : 0;
     const long long socket_total = (it[I_SOCKET] >> 4) & 0x0F;
     const uint16_t enchant = *reinterpret_cast<const uint16_t*>(it + I_ENCHANT);
-    const bool chaos = (enchant & 1) != 0;
+    const bool chaos = (enchant & 0x3) != 0;
     const long long enchant_id = (enchant >> 11) & 0x1F;
     const long long enchant_level = (enchant >> 6) & 0x1F;
     const uint32_t count_bits = *reinterpret_cast<const uint32_t*>(it + I_COUNT);
-    const long long chaos_level = (count_bits >> 0) & 0xFF;
-    const long long chaos_rate = (count_bits >> 8) & 0xFF;
+    const long long chaos_level = chaos ? static_cast<int8_t>(count_bits & 0xFF) : 0;
+    const long long chaos_rate = chaos ? ((count_bits >> 8) & 0xFF) : 100;
 
     const char* base_name =
         category >= 0 ? character_static_text(contracts::QolItemStaticTextKind::kItemName,
