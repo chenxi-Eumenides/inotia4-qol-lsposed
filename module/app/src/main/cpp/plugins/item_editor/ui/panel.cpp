@@ -277,6 +277,12 @@ void draw_right_text(QolUiHandle control, const char* text, int32_t right, int32
     draw_text(control, text, right - width, y, color, 0, font);
 }
 
+void draw_center_text(QolUiHandle control, const char* text, int32_t center, int32_t y,
+                      uint32_t color, int32_t font = 0) {
+    const int32_t width = text_pixel_width(text, font);
+    draw_text(control, text, center - width / 2, y, color, 0, font);
+}
+
 void draw_right_text_abs(int32_t right, int32_t y, const char* text, uint32_t color,
                          int32_t font = 0) {
     const auto* adapter = ui();
@@ -831,7 +837,7 @@ void item_card_cancel_clicked(void*) {
 }
 void draw_item_card_row(void*, uint32_t row_index, QolUiHandle row, uint8_t) {
     if (g_item_card_ids.empty()) {
-        draw_text(row, "该类别暂无物品", 364, 46, kMuted, 2, 0);
+        draw_center_text(row, "该类别暂无物品", 364, 46, kMuted);
         return;
     }
     const uint32_t first = row_index * 4;
@@ -883,8 +889,8 @@ void draw_item_card_row(void*, uint32_t row_index, QolUiHandle row, uint8_t) {
         } else {
             std::snprintf(label,sizeof(label),"%s",truncated_name);
         }
-        draw_text(row,label,15 + static_cast<int32_t>(column) * 176 + 87, 81,
-                  selected ? kGold : kText, 2, 0);
+        draw_center_text(row,label,15 + static_cast<int32_t>(column) * 176 + 87, 81,
+                         selected ? kGold : kText);
     }
 }
 void destroy_item_card() {
@@ -1102,7 +1108,7 @@ void draw_item_card_footer_button(QolUiHandle button,const char* label,bool enab
     if (adapter->draw_help_option_row != nullptr)
         (void)adapter->draw_help_option_row({abs_x,abs_y,140,48},0,
             static_cast<uint8_t>(pressed != 0));
-    draw_text(button,label,70,14,enabled ? kText : kMuted,2,0);
+    draw_center_text(button,label,70,14,enabled ? kText : kMuted);
 }
 void draw_item_card_slots(const QolUiComponents* c, const QolUiAdapter* adapter,
                           const UiRect& panel, int64_t offset) {
@@ -1596,8 +1602,8 @@ void draw_prefix_card_button(QolUiHandle button,const char* label,
     if (adapter->draw_help_option_row != nullptr)
         (void)adapter->draw_help_option_row({abs_x,abs_y,width,height},
             static_cast<uint8_t>(selected),static_cast<uint8_t>(pressed != 0));
-    draw_text(button,label,width/2,height/2-8,
-        selected ? kGold : (enabled ? kText : kMuted),2,0);
+    draw_center_text(button,label,width/2,height/2-8,
+        selected ? kGold : (enabled ? kText : kMuted));
 }
 void draw_prefix_card() {
     if (g_prefix_card_root == nullptr) return;
