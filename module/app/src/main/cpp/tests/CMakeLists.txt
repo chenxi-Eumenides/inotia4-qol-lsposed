@@ -2444,6 +2444,15 @@ set(QOL_LOG_STUB_SOURCES
     test_hooks_registry.cpp
 )
 
+add_executable(item_editor_draft_tests
+    test_item_editor_draft.cpp
+    ${CPP_DIR}/plugins/item_editor/model/draft.cpp
+)
+target_include_directories(item_editor_draft_tests PRIVATE ${CPP_DIR})
+target_compile_features(item_editor_draft_tests PRIVATE cxx_std_17)
+set_target_properties(item_editor_draft_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME item_editor_draft_tests COMMAND item_editor_draft_tests)
+
 # Host tests use assert expressions for both setup and checks; keep them active in Release too.
 get_property(HOST_TEST_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(test_target IN LISTS HOST_TEST_TARGETS)
