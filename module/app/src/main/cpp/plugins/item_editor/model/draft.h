@@ -34,6 +34,8 @@ struct ItemEditorDraft {
     int32_t class_index = -1;  // ITEMCLASSBASE 0..35，-1 未选
     int32_t item_id = -1;      // ITEMDATABASE 下标，-1 已丢弃/未选
     contracts::QolItemType item_type = contracts::QolItemType::kUnknown;
+    int32_t variant_series = 0;
+    int32_t prefix_class_bits = 0;
 
     int32_t count = 1;
     int32_t raw_rarity = kDefaultRawRarity;
@@ -48,6 +50,7 @@ struct ItemEditorDraft {
     int32_t chaos_flags = 0;
     int32_t jewel_attribute_type = -1;
     int32_t jewel_value = 0;
+    bool jewel_attribute_type_valid = false;
 
     // 派生值；类别变化后清零，等具体物品确定后重新读取/计算。
     int32_t damage = 0;

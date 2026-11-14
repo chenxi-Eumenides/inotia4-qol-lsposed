@@ -32,6 +32,7 @@ void reset_equipment_fields(ItemEditorDraft* draft) {
 void reset_jewel_fields(ItemEditorDraft* draft) {
     draft->jewel_attribute_type = -1;
     draft->jewel_value = 0;
+    draft->jewel_attribute_type_valid = false;
 }
 
 template <size_t N>
@@ -85,6 +86,7 @@ void draft_load(ItemEditorDraft* draft, contracts::QolItemHandle source,
                               view.category > 0;
     draft->item_id = has_category && view.category >= 0 ? view.category : -1;
     draft->item_type = item_type;
+    draft->variant_series = view.variant_series;
     draft->count = view.count_supported != 0 && view.effective_count > 0
         ? view.effective_count : 1;
     draft->raw_rarity = view.raw_rarity;
@@ -99,6 +101,8 @@ void draft_load(ItemEditorDraft* draft, contracts::QolItemHandle source,
     draft->chaos_rate = view.chaos_rate;
     draft->jewel_attribute_type = view.jewel_attribute_type;
     draft->jewel_value = view.jewel_value;
+    draft->jewel_attribute_type_valid =
+        (view.fields & contracts::kQolItemInventoryHasJewelAttributeType) != 0;
     draft->damage = view.damage;
     draft->defense = view.defense;
     draft->need_level = view.need_level;
@@ -129,6 +133,8 @@ bool draft_change_class(ItemEditorDraft* draft, int32_t class_index) {
         if (!old_equipment) reset_equipment_fields(draft);
         draft->count = 1;
         reset_jewel_fields(draft);
+        if (!old_equipment || old_group != new_group)
+            draft->prefix_class_bits = new_group == ItemClassGroup::kWeapon ? 3 : 5;
     } else {
         // 物品族不保留装备专属数据；数量可迁移，宝石属性只在宝石类之间保留。
         reset_equipment_fields(draft);
@@ -137,6 +143,7 @@ bool draft_change_class(ItemEditorDraft* draft, int32_t class_index) {
                                 new_group == ItemClassGroup::kItem &&
                                 old_class == kItemClassGem && class_index == kItemClassGem;
         if (!gem_to_gem) reset_jewel_fields(draft);
+        draft->prefix_class_bits = 0;
     }
 
     draft->class_index = class_index;
