@@ -71,6 +71,7 @@ QolUiHandle g_item_card_list = nullptr;
 QolUiHandle g_item_card_confirm = nullptr;
 QolUiHandle g_item_card_cancel = nullptr;
 std::vector<int32_t> g_item_card_ids;
+std::vector<int32_t> g_item_card_levels;
 std::vector<QolUiHandle> g_item_card_buttons;
 constexpr size_t kItemCardSlotPoolSize = 12;
 std::array<QolUiHandle, kItemCardSlotPoolSize> g_item_card_slots{};
@@ -778,15 +779,17 @@ void draw_item_card_row(void*, uint32_t row_index, QolUiHandle row, uint8_t) {
         draw_text(row, "该类别暂无物品", 304, 46, kMuted, 2, 0);
         return;
     }
-    const uint32_t first = row_index * 3;
-    for (uint32_t column = 0; column < 3; ++column) {
+    const uint32_t first = row_index * 4;
+    for (uint32_t column = 0; column < 4; ++column) {
         const uint32_t item_index = first + column;
         if (item_index >= g_item_card_ids.size() ||
-            item_index >= g_item_card_buttons.size()) break;
+            item_index >= g_item_card_buttons.size() ||
+            item_index >= g_item_card_levels.size()) break;
         const int32_t item_id = g_item_card_ids[item_index];
         const bool selected = item_id == g_item_card_selected_id;
         const char* name = static_text(QolItemStaticTextKind::kItemName,item_id);
         if (name == nullptr || name[0] == '\0') name = "未知";
+        char truncated_name[64]{};
         char label[96]{};
         size_t input_bytes = std::strlen(name);
         size_t input_offset = 0;
@@ -799,24 +802,33 @@ void draw_item_card_row(void*, uint32_t row_index, QolUiHandle row, uint8_t) {
                 ((lead & 0xE0) == 0xC0 ? 2u :
                  ((lead & 0xF0) == 0xE0 ? 3u : ((lead & 0xF8) == 0xF0 ? 4u : 1u)));
             if (sequence > input_bytes - input_offset) sequence = 1;
-            if (output_bytes + sequence + 4 >= sizeof(label)) {
+            if (output_bytes + sequence + 4 >= sizeof(truncated_name)) {
                 truncated = true;
                 break;
             }
-            std::memcpy(label + output_bytes,name + input_offset,sequence);
+            std::memcpy(truncated_name + output_bytes,name + input_offset,sequence);
             output_bytes += sequence;
             input_offset += sequence;
             ++codepoints;
         }
         if (input_offset < input_bytes) truncated = true;
         if (truncated) {
-            label[output_bytes++] = static_cast<char>(0xE2);
-            label[output_bytes++] = static_cast<char>(0x80);
-            label[output_bytes++] = static_cast<char>(0xA6);
+            truncated_name[output_bytes++] = static_cast<char>(0xE2);
+            truncated_name[output_bytes++] = static_cast<char>(0x80);
+            truncated_name[output_bytes++] = static_cast<char>(0xA6);
         }
-        label[output_bytes] = '\0';
-        // 名称在格底外，紧贴 74×74 格底下方 3px；cell 原点 x=15+col*196。
-        draw_text(row,label,15 + static_cast<int32_t>(column) * 196 + 93, 81,
+        truncated_name[output_bytes] = '\0';
+        if (item_class_is_equipment(g_draft.class_index)) {
+            if (g_item_card_levels[item_index] >= 0) {
+                std::snprintf(label,sizeof(label),"%s(%d)",truncated_name,
+                    g_item_card_levels[item_index]);
+            } else {
+                std::snprintf(label,sizeof(label),"%s(?)",truncated_name);
+            }
+        } else {
+            std::snprintf(label,sizeof(label),"%s",truncated_name);
+        }
+        draw_text(row,label,15 + static_cast<int32_t>(column) * 150 + 75, 81,
                   selected ? kGold : kText, 2, 0);
     }
 }
@@ -840,6 +852,7 @@ void destroy_item_card() {
     g_item_card_cancel = nullptr;
     for (auto& slot : g_item_card_slots) slot = nullptr;
     g_item_card_ids.clear();
+    g_item_card_levels.clear();
     g_item_card_buttons.clear();
     g_item_card_selected_id = -1;
 }
@@ -853,7 +866,8 @@ bool create_item_card() {
         c->scroll_list_set_selection_enabled == nullptr || c->item_slot_create == nullptr ||
         c->item_slot_set == nullptr || c->item_slot_set_flags == nullptr ||
         adapter->set_draw_proc == nullptr || !item_class_valid(g_draft.class_index) ||
-        port->read.draw_icon_id == nullptr) {
+        port->read.draw_icon_id == nullptr ||
+        port->read.read_item_base_stats_ex == nullptr) {
         log_panel("op=item_card_create result=failed stage=precondition code=-1");
         return false;
     }
@@ -862,9 +876,37 @@ bool create_item_card() {
         log_panel("op=item_card_create result=failed stage=item_list_parse code=-1");
         return false;
     }
+    g_item_card_levels.resize(g_item_card_ids.size(),-1);
+    for (size_t index = 0; index < g_item_card_ids.size(); ++index) {
+        QolItemBaseStats stats{};
+        if (succeeded(port->read.read_item_base_stats_ex(
+                g_item_card_ids[index],g_draft.raw_rarity,&stats))) {
+            g_item_card_levels[index] = stats.need_level;
+        }
+    }
+    std::vector<size_t> order(g_item_card_ids.size());
+    for (size_t index = 0; index < order.size(); ++index) order[index] = index;
+    std::stable_sort(order.begin(),order.end(),[](size_t lhs,size_t rhs) {
+        const int32_t left_level = g_item_card_levels[lhs] < 0
+            ? INT32_MAX : g_item_card_levels[lhs];
+        const int32_t right_level = g_item_card_levels[rhs] < 0
+            ? INT32_MAX : g_item_card_levels[rhs];
+        if (left_level != right_level) return left_level < right_level;
+        return g_item_card_ids[lhs] < g_item_card_ids[rhs];
+    });
+    std::vector<int32_t> sorted_ids;
+    std::vector<int32_t> sorted_levels;
+    sorted_ids.reserve(order.size());
+    sorted_levels.reserve(order.size());
+    for (size_t index : order) {
+        sorted_ids.push_back(g_item_card_ids[index]);
+        sorted_levels.push_back(g_item_card_levels[index]);
+    }
+    g_item_card_ids.swap(sorted_ids);
+    g_item_card_levels.swap(sorted_levels);
     uint32_t rows = 1;
     if (!g_item_card_ids.empty())
-        rows = static_cast<uint32_t>((g_item_card_ids.size() + 2u) / 3u);
+        rows = static_cast<uint32_t>((g_item_card_ids.size() + 3u) / 4u);
     const UiRect panel = panel_rect();
     const UiPanelDesc card{{panel.x+130,panel.y+30,640,500},{0,0,640,500},0,0};
     QolResult result = c->panel_create(&card,nullptr,&g_item_card_root);
@@ -908,9 +950,9 @@ bool create_item_card() {
     }
     g_item_card_buttons.assign(g_item_card_ids.size(),nullptr);
     for (uint32_t index = 0; index < g_item_card_ids.size(); ++index) {
-        const uint32_t row = index / 3;
-        const int32_t column = static_cast<int32_t>(index % 3);
-        const UiRect cell{15 + column * 196,2,186,112};
+        const uint32_t row = index / 4;
+        const int32_t column = static_cast<int32_t>(index % 4);
+        const UiRect cell{15 + column * 150,2,150,112};
         const intptr_t encoded = static_cast<intptr_t>(g_item_card_ids[index]) + 1;
         result = c->scroll_row_button_create(g_item_card_list,row,cell,
             &item_card_cell_clicked,reinterpret_cast<void*>(encoded),
@@ -941,7 +983,7 @@ bool create_item_card() {
         if (c->scroll_set_offset != nullptr) {
             const auto index = static_cast<uint32_t>(
                 std::distance(g_item_card_ids.begin(),selected_item));
-            const int32_t row_top = static_cast<int32_t>((index / 3) * 122);
+            const int32_t row_top = static_cast<int32_t>((index / 4) * 122);
             const int32_t offset = std::max(0,row_top - (400 - 122) / 2);
             (void)c->scroll_set_offset(g_item_card_list,offset);
         }
@@ -1028,14 +1070,15 @@ void draw_item_card_slots(const QolUiComponents* c, const QolUiAdapter* adapter,
     size_t pool_index = 0;
     for (size_t index = 0; index < g_item_card_ids.size() &&
                            pool_index < g_item_card_slots.size(); ++index) {
-        const int32_t row = static_cast<int32_t>(index / 3);
-        const int32_t column = static_cast<int32_t>(index % 3);
+        const int32_t row = static_cast<int32_t>(index / 4);
+        const int32_t column = static_cast<int32_t>(index % 4);
         const int64_t local_y = 16 + static_cast<int64_t>(row) * 122 - offset + 5;
         if (local_y + 74 <= 16 || local_y + 74 > 416) continue;
         const QolUiHandle slot = g_item_card_slots[pool_index++];
         if (slot == nullptr) continue;
         const int32_t item_id = g_item_card_ids[index];
-        (void)c->set_rect(slot, {87 + column * 196, static_cast<int32_t>(local_y), 74, 74});
+        (void)c->set_rect(slot, {15 + column * 150 + 38,
+                                 static_cast<int32_t>(local_y), 74, 74});
         (void)c->item_slot_set(slot, item_id, -1);
         const uint32_t flags = kUiItemSlotShowFrame |
             (item_id == g_item_card_selected_id ? kUiItemSlotSelected : 0u);
@@ -1079,15 +1122,15 @@ void apply_item_card_action() {
     const ItemCardAction action = g_item_card_pending_action;
     g_item_card_pending_action = ItemCardAction::kNone;
     bool changed = false;
-    if (action == ItemCardAction::kConfirm && g_item_card_selected_id >= 0 &&
-        g_item_card_selected_id != g_draft.item_id) {
+    if (action == ItemCardAction::kConfirm && g_item_card_selected_id >= 0) {
         g_draft.item_id = g_item_card_selected_id;
         g_draft.item_type = item_type_for_class(g_draft.class_index);
         const auto* port = item_port();
-        if (port != nullptr && port->read.read_item_base_stats != nullptr) {
+        if (port != nullptr && port->read.read_item_base_stats_ex != nullptr) {
             QolItemBaseStats stats{};
             const QolResult result =
-                port->read.read_item_base_stats(g_draft.item_id,&stats);
+                port->read.read_item_base_stats_ex(
+                    g_draft.item_id,g_draft.raw_rarity,&stats);
             if (succeeded(result)) {
                 g_draft.damage = stats.damage;
                 g_draft.defense = stats.defense;
@@ -1414,8 +1457,8 @@ bool create_prefix_card() {
     g_prefix_selected_raw = prefix_raw_available(g_draft.raw_rarity)
         ? g_draft.raw_rarity : -1;
     const UiRect panel = panel_rect();
-    const UiRect card_rect{panel.x+(panel.w-640)/2,panel.y+(panel.h-400)/2,640,400};
-    const UiPanelDesc card{card_rect,{0,0,640,400},0,0};
+    const UiRect card_rect{panel.x+(panel.w-760)/2,panel.y+(panel.h-400)/2,760,400};
+    const UiPanelDesc card{card_rect,{0,0,760,400},0,0};
     QolResult result = c->panel_create(&card,nullptr,&g_prefix_card_root);
     if (!succeeded(result)) {
         char message[112]{};
@@ -1431,7 +1474,7 @@ bool create_prefix_card() {
         if (quality < 0 || quality > 4) continue;
         const int32_t column = quality;
         const int32_t row = rows_by_quality[quality]++;
-        const UiButtonDesc button{{14+column*124,84+row*48,116,42},"",0,
+        const UiButtonDesc button{{14+column*146,54+row*50,138,42},"",0,
             &prefix_option_clicked,&g_prefix_option_raw[index]};
         result = c->button_create(&button,g_prefix_card_root,&g_prefix_buttons[index]);
         if (!succeeded(result)) {
@@ -1452,7 +1495,7 @@ bool create_prefix_card() {
             return false;
         }
     }
-    const UiButtonDesc confirm{{200,340,110,42},"",0,
+    const UiButtonDesc confirm{{250,340,110,42},"",0,
         &prefix_confirm_clicked,nullptr};
     result = c->button_create(&confirm,g_prefix_card_root,&g_prefix_confirm);
     if (!succeeded(result)) {
@@ -1467,7 +1510,7 @@ bool create_prefix_card() {
         log_panel("op=prefix_card_create result=failed stage=confirm_draw code=-1");
         return false;
     }
-    const UiButtonDesc cancel{{330,340,110,42},"",0,
+    const UiButtonDesc cancel{{400,340,110,42},"",0,
         &prefix_cancel_clicked,nullptr};
     result = c->button_create(&cancel,g_prefix_card_root,&g_prefix_cancel);
     if (!succeeded(result)) {
@@ -1505,7 +1548,7 @@ void draw_prefix_card() {
     const auto* c = components();
     if (adapter == nullptr || c == nullptr) return;
     const UiRect panel = panel_rect();
-    const UiRect card{panel.x+(panel.w-640)/2,panel.y+(panel.h-400)/2,640,400};
+    const UiRect card{panel.x+(panel.w-760)/2,panel.y+(panel.h-400)/2,760,400};
     if (adapter->fill_rect_alpha != nullptr)
         (void)adapter->fill_rect_alpha({panel.x,panel.y,panel.w,panel.h},0x0000,40);
     if (c->draw_container_styled != nullptr) {
@@ -1514,10 +1557,9 @@ void draw_prefix_card() {
     }
     static constexpr const char* kQualityNames[5] = {
         "白装", "绿装", "蓝装", "黄装", "紫装"};
-    draw_text(g_prefix_card_root,"选择前缀",320,12,kGold,2,2);
     for (int32_t quality = 0; quality < 5; ++quality) {
         draw_text(g_prefix_card_root,kQualityNames[quality],
-            14+quality*124+58,52,kGold,2,0);
+            14+quality*146+69,20,kGold,2,0);
     }
     int32_t rows_by_quality[5]{};
     for (uint32_t index = 0; index < g_prefix_option_count; ++index) {
@@ -1534,7 +1576,7 @@ void draw_prefix_card() {
         if (trimmed == 0) std::snprintf(label,sizeof(label),"无前缀（%d）",raw);
         else std::snprintf(label,sizeof(label),"%.*s（%d）",
             static_cast<int>(trimmed),prefix,raw);
-        draw_prefix_card_button(g_prefix_buttons[index],label,116,42,
+        draw_prefix_card_button(g_prefix_buttons[index],label,138,42,
             raw == g_prefix_selected_raw);
     }
     draw_prefix_card_button(g_prefix_confirm,"确定",110,42,
@@ -1545,14 +1587,38 @@ void apply_prefix_card_action() {
     if (g_prefix_card_pending_action == PrefixCardAction::kNone) return;
     const PrefixCardAction action = g_prefix_card_pending_action;
     g_prefix_card_pending_action = PrefixCardAction::kNone;
-    const bool changed = action == PrefixCardAction::kConfirm &&
+    const bool confirmed = action == PrefixCardAction::kConfirm &&
         prefix_raw_available(g_prefix_selected_raw);
-    if (changed) {
+    if (confirmed) {
         g_draft.raw_rarity = g_prefix_selected_raw;
         g_draft.dirty = true;
+        if (draft_has_item(g_draft)) {
+            const auto* port = item_port();
+            if (port != nullptr && port->read.read_item_base_stats_ex != nullptr) {
+                QolItemBaseStats stats{};
+                const QolResult result = port->read.read_item_base_stats_ex(
+                    g_draft.item_id,g_draft.raw_rarity,&stats);
+                if (succeeded(result)) {
+                    g_draft.damage = stats.damage;
+                    g_draft.defense = stats.defense;
+                    g_draft.magic_rate = stats.magic_rate;
+                    g_draft.need_level = stats.need_level;
+                    g_draft.stackable = stats.stackable != 0;
+                    if (!g_draft.stackable) g_draft.count = 1;
+                } else {
+                    char message[128]{};
+                    std::snprintf(message,sizeof(message),
+                        "fail item=%d op=load_item_stats result=failed stage=read code=%d reason=base_stats_read_failed",
+                        g_draft.item_id,result.code);
+                    log_panel(message);
+                }
+            } else {
+                log_panel("fail op=load_item_stats result=failed stage=api code=-1 reason=api_unavailable");
+            }
+        }
     }
     destroy_prefix_card();
-    if (changed) {
+    if (confirmed) {
         build_left_rows();
         rebuild_left_list();
         rebuild_item_slot();

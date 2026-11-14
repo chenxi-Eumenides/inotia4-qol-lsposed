@@ -36,8 +36,9 @@ QolResult error_result(int32_t code, const char* message) {
 
 QolResult not_ready() { return error_result(kQolErrNotReady, "not ready"); }
 
-QolResult read_item_base_stats(int32_t item_id, contracts::QolItemBaseStats* out) {
-    if (out == nullptr || item_id < 0) {
+QolResult read_item_base_stats_impl(int32_t item_id, int32_t raw_rarity,
+                                    contracts::QolItemBaseStats* out) {
+    if (out == nullptr || item_id < 0 || raw_rarity < 0 || raw_rarity > 14) {
         return error_result(kQolErrInvalidArgument, "invalid item base stats args");
     }
     if (g_base == 0) return not_ready();
@@ -57,21 +58,29 @@ QolResult read_item_base_stats(int32_t item_id, contracts::QolItemBaseStats* out
     if (data == nullptr || record_size < 7) return not_ready();
     const auto* record = data + static_cast<size_t>(item_id) * record_size;
     if (!game_memory_accessible(record, 7, 'r')) return not_ready();
+    const int32_t class_index = record[2];
     const int32_t stackable = (record[6] & 1u) != 0 ? 1 : 0;
 
     if (fn_get_damage == nullptr || fn_get_defense == nullptr ||
         fn_item_get_ability_level == nullptr) return not_ready();
 
-    // Damage/defense/ability are derived from the encoded type, class and default grade;
-    // magic rate is the class table +0xB column, not a per-instance random value.
+    // I_TYPE bits6-15 carry the ITEMDATABASE row (item_id), not ITEMCLASSBASE index.
     alignas(8) uint8_t item[0x40]{};
     const uint16_t type = static_cast<uint16_t>(
-        ((item_id & I_TYPE_CATEGORY_MASK) << I_TYPE_CATEGORY_SHIFT) | (2 << 2));
+        ((item_id & I_TYPE_CATEGORY_MASK) << I_TYPE_CATEGORY_SHIFT) | (raw_rarity << 2));
     std::memcpy(item + I_TYPE, &type, sizeof(type));
-    const int32_t class_index = record[2];
     *out = {fn_get_damage(item), fn_get_defense(item), item_class_magic_rate(class_index),
             fn_item_get_ability_level(item), stackable};
     return contracts::ok();
+}
+
+QolResult read_item_base_stats(int32_t item_id, contracts::QolItemBaseStats* out) {
+    return read_item_base_stats_impl(item_id, 2, out);
+}
+
+QolResult read_item_base_stats_ex(int32_t item_id, int32_t raw_rarity,
+                                  contracts::QolItemBaseStats* out) {
+    return read_item_base_stats_impl(item_id, raw_rarity, out);
 }
 
 QolResult resolve_item_handle(contracts::QolItemHandle handle, void** out_item) {
@@ -643,7 +652,7 @@ const contracts::QolItemPort kItemPort{
            &read_count_encoding, &read_quote, &read_serialize_item,
             &read_free_item, &read_native_bag_layout, &read_bag_capacity,
             &read_slot_occupied, &draw_icon, &draw_icon_address, &draw_icon_id,
-            &read_item_class_index, &read_item_base_stats},
+            &read_item_class_index, &read_item_base_stats, &read_item_base_stats_ex},
 };
 
 }  // namespace
