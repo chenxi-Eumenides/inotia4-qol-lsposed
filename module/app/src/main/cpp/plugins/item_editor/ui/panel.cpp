@@ -475,11 +475,11 @@ void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
             break;
         case LeftRowKind::kMagicDamage:
             if (g_draft.damage == 0 && g_draft.magic_rate == 0) {
-                std::snprintf(text, sizeof(text), "法伤：0（0.00x）");
+                std::snprintf(text, sizeof(text), "魔法攻击：0（0.00x）");
             } else {
                 const double multiplier = static_cast<double>(g_draft.magic_rate) / 100.0;
                 const double magic_damage = static_cast<double>(g_draft.damage) * multiplier;
-                std::snprintf(text, sizeof(text), "法伤：%.1f（%.2fx）",
+                std::snprintf(text, sizeof(text), "魔法攻击：%.1f（%.2fx）",
                     magic_damage, multiplier);
             }
             break;
@@ -1389,15 +1389,10 @@ void destroy_prefix_card() {
     g_prefix_selected_raw = -1;
 }
 void build_prefix_options() {
+    // raw 0..14 全部可选；空名称表示该变种/类别没有对应前缀，但 raw 仍决定品质。
     g_prefix_option_count = 0;
-    for (int32_t raw = 0; raw <= 14; ++raw) {
-        if (g_draft.variant_series == 4 &&
-            g_draft.prefix_class_bits == 3 && raw < 10 && raw != 2) continue;
-        const char* prefix = contracts::item_rarity_prefix(
-            g_draft.variant_series,g_draft.prefix_class_bits,raw);
-        if (raw != 2 && (prefix == nullptr || prefix[0] == '\0')) continue;
+    for (int32_t raw = 0; raw <= 14; ++raw)
         g_prefix_option_raw[g_prefix_option_count++] = raw;
-    }
 }
 bool prefix_raw_available(int32_t raw) {
     for (uint32_t index = 0; index < g_prefix_option_count; ++index) {
@@ -1419,8 +1414,8 @@ bool create_prefix_card() {
     g_prefix_selected_raw = prefix_raw_available(g_draft.raw_rarity)
         ? g_draft.raw_rarity : -1;
     const UiRect panel = panel_rect();
-    const UiRect card_rect{panel.x+(panel.w-420)/2,panel.y+(panel.h-360)/2,420,360};
-    const UiPanelDesc card{card_rect,{0,0,420,360},0,0};
+    const UiRect card_rect{panel.x+(panel.w-640)/2,panel.y+(panel.h-400)/2,640,400};
+    const UiPanelDesc card{card_rect,{0,0,640,400},0,0};
     QolResult result = c->panel_create(&card,nullptr,&g_prefix_card_root);
     if (!succeeded(result)) {
         char message[112]{};
@@ -1429,10 +1424,14 @@ bool create_prefix_card() {
         log_panel(message);
         return false;
     }
+    int32_t rows_by_quality[5]{};
     for (uint32_t index = 0; index < g_prefix_option_count; ++index) {
-        const int32_t column = static_cast<int32_t>(index % 3);
-        const int32_t row = static_cast<int32_t>(index / 3);
-        const UiButtonDesc button{{12+column*132,54+row*50,126,44},"",0,
+        const int32_t raw = g_prefix_option_raw[index];
+        const int32_t quality = contracts::item_rarity_from_raw_prefix(raw);
+        if (quality < 0 || quality > 4) continue;
+        const int32_t column = quality;
+        const int32_t row = rows_by_quality[quality]++;
+        const UiButtonDesc button{{14+column*124,84+row*48,116,42},"",0,
             &prefix_option_clicked,&g_prefix_option_raw[index]};
         result = c->button_create(&button,g_prefix_card_root,&g_prefix_buttons[index]);
         if (!succeeded(result)) {
@@ -1453,7 +1452,7 @@ bool create_prefix_card() {
             return false;
         }
     }
-    const UiButtonDesc confirm{{86,310,110,42},"",0,
+    const UiButtonDesc confirm{{200,340,110,42},"",0,
         &prefix_confirm_clicked,nullptr};
     result = c->button_create(&confirm,g_prefix_card_root,&g_prefix_confirm);
     if (!succeeded(result)) {
@@ -1468,7 +1467,7 @@ bool create_prefix_card() {
         log_panel("op=prefix_card_create result=failed stage=confirm_draw code=-1");
         return false;
     }
-    const UiButtonDesc cancel{{224,310,110,42},"",0,
+    const UiButtonDesc cancel{{330,340,110,42},"",0,
         &prefix_cancel_clicked,nullptr};
     result = c->button_create(&cancel,g_prefix_card_root,&g_prefix_cancel);
     if (!succeeded(result)) {
@@ -1506,26 +1505,36 @@ void draw_prefix_card() {
     const auto* c = components();
     if (adapter == nullptr || c == nullptr) return;
     const UiRect panel = panel_rect();
-    const UiRect card{panel.x+(panel.w-420)/2,panel.y+(panel.h-360)/2,420,360};
+    const UiRect card{panel.x+(panel.w-640)/2,panel.y+(panel.h-400)/2,640,400};
     if (adapter->fill_rect_alpha != nullptr)
         (void)adapter->fill_rect_alpha({panel.x,panel.y,panel.w,panel.h},0x0000,40);
     if (c->draw_container_styled != nullptr) {
         const UiContainerStyleDesc style{card,0x0000,60,1};
         (void)c->draw_container_styled(&style);
     }
-    draw_text(g_prefix_card_root,"选择前缀",210,18,kGold,2,2);
+    static constexpr const char* kQualityNames[5] = {
+        "白装", "绿装", "蓝装", "黄装", "紫装"};
+    draw_text(g_prefix_card_root,"选择前缀",320,12,kGold,2,2);
+    for (int32_t quality = 0; quality < 5; ++quality) {
+        draw_text(g_prefix_card_root,kQualityNames[quality],
+            14+quality*124+58,52,kGold,2,0);
+    }
+    int32_t rows_by_quality[5]{};
     for (uint32_t index = 0; index < g_prefix_option_count; ++index) {
         const int32_t raw = g_prefix_option_raw[index];
-        const char* prefix = raw == 2 ? "无" : contracts::item_rarity_prefix(
+        const int32_t quality = contracts::item_rarity_from_raw_prefix(raw);
+        if (quality < 0 || quality > 4) continue;
+        const int32_t row = rows_by_quality[quality]++;
+        const char* prefix = raw == 2 ? "" : contracts::item_rarity_prefix(
             g_draft.variant_series,g_draft.prefix_class_bits,raw);
         if (prefix == nullptr) prefix = "";
-        char label[64]{};
-        const size_t length = std::strlen(prefix);
-        size_t trimmed = length;
+        size_t trimmed = std::strlen(prefix);
         while (trimmed > 0 && prefix[trimmed - 1] == ' ') --trimmed;
-        std::snprintf(label,sizeof(label),"%.*s（%d）",
+        char label[64]{};
+        if (trimmed == 0) std::snprintf(label,sizeof(label),"无前缀（%d）",raw);
+        else std::snprintf(label,sizeof(label),"%.*s（%d）",
             static_cast<int>(trimmed),prefix,raw);
-        draw_prefix_card_button(g_prefix_buttons[index],label,126,44,
+        draw_prefix_card_button(g_prefix_buttons[index],label,116,42,
             raw == g_prefix_selected_raw);
     }
     draw_prefix_card_button(g_prefix_confirm,"确定",110,42,
