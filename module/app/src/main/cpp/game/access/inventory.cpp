@@ -625,6 +625,25 @@ QolResult detail_item_context(contracts::QolItemDetailContext* out_context) {
     // 不能把它当成已选中首格。仅 0/1/2 是有效详情类型。
     if (desc_type < 0 || desc_type > 2 || bag < 0)
         return error_result(kQolErrNotFound, "detail not open");
+    // 装备详情（desc_type=0）没有背包槽位；面板控件的光标仍停在背包首格，
+    // 用 cursor_index 会误取背包第一件物品。UIDesc_GetData 才是详情面板当前
+    // 物品对象，装备与背包详情共用它。
+    if (desc_type == 0) {
+        if (fn_ui_desc_get_data == nullptr)
+            return error_result(kQolErrNotReady, "detail item reader unavailable");
+        void* item = fn_ui_desc_get_data();
+        if (item == nullptr) return error_result(kQolErrNotFound, "detail item not found");
+        contracts::QolItemHandle handle = contracts::kInvalidItemHandle;
+        if (handle_for_item(item, &handle) != ItemHandleError::kNone ||
+            handle.slot == 0 || handle.generation == 0) {
+            return error_result(kQolErrNotReady, "detail item handle unavailable");
+        }
+        out_context->desc_type = desc_type;
+        out_context->bag = -1;
+        out_context->slot = -1;
+        out_context->item = handle;
+        return contracts::ok();
+    }
     int32_t slot = -1;
     result = cursor_index(control, &slot);
     if (!contracts::succeeded(result)) return result;

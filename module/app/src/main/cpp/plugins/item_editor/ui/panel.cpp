@@ -331,6 +331,10 @@ void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
     char text[160]{};
     switch (g_left_rows[index]) {
         case LeftRowKind::kCategory: {
+            if (!g_has_item) {
+                std::snprintf(text, sizeof(text), "类别：");
+                break;
+            }
             const char* type_name = item_type_name(g_item_type);
             const int32_t type_id = static_cast<int32_t>(g_item_type);
             if (g_item_type == QolItemType::kEquipment) {
