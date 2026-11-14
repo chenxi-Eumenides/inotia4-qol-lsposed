@@ -689,6 +689,14 @@ QolResult inline_color_from_code(int32_t code, uint32_t* out_color) {
     return contracts::ok();
 }
 
+// Minor 39 tail：物品详情面板（UIDesc）是否真正打开。wrapper false 表示符号未解析，
+// 此时 NotReady 且不写 out_open。
+QolResult item_detail_open(int32_t* out_open) {
+    if (out_open == nullptr) return invalid_argument();
+    if (!ui_uidesc_is_on(out_open)) return not_ready();
+    return contracts::ok();
+}
+
 QolResult set_font_color(uint32_t color) {
     if (fn_grpx_set_font_color == nullptr) return not_ready();
     fn_grpx_set_font_color(color);
@@ -1932,6 +1940,8 @@ QolUiAdapter g_ui_adapter{
               &roll_dice_draw,
              // Minor 38 tail: game inline color code → native ABGR packed color.
              &inline_color_from_code,
+             // Minor 39 tail: native item detail panel (UIDesc) open state query.
+             &item_detail_open,
             };
 
 }  // namespace

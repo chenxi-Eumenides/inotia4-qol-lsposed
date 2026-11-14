@@ -644,6 +644,8 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     fn_x_textctrl_get_color_from_code = reinterpret_cast<XTextCtrlGetColorFromCodeFn>(
         g_base + fn_resolve("F_X_TEXTCTRL_GET_COLOR_FROM_CODE_VMA",
                             F_X_TEXTCTRL_GET_COLOR_FROM_CODE_VMA));
+    fn_uidesc_is_on = reinterpret_cast<UIDescIsOnFn>(
+        g_base + fn_resolve("F_UIDESC_IS_ON_VMA", F_UIDESC_IS_ON_VMA));
     // 识别当前 libgame.so 变体/能力（离线表查表）。必须在 qol_log_init() 之后：
     // 日志 sink 未初始化时发出的日志会被丢弃。
     // 表匹配用磁盘上的 so 文件 md5，不受模块内存补丁影响，故无需先于补丁执行。

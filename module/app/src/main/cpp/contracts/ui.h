@@ -14,7 +14,7 @@ namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 2, kUiContractMinor = 24;
-constexpr uint16_t kUiAdapterMajor = 2, kUiAdapterMinor = 38;
+constexpr uint16_t kUiAdapterMajor = 2, kUiAdapterMinor = 39;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 2;
 constexpr uint32_t kUiStateMaxCustomPanels = 4;
@@ -876,6 +876,9 @@ struct QolUiAdapter {
     // code 为内联色码字符（'G','W','C','L','V','Y' 等），仅 0..255 有效；取色与
     // 游戏文本渲染同源，无符号时返回 NotReady 且不写 out_color。
     QolResult (*inline_color_from_code)(int32_t code, uint32_t* out_color);
+    // Minor 39 tail: 游戏物品详情面板（UIDesc）是否真正打开（UIDesc_IsOn）。
+    // out_open 写 1（control active==0x20）/0（未打开或 control 为空）；主线程专用。
+    QolResult (*item_detail_open)(int32_t* out_open);
 };
 
 }  // namespace qol::contracts

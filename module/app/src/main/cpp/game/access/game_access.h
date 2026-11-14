@@ -394,6 +394,7 @@ extern ControlObjectGetDataFn fn_ctrl_get_data;
 extern ControlObjectSetActiveFn fn_ctrl_set_active;
 extern ControlButtonDrawFn fn_ctrl_btn_draw;
 extern XTextCtrlGetColorFromCodeFn fn_x_textctrl_get_color_from_code;
+extern UIDescIsOnFn fn_uidesc_is_on;
 
 extern std::vector<std::pair<const char*, bool>> g_symbol_report;
 extern std::string g_dl_error;

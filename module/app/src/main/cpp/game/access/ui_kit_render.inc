@@ -244,3 +244,9 @@ uint32_t ui_inline_color_from_code(uint32_t code) {
     if (fn_x_textctrl_get_color_from_code == nullptr) return 0;
     return fn_x_textctrl_get_color_from_code(code);
 }
+
+bool ui_uidesc_is_on(int32_t* out_open) {
+    if (fn_uidesc_is_on == nullptr) return false;
+    if (out_open != nullptr) *out_open = fn_uidesc_is_on();
+    return true;
+}

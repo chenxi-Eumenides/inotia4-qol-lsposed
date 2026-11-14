@@ -988,6 +988,10 @@ constexpr uintptr_t F_ITEMDATA_DRAW_VMA = 0x1056f4; // void (ITEMDATABASE record
 constexpr uintptr_t F_CONTROL_ITEM_DRAW_VMA = 0xaaedc;  // void (void* ctrl) ControlItem_Draw：图标 + 稀有度贴图；数量由内部 bl ITEM_DrawPorting 以 show_count=1 画出（0xaaf24 mov w4,#1）
 constexpr uintptr_t F_UIDESC_SET_OFF_VMA = 0xb2b48;
 constexpr uintptr_t F_UIDESC_GET_DATA_VMA = 0xb2bd0;  // void* UIDesc_GetData()：当前 desc 面板物品对象（ButtonEquipExe b7c2c 同源）
+// 物品详情面板是否真正打开（item_editor 判定面板打开态）：b2b9c 反汇编——读全局 UIDesc
+// control GOT 槽，空则返回 0；否则调 ControlObject_GetActive(0x9dbd0)，cmp w0,#0x20 后
+// cset eq：active==0x20 返回 1，否则 0。
+constexpr uintptr_t F_UIDESC_IS_ON_VMA = 0xb2b9c;  // int32_t UIDesc_IsOn()
 // ---- UIDesc 描述刷新链（custom-craft-recipe 模块配方描述文案修正）----
 constexpr uintptr_t F_XTEXTCTRL_SET_TEXT_CONTROL_VMA = 0xb181c;  // void (ctrl,text,max_len,c,10,14) X_TEXTCTRL_SetTextControl：解析文本至 NUL、拷贝进控件布局；游戏每次刷描述都重复调用（readelf .dynsym 核对）
 constexpr uintptr_t F_GRPX_GET_FONT_HEIGHT_VMA = 0x8fc04;  // uint64_t (uint32_t idx) GRPX_GetFontHeight：*(font表[[0x2f5968]]+idx*8)；描述刷新以 idx=0 取默认行高（readelf .dynsym 核对）
@@ -1224,6 +1228,7 @@ using UiStoreMakeDescFn = void (*)(void*, void*);
 using UiEquipUpdateCharEquipFn = void (*)();
 using UiDescSetOffFn = void (*)();
 using UiDescGetDataFn = void* (*)();
+using UIDescIsOnFn = int32_t (*)();  // UIDesc_IsOn()：详情面板 control active==0x20 → 1
 using UiDescDrawFn = void (*)();  // UIDesc_Draw()
 using AllocateItemUidFn = uint64_t (*)();
 using UiEquipMakeDescFn = void (*)(void*, void*);  // UIEquip_MakeDesc(ctrl, 0)：读控件物品生成详情面板（袋标签二次点击原版语义）

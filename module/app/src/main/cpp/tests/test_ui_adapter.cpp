@@ -482,6 +482,13 @@ bool ui_draw_control_title_image_part(void*, int32_t) { return true; }
 void ui_show_text_popup(int32_t) {}
 uint32_t g_fake_inline_color = 0;
 uint32_t ui_inline_color_from_code(uint32_t) { return g_fake_inline_color; }
+int32_t g_fake_uidesc_is_on = 0;
+bool g_uidesc_is_on_resolved = false;
+bool ui_uidesc_is_on(int32_t* out_open) {
+    if (!g_uidesc_is_on_resolved) return false;
+    if (out_open != nullptr) *out_open = g_fake_uidesc_is_on;
+    return true;
+}
 bool ui_control_is_moving(void*, int32_t* out_moving) {
     if (out_moving != nullptr) *out_moving = 0;
     return true;
@@ -704,6 +711,24 @@ int main() {
         CHECK(adapter->inline_color_from_code(-1, &inline_color).code == kQolErrInvalidArgument);
         CHECK(adapter->inline_color_from_code(256, &inline_color).code == kQolErrInvalidArgument);
         g_fake_inline_color = 0;
+    }
+    // Minor 39 tail: 物品详情面板打开态查询。out 非空；符号未解析 NotReady 不写 out，
+    // 解析后 ok 且 out 写 0/1。
+    {
+        int32_t detail_open = 7;
+        g_uidesc_is_on_resolved = false;
+        CHECK(adapter->item_detail_open(&detail_open).code == kQolErrNotReady);
+        CHECK(detail_open == 7);
+        g_uidesc_is_on_resolved = true;
+        CHECK(adapter->item_detail_open(nullptr).code == kQolErrInvalidArgument);
+        g_fake_uidesc_is_on = 1;
+        CHECK(adapter->item_detail_open(&detail_open).ok == kQolOk);
+        CHECK(detail_open == 1);
+        g_fake_uidesc_is_on = 0;
+        CHECK(adapter->item_detail_open(&detail_open).ok == kQolOk);
+        CHECK(detail_open == 0);
+        g_uidesc_is_on_resolved = false;
+        g_fake_uidesc_is_on = 0;
     }
     // 加点模式（P+0x40 != 0）右侧详细框不绘制，命中矩形必须失效；普通模式与
     // 内存不可读场景保持原矩形。
@@ -1059,8 +1084,12 @@ int main() {
                   "inline color from code must append after roll dice draw");
     static_assert(offsetof(qol::contracts::QolUiAdapter, inline_color_from_code) +
                       sizeof(adapter->inline_color_from_code) ==
+                  offsetof(qol::contracts::QolUiAdapter, item_detail_open),
+                  "item detail open must append after inline color from code");
+    static_assert(offsetof(qol::contracts::QolUiAdapter, item_detail_open) +
+                      sizeof(adapter->item_detail_open) ==
                   sizeof(qol::contracts::QolUiAdapter),
-                  "inline color from code must remain the final adapter field");
+                  "item detail open must remain the final adapter field");
     uint64_t param[2]{};
     int source_control = 0;
     std::memcpy(&param[1], &source_control, sizeof(source_control));

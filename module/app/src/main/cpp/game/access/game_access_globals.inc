@@ -346,6 +346,7 @@ ControlObjectGetDataFn fn_ctrl_get_data = nullptr;
 ControlObjectSetActiveFn fn_ctrl_set_active = nullptr;
 ControlButtonDrawFn fn_ctrl_btn_draw = nullptr;
 XTextCtrlGetColorFromCodeFn fn_x_textctrl_get_color_from_code = nullptr;
+UIDescIsOnFn fn_uidesc_is_on = nullptr;
 
 std::vector<std::pair<const char*, bool>> g_symbol_report;
 std::string g_dl_error;

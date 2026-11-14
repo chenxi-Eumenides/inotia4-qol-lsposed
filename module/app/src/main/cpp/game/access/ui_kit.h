@@ -100,3 +100,7 @@ void ui_show_text_popup(int32_t text_id);
 // 游戏内联颜色码 → 游戏实际 ABGR packed color（0xAABBGGRR）。code 为色码字符
 // （'G','W','C','L','V','Y' 等）；符号未解析时返回 0（调用方据此判 NotReady）。
 uint32_t ui_inline_color_from_code(uint32_t code);
+
+// 游戏物品详情面板（UIDesc）是否真正打开：UIDesc_IsOn()，control active==0x20 → 1。
+// out_open 写 0/1；符号未解析返回 false 且不写 out_open。
+bool ui_uidesc_is_on(int32_t* out_open);

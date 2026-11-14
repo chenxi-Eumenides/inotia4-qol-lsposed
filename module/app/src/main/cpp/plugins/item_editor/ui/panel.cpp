@@ -125,11 +125,18 @@ void read_item() {
     g_category = 0;
     g_item_type = {};
     g_view = {};
+    const auto* adapter = ui();
+    int32_t detail_open = 0;
+    if (adapter != nullptr && adapter->item_detail_open != nullptr) {
+        if (!succeeded(adapter->item_detail_open(&detail_open)) || detail_open == 0) return;
+    }
     const auto* port = item_port();
     if (port == nullptr || port->read.detail_item_context == nullptr ||
         port->read.inventory_item_view == nullptr) return;
     QolItemDetailContext detail{};
     if (!succeeded(port->read.detail_item_context(&detail)) || detail.item.slot == 0) return;
+    // 1 是袋信息面板，不是物品详情；不能把 cursor 默认 0 当成首格物品。
+    if (detail.desc_type != 0 && detail.desc_type != 2) return;
     QolItemInventoryView view{};
     if (!succeeded(port->read.inventory_item_view(detail.item, &view))) return;
     g_item = detail.item;
@@ -472,7 +479,7 @@ void panel_process() {
         (void)c->draw_container_styled(&left);
     }
     if (c->item_slot_draw != nullptr && g_icon_slot != nullptr) (void)c->item_slot_draw(g_icon_slot);
-    if (!g_has_item) draw_text(g_root,"空",280,96,kMuted,2,0);
+    if (!g_has_item) draw_text(g_root,"无物品",280,96,kMuted,2,0);
     char text[160]{};
     const char* name = g_has_item ? static_text(QolItemStaticTextKind::kItemName,g_category) : nullptr;
     if (g_has_item) std::snprintf(text,sizeof(text),"名称：%s (id:%d)",name == nullptr ? "" : name,g_category);
