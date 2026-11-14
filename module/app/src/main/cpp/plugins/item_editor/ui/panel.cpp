@@ -442,8 +442,9 @@ void draw_name_row(const char* value) {
     }
     draw_text(g_root, "名称", static_cast<int32_t>(rect.x + 16),
               static_cast<int32_t>(rect.y + 14), enabled ? kText : kMuted, 0, 0);
+    // 名称行背景传入宽 316，draw_help_option_row 内缩后右边缘为 rect.x + rect.w - 4。
     draw_right_text(g_root, value == nullptr ? "" : value,
-                    static_cast<int32_t>(rect.x + rect.w - 16),
+                    static_cast<int32_t>(rect.x + rect.w - 4),
                     static_cast<int32_t>(rect.y + 14), enabled ? kText : kMuted);
 }
 void draw_fixed_category_row() {
@@ -461,7 +462,7 @@ void draw_fixed_category_row() {
     char value[120]{};
     format_category_row(value,sizeof(value));
     draw_text(g_category_row,"类别",16,14,kText,0,0);
-    draw_right_text(g_category_row,value,300,14,kText);
+    draw_right_text(g_category_row,value,312,14,kText);
 }
 void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
     const auto* adapter = ui();
@@ -544,7 +545,8 @@ void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
     draw_text(row, key, 16, 14, enabled ? kText : kMuted, 0, 0);
     // 背景由 draw_help_option_row 以绝对坐标绘制；value 必须使用同一坐标系，
     // 不能用 scroll row 的局部坐标，否则右侧会被列表裁剪。
-    draw_right_text_abs(static_cast<int32_t>(abs_x) + 312,
+    // draw_help_option_row({x+4, ..., 308}) 内部再内缩 4px，实际右边缘是 x+308。
+    draw_right_text_abs(static_cast<int32_t>(abs_x) + 308,
                         static_cast<int32_t>(abs_y) + 14, value,
                         enabled ? kText : kMuted);
 }
