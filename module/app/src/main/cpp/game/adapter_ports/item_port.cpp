@@ -36,6 +36,27 @@ QolResult error_result(int32_t code, const char* message) {
 
 QolResult not_ready() { return error_result(kQolErrNotReady, "not ready"); }
 
+QolResult read_item_base_stats(int32_t item_id, contracts::QolItemBaseStats* out) {
+    if (out == nullptr || item_id < 0) {
+        return error_result(kQolErrInvalidArgument, "invalid item base stats args");
+    }
+    if (fn_get_damage == nullptr || fn_get_defense == nullptr ||
+        fn_item_get_ability_level == nullptr) return not_ready();
+
+    // The game stat functions only need the encoded type bytes. This aligned temporary
+    // never enters the item pool and does not depend on an inventory item instance.
+    alignas(8) uint8_t item[0x40]{};
+    const uint16_t type = static_cast<uint16_t>(
+        ((item_id & I_TYPE_CATEGORY_MASK) << I_TYPE_CATEGORY_SHIFT) | (2 << 2));
+    std::memcpy(item + I_TYPE, &type, sizeof(type));
+    // I_MAGIC_RATE, I_COUNT, and I_ENCHANT remain zero from initialization.
+    out->damage = fn_get_damage(item);
+    out->defense = fn_get_defense(item);
+    out->magic_rate = 0;
+    out->need_level = fn_item_get_ability_level(item);
+    return contracts::ok();
+}
+
 QolResult resolve_item_handle(contracts::QolItemHandle handle, void** out_item) {
     if (out_item == nullptr || handle.slot == 0 || handle.generation == 0) {
         return error_result(kQolErrInvalidArgument, "invalid item handle");
@@ -603,9 +624,9 @@ const contracts::QolItemPort kItemPort{
         &read_static_text, &read_static_ready, &read_inventory_item_view,
          &read_effective_cumulate_count, nullptr, &read_count_limit,
            &read_count_encoding, &read_quote, &read_serialize_item,
-           &read_free_item, &read_native_bag_layout, &read_bag_capacity,
-           &read_slot_occupied, &draw_icon, &draw_icon_address, &draw_icon_id,
-           &read_item_class_index},
+            &read_free_item, &read_native_bag_layout, &read_bag_capacity,
+            &read_slot_occupied, &draw_icon, &draw_icon_address, &draw_icon_id,
+            &read_item_class_index, &read_item_base_stats},
 };
 
 }  // namespace

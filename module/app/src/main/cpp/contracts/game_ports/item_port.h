@@ -176,6 +176,13 @@ enum class QolItemStaticTextKind : int32_t {
 // 返回的是 JSON 已转义、不含外层引号的文本指针；存储只在启动期写入，运行期只读。
 using QolItemStaticTextFn = QolResult (*)(int32_t kind, int32_t id, const char** out_text);
 
+struct QolItemBaseStats {
+    int32_t damage;
+    int32_t defense;
+    int32_t magic_rate;
+    int32_t need_level;
+};
+
 struct QolItemPortReadApi {
     QolResult (*category)(QolItemHandle item, int32_t* out_category);
     QolResult (*item_type)(QolItemHandle item, QolItemType* out_type);
@@ -231,6 +238,8 @@ struct QolItemPortReadApi {
                               int32_t flip);
     // 5.3：ITEMDATABASE 记录 +2 的 ITEMCLASSBASE 下标（0..35）。
     QolResult (*item_class_index)(QolItemHandle item, int32_t* out_index);
+    // 5.4：按 ITEMDATABASE 下标读取基础属性；不访问或创建物品实例。
+    QolResult (*read_item_base_stats)(int32_t item_id, QolItemBaseStats* out);
 };
 
 struct QolItemPort {
@@ -284,6 +293,13 @@ inline bool qol_item_port_class_index_size_valid(const QolItemPort* port) {
     constexpr uint32_t kRequiredSize = static_cast<uint32_t>(
         offsetof(QolItemPort, read) + offsetof(QolItemPortReadApi, item_class_index) +
         sizeof(decltype(QolItemPortReadApi::item_class_index)));
+    return port != nullptr && port->struct_size >= kRequiredSize;
+}
+
+inline bool qol_item_port_base_stats_size_valid(const QolItemPort* port) {
+    constexpr uint32_t kRequiredSize = static_cast<uint32_t>(
+        offsetof(QolItemPort, read) + offsetof(QolItemPortReadApi, read_item_base_stats) +
+        sizeof(decltype(QolItemPortReadApi::read_item_base_stats)));
     return port != nullptr && port->struct_size >= kRequiredSize;
 }
 

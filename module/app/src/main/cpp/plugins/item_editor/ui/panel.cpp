@@ -77,6 +77,17 @@ int32_t g_item_card_selected_id = -1;
 bool g_item_card_open_requested = false;
 enum class ItemCardAction : uint8_t { kNone, kConfirm, kCancel };
 ItemCardAction g_item_card_pending_action = ItemCardAction::kNone;
+QolUiHandle g_quantity_card_root = nullptr;
+QolUiHandle g_quantity_adjust_buttons[8]{};
+QolUiHandle g_quantity_confirm = nullptr;
+QolUiHandle g_quantity_cancel = nullptr;
+int32_t g_quantity_value = 1;
+bool g_quantity_card_open_requested = false;
+enum class QuantityCardAction : uint8_t { kNone, kConfirm, kCancel };
+QuantityCardAction g_quantity_card_pending_action = QuantityCardAction::kNone;
+int32_t g_quantity_deltas[] = {-1,-10,-100,-1000,1,10,100,1000};
+constexpr const char* kQuantityLabels[] = {
+    "-1","-10","-100","-1000","+1","+10","+100","+1000"};
 std::atomic<bool> g_active{false};
 
 const QolUiComponents* components() {
@@ -117,20 +128,21 @@ void log_panel(const char* message) {
 void build_left_rows() {
     g_left_row_count = 0;
     if (item_class_is_equipment(g_draft.class_index)) {
-        constexpr LeftRowKind equipment_rows[] = {
-            LeftRowKind::kPrefix,
-            LeftRowKind::kEnchantDurability,
-            LeftRowKind::kSocketTotal,
-            LeftRowKind::kDamage,
-            LeftRowKind::kDefense,
-            LeftRowKind::kMagicDamage,
-            LeftRowKind::kRequiredLevel,
-            LeftRowKind::kChaosLevel,
-            LeftRowKind::kChaosRate,
-        };
-        for (const LeftRowKind kind : equipment_rows)
-            g_left_rows[g_left_row_count++] = kind;
-    } else if (item_class_valid(g_draft.class_index) || draft_has_item(g_draft)) {
+        g_left_rows[g_left_row_count++] = LeftRowKind::kPrefix;
+        g_left_rows[g_left_row_count++] = LeftRowKind::kEnchantDurability;
+        g_left_rows[g_left_row_count++] = LeftRowKind::kSocketTotal;
+        if (g_draft.damage != 0)
+            g_left_rows[g_left_row_count++] = LeftRowKind::kDamage;
+        if (g_draft.defense != 0)
+            g_left_rows[g_left_row_count++] = LeftRowKind::kDefense;
+        const int64_t magic_damage =
+            static_cast<int64_t>(g_draft.damage) * g_draft.magic_rate / 100;
+        if (magic_damage != 0)
+            g_left_rows[g_left_row_count++] = LeftRowKind::kMagicDamage;
+        g_left_rows[g_left_row_count++] = LeftRowKind::kRequiredLevel;
+        g_left_rows[g_left_row_count++] = LeftRowKind::kChaosLevel;
+        g_left_rows[g_left_row_count++] = LeftRowKind::kChaosRate;
+    } else if (item_class_valid(g_draft.class_index)) {
         g_left_rows[g_left_row_count++] = LeftRowKind::kQuantity;
     }
 }
@@ -467,6 +479,13 @@ void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
             return;
     }
     draw_text(row, text, 16, 14, kText, 0, 0);
+}
+void left_info_selected(void*, uint32_t index) {
+    if (index >= g_left_row_count ||
+        g_left_rows[index] != LeftRowKind::kQuantity ||
+        !item_class_valid(g_draft.class_index) ||
+        item_class_is_equipment(g_draft.class_index)) return;
+    g_quantity_card_open_requested = true;
 }
 
 void category_card_noop_draw(void*) {}
@@ -1012,6 +1031,8 @@ void draw_item_card() {
     draw_item_card_footer_button(g_item_card_cancel,"取消",true);
 }
 void rebuild_item_slot();
+void rebuild_left_list();
+void rebuild_right_list();
 void apply_item_card_action() {
     if (g_item_card_pending_action == ItemCardAction::kNone) return;
     const ItemCardAction action = g_item_card_pending_action;
@@ -1021,11 +1042,208 @@ void apply_item_card_action() {
         g_item_card_selected_id != g_draft.item_id) {
         g_draft.item_id = g_item_card_selected_id;
         g_draft.item_type = item_type_for_class(g_draft.class_index);
+        const auto* port = item_port();
+        if (port != nullptr && port->read.read_item_base_stats != nullptr) {
+            QolItemBaseStats stats{};
+            const QolResult result =
+                port->read.read_item_base_stats(g_draft.item_id,&stats);
+            if (succeeded(result)) {
+                g_draft.damage = stats.damage;
+                g_draft.defense = stats.defense;
+                g_draft.magic_rate = stats.magic_rate;
+                g_draft.need_level = stats.need_level;
+            } else {
+                char message[128]{};
+                std::snprintf(message,sizeof(message),
+                    "fail item=%d op=load_item_stats result=failed stage=read code=%d reason=base_stats_read_failed",
+                    g_draft.item_id,result.code);
+                log_panel(message);
+            }
+        } else {
+            log_panel("fail op=load_item_stats result=failed stage=api code=-1 reason=api_unavailable");
+        }
         g_draft.dirty = true;
         changed = true;
     }
     destroy_item_card();
-    if (changed) rebuild_item_slot();
+    if (changed) {
+        build_left_rows();
+        rebuild_left_list();
+        rebuild_right_list();
+        rebuild_item_slot();
+    }
+}
+void quantity_adjust_clicked(void* user) {
+    const auto* delta = static_cast<const int32_t*>(user);
+    if (delta == nullptr) return;
+    const int64_t adjusted = static_cast<int64_t>(g_quantity_value) + *delta;
+    g_quantity_value = static_cast<int32_t>(std::max<int64_t>(1,
+        std::min<int64_t>(999,adjusted)));
+}
+void quantity_confirm_clicked(void*) {
+    g_quantity_card_pending_action = QuantityCardAction::kConfirm;
+}
+void quantity_cancel_clicked(void*) {
+    g_quantity_card_pending_action = QuantityCardAction::kCancel;
+}
+void destroy_quantity_card() {
+    const auto* c = components();
+    if (c != nullptr && c->destroy != nullptr) {
+        for (auto& button : g_quantity_adjust_buttons) {
+            if (button != nullptr) (void)c->destroy(button);
+            button = nullptr;
+        }
+        if (g_quantity_confirm != nullptr) (void)c->destroy(g_quantity_confirm);
+        if (g_quantity_cancel != nullptr) (void)c->destroy(g_quantity_cancel);
+        if (g_quantity_card_root != nullptr) (void)c->destroy(g_quantity_card_root);
+    }
+    for (auto& button : g_quantity_adjust_buttons) button = nullptr;
+    g_quantity_confirm = nullptr;
+    g_quantity_cancel = nullptr;
+    g_quantity_card_root = nullptr;
+}
+bool create_quantity_card() {
+    const auto* c = components();
+    const auto* adapter = ui();
+    if (c == nullptr || adapter == nullptr || c->panel_create == nullptr ||
+        c->button_create == nullptr || adapter->set_draw_proc == nullptr ||
+        !item_class_valid(g_draft.class_index) ||
+        item_class_is_equipment(g_draft.class_index)) {
+        log_panel("op=quantity_card_create result=failed stage=precondition code=-1");
+        return false;
+    }
+    g_quantity_value = std::max(1,std::min(999,g_draft.count));
+    const UiRect panel = panel_rect();
+    const UiRect card_rect{panel.x+(panel.w-420)/2,panel.y+(panel.h-250)/2,420,250};
+    const UiPanelDesc card{card_rect,{0,0,420,250},0,0};
+    QolResult result = c->panel_create(&card,nullptr,&g_quantity_card_root);
+    if (!succeeded(result)) {
+        char message[112]{};
+        std::snprintf(message,sizeof(message),
+            "op=quantity_card_create result=failed stage=card_root code=%d",result.code);
+        log_panel(message);
+        return false;
+    }
+    for (uint32_t index = 0; index < 8; ++index) {
+        const int32_t column = static_cast<int32_t>(index % 4);
+        const int32_t row = static_cast<int32_t>(index / 4);
+        const UiButtonDesc button{{22+column*96,96+row*50,88,42},"",0,
+            &quantity_adjust_clicked,
+            &g_quantity_deltas[index]};
+        result = c->button_create(&button,g_quantity_card_root,
+            &g_quantity_adjust_buttons[index]);
+        if (!succeeded(result)) {
+            char message[112]{};
+            std::snprintf(message,sizeof(message),
+                "op=quantity_card_create result=failed stage=adjust_button code=%d index=%u",
+                result.code,index);
+            log_panel(message);
+            return false;
+        }
+        result = adapter->set_draw_proc(g_quantity_adjust_buttons[index],
+            &category_card_noop_draw);
+        if (!succeeded(result)) {
+            char message[112]{};
+            std::snprintf(message,sizeof(message),
+                "op=quantity_card_create result=failed stage=adjust_draw code=%d index=%u",
+                result.code,index);
+            log_panel(message);
+            return false;
+        }
+    }
+    const UiButtonDesc confirm{{100,200,100,42},"",0,
+        &quantity_confirm_clicked,nullptr};
+    result = c->button_create(&confirm,g_quantity_card_root,&g_quantity_confirm);
+    if (!succeeded(result)) {
+        char message[112]{};
+        std::snprintf(message,sizeof(message),
+            "op=quantity_card_create result=failed stage=confirm_button code=%d",result.code);
+        log_panel(message);
+        return false;
+    }
+    result = adapter->set_draw_proc(g_quantity_confirm,&category_card_noop_draw);
+    if (!succeeded(result)) {
+        char message[112]{};
+        std::snprintf(message,sizeof(message),
+            "op=quantity_card_create result=failed stage=confirm_draw code=%d",result.code);
+        log_panel(message);
+        return false;
+    }
+    const UiButtonDesc cancel{{220,200,100,42},"",0,
+        &quantity_cancel_clicked,nullptr};
+    result = c->button_create(&cancel,g_quantity_card_root,&g_quantity_cancel);
+    if (!succeeded(result)) {
+        char message[112]{};
+        std::snprintf(message,sizeof(message),
+            "op=quantity_card_create result=failed stage=cancel_button code=%d",result.code);
+        log_panel(message);
+        return false;
+    }
+    result = adapter->set_draw_proc(g_quantity_cancel,&category_card_noop_draw);
+    if (!succeeded(result)) {
+        char message[112]{};
+        std::snprintf(message,sizeof(message),
+            "op=quantity_card_create result=failed stage=cancel_draw code=%d",result.code);
+        log_panel(message);
+        return false;
+    }
+    return true;
+}
+void draw_quantity_card_button(QolUiHandle button,const char* label,
+                               int32_t width,int32_t height) {
+    const auto* adapter = ui();
+    if (adapter == nullptr || button == nullptr) return;
+    int64_t abs_x = 0,abs_y = 0;
+    if (adapter->control_absolute_origin == nullptr ||
+        !succeeded(adapter->control_absolute_origin(button,&abs_x,&abs_y))) return;
+    int32_t pressed = 0;
+    if (adapter->control_pressed != nullptr)
+        (void)adapter->control_pressed(button,&pressed);
+    if (adapter->draw_help_option_row != nullptr)
+        (void)adapter->draw_help_option_row({abs_x,abs_y,width,height},0,
+            static_cast<uint8_t>(pressed != 0));
+    draw_text(button,label,width/2,height/2-8,kText,2,0);
+}
+void draw_quantity_card() {
+    if (g_quantity_card_root == nullptr) return;
+    const auto* adapter = ui();
+    const auto* c = components();
+    if (adapter == nullptr || c == nullptr) return;
+    const UiRect panel = panel_rect();
+    const UiRect card{panel.x+(panel.w-420)/2,panel.y+(panel.h-250)/2,420,250};
+    if (adapter->fill_rect_alpha != nullptr)
+        (void)adapter->fill_rect_alpha({panel.x,panel.y,panel.w,panel.h},0x0000,40);
+    if (c->draw_container_styled != nullptr) {
+        const UiContainerStyleDesc style{card,0x0000,60,1};
+        (void)c->draw_container_styled(&style);
+    }
+    char quantity[48]{};
+    std::snprintf(quantity,sizeof(quantity),"数量：%d",g_quantity_value);
+    draw_text(g_quantity_card_root,"修改数量",210,18,kGold,2,2);
+    draw_text(g_quantity_card_root,quantity,210,56,kText,2,2);
+    for (uint32_t index = 0; index < 8; ++index)
+        draw_quantity_card_button(g_quantity_adjust_buttons[index],
+            kQuantityLabels[index],88,42);
+    draw_quantity_card_button(g_quantity_confirm,"确定",100,42);
+    draw_quantity_card_button(g_quantity_cancel,"取消",100,42);
+}
+void apply_quantity_action() {
+    if (g_quantity_card_pending_action == QuantityCardAction::kNone) return;
+    const QuantityCardAction action = g_quantity_card_pending_action;
+    g_quantity_card_pending_action = QuantityCardAction::kNone;
+    const bool changed = action == QuantityCardAction::kConfirm &&
+        item_class_valid(g_draft.class_index) &&
+        !item_class_is_equipment(g_draft.class_index);
+    if (changed) {
+        g_draft.count = g_quantity_value;
+        g_draft.dirty = true;
+    }
+    destroy_quantity_card();
+    if (changed) {
+        build_left_rows();
+        rebuild_left_list();
+        rebuild_item_slot();
+    }
 }
 void rebuild_left_list() {
     const auto* c = components();
@@ -1034,7 +1252,7 @@ void rebuild_left_list() {
     g_left_list = nullptr;
     if (g_left_row_count == 0) return;
     const UiScrollListDesc list{{122,268,316,232},48,g_left_row_count,-1,
-        &draw_left_info_row,nullptr,nullptr};
+        &draw_left_info_row,&left_info_selected,nullptr};
     (void)c->scroll_list_create(&list,g_root,&g_left_list);
 }
 void rebuild_right_list() {
@@ -1092,6 +1310,7 @@ void apply_category_card_action() {
 void destroy() {
     destroy_item_card();
     destroy_category_card();
+    destroy_quantity_card();
     const auto* c = components();
     if (c != nullptr && c->destroy != nullptr) {
         if (g_list != nullptr) (void)c->destroy(g_list);
@@ -1114,6 +1333,8 @@ void destroy() {
     g_card_pending_action = CategoryCardAction::kNone;
     g_item_card_open_requested = false;
     g_item_card_pending_action = ItemCardAction::kNone;
+    g_quantity_card_open_requested = false;
+    g_quantity_card_pending_action = QuantityCardAction::kNone;
     g_active.store(false, std::memory_order_release);
 }
 bool create() {
@@ -1165,13 +1386,23 @@ void panel_process() {
     }
     apply_category_card_action();
     apply_item_card_action();
-    if (g_item_card_open_requested) {
+    apply_quantity_action();
+    if (g_quantity_card_open_requested) {
+        g_quantity_card_open_requested = false;
+        g_card_open_requested = false;
+        g_item_card_open_requested = false;
+        destroy_category_card();
+        destroy_item_card();
+        if (!create_quantity_card()) destroy_quantity_card();
+    } else if (g_item_card_open_requested) {
         g_item_card_open_requested = false;
         g_card_open_requested = false;
+        destroy_quantity_card();
         destroy_category_card();
         if (!create_item_card()) destroy_item_card();
     } else if (g_card_open_requested) {
         g_card_open_requested = false;
+        destroy_quantity_card();
         destroy_item_card();
         if (!create_category_card()) {
             destroy_category_card();
@@ -1210,6 +1441,7 @@ void panel_process() {
     if (c->nav_button_draw != nullptr) (void)c->nav_button_draw(g_close);
     if (g_card_root != nullptr) draw_category_card();
     if (g_item_card_root != nullptr) draw_item_card();
+    if (g_quantity_card_root != nullptr) draw_quantity_card();
     if (adapter->end_frame != nullptr) (void)adapter->end_frame();
 }
 void panel_f3() { panel_destroy(); }
@@ -1217,6 +1449,10 @@ void panel_f4() {}
 uint32_t panel_event(uint64_t event,uint64_t param,uint64_t param2) {
     const auto* c=components(); if(!g_active.load(std::memory_order_acquire)||g_root==nullptr||c==nullptr||c->dispatch_native_event==nullptr)return 1;
     uint32_t consumed=0;
+    if (g_quantity_card_root != nullptr) {
+        (void)c->dispatch_native_event(g_quantity_card_root,event,param,param2,&consumed);
+        return consumed != 0 ? consumed : 1;
+    }
     if (g_item_card_footer_root != nullptr) {
         (void)c->dispatch_native_event(g_item_card_footer_root,event,param,param2,&consumed);
         if (consumed != 0) return consumed;

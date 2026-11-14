@@ -3,6 +3,7 @@
 #include "../../contracts/panels.h"
 #include "../../contracts/ui.h"
 #include "../../contracts/game_ports/ports.h"
+#include "../../contracts/game_ports/item_port.h"
 
 #include <atomic>
 
@@ -66,9 +67,11 @@ int install(contracts::PluginContext& ctx) {
     g_item_port = static_cast<const contracts::QolItemPort*>(ctx.ports[0]);
     if (!contracts::qol_item_port_draw_icon_size_valid(g_item_port) ||
         !contracts::qol_item_port_class_index_size_valid(g_item_port) ||
+        !contracts::qol_item_port_base_stats_size_valid(g_item_port) ||
         g_item_port->read.item_class_index == nullptr ||
         g_item_port->read.detail_item_context == nullptr ||
         g_item_port->read.inventory_item_view == nullptr ||
+        g_item_port->read.read_item_base_stats == nullptr ||
         g_item_port->read.draw_icon == nullptr) {
         g_item_port = nullptr;
         g_sdk = nullptr;
