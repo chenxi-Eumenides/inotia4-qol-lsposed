@@ -45,6 +45,19 @@ bool category_is_no_equip(int category) {
     return category_is_no_equip_from_class_data(category, class_data, stride);
 }
 
+int32_t item_class_magic_rate(int category) {
+    if (g_base == 0 || category < 0) return 0;
+    const uint8_t* class_data =
+        *reinterpret_cast<const uint8_t**>(*reinterpret_cast<void* const*>(g_base + G_ITEMCLASS_DATA_GOT_VMA));
+    const uint8_t* size_ptr =
+        *reinterpret_cast<const uint8_t**>(g_base + G_ITEMCLASS_SIZE_GOT_VMA);
+    const uint8_t stride = size_ptr != nullptr ? *size_ptr : 0;
+    constexpr size_t kMagicRateOffset = 0xB;
+    if (class_data == nullptr || stride <= kMagicRateOffset) return 0;
+    return static_cast<int32_t>(class_data[static_cast<size_t>(category) * stride +
+                                            kMagicRateOffset]);
+}
+
 namespace {
 
 // 调试定长 hex 输出（前导零补位），仅 /api/debug/item/raw 使用。

@@ -20,6 +20,10 @@ bool item_is_equip(void* item);
 // 与扩展背包 category_is_extension_backpack 同口径；category 为 I_TYPE bit6-15。
 bool item_is_backpack(int category);
 
+// ITEMCLASSBASE 记录 +0xB 的武器魔法倍率（百分数）；非武器类/表不可用返回 0。
+// 武器类 0..8 固定为 110/80/100/110/95/130/130/100/90，防具和物品类为 0。
+int32_t item_class_magic_rate(int category);
+
 // ITEMDATABASE/ITEMCLASSBASE 记录 +7 的「NPC 专属保护」位（bit4）：置位 = 不可装备 + 不可脱下
 // （`CHAR_CanEquipItem @0xe4f3c` / `CHAR_CanUnequipItem @0xe4e80` 读的是同一位）。
 constexpr uint8_t kNoEquipBit = 0x10;

@@ -30,8 +30,6 @@ namespace {
 
 using QolResult = ::QolResult;
 
-std::unordered_map<int32_t, contracts::QolItemBaseStats> g_base_stats_cache;
-
 QolResult error_result(int32_t code, const char* message) {
     return contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
 }
@@ -50,12 +48,6 @@ QolResult read_item_base_stats(int32_t item_id, contracts::QolItemBaseStats* out
         return error_result(kQolErrInvalidArgument, "item id out of range");
     }
 
-    const auto cached = g_base_stats_cache.find(item_id);
-    if (cached != g_base_stats_cache.end()) {
-        *out = cached->second;
-        return contracts::ok();
-    }
-
     auto* data_slot = reinterpret_cast<void**>(g_base + G_ITEMDATABASE_DATA_VMA);
     auto* size_slot = reinterpret_cast<const uint8_t*>(g_base + G_ITEMDATABASE_N_RECORD_SIZE_VMA);
     if (!game_memory_accessible(data_slot, sizeof(*data_slot), 'r') ||
@@ -70,40 +62,15 @@ QolResult read_item_base_stats(int32_t item_id, contracts::QolItemBaseStats* out
     if (fn_get_damage == nullptr || fn_get_defense == nullptr ||
         fn_item_get_ability_level == nullptr) return not_ready();
 
-    if (fn_create_item != nullptr && fn_itempool_free != nullptr) {
-        void* item = fn_create_item(item_id, 0, 0, 0);
-        if (item != nullptr) {
-            contracts::QolItemBaseStats stats{};
-            stats.damage = fn_get_damage(item);
-            stats.defense = fn_get_defense(item);
-            uint8_t magic_rate = 0;
-            std::memcpy(&magic_rate,
-                        static_cast<const uint8_t*>(item) + I_MAGIC_RATE,
-                        sizeof(uint8_t));
-            stats.magic_rate = magic_rate;
-            stats.need_level = fn_item_get_ability_level(item);
-            stats.stackable = stackable;
-            // CreateItem 返回的临时对象由游戏生成；读取后立即释放，不进入背包。
-            fn_itempool_free(item);
-            // CreateItem may assign a random magic rate; cache it so this item ID stays stable
-            // for the remainder of the current session.
-            g_base_stats_cache.emplace(item_id, stats);
-            *out = stats;
-            return contracts::ok();
-        }
-    }
-
-    // Fallback: the game stat functions can read the encoded type from this aligned
-    // temporary if CreateItem or ItemPool_Free is unavailable or CreateItem returns null.
+    // Damage/defense/ability are derived from the encoded type, class and default grade;
+    // magic rate is the class table +0xB column, not a per-instance random value.
     alignas(8) uint8_t item[0x40]{};
     const uint16_t type = static_cast<uint16_t>(
         ((item_id & I_TYPE_CATEGORY_MASK) << I_TYPE_CATEGORY_SHIFT) | (2 << 2));
     std::memcpy(item + I_TYPE, &type, sizeof(type));
-    // I_MAGIC_RATE, I_COUNT, and I_ENCHANT remain zero from initialization.
-    const contracts::QolItemBaseStats stats{
-        fn_get_damage(item), fn_get_defense(item), 0, fn_item_get_ability_level(item), stackable};
-    g_base_stats_cache.emplace(item_id, stats);
-    *out = stats;
+    const int32_t class_index = record[2];
+    *out = {fn_get_damage(item), fn_get_defense(item), item_class_magic_rate(class_index),
+            fn_item_get_ability_level(item), stackable};
     return contracts::ok();
 }
 
