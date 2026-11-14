@@ -625,6 +625,30 @@ void left_info_selected(void*, uint32_t index) {
             numeric_card_open(spec);
             return;
         }
+        case LeftRowKind::kSocketTotal: {
+            if (!item_class_is_equipment(g_draft.class_index)) return;
+            // 下限是已镶宝石数，防止把孔数改到低于 filled；上限用原生/UI 的 15。
+            // 理论上 filled≤15，越界时只允许 max 并记录失败日志。
+            int32_t min_value = g_draft.socket_filled;
+            if (min_value > 15) {
+                char message[96]{};
+                std::snprintf(message,sizeof(message),
+                    "fail op=socket_card_open result=failed reason=filled_exceeds_max filled=%d",
+                    min_value);
+                log_panel(message);
+                min_value = 15;
+            }
+            NumericCardSpec spec{};
+            spec.id = "socket_total";
+            spec.min_value = min_value;
+            spec.max_value = 15;
+            spec.small_step = 1;
+            spec.large_step = 10;
+            spec.value = g_draft.socket_total;
+            spec.target = NumericCardTarget::kSocketTotal;
+            numeric_card_open(spec);
+            return;
+        }
         default:
             return;
     }
@@ -1635,6 +1659,11 @@ void numeric_card_apply() {
                 g_draft.dirty = true;
                 break;
             case NumericCardTarget::kSocketTotal:
+                // 孔数不重建列表、不重算派生属性（基础伤害/防御/需要等级不变）。
+                g_draft.socket_total = std::clamp(
+                    g_numeric_value,g_numeric_min,g_numeric_max);
+                g_draft.dirty = true;
+                break;
             case NumericCardTarget::kChaosLevel:
             case NumericCardTarget::kChaosRate:
                 // 目标行尚未接入；占位分支要求新增目标必须在此显式处理。
