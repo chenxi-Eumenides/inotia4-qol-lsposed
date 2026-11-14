@@ -1,3 +1,4 @@
+#include "contracts/log_domain.h"
 #include "plugins/core.item/runtime/core_item_internal.h"
 #include "plugins/core.item/api/native_inventory.h"
 
@@ -25,7 +26,7 @@ void log_snapshot_serialize_failure() {
     g_snapshot_serialize_warned = true;
     constexpr char kMessage[] = "fail op=snapshot reason=serialize_failed";
     if (g_sdk == nullptr || g_sdk->log.write == nullptr) return;
-    (void)g_sdk->log.write(2, 1, kPluginId, kMessage,
+    (void)g_sdk->log.write(2, static_cast<int32_t>(QolDomain::kCore), kPluginId, kMessage,
                            static_cast<uint32_t>(sizeof(kMessage) - 1));
 }
 

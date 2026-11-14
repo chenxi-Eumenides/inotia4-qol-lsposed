@@ -2,6 +2,7 @@
 
 #include "contracts/host_sdk.h"
 #include "contracts/module_health.h"
+#include "contracts/log_domain.h"
 
 #include <mutex>
 #include <cstdio>
@@ -34,7 +35,7 @@ void log_scheduler_failure(const contracts::QolHostSdk* sdk, const char* op,
     if (length <= 0) return;
     const uint32_t message_length = static_cast<uint32_t>(
         length < static_cast<int>(sizeof(message)) ? length : static_cast<int>(sizeof(message) - 1));
-    (void)sdk->log.write(2, 0, "plugins/module_health/plugin.cpp", message, message_length);
+    (void)sdk->log.write(2, static_cast<int32_t>(QolDomain::kPlatform), "plugins/module_health/plugin.cpp", message, message_length);
 }
 
 bool valid_snapshot(const contracts::QolModuleHealthSnapshot& snapshot) {

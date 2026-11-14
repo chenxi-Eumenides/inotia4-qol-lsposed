@@ -24,6 +24,5 @@ enum class LogDomain(val token: String) {
     CATALOG("catalog"),
     CUSTOM_RECIPE("custom_recipe"),
     WORLD_TUNING("world_tuning"),
-    SPECIAL_EQUIP("special_equip"),
-    ITEM_LAB("item_lab");
+    SPECIAL_EQUIP("special_equip");
 }

@@ -10,6 +10,7 @@
 #include "../../contracts/panels.h"
 #include "../../contracts/runtime_hooks.h"
 #include "../../contracts/ui.h"
+#include "contracts/log_domain.h"
 #include "charinfo_scope.h"
 #include "charinfo_watch.h"
 #include "feature.h"
@@ -106,7 +107,7 @@ void log_info(int32_t level, const char* message) {
     if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
     if (level == 0 &&
         (sdk->log.debug_enabled == nullptr || sdk->log.debug_enabled() == 0)) return;
-    (void)sdk->log.write(level, 1, kPluginId, message,
+    (void)sdk->log.write(level, static_cast<int32_t>(QolDomain::kCore), kPluginId, message,
                          static_cast<uint32_t>(std::strlen(message)));
 }
 

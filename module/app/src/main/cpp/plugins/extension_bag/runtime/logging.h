@@ -5,6 +5,7 @@
 #include <cstring>
 #include <cstdint>
 
+#include "contracts/log_domain.h"
 #include "plugins/extension_bag/runtime/state.h"
 
 // src 只保留 basename：__FILE__ 可能是绝对路径，绝对路径会泄漏构建机目录，
@@ -34,7 +35,7 @@ inline void extension_bag_log(int32_t level, const char* file, int line, const c
                                 : static_cast<uint32_t>(written);
     char source[160]{};
     std::snprintf(source, sizeof(source), "%s:%d", extension_bag_log_basename(file), line);
-    (void)sdk->log.write(level, 6, source, message, length);
+    (void)sdk->log.write(level, static_cast<int32_t>(QolDomain::kExtensionBag), source, message, length);
 }
 
 // 统一日志系统 P2/P3：扩展背包所有日志经统一 native 日志系统单写者输出。

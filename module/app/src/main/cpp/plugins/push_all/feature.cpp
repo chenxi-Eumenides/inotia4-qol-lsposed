@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdio>
 
+#include "contracts/log_domain.h"
 #include "rules.h"
 
 namespace qol::features::push_all {
@@ -29,7 +30,7 @@ void log_message(int32_t level, const char* format, ...) {
     if (length < 0) return;
     const uint32_t message_length = static_cast<uint32_t>(
         length < static_cast<int>(contracts::kMessageCap) ? length : contracts::kMessageCap);
-    (void)sdk->log.write(level, 0, "plugins/push_all/feature.cpp", message, message_length);
+    (void)sdk->log.write(level, static_cast<int32_t>(QolDomain::kPlatform), "plugins/push_all/feature.cpp", message, message_length);
 }
 
 void log_filter_reject_once(const char* reason) {

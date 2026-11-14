@@ -2,7 +2,7 @@
 
 // core.save 插件本地日志 seam（分层约束：插件只能 include contracts/ 与自身目录，
 // 不得依赖 infra/log）。经 plugin.cpp 安装的 bridge 转发到 sdk->log.write，
-// domain 固定取 kSave=7（与 infra/log/qol_log.h 的 QolDomain 枚举序一致）。
+// domain 固定取 kSave=7（与 contracts/log_domain.h 的 QolDomain 枚举序一致）。
 
 #include <cstdarg>
 #include <cstdint>

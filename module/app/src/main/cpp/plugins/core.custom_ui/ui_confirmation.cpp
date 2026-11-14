@@ -1,3 +1,4 @@
+#include "contracts/log_domain.h"
 #include "ui_confirmation.h"
 
 #include <cstddef>
@@ -82,7 +83,7 @@ void log_confirmation(int32_t level, const char* event, uint64_t token,
         std::snprintf(message, sizeof(message), "confirmation event=%s token=%llu result=%s",
                       event, static_cast<unsigned long long>(token), result);
     }
-    (void)g_sdk->log.write(level, 12, "core.custom_ui/ui_confirmation", message,
+    (void)g_sdk->log.write(level, static_cast<int32_t>(QolDomain::kUi), "core.custom_ui/ui_confirmation", message,
                            static_cast<uint32_t>(std::strlen(message)));
 }
 uint64_t overlay_scope_owner_begin(uint64_t token);
@@ -290,7 +291,7 @@ bool unregister_frame_overlay(const contracts::QolUiAdapter* adapter) {
     if (!adapter_has_overlay_slots(adapter)) {
         if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
             static constexpr char message[] = "op=overlay owner=core.custom_ui result=failed reason=adapter_unavailable";
-            (void)g_sdk->log.write(2, 12, "core.custom_ui/ui_confirmation", message,
+            (void)g_sdk->log.write(2, static_cast<int32_t>(QolDomain::kUi), "core.custom_ui/ui_confirmation", message,
                                    sizeof(message) - 1);
         }
         return false;
@@ -302,7 +303,7 @@ bool unregister_frame_overlay(const contracts::QolUiAdapter* adapter) {
             std::snprintf(message, sizeof(message),
                           "op=overlay owner=core.custom_ui result=failed reason=unregister_rejected code=%d",
                           result.code);
-            (void)g_sdk->log.write(2, 12, "core.custom_ui/ui_confirmation", message,
+            (void)g_sdk->log.write(2, static_cast<int32_t>(QolDomain::kUi), "core.custom_ui/ui_confirmation", message,
                                    static_cast<uint32_t>(std::strlen(message)));
         }
         return false;
@@ -947,7 +948,7 @@ bool ui_confirmation_register_frame_overlay(contracts::QolUiFrameOverlayDrawFn d
         std::snprintf(message, sizeof(message),
                       "op=overlay owner=core.custom_ui result=failed reason=register_rejected code=%d",
                       result.code);
-        (void)g_sdk->log.write(2, 12, "core.custom_ui/ui_confirmation", message,
+        (void)g_sdk->log.write(2, static_cast<int32_t>(QolDomain::kUi), "core.custom_ui/ui_confirmation", message,
                                static_cast<uint32_t>(std::strlen(message)));
     }
     std::lock_guard<std::mutex> lock(g_mutex);

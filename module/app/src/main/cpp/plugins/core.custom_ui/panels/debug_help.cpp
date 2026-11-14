@@ -1,3 +1,4 @@
+#include "contracts/log_domain.h"
 #include "debug_help.h"
 
 #if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
@@ -56,7 +57,7 @@ void log_result(const char* action, QolResult result) {
     char message[128]{};
     std::snprintf(message, sizeof(message), "%s result=%d selected=%d", action, result.code,
                   g_last_selected);
-    (void)g_sdk->log.write(1, 12, "core.custom_ui/debug_help", message,
+    (void)g_sdk->log.write(1, static_cast<int32_t>(QolDomain::kUi), "core.custom_ui/debug_help", message,
                          static_cast<uint32_t>(std::strlen(message)));
 }
 void record(QolResult result) {

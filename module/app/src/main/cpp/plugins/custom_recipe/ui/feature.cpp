@@ -1,5 +1,7 @@
 #include "feature.h"
 
+#include "contracts/log_domain.h"
+
 #include <atomic>
 #include <cstdarg>
 #include <cstdio>
@@ -51,7 +53,8 @@ void log_message(int32_t level, const char* format, ...) {
     const uint32_t size = static_cast<uint32_t>(length) >= contracts::kMessageCap
                               ? contracts::kMessageCap
                               : static_cast<uint32_t>(length);
-    (void)g_sdk->log.write(level, 15, "plugins/custom_recipe/ui", message, size);
+    (void)g_sdk->log.write(level, static_cast<int32_t>(QolDomain::kCustomRecipe),
+                          "plugins/custom_recipe/ui", message, size);
 }
 
 uint32_t craft_mix_type() {

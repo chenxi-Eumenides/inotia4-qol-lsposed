@@ -41,25 +41,9 @@ struct DomainEntry {
 
 // 与 QolDomain 枚举逐项对应；顺序不重要，token 文本是唯一契约。
 const DomainEntry kDomainTable[] = {
-    {QolDomain::kPlatform, "platform"},
-    {QolDomain::kCore, "core"},
-    {QolDomain::kHttp, "http"},
-    {QolDomain::kApi, "api"},
-    {QolDomain::kOp, "op"},
-    {QolDomain::kInventory, "inventory"},
-    {QolDomain::kExtensionBag, "extension_bag"},
-    {QolDomain::kSave, "save"},
-    {QolDomain::kSaveBackup, "save_backup"},
-    {QolDomain::kAutosell, "autosell"},
-    {QolDomain::kCraft, "craft"},
-    {QolDomain::kAttrRange, "attr_range"},
-    {QolDomain::kUi, "ui"},
-    {QolDomain::kConfig, "config"},
-    {QolDomain::kCatalog, "catalog"},
-    {QolDomain::kCustomRecipe, "custom_recipe"},
-    {QolDomain::kWorldTuning, "world_tuning"},
-    {QolDomain::kSpecialEquip, "special_equip"},
-    {QolDomain::kItemLab, "item_lab"},
+#define QOL_LOG_DOMAIN(name, token) {QolDomain::name, token},
+#include "contracts/qol_log_domains.inc"
+#undef QOL_LOG_DOMAIN
 };
 
 std::atomic<QolFrameProvider> g_frame_provider{nullptr};

@@ -11,6 +11,7 @@
 #include "../../contracts/game_ports/character_extras_port.h"
 #include "../../contracts/ui.h"
 #include "../../contracts/ui_theme.h"
+#include "contracts/log_domain.h"
 #include "feature.h"
 #include "overview_model.h"
 
@@ -70,7 +71,7 @@ uint32_t g_page_count = 1;  // enter 前也安全（绘制不会发生）
 void log_panel_event(int32_t level, const char* message) {
     const contracts::QolHostSdk* sdk = host_sdk();
     if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
-    (void)sdk->log.write(level, 1, "character_panel", message,
+    (void)sdk->log.write(level, static_cast<int32_t>(QolDomain::kCore), "character_panel", message,
                          static_cast<uint32_t>(std::strlen(message)));
 }
 

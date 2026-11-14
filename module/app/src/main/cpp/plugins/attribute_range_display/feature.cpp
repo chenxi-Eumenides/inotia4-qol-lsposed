@@ -8,6 +8,7 @@
 #include "../../contracts/attribute_quality.h"
 #include "../../contracts/item_facts.h"
 #include "../../contracts/ui.h"
+#include "contracts/log_domain.h"
 
 namespace qol::features::attribute_range_display {
 namespace {
@@ -213,7 +214,7 @@ void log_hook_state(int32_t level, const char* message) {
     const auto* sdk = g_sdk;
     if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
     if (level == 0 && (sdk->log.debug_enabled == nullptr || sdk->log.debug_enabled() == 0)) return;
-    (void)sdk->log.write(level, 11, "attribute_range_display", message,
+    (void)sdk->log.write(level, static_cast<int32_t>(QolDomain::kAttrRange), "attribute_range_display", message,
                          static_cast<uint32_t>(std::strlen(message)));
 }
 

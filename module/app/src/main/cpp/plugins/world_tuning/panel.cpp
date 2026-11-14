@@ -7,6 +7,7 @@
 
 #include "../../contracts/host_sdk.h"
 #include "../../contracts/ui_theme.h"
+#include "contracts/log_domain.h"
 #include "feature.h"
 #include "rates.h"
 
@@ -84,7 +85,7 @@ bool g_message_error = false;
 
 void log_panel_message(int32_t level, const char* message) {
     if (g_sdk == nullptr || g_sdk->log.write == nullptr || message == nullptr) return;
-    (void)g_sdk->log.write(level, 16, "plugins/world_tuning/panel.cpp", message,
+    (void)g_sdk->log.write(level, static_cast<int32_t>(QolDomain::kWorldTuning), "plugins/world_tuning/panel.cpp", message,
                            static_cast<uint32_t>(std::strlen(message)));
 }
 

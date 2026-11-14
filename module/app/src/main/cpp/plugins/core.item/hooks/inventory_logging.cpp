@@ -1,3 +1,4 @@
+#include "contracts/log_domain.h"
 #include "inventory_logging.h"
 
 #include <array>
@@ -45,5 +46,5 @@ void inventory_log_write(int32_t level, const char* file, int line, const char* 
         : static_cast<uint32_t>(written);
     char source[160]{};
     std::snprintf(source, sizeof(source), "%s:%d", log_basename(file), line);
-    (void)g_sdk->log.write(level, 5, source, message.data(), length);
+    (void)g_sdk->log.write(level, static_cast<int32_t>(QolDomain::kInventory), source, message.data(), length);
 }

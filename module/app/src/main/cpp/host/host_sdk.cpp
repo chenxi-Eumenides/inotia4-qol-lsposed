@@ -113,16 +113,14 @@ QolResult sdk_result_write_error(const char* message, char* out, uint32_t capaci
 
 bool valid_log_level(int32_t level) { return level >= 0 && level <= 3; }
 
-bool valid_log_domain(int32_t domain) {
-    return domain >= 0 && domain <= static_cast<int32_t>(QolDomain::kItemLab);
-}
-
 QolResult sdk_log_write(int32_t level, int32_t domain, const char* source, const char* message,
                         uint32_t message_len) {
     if (source == nullptr || message == nullptr) {
         return result_error(kQolErrInvalidArgument, kNullArgument);
     }
-    if (!valid_log_level(level) || !valid_log_domain(domain)) {
+    // domain 由插件编译期常量给出；未知值由 qol_domain_token 回退 platform，
+    // 不在入口拒绝，避免新增域时漏改白名单导致日志被静默丢弃。
+    if (!valid_log_level(level)) {
         return result_error(kQolErrInvalidArgument, kInvalidArgument);
     }
     if (message_len > contracts::kMessageCap) {

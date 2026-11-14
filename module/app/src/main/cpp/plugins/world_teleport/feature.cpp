@@ -12,6 +12,7 @@
 #include "../../contracts/game_host.h"
 #include "../../contracts/ui.h"
 #include "../../contracts/ui_choice.h"
+#include "contracts/log_domain.h"
 #include "plugin.h"
 #include "rules.h"
 
@@ -71,7 +72,7 @@ void log_message(int32_t level, const char* format, ...) {
     if (written < 0) return;
     const uint32_t length = static_cast<uint32_t>(written) < qol::contracts::kMessageCap
         ? static_cast<uint32_t>(written) : qol::contracts::kMessageCap;
-    (void)sdk->log.write(level, 12, __FILE__, message, length);
+    (void)sdk->log.write(level, static_cast<int32_t>(QolDomain::kUi), __FILE__, message, length);
 }
 
 bool read_state(int* out) {

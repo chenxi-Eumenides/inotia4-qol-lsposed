@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "../../contracts/runtime_hooks.h"
+#include "contracts/log_domain.h"
 
 namespace qol::features::better_move {
 namespace {
@@ -47,7 +48,7 @@ void log_message(int32_t level, const char* format, ...) {
     if (length < 0) return;
     const uint32_t message_length = static_cast<uint32_t>(
         length < static_cast<int>(contracts::kMessageCap) ? length : contracts::kMessageCap);
-    (void)sdk->log.write(level, 0, "plugins/better_move/feature.cpp", message, message_length);
+    (void)sdk->log.write(level, static_cast<int32_t>(QolDomain::kPlatform), "plugins/better_move/feature.cpp", message, message_length);
 }
 
 void log_reject(const char* feature, const char* reason) {
@@ -59,7 +60,7 @@ void log_reject(const char* feature, const char* reason) {
     if (length <= 0) return;
     const uint32_t message_length = static_cast<uint32_t>(
         length < static_cast<int>(sizeof(message)) ? length : static_cast<int>(sizeof(message) - 1));
-    (void)sdk->log.write(2, 0, "plugins/better_move/feature.cpp", message, message_length);
+    (void)sdk->log.write(2, static_cast<int32_t>(QolDomain::kPlatform), "plugins/better_move/feature.cpp", message, message_length);
 }
 
 void log_first_hook(std::atomic<bool>& seen, const char* hook) {

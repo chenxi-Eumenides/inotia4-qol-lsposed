@@ -1,3 +1,4 @@
+#include "contracts/log_domain.h"
 #include "read_inventory.h"
 #include "plugins/core.inventory/api/access.h"
 
@@ -50,7 +51,7 @@ void log_snapshot_failure(int32_t space, int32_t bag, const QolResult& result,
     const uint32_t size = static_cast<uint32_t>(length < static_cast<int>(sizeof(line))
                                                     ? length
                                                     : sizeof(line) - 1);
-    (void)g_sdk->log.write(2, 5, "core.inventory", line, size);
+    (void)g_sdk->log.write(2, static_cast<int32_t>(QolDomain::kInventory), "core.inventory", line, size);
 }
 
 QolResult read_space_count(int32_t space_id, const contracts::QolBagSource* source,

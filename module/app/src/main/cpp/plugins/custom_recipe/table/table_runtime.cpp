@@ -4,6 +4,8 @@
 // 便携核心的 TableAccess，并承接全部与宿主/平台的接线（日志绑定、模块侧状态）。
 // 地址与 VMA 不在此目录出现：槽位由 game 适配层装配。
 
+#include "contracts/log_domain.h"
+
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
@@ -32,7 +34,8 @@ void table_log_line(int32_t level, const char* message) {
     const uint32_t size = length >= qol::contracts::kMessageCap
                               ? qol::contracts::kMessageCap
                               : static_cast<uint32_t>(length);
-    (void)g_sdk->log.write(level, 15, "plugins/custom_recipe/table", message, size);
+    (void)g_sdk->log.write(level, static_cast<int32_t>(QolDomain::kCustomRecipe),
+                          "plugins/custom_recipe/table", message, size);
 }
 
 TableAccess resolve_access() {

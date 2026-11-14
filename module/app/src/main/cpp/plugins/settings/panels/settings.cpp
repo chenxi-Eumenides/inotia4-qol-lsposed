@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "contracts/log_domain.h"
 #include "../../../contracts/game_host.h"
 #include "../../../contracts/panels.h"
 #include "../../../contracts/ui.h"
@@ -1147,7 +1148,7 @@ void settings_bind_sdk(const contracts::QolHostSdk* sdk, contracts::QolOwnerToke
         else CORE_UI_LOG_WARN("bind owner=settings result=failed reason=ui_api_unavailable");
     } else if (previous_sdk != nullptr && previous_sdk->log.write != nullptr) {
         static constexpr char message[] = "unbind owner=settings result=released";
-        (void)previous_sdk->log.write(1, 12, "core.settings/settings", message,
+        (void)previous_sdk->log.write(1, static_cast<int32_t>(QolDomain::kUi), "core.settings/settings", message,
                                       sizeof(message) - 1);
     }
 }

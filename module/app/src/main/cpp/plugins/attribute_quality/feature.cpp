@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "contracts/log_domain.h"
 #include "rules.h"
 
 namespace qol::features::attribute_quality {
@@ -314,7 +315,7 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
         if (ctx.sdk != nullptr && ctx.sdk->log.write != nullptr) {
             constexpr char kMessage[] =
                 "degrade feature=attribute_quality.provider resource=hook:MATH_GetRandom reason=backup_unavailable";
-            (void)ctx.sdk->log.write(2, 0, "plugins/attribute_quality/feature.cpp",
+            (void)ctx.sdk->log.write(2, static_cast<int32_t>(QolDomain::kPlatform), "plugins/attribute_quality/feature.cpp",
                                      kMessage, sizeof(kMessage) - 1);
         }
         return 1;

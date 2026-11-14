@@ -5,6 +5,7 @@
 #include <cstring>
 #include <mutex>
 
+#include "contracts/log_domain.h"
 #include "contracts/bag.h"
 #include "contracts/craft_facts.h"
 #include "contracts/inventory_projection.h"
@@ -212,7 +213,7 @@ void log_bag_count_config_receipt(int32_t level, const char* result, const char*
                         "op=config_receipt section=extension_bag key=bagCount result=%s reason=%s",
                         result, reason);
     if (written <= 0 || static_cast<size_t>(written) >= sizeof(message)) return;
-    (void)g_sdk->log.write(level, 1, kPluginId, message, static_cast<uint32_t>(written));
+    (void)g_sdk->log.write(level, static_cast<int32_t>(QolDomain::kCore), kPluginId, message, static_cast<uint32_t>(written));
 }
 
 void close_extension_bag_gates() {
@@ -371,7 +372,7 @@ void read_initial_bag_count(const qol::contracts::PluginContext& ctx) {
     if (!setting.enabled && read_state != bag_count_setting::ConfigRead::kNotFound &&
         g_sdk != nullptr && g_sdk->log.write != nullptr) {
         constexpr char message[] = "bagCount config invalid or unreadable; extension bag disabled";
-        (void)g_sdk->log.write(2, 1, kPluginId, message,
+        (void)g_sdk->log.write(2, static_cast<int32_t>(QolDomain::kCore), kPluginId, message,
                                static_cast<uint32_t>(sizeof(message) - 1));
     }
 }
@@ -605,7 +606,7 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
             constexpr char kMessage[] =
                 "extension bag bag_source registration failed; install rejected";
-            (void)g_sdk->log.write(2, 1, kPluginId, kMessage,
+            (void)g_sdk->log.write(2, static_cast<int32_t>(QolDomain::kCore), kPluginId, kMessage,
                                    static_cast<uint32_t>(sizeof(kMessage) - 1));
         }
         rollback_extension_bag_install();
@@ -619,7 +620,7 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
             constexpr char kMessage[] =
                 "extension bag lifecycle participant registration failed; source unavailable";
-            (void)g_sdk->log.write(2, 1, kPluginId, kMessage,
+            (void)g_sdk->log.write(2, static_cast<int32_t>(QolDomain::kCore), kPluginId, kMessage,
                                    static_cast<uint32_t>(sizeof(kMessage) - 1));
         }
         rollback_extension_bag_install();
@@ -725,7 +726,7 @@ void plugin_on_enabled(qol::contracts::PluginContext& ctx) {
         !extension_bag_slot_data_register(ctx.owner_token, g_slot_data_api_cache)) {
         if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
             constexpr char kMessage[] = "extension bag slot_data re-register on enable failed";
-            (void)g_sdk->log.write(2, 1, kPluginId, kMessage,
+            (void)g_sdk->log.write(2, static_cast<int32_t>(QolDomain::kCore), kPluginId, kMessage,
                                    static_cast<uint32_t>(sizeof(kMessage) - 1));
         }
         return;
@@ -750,7 +751,7 @@ void plugin_on_enabled(qol::contracts::PluginContext& ctx) {
     if (!register_bag_source_if_available()) {
         if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
             constexpr char kMessage[] = "extension bag bag_source re-register on enable failed";
-            (void)g_sdk->log.write(2, 1, kPluginId, kMessage,
+            (void)g_sdk->log.write(2, static_cast<int32_t>(QolDomain::kCore), kPluginId, kMessage,
                                    static_cast<uint32_t>(sizeof(kMessage) - 1));
         }
         extension_bag_set_enabled(false);
@@ -763,7 +764,7 @@ void plugin_on_enabled(qol::contracts::PluginContext& ctx) {
     if (!contracts::succeeded(projection_result)) {
         if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
             constexpr char kMessage[] = "extension bag projection registration on enable failed";
-            (void)g_sdk->log.write(2, 1, kPluginId, kMessage,
+            (void)g_sdk->log.write(2, static_cast<int32_t>(QolDomain::kCore), kPluginId, kMessage,
                                    static_cast<uint32_t>(sizeof(kMessage) - 1));
         }
         extension_bag_bag_source_unregister();

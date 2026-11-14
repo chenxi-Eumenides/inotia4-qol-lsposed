@@ -13,6 +13,22 @@
 #include <signal.h>
 #include <unistd.h>
 
+// 目录 → 域推导必须是编译期行为；任一映射写错或漏配在此直接编译失败。
+static_assert(qol_domain_for_file("/w/module/app/src/main/cpp/plugins/core.save/x.cpp") ==
+              QolDomain::kSave);
+static_assert(qol_domain_for_file("/w/module/app/src/main/cpp/plugins/core.item/x.cpp") ==
+              QolDomain::kInventory);
+static_assert(qol_domain_for_file("/w/module/app/src/main/cpp/plugins/extension_bag/ui/x.cpp") ==
+              QolDomain::kExtensionBag);
+static_assert(qol_domain_for_file("/w/module/app/src/main/cpp/plugins/craft_lottery/f.cpp") ==
+              QolDomain::kCraft);
+static_assert(qol_domain_for_file("/w/module/app/src/main/cpp/plugins/core.custom_ui/p.cpp") ==
+              QolDomain::kUi);
+static_assert(qol_domain_for_file("/w/module/app/src/main/cpp/host/assembly.cpp") ==
+              QolDomain::kCore);
+static_assert(qol_domain_for_file("/w/module/app/src/main/cpp/unknown/x.cpp") ==
+              QolDomain::kPlatform);
+
 static int g_pass = 0;
 static int g_fail = 0;
 
@@ -99,16 +115,18 @@ static void test_domain_tokens() {
         QolDomain::kExtensionBag, QolDomain::kSave,      QolDomain::kSaveBackup,
         QolDomain::kAutosell,   QolDomain::kCraft,    QolDomain::kAttrRange,
         QolDomain::kUi,         QolDomain::kConfig,      QolDomain::kCatalog,
-        QolDomain::kWorldTuning,
+        QolDomain::kCustomRecipe, QolDomain::kWorldTuning,
+        QolDomain::kSpecialEquip,
     };
     const char* tokens[] = {
         "platform", "core",  "http",   "api",        "op",
         "inventory", "extension_bag", "save", "save_backup", "autosell",
         "craft", "attr_range", "ui", "config", "catalog",
-        "world_tuning",
+        "custom_recipe", "world_tuning", "special_equip",
     };
     const size_t count = sizeof(domains) / sizeof(domains[0]);
-    CHECK(count == 16);
+    CHECK(count == static_cast<size_t>(QolDomain::kDomainCount));
+    CHECK(count == 18);
     for (size_t i = 0; i < count; ++i) {
         CHECK(std::strcmp(qol_domain_token(domains[i]), tokens[i]) == 0);
         CHECK(qol_domain_from_token(tokens[i]) == domains[i]);

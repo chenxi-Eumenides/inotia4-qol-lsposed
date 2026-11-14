@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include <vector>
 
+#include "contracts/log_domain.h"
 #include "map_data.h"
 
 namespace qol::features::custom_map {
@@ -123,7 +124,7 @@ void log_loaded_map(const MapPathId& id, int32_t size) {
     const uint32_t length = static_cast<uint32_t>(written) < sizeof(message)
         ? static_cast<uint32_t>(written)
         : static_cast<uint32_t>(sizeof(message) - 1);
-    (void)sdk->log.write(1, 1, "plugins/custom_map", message, length);
+    (void)sdk->log.write(1, static_cast<int32_t>(QolDomain::kCore), "plugins/custom_map", message, length);
 }
 
 void log_conversion(const MapPathId& id, const char* status,
@@ -139,7 +140,7 @@ void log_conversion(const MapPathId& id, const char* status,
     if (written < 0) return;
     const uint32_t length = static_cast<uint32_t>(written) < sizeof(message)
         ? static_cast<uint32_t>(written) : static_cast<uint32_t>(sizeof(message) - 1);
-    (void)sdk->log.write(1, 1, "plugins/custom_map", message, length);
+    (void)sdk->log.write(1, static_cast<int32_t>(QolDomain::kCore), "plugins/custom_map", message, length);
 }
 
 bool load_custom_dat(const MapPathId& id, const char* path, void** out_buf, int32_t* out_size) {

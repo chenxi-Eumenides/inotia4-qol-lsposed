@@ -1,3 +1,4 @@
+#include "contracts/log_domain.h"
 #include "host.h"
 
 #include <cstddef>
@@ -72,7 +73,7 @@ void sdk_end_overlay_scope(void* context) {
 void sdk_log(void* context, int32_t level, const char* message) {
     const auto* sdk = static_cast<const contracts::QolHostSdk*>(context);
     if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
-    (void)sdk->log.write(level, 12, "core.custom_ui/panels/host", message,
+    (void)sdk->log.write(level, static_cast<int32_t>(QolDomain::kUi), "core.custom_ui/panels/host", message,
                          static_cast<uint32_t>(std::strlen(message)));
 }
 void sdk_save_lcd(void* context) {

@@ -220,7 +220,7 @@ file:line | domain | level_now | message | event_class | level_target | disposit
 
 ## 9. 等级与域的一致性
 
-- 域 token 与 `QolDomain` 枚举一致，新增域必须同时更新 `qol_log.h`、`qol_log.cpp` 的 `kDomainTable` 和 Kotlin `LogDomain`。
+- 域 token 与 `QolDomain` 枚举一致，唯一来源是 `contracts/qol_log_domains.inc`；新增域追加一行，有插件目录时同步 `contracts/qol_log_domain_dirs.inc`，并更新 Kotlin `LogDomain`。
 - 不得为绕过等级规范新增域或新增等级。
 - 日志等级不得运行时可变；debug 只有开/关两态。
 

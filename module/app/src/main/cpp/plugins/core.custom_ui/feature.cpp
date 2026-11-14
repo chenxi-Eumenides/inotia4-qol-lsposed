@@ -1,3 +1,4 @@
+#include "contracts/log_domain.h"
 // 原生 UICHOICE 选择框插件业务层。
 
 #include "feature.h"
@@ -86,7 +87,7 @@ void log_line(int32_t level, const char* message) {
     if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
     const size_t length = std::strlen(message);
     if (length == 0) return;
-    (void)sdk->log.write(level, 1, "plugins/core.custom_ui/feature.cpp", message,
+    (void)sdk->log.write(level, static_cast<int32_t>(QolDomain::kCore), "plugins/core.custom_ui/feature.cpp", message,
                          static_cast<uint32_t>(length));
 }
 

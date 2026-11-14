@@ -11,6 +11,7 @@
 #include <cstdio>
 
 #include "../../contracts/in_flight.h"
+#include "contracts/log_domain.h"
 #include "rules.h"
 
 namespace qol::features::special_equip {
@@ -78,7 +79,7 @@ void log_write(int32_t level, const char* format, va_list args) {
     if (length < 0) return;
     const uint32_t message_length = static_cast<uint32_t>(
         length < static_cast<int>(contracts::kMessageCap) ? length : contracts::kMessageCap);
-    (void)sdk->log.write(level, 17, "plugins/special_equip/feature.cpp", message, message_length);
+    (void)sdk->log.write(level, static_cast<int32_t>(QolDomain::kSpecialEquip), "plugins/special_equip/feature.cpp", message, message_length);
 }
 
 bool debug_enabled() {

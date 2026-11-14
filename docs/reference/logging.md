@@ -26,6 +26,8 @@
 - 单条消息缓冲 4096 字节，溢出截断并补 `...`。
 
 native 出口为 `QOL_LOG_DEBUG` / `QOL_LOG_INFO` / `QOL_LOG_WARN` / `QOL_LOG_ERROR`；
+无域参数的变体 `QOL_LOG_DEBUG_AUTO` / `QOL_LOG_INFO_AUTO` / `QOL_LOG_WARN_AUTO` /
+`QOL_LOG_ERROR_AUTO` 按 `__FILE__` 在编译期推导域（映射见 §3）。
 需在构造昂贵 debug 参数前短路时使用 `QOL_LOG_DEBUG_ENABLED`（`infra/log/qol_log.h`）。
 Kotlin 经 `LogFile` facade 转发 `qol_log_write_kotlin`，D 级门控与 native 一致
 （debug 未开启时格式化前短路）。
@@ -44,10 +46,20 @@ Kotlin 经 `LogFile` facade 转发 `qol_log_write_kotlin`，D 级门控与 nativ
 
 ## 3. 域（domain）
 
-域 token 由 `QolDomain` 枚举到文本的唯一映射表（`qol_log.cpp` `kDomainTable`）定义，当前 18 个：
+域 token 的**唯一来源**是 `contracts/qol_log_domains.inc`：`QolDomain` 枚举与
+`kDomainTable` 都由同一组 `QOL_LOG_DOMAIN(name, "token")` 行展开，当前 18 个：
 `platform`、`core`、`http`、`api`、`op`、`inventory`、`extension_bag`、`save`、`save_backup`、
 `autosell`、`craft`、`attr_range`、`ui`、`config`、`catalog`、`custom_recipe`、`world_tuning`、
-`special_equip`。token 文本是唯一契约，新增域必须进该表。
+`special_equip`。token 文本是唯一契约，只追加、不插入、不重排。
+
+`contracts/qol_log_domain_dirs.inc` 维护 `plugins/<目录> → 域` 映射，供
+`QOL_LOG_INFO_AUTO` / `QOL_LOG_WARN_AUTO` / `QOL_LOG_ERROR_AUTO` / `QOL_LOG_DEBUG_AUTO`
+在编译期从 `__FILE__` 推导域。新代码优先用这四个宏，调用点不出现域号或枚举；
+需要覆盖推导结果时才显式传域。
+
+新增域：在 `qol_log_domains.inc` 追加一行；有插件目录时在 `qol_log_domain_dirs.inc`
+追加映射，并更新 Kotlin `LogDomain`。入口不做 domain 白名单拒绝，未知 domain 在格式化时
+回退 `platform`。
 
 ## 4. 文件清单与路径
 

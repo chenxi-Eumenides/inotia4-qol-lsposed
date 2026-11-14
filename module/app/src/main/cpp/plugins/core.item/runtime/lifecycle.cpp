@@ -1,3 +1,4 @@
+#include "contracts/log_domain.h"
 #include "plugins/core.item/runtime/core_item_internal.h"
 #include "plugins/core.item/plugin.h"
 #include "plugins/core.item/api/bag_source.h"
@@ -28,14 +29,14 @@ void log_message(const contracts::QolHostSdk* sdk, const char* message) {
     if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
     uint32_t length = 0;
     while (message[length] != '\0') ++length;
-    (void)sdk->log.write(1, 1, kPluginId, message, length);
+    (void)sdk->log.write(1, static_cast<int32_t>(QolDomain::kCore), kPluginId, message, length);
 }
 
 void log_inventory_unavailable(const contracts::QolHostSdk* sdk) {
     constexpr char kMessage[] =
         "degrade feature=inventory_hooks result=unavailable reason=resource_attach_failed";
     if (sdk == nullptr || sdk->log.write == nullptr) return;
-    (void)sdk->log.write(2, 1, kPluginId, kMessage,
+    (void)sdk->log.write(2, static_cast<int32_t>(QolDomain::kCore), kPluginId, kMessage,
                          static_cast<uint32_t>(sizeof(kMessage) - 1));
 }
 

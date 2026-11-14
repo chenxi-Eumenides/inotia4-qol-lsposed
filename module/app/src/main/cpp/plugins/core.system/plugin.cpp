@@ -1,3 +1,4 @@
+#include "contracts/log_domain.h"
 #include "plugin.h"
 
 #include <cstdint>
@@ -70,7 +71,7 @@ void log_message(const contracts::QolHostSdk* sdk, const char* message, int leve
     if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
     uint32_t length = 0;
     while (message[length] != '\0') ++length;
-    (void)sdk->log.write(level, 1, kPluginId, message, length);
+    (void)sdk->log.write(level, static_cast<int32_t>(QolDomain::kCore), kPluginId, message, length);
 }
 
 void warn_snapshot_failure() {
@@ -78,7 +79,7 @@ void warn_snapshot_failure() {
         constexpr char kMessage[] =
             "fail op=snapshot_read kind=system reason=read_failed_or_capacity keep=previous";
         if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
-            (void)g_sdk->log.write(2, 1, kPluginId, kMessage, sizeof(kMessage) - 1);
+            (void)g_sdk->log.write(2, static_cast<int32_t>(QolDomain::kCore), kPluginId, kMessage, sizeof(kMessage) - 1);
         }
         g_snapshot_failure_warned = true;
     }

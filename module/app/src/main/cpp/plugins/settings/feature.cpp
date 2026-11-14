@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "contracts/log_domain.h"
 #include "../../contracts/panels.h"
 #include "../../contracts/ui.h"
 #include "panels/settings.h"
@@ -62,7 +63,7 @@ bool settings_panels_open(const char* panel_id) {
             std::snprintf(message, sizeof(message),
                           "panels_open skipped: ui_panels capability unavailable panel=%s reason=capability_unavailable",
                           panel_id == nullptr ? "none" : panel_id);
-            (void)g_sdk->log.write(2, 12, "core.settings/feature.cpp", message,
+            (void)g_sdk->log.write(2, static_cast<int32_t>(QolDomain::kUi), "core.settings/feature.cpp", message,
                                   static_cast<uint32_t>(std::strlen(message)));
         }
         return false;

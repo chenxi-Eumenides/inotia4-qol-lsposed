@@ -10,6 +10,7 @@
 #include "../../contracts/panels.h"
 #include "../../contracts/popup_enter_alias.h"
 #include "../../contracts/ui.h"
+#include "contracts/log_domain.h"
 #include "feature.h"
 #include "overview.h"
 
@@ -37,7 +38,7 @@ int64_t g_press_y = 0;
 void log_warn(const char* message) {
     const contracts::QolHostSdk* sdk = host_sdk();
     if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
-    (void)sdk->log.write(2, 1, "character_panel", message,
+    (void)sdk->log.write(2, static_cast<int32_t>(QolDomain::kCore), "character_panel", message,
                          static_cast<uint32_t>(std::strlen(message)));
 }
 

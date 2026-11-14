@@ -38,6 +38,7 @@ CPP_ROOT = ROOT / "module" / "app" / "src" / "main" / "cpp"
 JAVA_ROOT = ROOT / "module" / "app" / "src" / "main" / "java"
 
 QOL_LOG_CPP = CPP_ROOT / "infra" / "log" / "qol_log.cpp"
+QOL_LOG_DOMAINS_INC = CPP_ROOT / "contracts" / "qol_log_domains.inc"
 LOG_STUB = CPP_ROOT / "tests" / "stubs" / "android" / "log.h"
 
 CPP_SUFFIXES = {".cpp", ".h", ".hpp", ".cc", ".inc"}
@@ -101,6 +102,7 @@ PER_FRAME_NAME_PATTERNS = (
 
 _ANDROID_LOG_RE = re.compile(r"\bandroid\.util\.Log\b")
 _NATIVE_DOMAIN_RE = re.compile(r"\{\s*QolDomain::\w+\s*,\s*\"([a-z_]+)\"\s*\}")
+_NATIVE_DOMAIN_INC_RE = re.compile(r"QOL_LOG_DOMAIN\(\s*\w+\s*,\s*\"([a-z_]+)\"\s*\)")
 _KOTLIN_DECL_RE = re.compile(r"\b(?:enum\s+class|object|class)\s+LogDomain\b")
 _KOTLIN_TOKEN_RE = re.compile(r"\"([a-z][a-z0-9_]*)\"")
 _STR_LITERAL_RE = re.compile(r'"(?:[^"\\]|\\.)*"')
@@ -323,6 +325,9 @@ def check_banned_tags(findings: list[Finding]) -> None:
 
 
 def native_domain_tokens() -> list[str]:
+    # 域词表的唯一来源是 qol_log_domains.inc；保留旧解析作为过渡回退。
+    if QOL_LOG_DOMAINS_INC.exists():
+        return _NATIVE_DOMAIN_INC_RE.findall(QOL_LOG_DOMAINS_INC.read_text(errors="replace"))
     if not QOL_LOG_CPP.exists():
         return []
     return _NATIVE_DOMAIN_RE.findall(QOL_LOG_CPP.read_text(errors="replace"))
@@ -357,7 +362,8 @@ def check_domain_vocabulary(findings: list[Finding]) -> None:
     kotlin, kotlin_path = kotlin_domain_tokens()
     if not native:
         findings.append(
-            Finding(rel(QOL_LOG_CPP), 1, "R3", "未能在 qol_log.cpp 解析到 native domain token 表")
+            Finding(rel(QOL_LOG_CPP), 1, "R3",
+                    "未能在 contracts/qol_log_domains.inc / qol_log.cpp 解析到 native domain token 表")
         )
         return
     if kotlin_path is None:

@@ -1,3 +1,4 @@
+#include "contracts/log_domain.h"
 #include "plugin.h"
 
 #include <cstdint>
@@ -36,7 +37,7 @@ void write_log(int level, const char* message) {
     if (g_sdk == nullptr || g_sdk->log.write == nullptr || message == nullptr) return;
     uint32_t length = 0;
     while (message[length] != '\0') ++length;
-    (void)g_sdk->log.write(level, 1, kPluginId, message, length);
+    (void)g_sdk->log.write(level, static_cast<int32_t>(QolDomain::kCore), kPluginId, message, length);
 }
 
 QolResult write_response(contracts::HttpRes* response, uint16_t status, const std::string& body) {

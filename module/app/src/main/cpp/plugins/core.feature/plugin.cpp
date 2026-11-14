@@ -1,3 +1,4 @@
+#include "contracts/log_domain.h"
 #include "plugin.h"
 
 #include <atomic>
@@ -49,7 +50,7 @@ void write_log(int level, const char* message) {
     if (g_sdk == nullptr || g_sdk->log.write == nullptr || message == nullptr) return;
     uint32_t length = 0;
     while (message[length] != '\0') ++length;
-    (void)g_sdk->log.write(level, 1, kPluginId, message, length);
+    (void)g_sdk->log.write(level, static_cast<int32_t>(QolDomain::kCore), kPluginId, message, length);
 }
 
 std::atomic<bool> g_mask_crit_effects{true};

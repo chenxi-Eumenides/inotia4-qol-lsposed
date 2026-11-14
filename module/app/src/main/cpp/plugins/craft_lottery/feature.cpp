@@ -6,6 +6,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "contracts/log_domain.h"
+
 namespace qol::features::craft_lottery {
 namespace {
 
@@ -26,7 +28,7 @@ void log_write(int32_t level, const char* format, va_list args) {
     if (length < 0) return;
     const uint32_t message_length = static_cast<uint32_t>(
         length < static_cast<int>(contracts::kMessageCap) ? length : contracts::kMessageCap);
-    (void)sdk->log.write(level, 16, "plugins/craft_lottery/feature.cpp", message, message_length);
+    (void)sdk->log.write(level, static_cast<int32_t>(QolDomain::kCraft), "plugins/craft_lottery/feature.cpp", message, message_length);
 }
 
 void log_info(const char* format, ...) {

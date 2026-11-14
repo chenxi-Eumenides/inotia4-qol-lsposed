@@ -1,3 +1,4 @@
+#include "contracts/log_domain.h"
 #include "plugin.h"
 #include "save_coordinator.h"
 #include "save_pre_save.h"
@@ -171,7 +172,7 @@ void log_message(const contracts::QolHostSdk* sdk, const char* message) {
     if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
     uint32_t length = 0;
     while (message[length] != '\0') ++length;
-    (void)sdk->log.write(1, 1, kPluginId, message, length);
+    (void)sdk->log.write(1, static_cast<int32_t>(QolDomain::kCore), kPluginId, message, length);
 }
 
 // core.save 本地日志 seam 的宿主桥：domain 固定 7（kSave，QolDomain 枚举序）；

@@ -12,15 +12,51 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "contracts/log_domain.h"
+
 enum class QolLogLevel : uint8_t { kDebug = 0, kInfo = 1, kWarn = 2, kError = 3 };
 
-enum class QolDomain : uint8_t {
-    kPlatform = 0, kCore, kHttp, kApi, kOp, kInventory, kExtensionBag,
-    kSave, kSaveBackup, kAutosell, kCraft, kAttrRange, kUi, kConfig, kCatalog,
-    kCustomRecipe,
-    kWorldTuning,
-    kSpecialEquip, kItemLab,
+// 枚举顺序与 token 由 contracts/qol_log_domains.inc 单一来源生成；新增域只改该文件。
+
+// 源文件目录 → 域的映射，供 QOL_LOG_*_AUTO 在编译期推导域。
+struct QolDomainDirEntry {
+    const char* pattern;
+    QolDomain domain;
 };
+
+inline constexpr QolDomainDirEntry kQolDomainDirTable[] = {
+#define QOL_LOG_DOMAIN_DIR(dir, domain) {"/plugins/" dir "/", QolDomain::domain},
+#include "contracts/qol_log_domain_dirs.inc"
+#undef QOL_LOG_DOMAIN_DIR
+    {"/host/", QolDomain::kCore},
+    {"/bridge/", QolDomain::kCore},
+    {"/patch/", QolDomain::kPlatform},
+    {"/game/access/", QolDomain::kCore},
+    {"/infra/", QolDomain::kPlatform},
+};
+
+constexpr bool qol_log_path_contains(const char* path, const char* needle) {
+    if (path == nullptr || needle == nullptr) return false;
+    if (*needle == '\0') return true;
+    for (const char* p = path; *p != '\0'; ++p) {
+        const char* a = p;
+        const char* b = needle;
+        while (*a != '\0' && *b != '\0' && *a == *b) {
+            ++a;
+            ++b;
+        }
+        if (*b == '\0') return true;
+    }
+    return false;
+}
+
+// 编译期推导：按目录表顺序匹配 __FILE__，未命中回退 platform。
+constexpr QolDomain qol_domain_for_file(const char* path) {
+    for (const QolDomainDirEntry& entry : kQolDomainDirTable) {
+        if (qol_log_path_contains(path, entry.pattern)) return entry.domain;
+    }
+    return QolDomain::kPlatform;
+}
 
 // 文件 sink 单文件字节上限；写满后轮转为 `<path>.1`。
 constexpr int64_t kQolLogFileCapBytes = 4 * 1024 * 1024;
@@ -83,3 +119,19 @@ void qol_log_set_test_clock(QolLogTestClock fn);  // fn=null 恢复真实时钟
 #define QOL_LOG_ERROR(dom, ...) qol_log_write(QolLogLevel::kError, (dom), __FILE__, __LINE__, __VA_ARGS__)
 #define QOL_LOG_DEBUG(dom, ...) \
     do { if (qol_log_debug_enabled()) qol_log_write(QolLogLevel::kDebug, (dom), __FILE__, __LINE__, __VA_ARGS__); } while (0)
+
+// 无域参数：域由 __FILE__ 的目录在编译期推导（见 qol_log_domain_dirs.inc）。
+// 新代码优先用这四个宏；需要覆盖推导结果时才显式传域。
+#define QOL_LOG_DOMAIN_AUTO (qol_domain_for_file(__FILE__))
+#define QOL_LOG_INFO_AUTO(...) \
+    qol_log_write(QolLogLevel::kInfo, QOL_LOG_DOMAIN_AUTO, __FILE__, __LINE__, __VA_ARGS__)
+#define QOL_LOG_WARN_AUTO(...) \
+    qol_log_write(QolLogLevel::kWarn, QOL_LOG_DOMAIN_AUTO, __FILE__, __LINE__, __VA_ARGS__)
+#define QOL_LOG_ERROR_AUTO(...) \
+    qol_log_write(QolLogLevel::kError, QOL_LOG_DOMAIN_AUTO, __FILE__, __LINE__, __VA_ARGS__)
+#define QOL_LOG_DEBUG_AUTO(...)                                                        \
+    do {                                                                               \
+        if (qol_log_debug_enabled())                                                   \
+            qol_log_write(QolLogLevel::kDebug, QOL_LOG_DOMAIN_AUTO, __FILE__, __LINE__, \
+                          __VA_ARGS__);                                                \
+    } while (0)

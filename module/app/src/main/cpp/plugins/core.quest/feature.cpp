@@ -1,3 +1,4 @@
+#include "contracts/log_domain.h"
 #include "feature.h"
 #include "plugin.h"
 
@@ -20,7 +21,7 @@ void log_write(int32_t level, const char* format, va_list args) {
     if (length < 0) return;
     const uint32_t message_length = static_cast<uint32_t>(
         length < static_cast<int>(contracts::kMessageCap) ? length : contracts::kMessageCap);
-    (void)sdk->log.write(level, 0, "plugins/core.quest/feature.cpp", message, message_length);
+    (void)sdk->log.write(level, static_cast<int32_t>(QolDomain::kPlatform), "plugins/core.quest/feature.cpp", message, message_length);
 }
 
 void log_info(const char* format, ...) {

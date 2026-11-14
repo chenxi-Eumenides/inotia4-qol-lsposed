@@ -1,3 +1,4 @@
+#include "contracts/log_domain.h"
 #include "plugin.h"
 
 #include <cstdint>
@@ -101,7 +102,7 @@ void log_message(const contracts::QolHostSdk* sdk, const char* message, int leve
     if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
     uint32_t length = 0;
     while (message[length] != '\0') ++length;
-    (void)sdk->log.write(level, 1, kPluginId, message, length);
+    (void)sdk->log.write(level, static_cast<int32_t>(QolDomain::kCore), kPluginId, message, length);
 }
 
 void snapshot_read_failed() {

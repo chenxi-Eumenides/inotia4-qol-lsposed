@@ -5,6 +5,8 @@
 #include <cstdarg>
 #include <cstdio>
 
+#include "contracts/log_domain.h"
+
 namespace qol::extension_bag {
 namespace {
 
@@ -30,7 +32,7 @@ void entry_log(int32_t level, const char* format, ...) {
     const uint32_t length = static_cast<uint32_t>(written) >= sizeof(message)
                                 ? static_cast<uint32_t>(sizeof(message) - 1)
                                 : static_cast<uint32_t>(written);
-    (void)sdk->log.write(level, 6, "extension_bag", message, length);
+    (void)sdk->log.write(level, static_cast<int32_t>(QolDomain::kExtensionBag), "extension_bag", message, length);
 }
 
 }  // namespace

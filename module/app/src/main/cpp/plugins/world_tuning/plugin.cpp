@@ -10,6 +10,7 @@
 #include "../../contracts/item_use.h"
 #include "../../contracts/panels.h"
 #include "../../contracts/ui.h"
+#include "contracts/log_domain.h"
 #include "feature.h"
 #include "panel.h"
 #include "rates.h"
@@ -35,7 +36,7 @@ void log_panel_open_failure(const char* reason) {
     if (length <= 0) return;
     const uint32_t message_length = static_cast<uint32_t>(
         length < static_cast<int>(sizeof(message)) ? length : sizeof(message) - 1);
-    (void)g_sdk->log.write(2, 16, "plugins/world_tuning/plugin.cpp", message, message_length);
+    (void)g_sdk->log.write(2, static_cast<int32_t>(QolDomain::kWorldTuning), "plugins/world_tuning/plugin.cpp", message, message_length);
 }
 // item.use 与面板 UI 能力均为可选：由宿主在能力注册/撤销时广播变更，
 // 插件据此重新 require、注册 provider 或解绑/注销。
