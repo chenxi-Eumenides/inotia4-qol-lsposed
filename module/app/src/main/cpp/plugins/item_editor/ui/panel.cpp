@@ -256,6 +256,36 @@ void draw_text(QolUiHandle control, const char* text, int32_t x, int32_t y,
     if (c != nullptr && c->draw_control_text != nullptr)
         (void)c->draw_control_text(control, text, x, y, color, align, font);
 }
+
+int32_t text_pixel_width(const char* text, int32_t font) {
+    if (text == nullptr || text[0] == '\0') return 0;
+    const auto* adapter = ui();
+    int32_t width = 0;
+    if (adapter != nullptr && adapter->minor >= 40 && adapter->text_width != nullptr &&
+        succeeded(adapter->text_width(text, font, &width)) && width > 0) {
+        return width;
+    }
+    // 测量接口不可用时保守留出 80px，避免文本从右边界继续向右溢出。
+    return 80;
+}
+
+void draw_right_text(QolUiHandle control, const char* text, int32_t right, int32_t y,
+                     uint32_t color, int32_t font = 0) {
+    const int32_t width = text_pixel_width(text, font);
+    draw_text(control, text, right - width, y, color, 0, font);
+}
+
+void draw_right_text_abs(int32_t right, int32_t y, const char* text, uint32_t color,
+                         int32_t font = 0) {
+    const auto* adapter = ui();
+    if (adapter == nullptr || adapter->set_font_color_rgb == nullptr ||
+        adapter->draw_string_with_font == nullptr || text == nullptr) return;
+    const int32_t width = text_pixel_width(text, font);
+    (void)adapter->set_font_color_rgb(static_cast<int32_t>(color & 0xff),
+        static_cast<int32_t>((color >> 8) & 0xff),
+        static_cast<int32_t>((color >> 16) & 0xff));
+    (void)adapter->draw_string_with_font(text, right - width, y, 0, font);
+}
 const AttributeQualityApi* attribute_quality_api() {
     const auto* sdk = host_sdk();
     if (sdk == nullptr || sdk->capabilities.require == nullptr) return nullptr;
@@ -393,7 +423,7 @@ void draw_right_row(void*, uint32_t row_index, QolUiHandle row, uint8_t) {
         name = "空";
     }
     draw_text(row, name, 20, 26, enabled ? kText : kMuted);
-    draw_text(row, value, 300, 26, value_color, 1, 1);
+    draw_right_text(row, value, 300, 26, value_color, 1);
     draw_text(row, "×", 366, 18, enabled ? kGold : kMuted, 1, 2);
 }
 
@@ -412,9 +442,9 @@ void draw_name_row(const char* value) {
     }
     draw_text(g_root, "名称", static_cast<int32_t>(rect.x + 16),
               static_cast<int32_t>(rect.y + 14), enabled ? kText : kMuted, 0, 0);
-    draw_text(g_root, value == nullptr ? "" : value,
-              static_cast<int32_t>(rect.x + rect.w - 16),
-              static_cast<int32_t>(rect.y + 14), enabled ? kText : kMuted, 1, 0);
+    draw_right_text(g_root, value == nullptr ? "" : value,
+                    static_cast<int32_t>(rect.x + rect.w - 16),
+                    static_cast<int32_t>(rect.y + 14), enabled ? kText : kMuted);
 }
 void draw_fixed_category_row() {
     const auto* adapter = ui();
@@ -431,7 +461,7 @@ void draw_fixed_category_row() {
     char value[120]{};
     format_category_row(value,sizeof(value));
     draw_text(g_category_row,"类别",16,14,kText,0,0);
-    draw_text(g_category_row,value,300,14,kText,1,0);
+    draw_right_text(g_category_row,value,300,14,kText);
 }
 void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
     const auto* adapter = ui();
@@ -512,7 +542,11 @@ void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
             return;
     }
     draw_text(row, key, 16, 14, enabled ? kText : kMuted, 0, 0);
-    draw_text(row, value, 300, 14, enabled ? kText : kMuted, 1, 0);
+    // 背景由 draw_help_option_row 以绝对坐标绘制；value 必须使用同一坐标系，
+    // 不能用 scroll row 的局部坐标，否则右侧会被列表裁剪。
+    draw_right_text_abs(static_cast<int32_t>(abs_x) + 312,
+                        static_cast<int32_t>(abs_y) + 14, value,
+                        enabled ? kText : kMuted);
 }
 void resolve_variant_series() {
     if (g_draft.source_valid && g_draft.variant_series != 0) return;

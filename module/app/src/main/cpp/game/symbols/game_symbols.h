@@ -1001,6 +1001,7 @@ constexpr uintptr_t F_UIDESC_IS_ON_VMA = 0xb2b9c;  // int32_t UIDesc_IsOn()
 // ---- UIDesc 描述刷新链（custom-craft-recipe 模块配方描述文案修正）----
 constexpr uintptr_t F_XTEXTCTRL_SET_TEXT_CONTROL_VMA = 0xb181c;  // void (ctrl,text,max_len,c,10,14) X_TEXTCTRL_SetTextControl：解析文本至 NUL、拷贝进控件布局；游戏每次刷描述都重复调用（readelf .dynsym 核对）
 constexpr uintptr_t F_GRPX_GET_FONT_HEIGHT_VMA = 0x8fc04;  // uint64_t (uint32_t idx) GRPX_GetFontHeight：*(font表[[0x2f5968]]+idx*8)；描述刷新以 idx=0 取默认行高（readelf .dynsym 核对）
+constexpr uintptr_t F_GRPX_GET_TEXT_WIDTH_VMA = 0x8feb4; // int32_t (const char* text, int32_t len, int32_t font) GRPX_GetTextWidthWithFont
 constexpr uintptr_t F_CONTROLSCROLL_SET_OPTION_VMA = 0xab130;  // void (scroll, i64 content_extent, i64 max_delta)；重置拖动阈值为 1
 constexpr uintptr_t F_UIDESC_DRAW_VMA = 0xb56f4;      // void () UIDesc_Draw：物品详情面板绘制（Scene_Draw_POPUP_SC_EQUIP +0x1cc bl）
 constexpr uintptr_t F_UIROLLDICE_DRAW_VMA = 0xcccf0; // void () UIRollDice_Draw
@@ -1465,6 +1466,7 @@ using GrpxFillRectFn = void (*)(int32_t x, int32_t y, int32_t w, int32_t h, uint
 using GrpxFillRectAlphaFn = void (*)(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t rgb565, uint32_t alpha_pct);  // rgb565 + alpha 百分比（非 ABGR8888）
 using GrpxSetFontColorFn = void (*)(uint32_t abgr);
 using GrpxDrawStringWithFontFn = void (*)(char* text, int32_t x, int32_t y, int32_t align, int32_t font);
+using GrpxGetTextWidthFn = int32_t (*)(const char* text, int32_t length, int32_t font);
 using GrpxSetFontColorRgbFn = void (*)(int32_t r, int32_t g, int32_t b);
 using GrpxDrawPartFn = void (*)(void* group, int32_t x, int32_t y, void* loc, int32_t type, int32_t flip, int32_t unknown);
 // Exported GRPX wrappers use the common native textured-container drawing ABI.

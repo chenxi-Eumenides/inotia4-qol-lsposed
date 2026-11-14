@@ -618,6 +618,7 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     fn_grpx_fill_rect_alpha = reinterpret_cast<GrpxFillRectAlphaFn>(g_base + fn_resolve("F_GRPX_FILL_RECT_ALPHA_VMA", F_GRPX_FILL_RECT_ALPHA_VMA));
     fn_grpx_set_font_color = reinterpret_cast<GrpxSetFontColorFn>(g_base + fn_resolve("F_GRPX_SET_FONT_COLOR_VMA", F_GRPX_SET_FONT_COLOR_VMA));
     fn_grpx_draw_string_with_font = reinterpret_cast<GrpxDrawStringWithFontFn>(g_base + fn_resolve("F_GRPX_DRAW_STRING_WITH_FONT_VMA", F_GRPX_DRAW_STRING_WITH_FONT_VMA));
+    fn_grpx_get_text_width = reinterpret_cast<GrpxGetTextWidthFn>(g_base + fn_resolve("F_GRPX_GET_TEXT_WIDTH_VMA", F_GRPX_GET_TEXT_WIDTH_VMA));
     fn_grpx_get_font_height = reinterpret_cast<GrpxGetFontHeightFn>(
         g_base + fn_resolve("F_GRPX_GET_FONT_HEIGHT_VMA", F_GRPX_GET_FONT_HEIGHT_VMA));
     fn_grpx_set_font_color_rgb = reinterpret_cast<GrpxSetFontColorRgbFn>(g_base + fn_resolve("F_GRPX_SET_FONT_COLOR_RGB_VMA", F_GRPX_SET_FONT_COLOR_RGB_VMA));

@@ -316,6 +316,7 @@ GrpxFillRectFn fn_grpx_fill_rect = nullptr;
 GrpxFillRectAlphaFn fn_grpx_fill_rect_alpha = nullptr;
 GrpxSetFontColorFn fn_grpx_set_font_color = nullptr;
 GrpxDrawStringWithFontFn fn_grpx_draw_string_with_font = nullptr;
+GrpxGetTextWidthFn fn_grpx_get_text_width = nullptr;
 GrpxGetFontHeightFn fn_grpx_get_font_height = nullptr;
 GrpxSetFontColorRgbFn fn_grpx_set_font_color_rgb = nullptr;
 GrpxDrawPartFn fn_grpx_draw_part = nullptr;

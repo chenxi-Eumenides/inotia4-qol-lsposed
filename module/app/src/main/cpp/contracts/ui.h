@@ -14,7 +14,7 @@ namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 2, kUiContractMinor = 27;
-constexpr uint16_t kUiAdapterMajor = 2, kUiAdapterMinor = 39;
+constexpr uint16_t kUiAdapterMajor = 2, kUiAdapterMinor = 40;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 2;
 constexpr uint32_t kUiStateMaxCustomPanels = 4;
@@ -874,6 +874,9 @@ struct QolUiAdapter {
     // Minor 39 tail: 游戏物品详情面板（UIDesc）是否真正打开（UIDesc_IsOn）。
     // out_open 写 1（control active==0x20）/0（未打开或 control 为空）；主线程专用。
     QolResult (*item_detail_open)(int32_t* out_open);
+    // Minor 40 tail: 以游戏字体测量 UTF-8 文本宽度；font 使用 GRPX 字体档位。
+    // 供调用方做真正的右/居中对齐，不依赖 GRPX_DrawStringWithFont 的 align 参数。
+    QolResult (*text_width)(const char* text, int32_t font, int32_t* out_width);
 };
 
 }  // namespace qol::contracts

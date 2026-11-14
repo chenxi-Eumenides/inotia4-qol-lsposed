@@ -697,6 +697,16 @@ QolResult item_detail_open(int32_t* out_open) {
     return contracts::ok();
 }
 
+// Minor 40 tail：按当前语言字体测量 UTF-8 文本宽度，供右/居中对齐使用。
+QolResult text_width(const char* text, int32_t font, int32_t* out_width) {
+    if (text == nullptr || out_width == nullptr) return invalid_argument();
+    if (fn_grpx_get_text_width == nullptr) return not_ready();
+    const int32_t width = fn_grpx_get_text_width(text, static_cast<int32_t>(std::strlen(text)), font);
+    if (width < 0) return not_ready();
+    *out_width = width;
+    return contracts::ok();
+}
+
 QolResult set_font_color(uint32_t color) {
     if (fn_grpx_set_font_color == nullptr) return not_ready();
     fn_grpx_set_font_color(color);
@@ -1942,6 +1952,8 @@ QolUiAdapter g_ui_adapter{
              &inline_color_from_code,
              // Minor 39 tail: native item detail panel (UIDesc) open state query.
              &item_detail_open,
+             // Minor 40 tail: native font text width for exact right/center alignment.
+             &text_width,
             };
 
 }  // namespace

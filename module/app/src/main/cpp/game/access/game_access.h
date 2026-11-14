@@ -363,6 +363,7 @@ extern GrpxFillRectFn fn_grpx_fill_rect;
 extern GrpxFillRectAlphaFn fn_grpx_fill_rect_alpha;
 extern GrpxSetFontColorFn fn_grpx_set_font_color;
 extern GrpxDrawStringWithFontFn fn_grpx_draw_string_with_font;
+extern GrpxGetTextWidthFn fn_grpx_get_text_width;
 using GrpxGetFontHeightFn = uint64_t (*)(uint32_t font);
 extern GrpxGetFontHeightFn fn_grpx_get_font_height;
 extern GrpxSetFontColorRgbFn fn_grpx_set_font_color_rgb;
