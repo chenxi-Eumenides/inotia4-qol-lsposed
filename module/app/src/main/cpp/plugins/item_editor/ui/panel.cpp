@@ -472,7 +472,7 @@ void panel_process() {
         (void)c->draw_container_styled(&left);
     }
     if (c->item_slot_draw != nullptr && g_icon_slot != nullptr) (void)c->item_slot_draw(g_icon_slot);
-    if (!g_has_item) draw_text(g_root,"选择物品",280,96,kMuted,2,0);
+    if (!g_has_item) draw_text(g_root,"空",280,96,kMuted,2,0);
     char text[160]{};
     const char* name = g_has_item ? static_text(QolItemStaticTextKind::kItemName,g_category) : nullptr;
     if (g_has_item) std::snprintf(text,sizeof(text),"名称：%s (id:%d)",name == nullptr ? "" : name,g_category);
