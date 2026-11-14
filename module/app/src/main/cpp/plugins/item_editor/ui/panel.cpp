@@ -27,6 +27,8 @@ using namespace contracts;
 constexpr int32_t kPanelW = 900;
 constexpr int32_t kPanelH = 560;
 constexpr int32_t kRightRowH = 75;
+// 行背景右边缘与右对齐文本之间保留的安全间距。
+constexpr int32_t kRowTextRightMargin = 8;
 // draw_control_text / draw_string_with_font 的颜色是 AABBGGRR；金色取统一主题常量。
 constexpr uint32_t kText = 0xFFD5E8F2u;
 constexpr uint32_t kGold = contracts::ui_theme::kTextGold;
@@ -444,7 +446,7 @@ void draw_name_row(const char* value) {
               static_cast<int32_t>(rect.y + 14), enabled ? kText : kMuted, 0, 0);
     // 名称行背景传入宽 316，draw_help_option_row 内缩后右边缘为 rect.x + rect.w - 4。
     draw_right_text(g_root, value == nullptr ? "" : value,
-                    static_cast<int32_t>(rect.x + rect.w - 4),
+                    static_cast<int32_t>(rect.x + rect.w - 4 - kRowTextRightMargin),
                     static_cast<int32_t>(rect.y + 14), enabled ? kText : kMuted);
 }
 void draw_fixed_category_row() {
@@ -462,7 +464,7 @@ void draw_fixed_category_row() {
     char value[120]{};
     format_category_row(value,sizeof(value));
     draw_text(g_category_row,"类别",16,14,kText,0,0);
-    draw_right_text(g_category_row,value,312,14,kText);
+    draw_right_text(g_category_row,value,312 - kRowTextRightMargin,14,kText);
 }
 void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
     const auto* adapter = ui();
@@ -495,7 +497,7 @@ void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
             while (has_prefix && label_length > 0 && label[label_length - 1] == ' ')
                 --label_length;
             std::snprintf(key, sizeof(key), "前缀");
-            std::snprintf(value, sizeof(value), "%.*s（raw:%d）",
+            std::snprintf(value, sizeof(value), "%.*s(raw:%d)",
                 static_cast<int>(label_length), label, g_draft.raw_rarity);
             break;
         }
@@ -545,8 +547,9 @@ void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
     draw_text(row, key, 16, 14, enabled ? kText : kMuted, 0, 0);
     // 背景由 draw_help_option_row 以绝对坐标绘制；value 必须使用同一坐标系，
     // 不能用 scroll row 的局部坐标，否则右侧会被列表裁剪。
-    // draw_help_option_row({x+4, ..., 308}) 内部再内缩 4px，实际右边缘是 x+308。
-    draw_right_text_abs(static_cast<int32_t>(abs_x) + 308,
+    // draw_help_option_row({x+4, ..., 308}) 内部再内缩 4px，实际右边缘是 x+308；
+    // 再留出安全间距，避免文字贴住背景边缘。
+    draw_right_text_abs(static_cast<int32_t>(abs_x) + 308 - kRowTextRightMargin,
                         static_cast<int32_t>(abs_y) + 14, value,
                         enabled ? kText : kMuted);
 }
@@ -1627,8 +1630,8 @@ void draw_prefix_card() {
         size_t trimmed = std::strlen(prefix);
         while (trimmed > 0 && prefix[trimmed - 1] == ' ') --trimmed;
         char label[64]{};
-        if (trimmed == 0) std::snprintf(label,sizeof(label),"无前缀（%d）",raw);
-        else std::snprintf(label,sizeof(label),"%.*s（%d）",
+        if (trimmed == 0) std::snprintf(label,sizeof(label),"无前缀(%d)",raw);
+        else std::snprintf(label,sizeof(label),"%.*s(%d)",
             static_cast<int>(trimmed),prefix,raw);
         draw_prefix_card_button(g_prefix_buttons[index],label,138,42,
             raw == g_prefix_selected_raw);
