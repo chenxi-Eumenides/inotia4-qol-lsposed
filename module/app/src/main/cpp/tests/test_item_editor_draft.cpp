@@ -67,6 +67,12 @@ int main() {
     CHECK(item_class_is_equipment(0));
     CHECK(item_class_is_equipment(16));
     CHECK(!item_class_is_equipment(22));
+    CHECK(item_type_for_class(0) == QolItemType::kEquipment);
+    CHECK(item_type_for_class(16) == QolItemType::kEquipment);
+    CHECK(item_type_for_class(22) == QolItemType::kPotion);
+    CHECK(item_type_for_class(24) == QolItemType::kEnchantScroll);
+    CHECK(item_type_for_class(25) == QolItemType::kJewel);
+    CHECK(item_type_for_class(31) == QolItemType::kBackpack);
 
     ItemEditorDraft draft{};
     draft_clear(&draft);

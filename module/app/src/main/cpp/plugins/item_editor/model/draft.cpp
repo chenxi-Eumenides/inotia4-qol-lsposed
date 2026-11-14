@@ -64,6 +64,22 @@ bool item_class_valid(int32_t class_index) {
     return class_index >= 0 && class_index < kItemClassCount;
 }
 
+contracts::QolItemType item_type_for_class(int32_t class_index) {
+    if (!item_class_valid(class_index)) return contracts::QolItemType::kUnknown;
+    if (item_class_is_equipment(class_index)) return contracts::QolItemType::kEquipment;
+    switch (class_index) {
+        case 22:
+        case 23: return contracts::QolItemType::kPotion;
+        case 24: return contracts::QolItemType::kEnchantScroll;
+        case 25: return contracts::QolItemType::kJewel;
+        case 29: return contracts::QolItemType::kMercenarySeal;
+        case 30: return contracts::QolItemType::kSkillBook;
+        case 31: return contracts::QolItemType::kBackpack;
+        case 32: return contracts::QolItemType::kDice;
+        default: return contracts::QolItemType::kOther;
+    }
+}
+
 void draft_clear(ItemEditorDraft* draft) {
     if (draft == nullptr) return;
     *draft = {};
@@ -85,6 +101,7 @@ void draft_load(ItemEditorDraft* draft, contracts::QolItemHandle source,
     const bool has_category = (view.fields & contracts::kQolItemInventoryHasCategory) != 0 ||
                               view.category > 0;
     draft->item_id = has_category && view.category >= 0 ? view.category : -1;
+    draft->source_item_id = draft->item_id;
     draft->item_type = item_type;
     draft->variant_series = view.variant_series;
     draft->count = view.count_supported != 0 && view.effective_count > 0
@@ -149,7 +166,7 @@ bool draft_change_class(ItemEditorDraft* draft, int32_t class_index) {
     draft->class_index = class_index;
     // 具体 item_id 属于单一物品，换类后不能复用。
     draft->item_id = -1;
-    draft->item_type = contracts::QolItemType::kUnknown;
+    draft->item_type = item_type_for_class(class_index);
     draft->damage = 0;
     draft->defense = 0;
     draft->need_level = 0;

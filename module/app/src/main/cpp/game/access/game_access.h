@@ -309,6 +309,7 @@ typedef uint32_t (*ControlObjectGetUserTypeFn)(void* ctrl);
 extern ControlObjectGetUserTypeFn fn_control_object_get_user_type;extern TouchHandleSetCursorFn fn_touch_handle_set_cursor;
 extern UiEquipInvenItemControlEventProcFn fn_ui_equip_inven_item_control_event_proc;
 extern ItemDrawPortingFn fn_item_draw_porting;
+extern ItemDrawByIdPortingFn fn_item_draw_by_id_porting;
 extern ItemDataDrawFn fn_itemdata_draw;
 extern MakeMixFn fn_make_mix;
 extern GetCostFn fn_get_cost;

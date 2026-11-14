@@ -984,6 +984,7 @@ constexpr uintptr_t F_UIEQUIP_DRAW_VMA = 0xb764c;
 constexpr uintptr_t F_UIEQUIP_DRAW_INVEN_ITEM_VMA = 0xb6fac;
 constexpr uintptr_t F_UIEQUIP_DRAW_INVEN_BAG_VMA = 0xb7284;
 constexpr uintptr_t F_ITEM_DRAW_PORTING_VMA = 0x10644c; // void (item*, x, y, type, flip) 原版物品图标/数量绘制
+constexpr uintptr_t F_ITEM_DRAW_BY_ID_PORTING_VMA = 0x106834; // void (item_id, x, y, type, show_count, count) 按 ITEMDATABASE 下标直接绘制图标
 constexpr uintptr_t F_ITEMDATA_DRAW_VMA = 0x1056f4; // void (ITEMDATABASE record*, x, y) 按类别记录绘制物品图标
 constexpr uintptr_t F_CONTROL_ITEM_DRAW_VMA = 0xaaedc;  // void (void* ctrl) ControlItem_Draw：图标 + 稀有度贴图；数量由内部 bl ITEM_DrawPorting 以 show_count=1 画出（0xaaf24 mov w4,#1）
 constexpr uintptr_t F_UIDESC_SET_OFF_VMA = 0xb2b48;
@@ -1243,6 +1244,7 @@ using TouchHandleResetMovingControlFn = void (*)();
 using TouchHandleResetSelectedControlFn = uint64_t (*)();
 using UiEquipInvenItemControlEventProcFn = uint64_t (*)(void*, uint64_t, void*, void*);
 using ItemDrawPortingFn = void (*)(void*, int32_t, int32_t, int32_t, int32_t);
+using ItemDrawByIdPortingFn = void (*)(int32_t, int32_t, int32_t, int32_t, int32_t, int32_t);
 using ItemDataDrawFn = void (*)(void*, int32_t, int32_t);  // ITEMDATA_Draw(record, x, y)
 using ControlItemDrawFn = void (*)(void*);  // ControlItem_Draw(ctrl)
 using SetExpFn = void (*)(void*, int32_t);

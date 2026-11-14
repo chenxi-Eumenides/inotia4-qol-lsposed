@@ -13,7 +13,7 @@
 namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
-constexpr uint16_t kUiContractMajor = 2, kUiContractMinor = 24;
+constexpr uint16_t kUiContractMajor = 2, kUiContractMinor = 25;
 constexpr uint16_t kUiAdapterMajor = 2, kUiAdapterMinor = 39;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 2;
@@ -386,6 +386,8 @@ enum UiItemSlotFlags : uint32_t {
     kUiItemSlotShowCount = 1u << 1,
     kUiItemSlotSelected = 1u << 2,
     kUiItemSlotDimmed = 1u << 3,
+    // 可选 84×84 外框（原生 loc 39）；selected 也会触发该外框。
+    kUiItemSlotShowOuterFrame = 1u << 4,
 };
 struct UiItemSlotDesc {
     UiRect rect;
@@ -571,6 +573,8 @@ struct QolUiComponents {
     QolResult (*item_slot_create)(const UiItemSlotDesc*, QolUiHandle parent, QolUiHandle* out);
     QolResult (*item_slot_set)(QolUiHandle, const QolUiItemRef*, int32_t count);
     QolResult (*item_slot_draw)(QolUiHandle);
+    // Minor 25 append-only: 更新格子的 flags（ShowFrame/Selected/ShowOuterFrame 等）。
+    QolResult (*item_slot_set_flags)(QolUiHandle, uint32_t flags);
 };
 
 using QolUiDrawFn = void (*)(void* control);

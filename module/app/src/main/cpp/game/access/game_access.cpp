@@ -533,6 +533,8 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     fn_touch_handle_set_cursor = reinterpret_cast<TouchHandleSetCursorFn>(g_base + fn_resolve("F_TOUCHHANDLE_SET_CURSOR_VMA", F_TOUCHHANDLE_SET_CURSOR_VMA));
     fn_ui_equip_inven_item_control_event_proc = reinterpret_cast<UiEquipInvenItemControlEventProcFn>(g_base + fn_resolve("F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA", F_UIEQUIP_INVEN_ITEM_CONTROL_EVENT_PROC_VMA));
     fn_item_draw_porting = reinterpret_cast<ItemDrawPortingFn>(g_base + fn_resolve("F_ITEM_DRAW_PORTING_VMA", F_ITEM_DRAW_PORTING_VMA));
+    fn_item_draw_by_id_porting = reinterpret_cast<ItemDrawByIdPortingFn>(
+        g_base + fn_resolve("F_ITEM_DRAW_BY_ID_PORTING_VMA", F_ITEM_DRAW_BY_ID_PORTING_VMA));
     fn_itemdata_draw = reinterpret_cast<ItemDataDrawFn>(g_base + fn_resolve("F_ITEMDATA_DRAW_VMA", F_ITEMDATA_DRAW_VMA));
     qol::game::item_port_bind_draw_icon(
         [](void* item, int32_t x, int32_t y, int32_t draw_type, int32_t flip) {
@@ -544,9 +546,18 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
             }
         },
         [](int32_t category, int32_t x, int32_t y, int32_t draw_type, int32_t flip) {
-            (void)draw_type;
             (void)flip;
-            if (fn_itemdata_draw == nullptr || category < 0 || g_base == 0) return;
+            if (category < 0 || g_base == 0) return;
+            const auto* count_slot = reinterpret_cast<const uint16_t*>(
+                g_base + G_ITEMDATABASE_N_RECORD_COUNT_VMA);
+            if (count_slot == nullptr || category >= *count_slot) return;
+            // ITEM_DrawByIDPorting 内部把 y 减去 30；这里补偿到与 ITEM_DrawPorting
+            // 的 (+5,+5) 图标落点一致。它直接查 ITEMDATABASE，不依赖物品实例或 SNASYS。
+            if (fn_item_draw_by_id_porting != nullptr) {
+                fn_item_draw_by_id_porting(category, x + 5, y + 35, draw_type, 0, 0);
+                return;
+            }
+            if (fn_itemdata_draw == nullptr) return;
             auto* data_slot = reinterpret_cast<void**>(g_base + G_ITEMDATABASE_DATA_VMA);
             auto* size_slot = reinterpret_cast<uint8_t*>(g_base + G_ITEMDATABASE_N_RECORD_SIZE_VMA);
             void* data = *data_slot;

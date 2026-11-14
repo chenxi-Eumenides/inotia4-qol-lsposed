@@ -170,6 +170,8 @@ enum class QolItemStaticTextKind : int32_t {
     kItemOptionPercent = 7,
     // 5.3：按 ITEMCLASSBASE 下标下发 36 个类名。
     kItemClassList = 8,
+    // 5.3：按类下标下发该类全部 ITEMDATABASE 下标，逗号分隔。
+    kItemList = 9,
 };
 // 返回的是 JSON 已转义、不含外层引号的文本指针；存储只在启动期写入，运行期只读。
 using QolItemStaticTextFn = QolResult (*)(int32_t kind, int32_t id, const char** out_text);

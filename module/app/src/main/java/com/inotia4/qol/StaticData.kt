@@ -402,6 +402,7 @@ object StaticData {
                 null
             }
             if (records != null) {
+                val classItems = Array(classRecords?.length() ?: 0) { StringBuilder() }
                 for (i in 0 until records.length()) {
                     val record = records.optJSONObject(i) ?: continue
                     // 空名称也下发：迁移前 itemName 对空 text_0 返回 ""（非 null），name 仍为
@@ -409,6 +410,10 @@ object StaticData {
                     appendStaticEntry(sb, 'N', i, record.optString("text_0", ""))
                     appendStaticEntry(sb, 'T', i, itemType(i))
                     val classIndex = hexByte(record.optString("hex", ""), 2)
+                    if (classIndex != null && classIndex < classItems.size) {
+                        if (classItems[classIndex].isNotEmpty()) classItems[classIndex].append(',')
+                        classItems[classIndex].append(i)
+                    }
                     val classRecord = classIndex?.let { classRecords?.optJSONObject(it) }
                     val classByte = classRecord?.let { hexByte(it.optString("hex", ""), 2) }
                     if (classByte != null) {
@@ -423,6 +428,10 @@ object StaticData {
                     }
                     val className = classNameId?.let { textArr?.optString(it, "") }.orEmpty()
                     if (className.isNotEmpty()) appendStaticEntry(sb, 'C', i, className)
+                }
+                // 空类也下发空行，native 才能区分“该类无物品”和“静态表未就绪”。
+                for (i in classItems.indices) {
+                    appendStaticEntry(sb, 'I', i, classItems[i].toString())
                 }
             }
         }

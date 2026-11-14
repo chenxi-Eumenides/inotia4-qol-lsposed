@@ -498,7 +498,7 @@ QolResult read_in_world(int32_t* out) {
 
 // 启动期下发的静态名称表：只在启动期写入，运行期只读；字符串是 JSON 已转义、不含外层引号
 // 的文本，handler 直接拼接即可与既有 Kotlin JSONObject 序列化保持一致。
-constexpr uint32_t kTextKindCount = 9;
+constexpr uint32_t kTextKindCount = 10;
 std::unordered_map<int32_t, std::string> g_item_text[kTextKindCount];
 std::mutex g_item_text_mutex;
 std::atomic<bool> g_item_text_ready{false};
@@ -586,6 +586,8 @@ QolResult draw_icon_address(uintptr_t item_address, int32_t x, int32_t y, int32_
 
 QolResult draw_icon_id(int32_t category, int32_t x, int32_t y, int32_t draw_type, int32_t flip) {
     if (category < 0) return error_result(kQolErrInvalidArgument, "invalid item id");
+    // 按 ITEMDATABASE 下标直接走 IMGSYS；不构造临时物品，因此不触发
+    // ITEM_IsRealBroken 的损坏图标分支，也不依赖 SNASYS sprite 表。
     if (g_draw_icon_id_fn == nullptr) return not_ready();
     g_draw_icon_id_fn(category, x, y, draw_type, flip);
     return contracts::ok();
@@ -639,6 +641,7 @@ void item_port_load_static_text(const char* payload) {
                 case 'C': kind = 6; break;
                 case 'V': kind = 7; break;
                 case 'L': kind = 8; break;
+                case 'I': kind = 9; break;
                 default: break;
             }
             const char* id_start = cursor + 2;

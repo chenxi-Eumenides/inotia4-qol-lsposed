@@ -2609,6 +2609,15 @@ QolResult item_slot_set(contracts::QolUiHandle handle, const contracts::QolUiIte
     return contracts::ok();
 }
 
+QolResult item_slot_set_flags(contracts::QolUiHandle handle, uint32_t flags) {
+    Component* component = nullptr;
+    const QolResult lookup = require_component(handle, &component);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (component->kind != ComponentKind::kItemSlot) return unsupported();
+    component->item_flags = flags;
+    return contracts::ok();
+}
+
 QolResult item_slot_draw(contracts::QolUiHandle handle) {
     Component* component = nullptr;
     const QolResult lookup = require_component(handle, &component);
@@ -2635,6 +2644,8 @@ QolResult item_slot_draw(contracts::QolUiHandle handle) {
     const bool dimmed = (component->item_flags & contracts::kUiItemSlotDimmed) != 0;
     const bool selected = (component->item_flags & contracts::kUiItemSlotSelected) != 0;
     const bool frame = (component->item_flags & contracts::kUiItemSlotShowFrame) != 0;
+    const bool outer_frame =
+        (component->item_flags & contracts::kUiItemSlotShowOuterFrame) != 0;
 
     QolResult result = contracts::ok();
     if (frame) {
@@ -2662,7 +2673,7 @@ QolResult item_slot_draw(contracts::QolUiHandle handle) {
                                             static_cast<int32_t>(background_scale));
         if (!contracts::succeeded(result)) return result;
 
-        if (selected) {
+        if (selected || outer_frame) {
             contracts::QolUiHandle selection_frame = nullptr;
             result = g_adapter->image_loc(kItemSlotImageUnit, kItemSlotSelectedLoc,
                                           &selection_frame);
@@ -2798,6 +2809,7 @@ const contracts::QolUiComponents kUiComponents{
     &item_slot_create,
     &item_slot_set,
     &item_slot_draw,
+    &item_slot_set_flags,
 };
 
 }  // namespace
