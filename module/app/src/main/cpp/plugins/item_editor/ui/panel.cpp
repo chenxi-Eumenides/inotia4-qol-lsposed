@@ -818,7 +818,7 @@ void panel_enter() {
     read_item();
     resolve_variant_series();
     build_left_rows();
-    if (!create()) { destroy(); panel_request_close(); return; }
+    if (!create()) { destroy(); return; }
     g_active.store(true, std::memory_order_release);
 }
 bool card_overlay_active() {

@@ -153,7 +153,6 @@ const char* provider_block_reason() {
     if (!op_enabled()) return "需要开启高级权限";
     return g_enabled.load(std::memory_order_acquire) ? nullptr : "请先启用物品编辑器";
 }
-void panel_request_close() { const auto* p = panels_api(); if (p != nullptr && p->close != nullptr) p->close(kPanelId); }
 bool item_editor_enabled() {
     refresh_enabled();
     return g_enabled.load(std::memory_order_acquire);
@@ -161,6 +160,9 @@ bool item_editor_enabled() {
 void item_editor_force_disable() {
     g_feature_enabled.store(false, std::memory_order_release);
     g_enabled.store(false, std::memory_order_release);
-    panel_request_close();
+    // OP 失效发生在主线程；仍走 owner 生命周期，不直接 close(panel_id)。
+    const auto* panels = panels_api();
+    if (panels != nullptr && panels->deactivate_owner != nullptr)
+        (void)panels->deactivate_owner(kPluginId);
 }
 }

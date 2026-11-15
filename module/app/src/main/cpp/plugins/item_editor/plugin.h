@@ -20,7 +20,6 @@ bool provider_open();
 void provider_close();
 bool provider_active();
 const char* provider_block_reason();
-void panel_request_close();
 void panel_destroy();
 bool panel_is_active();
 bool item_editor_enabled();
