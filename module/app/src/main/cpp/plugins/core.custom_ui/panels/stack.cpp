@@ -284,6 +284,12 @@ bool ui_panels_open(const char* panel_id) {
     return false;
 }
 
+bool ui_panels_close_if_top(const char* panel_id) {
+    if (panel_id == nullptr || panel_id[0] == '\0' || g_depth <= 0) return false;
+    if (std::strcmp(g_stack[g_depth - 1], panel_id) != 0) return false;
+    return close_top();
+}
+
 void ui_panels_close(const char* panel_id) {
     if (panel_id == nullptr || panel_id[0] == '\0') return;
     const int index = stack_index_of(panel_id);

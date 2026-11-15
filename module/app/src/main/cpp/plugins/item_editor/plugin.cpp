@@ -152,7 +152,16 @@ const char* provider_block_reason() {
     if (!op_enabled()) return "需要开启高级权限";
     return g_enabled.load(std::memory_order_acquire) ? nullptr : "请先启用物品编辑器";
 }
-void panel_request_close() { const auto* p = panels_api(); if (p != nullptr && p->close != nullptr) p->close(kPanelId); }
+void panel_request_close() {
+    const auto* p = panels_api();
+    if (p == nullptr) return;
+    // 被设置页等上层面板压住时不要 close；否则 ui_panels_close 会把上层一起弹出。
+    if (p->close_if_top != nullptr) {
+        (void)p->close_if_top(kPanelId);
+    } else if (p->close != nullptr) {
+        p->close(kPanelId);
+    }
+}
 bool item_editor_enabled() {
     refresh_enabled();
     return g_enabled.load(std::memory_order_acquire);
