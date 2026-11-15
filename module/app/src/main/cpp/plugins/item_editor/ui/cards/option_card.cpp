@@ -4,6 +4,7 @@
 #include "../../../../contracts/game_ports/item_port.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstdint>
 #include <vector>
@@ -34,6 +35,7 @@ QolUiHandle g_confirm = nullptr;
 QolUiHandle g_cancel = nullptr;
 QolUiHandle g_adjust[8]{};
 OptionRowContext g_rows[kOptionIdCount]{};
+std::array<std::array<char, 160>, kOptionIdCount> g_row_labels{};
 bool g_open_requested = false;
 uint32_t g_section = 0;
 uint32_t g_index = 0;
@@ -76,7 +78,10 @@ void build_group_ids() {
         for (uint32_t row = 0; row < count; ++row) {
             const int32_t id = static_cast<int32_t>(first + row);
             const char* name = static_text(QolItemStaticTextKind::kOptionName, id);
-            if (name != nullptr && name[0] != '\0') g_group_ids[group].push_back(id);
+            if (name == nullptr || name[0] == '\0') continue;
+            g_group_ids[group].push_back(id);
+            auto& label = g_row_labels[static_cast<size_t>(id)];
+            std::snprintf(label.data(), label.size(), "ID %d  %s", id, name);
         }
     }
 }
@@ -86,21 +91,18 @@ void draw_option_row(void* user, uint32_t row_index, QolUiHandle row, uint8_t) {
     const uint32_t group = *static_cast<const uint32_t*>(user);
     if (group >= 3 || row_index >= g_group_ids[group].size()) return;
     const int32_t id = g_group_ids[group][row_index];
-    const char* name = static_text(QolItemStaticTextKind::kOptionName, id);
-    char label[160]{};
-    if (name == nullptr || name[0] == '\0')
-        std::snprintf(label, sizeof(label), "ID %d", id);
-    else
-        std::snprintf(label, sizeof(label), "ID %d  %s", id, name);
+    const char* label = g_row_labels[static_cast<size_t>(id)].data();
     int64_t abs_x = 0, abs_y = 0;
     if (adapter->control_absolute_origin != nullptr &&
-        succeeded(adapter->control_absolute_origin(row, &abs_x, &abs_y)) &&
-        adapter->draw_help_option_row != nullptr) {
+        succeeded(adapter->control_absolute_origin(row, &abs_x, &abs_y))) {
         int32_t pressed = 0;
         if (adapter->control_pressed != nullptr)
             (void)adapter->control_pressed(row, &pressed);
-        (void)adapter->draw_help_option_row({abs_x + 2, abs_y + 1, 214, 42},
-            static_cast<uint8_t>(id == g_id), static_cast<uint8_t>(pressed != 0));
+        // 普通行由整列背景承载；只有选中/按下行再画原生行底。
+        if ((id == g_id || pressed != 0) && adapter->draw_help_option_row != nullptr) {
+            (void)adapter->draw_help_option_row({abs_x + 2, abs_y + 1, 214, 42},
+                static_cast<uint8_t>(id == g_id), static_cast<uint8_t>(pressed != 0));
+        }
     }
     draw_text(row, label, 8, 14, id == g_id ? kGold : kText, 0, 0);
 }
@@ -314,6 +316,14 @@ void draw_option_card() {
     if (c->draw_container_styled != nullptr) {
         const UiContainerStyleDesc style{card, 0x0000, 60, 1};
         (void)c->draw_container_styled(&style);
+    }
+    // 三列各画一次底色，普通行不再逐行画原生圆角底。
+    if (adapter->fill_rect_alpha != nullptr) {
+        constexpr int32_t col_x[] = {16, 242, 468};
+        for (int32_t x : col_x) {
+            (void)adapter->fill_rect_alpha(
+                {card.x + x, card.y + 54, 220, 420}, 0x000000u, 20);
+        }
     }
     int64_t offsets[3] = {g_sync_offset, g_sync_offset, g_sync_offset};
     for (uint32_t group = 0; group < 3; ++group) {
