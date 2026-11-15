@@ -1315,14 +1315,37 @@ bool control_in_child_list(contracts::QolUiHandle parent, contracts::QolUiHandle
 // 避免游戏绘制阶段再画一次按钮底图。
 void anchored_noop_draw(void*) {}
 
-// 释放后原生控件仍留在游戏控件树里（native 生命周期归游戏，不能删）。因此释放前先隐藏它
-// 并摘掉点击回调：forget_native 会释放组件记录，而 ExecuteProc 的 trampoline 仍以该记录
-// 为 user，未处理的点击会打到已释放内存，同时在原位留下看不见却可点的热区。
+// 释放后原生控件仍留在游戏控件树里（native 生命周期归游戏，不能删）。只有能证明它仍是
+// 本模块挂在活根上的控件时，才敢隐藏它并摘掉点击回调：forget_native 会释放组件记录，
+// 而 ExecuteProc 的 trampoline 仍以该记录为 user，未处理的点击会打到已释放内存，同时在
+// 原位留下看不见却可点的热区。
+//
+// 失效路径（root_missing / not_in_child_list / handle_stale）上的句柄可能已被游戏销毁并
+// 复用，其 CO_DATA 是野指针：2026-11-16 00:41:16 真机在 ui_clone_button_style 的
+// memcpy 上 SIGSEGV（fault 落在 libgame.so 的 r-xp 段），因此这些路径一律不碰 native。
 void anchored_inert_click(void*) {}
+
+QolResult anchored_handle_is_current(const contracts::QolUiAnchoredButton* state,
+                                     int32_t* out_current);
+
+bool anchored_handle_owned_and_live(const contracts::QolUiAnchoredButton* state) {
+    if (g_adapter == nullptr || g_adapter->find_root == nullptr ||
+        g_adapter->child_count == nullptr || g_adapter->child_at == nullptr) {
+        return false;
+    }
+    contracts::QolUiHandle parent = nullptr;
+    if (!contracts::succeeded(g_adapter->find_root(
+            static_cast<contracts::QolUiRootKind>(state->root_kind), &parent)) ||
+        parent == nullptr || !control_in_child_list(parent, state->handle)) {
+        return false;
+    }
+    int32_t current = 0;
+    return contracts::succeeded(anchored_handle_is_current(state, &current)) && current != 0;
+}
 
 void release_anchored_state(contracts::QolUiAnchoredButton* state, const char* reason) {
     if (state->mounted && state->handle != nullptr) {
-        if (g_adapter != nullptr && g_adapter->set_control_show != nullptr &&
+        if (anchored_handle_owned_and_live(state) && g_adapter->set_control_show != nullptr &&
             contracts::succeeded(g_adapter->set_control_show(state->handle, 0)) &&
             g_adapter->set_click_proc != nullptr) {
             (void)g_adapter->set_click_proc(state->handle, &anchored_inert_click, nullptr);
