@@ -65,13 +65,14 @@ void confirm_clicked(void*) { g_pending = Action::kConfirm; }
 void cancel_clicked(void*) { g_pending = Action::kCancel; }
 
 uint32_t group_first(uint32_t group) {
-    return group == 0 ? 0u : group == 1 ? 5u : 17u;
+    return group == 0 ? 0u : group == 1 ? 17u : 37u;
 }
 void build_group_ids() {
     for (auto& ids : g_group_ids) ids.clear();
     for (uint32_t group = 0; group < 3; ++group) {
         const uint32_t first = group_first(group);
-        const uint32_t count = group == 0 ? 5u : group == 1 ? 12u : g_jewel_self ? 47u : 72u;
+        // 基本 0..16，进阶 17..36，特殊 37..（C18 到 63，其他变体到 88）。
+        const uint32_t count = group == 0 ? 17u : group == 1 ? 20u : g_jewel_self ? 27u : 52u;
         for (uint32_t row = 0; row < count; ++row) {
             const int32_t id = static_cast<int32_t>(first + row);
             const char* name = static_text(QolItemStaticTextKind::kOptionName, id);
