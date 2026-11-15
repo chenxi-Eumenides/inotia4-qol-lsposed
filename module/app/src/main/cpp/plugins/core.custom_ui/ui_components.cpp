@@ -1926,7 +1926,8 @@ void scroll_content_draw(contracts::QolUiHandle handle, int64_t displacement) {
     // 原生已完成内容平移及 clip；只回调与视口相交的行，避免长列表每帧绘制全部行。
     const int64_t row_height = list->rows.empty()
         ? 0 : list->content_extent / static_cast<int64_t>(list->rows.size());
-    const int64_t view_top = std::max<int64_t>(0, displacement);
+    // ControlScroll 把内容组向上移动到 -offset，draw proc 收到的位移是 -offset。
+    const int64_t view_top = std::max<int64_t>(0, -displacement);
     const int64_t view_bottom = view_top + static_cast<int64_t>(list->rect.h);
     for (const auto& row : list->rows) {
         if (list->pending_destroy) break;
