@@ -3,6 +3,7 @@ add_library(qol_plugin_item_editor STATIC
     plugin.cpp
     ui/entry.cpp
     ui/panel.cpp
+    ui/actions.cpp
     ui/cards/category_card.cpp
     ui/cards/delete_option_card.cpp
     ui/cards/enchant_card.cpp

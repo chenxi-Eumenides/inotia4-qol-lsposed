@@ -133,6 +133,7 @@ decltype(fn_inven_remove_item_data) fn_inven_remove_item_data = nullptr;
 decltype(fn_remove_item) fn_remove_item = nullptr;
 decltype(fn_item_create_perfect_item) fn_item_create_perfect_item = nullptr;
 decltype(fn_create_item) fn_create_item = nullptr;
+decltype(fn_mapitem_add) fn_mapitem_add = nullptr;
 decltype(fn_inven_save_item) fn_inven_save_item = nullptr;
 decltype(fn_inven_save_item_on_empty) fn_inven_save_item_on_empty = nullptr;
 decltype(fn_save_save_item) fn_save_save_item = nullptr;

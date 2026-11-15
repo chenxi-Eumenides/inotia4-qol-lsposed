@@ -10,6 +10,7 @@
 #include "../../../contracts/item_display_name.h"
 #include "../model/draft.h"
 #include "panel_internal.h"
+#include "actions.h"
 #include "cards/cards.h"
 #include "cards/numeric_card.h"
 
@@ -661,6 +662,7 @@ void left_info_selected(void*, uint32_t index) {
 }
 
 void destroy() {
+    actions_destroy();
     destroy_item_card();
     destroy_category_card();
     destroy_prefix_card();
@@ -719,6 +721,8 @@ bool create() {
         contracts::ui_theme::kNavBoxW, contracts::ui_theme::kNavBoxH},
         kUiNavButtonForceClose,nullptr,nullptr};
     if (!succeeded(c->nav_button_create(&close,g_root,&g_close))) return false;
+    // 动作列 root 独立于主面板，避免被主面板 rect 裁剪；失败按 fail-closed 关闭面板。
+    if (!actions_create()) return false;
     return true;
 }
 }
@@ -832,6 +836,8 @@ void panel_process() {
     numeric_card_apply();
     delete_option_card_apply();
     option_card_apply();
+    // 库存写动作在 begin_frame 之前执行，不能在绘制块内做。
+    actions_process();
     process_pending_right_hit();
     if (prefix_card_open_requested()) {
         prefix_card_clear_open_request();
@@ -951,6 +957,8 @@ void panel_process() {
     if (numeric_card_active()) draw_numeric_card();
     draw_delete_option_card();
     draw_option_card();
+    // 动作列只负责绘制；库存写已在 begin_frame 之前处理。
+    actions_draw();
     if (adapter->end_frame != nullptr) (void)adapter->end_frame();
 }
 void panel_f3() { panel_destroy(); }
@@ -975,6 +983,8 @@ uint32_t panel_event(uint64_t event,uint64_t param,uint64_t param2) {
     if (category_card_handle_event(event,param,param2,&consumed) && consumed != 0)
         return consumed;
     (void)c->dispatch_native_event(g_root,event,param,param2,&consumed);
+    // 主面板未消费时派发给独立动作列 root。
+    if (consumed == 0) consumed = actions_dispatch_event(event,param,param2);
     return consumed;
 }
 void panel_destroy() { destroy(); }
