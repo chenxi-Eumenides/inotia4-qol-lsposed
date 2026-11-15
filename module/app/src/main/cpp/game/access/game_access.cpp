@@ -536,6 +536,8 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     fn_item_draw_by_id_porting = reinterpret_cast<ItemDrawByIdPortingFn>(
         g_base + fn_resolve("F_ITEM_DRAW_BY_ID_PORTING_VMA", F_ITEM_DRAW_BY_ID_PORTING_VMA));
     fn_itemdata_draw = reinterpret_cast<ItemDataDrawFn>(g_base + fn_resolve("F_ITEMDATA_DRAW_VMA", F_ITEMDATA_DRAW_VMA));
+    fn_mapitem_add = reinterpret_cast<MapItemAddFn>(
+        g_base + fn_resolve("F_MAPITEMSYSTEM_ADD_VMA", F_MAPITEMSYSTEM_ADD_VMA));
     qol::game::item_port_bind_draw_icon(
         [](void* item, int32_t x, int32_t y, int32_t draw_type, int32_t flip) {
             if (fn_item_draw_porting != nullptr) fn_item_draw_porting(item, x, y, draw_type, flip);

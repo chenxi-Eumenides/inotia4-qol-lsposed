@@ -591,6 +591,23 @@ QolResult read_free_item(void* item) {
     return contracts::ok();
 }
 
+QolResult read_drop_item(contracts::QolItemHandle item) {
+    void* native_item = nullptr;
+    const QolResult resolution = resolve_item_handle(item, &native_item);
+    if (!contracts::succeeded(resolution)) return resolution;
+    if (!game_in_world()) return not_ready();
+    void* hero = lead_member();
+    if (hero == nullptr || !game_memory_accessible(hero, C_POS_Y + sizeof(int16_t), 'r'))
+        return not_ready();
+    if (fn_mapitem_add == nullptr) return not_ready();
+    const int32_t x = *reinterpret_cast<int16_t*>(static_cast<uint8_t*>(hero) + C_POS_X);
+    const int32_t y = *reinterpret_cast<int16_t*>(static_cast<uint8_t*>(hero) + C_POS_Y);
+    if (fn_mapitem_add(native_item, x, y) == 0) return error_result(kQolErrInternal, "map add failed");
+    // 掉落池接管对象；句柄不能继续指向已转交的物品。
+    (void)invalidate_item(item);
+    return contracts::ok();
+}
+
 QolResult read_native_bag_layout(contracts::QolNativeBagLayout* out) {
     return native_bag_layout_info(out);
 }
@@ -654,7 +671,8 @@ const contracts::QolItemPort kItemPort{
            &read_count_encoding, &read_quote, &read_serialize_item,
             &read_free_item, &read_native_bag_layout, &read_bag_capacity,
             &read_slot_occupied, &draw_icon, &draw_icon_address, &draw_icon_id,
-            &read_item_class_index, &read_item_base_stats, &read_item_base_stats_ex},
+            &read_item_class_index, &read_item_base_stats, &read_item_base_stats_ex,
+            &read_drop_item},
 };
 
 }  // namespace

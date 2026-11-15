@@ -72,6 +72,7 @@ int install(contracts::PluginContext& ctx) {
         !contracts::qol_item_port_class_index_size_valid(g_item_port) ||
         !contracts::qol_item_port_base_stats_size_valid(g_item_port) ||
         !contracts::qol_item_port_base_stats_ex_size_valid(g_item_port) ||
+        !contracts::qol_item_port_drop_size_valid(g_item_port) ||
         g_item_port->read.item_class_index == nullptr ||
         g_item_port->read.detail_item_context == nullptr ||
         g_item_port->read.inventory_item_view == nullptr ||

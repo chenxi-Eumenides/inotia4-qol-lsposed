@@ -244,6 +244,8 @@ struct QolItemPortReadApi {
     // 5.5：按 ITEMDATABASE 下标与 raw rarity 读取基础属性。
     QolResult (*read_item_base_stats_ex)(int32_t item_id, int32_t raw_rarity,
                                          QolItemBaseStats* out);
+    // 5.6：把 detached 物品放入当前地图掉落池（角色脚下），成功后句柄失效。
+    QolResult (*drop_item)(QolItemHandle item);
 };
 
 struct QolItemPort {
@@ -311,6 +313,13 @@ inline bool qol_item_port_base_stats_ex_size_valid(const QolItemPort* port) {
     constexpr uint32_t kRequiredSize = static_cast<uint32_t>(
         offsetof(QolItemPort, read) + offsetof(QolItemPortReadApi, read_item_base_stats_ex) +
         sizeof(decltype(QolItemPortReadApi::read_item_base_stats_ex)));
+    return port != nullptr && port->struct_size >= kRequiredSize;
+}
+
+inline bool qol_item_port_drop_size_valid(const QolItemPort* port) {
+    constexpr uint32_t kRequiredSize = static_cast<uint32_t>(
+        offsetof(QolItemPort, read) + offsetof(QolItemPortReadApi, drop_item) +
+        sizeof(decltype(QolItemPortReadApi::drop_item)));
     return port != nullptr && port->struct_size >= kRequiredSize;
 }
 

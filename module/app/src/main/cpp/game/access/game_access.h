@@ -311,6 +311,7 @@ extern UiEquipInvenItemControlEventProcFn fn_ui_equip_inven_item_control_event_p
 extern ItemDrawPortingFn fn_item_draw_porting;
 extern ItemDrawByIdPortingFn fn_item_draw_by_id_porting;
 extern ItemDataDrawFn fn_itemdata_draw;
+extern MapItemAddFn fn_mapitem_add;
 extern MakeMixFn fn_make_mix;
 extern GetCostFn fn_get_cost;
 extern UIMixStartMixFn fn_uimix_start_mix;

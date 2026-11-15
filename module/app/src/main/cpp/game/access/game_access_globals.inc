@@ -265,6 +265,7 @@ UiEquipInvenItemControlEventProcFn fn_ui_equip_inven_item_control_event_proc = n
 ItemDrawPortingFn fn_item_draw_porting = nullptr;
 ItemDrawByIdPortingFn fn_item_draw_by_id_porting = nullptr;
 ItemDataDrawFn fn_itemdata_draw = nullptr;
+MapItemAddFn fn_mapitem_add = nullptr;
 MakeMixFn fn_make_mix = nullptr;
 GetCostFn fn_get_cost = nullptr;
 UIMixStartMixFn fn_uimix_start_mix = nullptr;

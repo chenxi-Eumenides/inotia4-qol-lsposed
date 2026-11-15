@@ -892,6 +892,7 @@ constexpr uintptr_t G_ITEMPACK_RECORDS_GOT_VMA = 0x2f4308;
 constexpr uintptr_t G_ITEMPACK_STRIDE_GOT_VMA = 0x2f6730;
 constexpr uintptr_t G_ITEMPACK_COUNT_GOT_VMA = 0x2f51d0;
 constexpr uintptr_t F_MAPITEMSYSTEM_CREATE_ITEM_VMA = 0x116e10; // MAPITEMSYSTEM_CreateItem 地图掉落
+constexpr uintptr_t F_MAPITEMSYSTEM_ADD_VMA = 0x116d5c; // int (item*, x, y) 放入地图掉落池
 constexpr uintptr_t F_MAPITEMSYSTEM_ALLOCATE_SLOT_VMA = 0x116d14; // 地面掉落池分配槽函数
 constexpr uintptr_t F_MAPITEMSYSTEM_CREATE_VMA = 0x118240; // 地面掉落池创建函数
 constexpr uintptr_t F_MAPITEMSYSTEM_INITIALIZE_VMA = 0x1170ec; // 地面掉落池切图初始化函数
@@ -1252,6 +1253,7 @@ using UiEquipInvenItemControlEventProcFn = uint64_t (*)(void*, uint64_t, void*, 
 using ItemDrawPortingFn = void (*)(void*, int32_t, int32_t, int32_t, int32_t);
 using ItemDrawByIdPortingFn = void (*)(int32_t, int32_t, int32_t, int32_t, int32_t, int32_t);
 using ItemDataDrawFn = void (*)(void*, int32_t, int32_t);  // ITEMDATA_Draw(record, x, y)
+using MapItemAddFn = int32_t (*)(void*, int32_t, int32_t);  // MAPITEMSYSTEM_Add(item, x, y)
 using ControlItemDrawFn = void (*)(void*);  // ControlItem_Draw(ctrl)
 using SetExpFn = void (*)(void*, int32_t);
 using SetLevelFn = int (*)(void*, int32_t);   // CHAR_SetLevel(0xe05a0)：返回 1=成功（升级/同级）/ 0=降级拒绝
