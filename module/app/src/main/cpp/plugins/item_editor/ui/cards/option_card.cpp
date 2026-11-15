@@ -38,13 +38,17 @@ uint32_t g_index = 0;
 int32_t g_id = 0;
 int32_t g_value = 0;
 bool g_jewel_self = false;
+char g_error[64]{};
 enum class Action : uint8_t { kNone, kConfirm, kCancel };
 Action g_pending = Action::kNone;
 
 void noop_draw(void*) {}
 void row_clicked(void* user) {
     const auto* row = static_cast<const OptionRowContext*>(user);
-    if (row != nullptr) g_id = row->id;
+    if (row != nullptr) {
+        g_id = row->id;
+        g_error[0] = '\0';
+    }
 }
 void adjust_clicked(void* user) {
     const auto* delta = static_cast<const int32_t*>(user);
@@ -125,12 +129,22 @@ void write_option(QolItemInventoryOptionView& option) {
     option.id = g_id;
     option.value = static_cast<int16_t>(g_value);
 }
+
+bool native_option_id_exists(int32_t id) {
+    if (g_section != 0 || id < 0) return false;
+    for (uint32_t index = 0; index < g_draft.native_option_count; ++index) {
+        if (index == g_index) continue;
+        if (g_draft.native_options[index].id == id) return true;
+    }
+    return false;
+}
 }  // namespace
 
 void option_card_open(uint32_t section, uint32_t index) {
     if (section > 2) return;
     g_section = section;
     g_index = index;
+    g_error[0] = '\0';
     g_open_requested = true;
 }
 bool option_card_open_requested() { return g_open_requested; }
@@ -304,6 +318,8 @@ void draw_option_card() {
     draw_text(g_root, id_text, 720, 112, kMuted, 0, 0);
     draw_text(g_root, "当前数值", 720, 170, kMuted, 0, 0);
     draw_text(g_root, value, 720, 204, kGold, 0, 1);
+    if (g_error[0] != '\0')
+        draw_text(g_root, g_error, 720, 246, contracts::ui_theme::kError, 0, 0);
     for (uint32_t index = 0; index < 8; ++index) {
         char label[16]{};
         std::snprintf(label, sizeof(label), "%+d", g_deltas[index]);
@@ -318,6 +334,10 @@ void option_card_apply() {
     const Action action = g_pending;
     g_pending = Action::kNone;
     if (action == Action::kConfirm && valid_target()) {
+        if (native_option_id_exists(g_id)) {
+            std::snprintf(g_error, sizeof(g_error), "该属性已存在，不能重复添加");
+            return;
+        }
         if (g_jewel_self) {
             g_draft.jewel_attribute_type = std::clamp(g_id, 0, 63);
             g_draft.jewel_value = std::clamp(g_value, 0, kJewelValueMax);
