@@ -22,6 +22,9 @@ void reset_equipment_fields(ItemEditorDraft* draft) {
     draft->enchant_remaining = 0;
     draft->enchant_id = 0;
     draft->enchant_level = 0;
+    draft->enchant_increment = 0;
+    draft->enchant_threshold = 0;
+    draft->enchant_overage = 0;
     draft->magic_rate = 0;
     draft->chaos_level = 0;
     draft->chaos_rate = kDefaultChaosRate;

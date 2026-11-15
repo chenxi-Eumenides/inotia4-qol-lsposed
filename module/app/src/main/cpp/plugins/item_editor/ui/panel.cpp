@@ -91,6 +91,8 @@ void draw_center_text(QolUiHandle control, const char* text, int32_t center,
     draw_text(control, text, center - width / 2, y, color, 0, font);
 }
 
+bool read_draft_full_stats(const ItemEditorDraft& draft, QolItemBaseStats* out);
+
 void read_item() {
     draft_clear(&g_draft);
     g_draft.item_id = -1;
@@ -120,6 +122,12 @@ void read_item() {
             QolItemStaticTextKind::kItemPrefixClass), view.category, &prefix_class)) &&
         prefix_class != nullptr) {
         g_draft.prefix_class_bits = std::atoi(prefix_class);
+    }
+    QolItemBaseStats full{};
+    if (read_draft_full_stats(g_draft, &full)) {
+        g_draft.enchant_increment = full.enchant_increment;
+        g_draft.enchant_threshold = full.enchant_threshold;
+        g_draft.enchant_overage = full.enchant_overage;
     }
 }
 
@@ -607,7 +615,9 @@ void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
             break;
         case LeftRowKind::kEnchantLevel:
             std::snprintf(key, sizeof(key), "已强化次数");
-            std::snprintf(value, sizeof(value), "%d", g_draft.enchant_level);
+            std::snprintf(value, sizeof(value), "%d (%d/%d/%d)", g_draft.enchant_level,
+                          g_draft.enchant_increment, g_draft.enchant_threshold,
+                          g_draft.enchant_overage);
             break;
         case LeftRowKind::kSocketTotal:
             std::snprintf(key, sizeof(key), "宝石孔数");

@@ -69,6 +69,9 @@ void recalc_chaos_derived() {
     panel_internal::g_draft.defense = stats.defense;
     panel_internal::g_draft.magic_rate = stats.magic_rate;
     panel_internal::g_draft.need_level = stats.need_level;
+    panel_internal::g_draft.enchant_increment = stats.enchant_increment;
+    panel_internal::g_draft.enchant_threshold = stats.enchant_threshold;
+    panel_internal::g_draft.enchant_overage = stats.enchant_overage;
 }
 
 void draw_card_button(QolUiHandle button, const char* label,

@@ -182,6 +182,10 @@ struct QolItemBaseStats {
     int32_t magic_rate;
     int32_t need_level;
     int32_t stackable;
+    // ITEMENCHANTBASE[enchant_id-1] 的 +6/+7/+8；无强化 ID 时为 0。
+    int32_t enchant_increment;
+    int32_t enchant_threshold;
+    int32_t enchant_overage;
 };
 
 struct QolItemPortReadApi {

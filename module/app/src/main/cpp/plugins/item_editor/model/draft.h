@@ -46,6 +46,9 @@ struct ItemEditorDraft {
     int32_t enchant_remaining = 0;
     int32_t enchant_id = 0;
     int32_t enchant_level = 0;
+    int32_t enchant_increment = 0;
+    int32_t enchant_threshold = 0;
+    int32_t enchant_overage = 0;
     int32_t magic_rate = 0;
     int32_t chaos_level = 0;
     int32_t chaos_rate = kDefaultChaosRate;

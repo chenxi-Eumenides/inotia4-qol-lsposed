@@ -102,9 +102,13 @@ int32_t class_formula_value(int32_t class_index, size_t formula_offset, int32_t 
     return fn_cal_calculate(formula, &ability, 1);
 }
 
-int32_t apply_enchant_value(int32_t value, int32_t enchant_id, int32_t level) {
-    if (enchant_id <= 0 || value == 0) return value;
-    if (g_base == 0) return value;
+bool read_enchant_values(int32_t enchant_id, int32_t* increment, int32_t* threshold,
+                         int32_t* overage) {
+    if (increment == nullptr || threshold == nullptr || overage == nullptr) return false;
+    *increment = 0;
+    *threshold = 0;
+    *overage = 0;
+    if (enchant_id <= 0 || g_base == 0) return false;
     const uint8_t* data = *reinterpret_cast<const uint8_t**>(
         *reinterpret_cast<void* const*>(g_base + G_ITEMENCHANTBASE_DATA_GOT_VMA));
     const uint8_t* size_ptr = *reinterpret_cast<const uint8_t**>(
@@ -112,12 +116,19 @@ int32_t apply_enchant_value(int32_t value, int32_t enchant_id, int32_t level) {
     const auto* count_ptr = *reinterpret_cast<const uint16_t**>(
         g_base + G_ITEMENCHANTBASE_COUNT_GOT_VMA);
     if (data == nullptr || size_ptr == nullptr || count_ptr == nullptr ||
-        *size_ptr < 9 || enchant_id > *count_ptr) return value;
+        *size_ptr < 9 || enchant_id > *count_ptr) return false;
     const auto* record = data + static_cast<size_t>(enchant_id - 1) * *size_ptr;
-    if (!game_memory_accessible(record, 9, 'r')) return value;
-    const int32_t increment = record[6];
-    const int32_t threshold = record[7];
-    const int32_t overage = record[8];
+    if (!game_memory_accessible(record, 9, 'r')) return false;
+    *increment = record[6];
+    *threshold = record[7];
+    *overage = record[8];
+    return true;
+}
+
+int32_t apply_enchant_value(int32_t value, int32_t enchant_id, int32_t level) {
+    if (enchant_id <= 0 || value == 0) return value;
+    int32_t increment = 0, threshold = 0, overage = 0;
+    if (!read_enchant_values(enchant_id, &increment, &threshold, &overage)) return value;
     int32_t result = value + increment * level;
     if (level >= threshold) result += overage * (level - threshold + 1);
     return result;
@@ -192,6 +203,8 @@ QolResult read_item_stats_full(int32_t item_id, int32_t raw_rarity,
     // 不是 ITEMCLASSBASE 记录 +3；后者在多数装备类上是 0/1 标志位。
     out->need_level = std::clamp(meta.ability + chaos_level_value, 0, 105);
     out->stackable = meta.stackable;
+    (void)read_enchant_values(id, &out->enchant_increment, &out->enchant_threshold,
+                              &out->enchant_overage);
     return contracts::ok();
 }
 
