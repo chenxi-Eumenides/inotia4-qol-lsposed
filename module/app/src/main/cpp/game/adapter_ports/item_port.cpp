@@ -37,42 +37,122 @@ QolResult error_result(int32_t code, const char* message) {
 
 QolResult not_ready() { return error_result(kQolErrNotReady, "not ready"); }
 
-QolResult read_item_base_stats_impl(int32_t item_id, int32_t raw_rarity,
-                                    contracts::QolItemBaseStats* out) {
-    if (out == nullptr || item_id < 0 || raw_rarity < 0 || raw_rarity > 14) {
-        return error_result(kQolErrInvalidArgument, "invalid item base stats args");
-    }
-    if (g_base == 0) return not_ready();
+struct ItemMeta {
+    int32_t class_index = -1;
+    int32_t ability = 0;
+    int32_t stackable = 0;
+};
+
+bool read_item_meta(int32_t item_id, ItemMeta* out) {
+    if (g_base == 0 || out == nullptr || item_id < 0) return false;
     const auto* count_slot = reinterpret_cast<const uint16_t*>(
         g_base + G_ITEMDATABASE_N_RECORD_COUNT_VMA);
-    if (!game_memory_accessible(count_slot, sizeof(*count_slot), 'r')) return not_ready();
-    if (item_id >= *count_slot) {
-        return error_result(kQolErrInvalidArgument, "item id out of range");
-    }
-
+    if (!game_memory_accessible(count_slot, sizeof(*count_slot), 'r') ||
+        item_id >= *count_slot) return false;
     auto* data_slot = reinterpret_cast<void**>(g_base + G_ITEMDATABASE_DATA_VMA);
     auto* size_slot = reinterpret_cast<const uint8_t*>(g_base + G_ITEMDATABASE_N_RECORD_SIZE_VMA);
     if (!game_memory_accessible(data_slot, sizeof(*data_slot), 'r') ||
-        !game_memory_accessible(size_slot, sizeof(*size_slot), 'r')) return not_ready();
+        !game_memory_accessible(size_slot, sizeof(*size_slot), 'r')) return false;
     const auto* data = static_cast<const uint8_t*>(*data_slot);
     const uint8_t record_size = *size_slot;
-    if (data == nullptr || record_size < 7) return not_ready();
+    if (data == nullptr || record_size < 7) return false;
     const auto* record = data + static_cast<size_t>(item_id) * record_size;
-    if (!game_memory_accessible(record, 7, 'r')) return not_ready();
-    const int32_t class_index = record[2];
-    const int32_t stackable = (record[6] & 1u) != 0 ? 1 : 0;
+    if (!game_memory_accessible(record, 7, 'r')) return false;
+    out->class_index = record[2];
+    out->ability = static_cast<int8_t>(record[3]);
+    out->stackable = (record[6] & 1u) != 0 ? 1 : 0;
+    return true;
+}
 
-    if (fn_get_damage == nullptr || fn_get_defense == nullptr ||
-        fn_item_get_ability_level == nullptr) return not_ready();
+bool read_class_record(int32_t class_index, uint8_t* out, size_t size) {
+    if (g_base == 0 || out == nullptr || class_index < 0 || size == 0) return false;
+    const uint8_t* data = *reinterpret_cast<const uint8_t**>(
+        *reinterpret_cast<void* const*>(g_base + G_ITEMCLASSBASE_DATA_GOT_VMA));
+    const uint8_t* size_ptr = *reinterpret_cast<const uint8_t**>(
+        g_base + G_ITEMCLASSBASE_SIZE_GOT_VMA);
+    if (data == nullptr || size_ptr == nullptr || *size_ptr < size) return false;
+    const auto* record = data + static_cast<size_t>(class_index) * *size_ptr;
+    if (!game_memory_accessible(record, size, 'r')) return false;
+    std::memcpy(out, record, size);
+    return true;
+}
 
-    // I_TYPE bits6-15 carry the ITEMDATABASE row (item_id), not ITEMCLASSBASE index.
-    alignas(8) uint8_t item[0x40]{};
-    const uint16_t type = static_cast<uint16_t>(
-        ((item_id & I_TYPE_CATEGORY_MASK) << I_TYPE_CATEGORY_SHIFT) | (raw_rarity << 2));
-    std::memcpy(item + I_TYPE, &type, sizeof(type));
-    *out = {fn_get_damage(item), fn_get_defense(item), item_class_magic_rate(class_index),
-            fn_item_get_ability_level(item), stackable};
-    return contracts::ok();
+bool read_grade_record(int32_t raw_rarity, int32_t* add, int32_t* percent) {
+    if (g_base == 0 || raw_rarity < 0 || raw_rarity > 14) return false;
+    const uint8_t* data = *reinterpret_cast<const uint8_t**>(
+        *reinterpret_cast<void* const*>(g_base + G_ITEMGRADEBASE_DATA_GOT_VMA));
+    const uint8_t* size_ptr = *reinterpret_cast<const uint8_t**>(
+        g_base + G_ITEMGRADEBASE_SIZE_GOT_VMA);
+    if (data == nullptr || size_ptr == nullptr || *size_ptr < 7) return false;
+    const auto* record = data + static_cast<size_t>(raw_rarity) * *size_ptr;
+    if (!game_memory_accessible(record, 7, 'r')) return false;
+    *add = static_cast<int8_t>(record[5]);
+    *percent = static_cast<int8_t>(record[6]);
+    return true;
+}
+
+int32_t class_formula_value(int32_t class_index, size_t formula_offset, int32_t ability) {
+    uint8_t record[32]{};
+    if (!read_class_record(class_index, record, formula_offset + 2)) return 0;
+    uint16_t text_id = 0;
+    std::memcpy(&text_id, record + formula_offset, sizeof(text_id));
+    if (fn_memorytext_get_text_e == nullptr || fn_cal_calculate == nullptr) return 0;
+    const char* formula = fn_memorytext_get_text_e(text_id);
+    if (formula == nullptr || formula[0] == '\0') return 0;
+    return fn_cal_calculate(formula, &ability, 1);
+}
+
+int32_t apply_enchant_value(int32_t value, int32_t enchant_id, int32_t level) {
+    if (enchant_id <= 0 || value == 0) return value;
+    if (g_base == 0) return value;
+    const uint8_t* data = *reinterpret_cast<const uint8_t**>(
+        *reinterpret_cast<void* const*>(g_base + G_ITEMENCHANTBASE_DATA_GOT_VMA));
+    const uint8_t* size_ptr = *reinterpret_cast<const uint8_t**>(
+        g_base + G_ITEMENCHANTBASE_SIZE_GOT_VMA);
+    const auto* count_ptr = *reinterpret_cast<const uint16_t**>(
+        g_base + G_ITEMENCHANTBASE_COUNT_GOT_VMA);
+    if (data == nullptr || size_ptr == nullptr || count_ptr == nullptr ||
+        *size_ptr < 9 || enchant_id > *count_ptr) return value;
+    const auto* record = data + static_cast<size_t>(enchant_id - 1) * *size_ptr;
+    if (!game_memory_accessible(record, 9, 'r')) return value;
+    const int32_t increment = record[6];
+    const int32_t threshold = record[7];
+    const int32_t overage = record[8];
+    int32_t result = value + increment * level;
+    if (level >= threshold) result += overage * (level - threshold + 1);
+    return result;
+}
+
+int32_t apply_chaos_value(int32_t value, int32_t rate) {
+    const int32_t result = value * rate / 100;
+    return result > 0 ? result : 1;
+}
+
+QolResult read_item_stats_full(int32_t item_id, int32_t raw_rarity,
+                               int32_t enchant_id, int32_t enchant_level,
+                               int32_t chaos_flags, int32_t chaos_level,
+                               int32_t chaos_rate, contracts::QolItemBaseStats* out);
+
+int32_t calculate_class_stat(const ItemMeta& meta, int32_t raw_rarity, int32_t enchant_id,
+                             int32_t enchant_level, int32_t chaos_flags, int32_t chaos_rate,
+                             size_t formula_offset, uint8_t required_flag) {
+    uint8_t class_record[32]{};
+    if (!read_class_record(meta.class_index, class_record, formula_offset + 2)) return 0;
+    if ((class_record[2] & required_flag) == 0) return 0;
+    int32_t grade_add = 0;
+    int32_t grade_percent = 0;
+    if (!read_grade_record(raw_rarity, &grade_add, &grade_percent)) return 0;
+    const int32_t base = class_formula_value(meta.class_index, formula_offset, meta.ability);
+    const int32_t graded =
+        class_formula_value(meta.class_index, formula_offset, meta.ability + grade_add);
+    int32_t value = graded + base * grade_percent / 100;
+    value = apply_enchant_value(value, enchant_id, enchant_level);
+    return apply_chaos_value(value, (chaos_flags & 3) != 0 ? chaos_rate : 100);
+}
+
+QolResult read_item_base_stats_impl(int32_t item_id, int32_t raw_rarity,
+                                    contracts::QolItemBaseStats* out) {
+    return read_item_stats_full(item_id, raw_rarity, 0, 0, 0, 0, 100, out);
 }
 
 QolResult read_item_base_stats(int32_t item_id, contracts::QolItemBaseStats* out) {
@@ -92,60 +172,27 @@ QolResult read_item_stats_full(int32_t item_id, int32_t raw_rarity,
         return error_result(kQolErrInvalidArgument, "invalid item stats args");
     }
     if (g_base == 0) return not_ready();
-    const auto* count_slot = reinterpret_cast<const uint16_t*>(
-        g_base + G_ITEMDATABASE_N_RECORD_COUNT_VMA);
-    if (!game_memory_accessible(count_slot, sizeof(*count_slot), 'r')) return not_ready();
-    if (item_id >= *count_slot) {
+    ItemMeta meta{};
+    if (!read_item_meta(item_id, &meta)) {
         return error_result(kQolErrInvalidArgument, "item id out of range");
     }
-    auto* data_slot = reinterpret_cast<void**>(g_base + G_ITEMDATABASE_DATA_VMA);
-    auto* size_slot = reinterpret_cast<const uint8_t*>(g_base + G_ITEMDATABASE_N_RECORD_SIZE_VMA);
-    if (!game_memory_accessible(data_slot, sizeof(*data_slot), 'r') ||
-        !game_memory_accessible(size_slot, sizeof(*size_slot), 'r')) return not_ready();
-    const auto* data = static_cast<const uint8_t*>(*data_slot);
-    const uint8_t record_size = *size_slot;
-    if (data == nullptr || record_size < 7) return not_ready();
-    const auto* record = data + static_cast<size_t>(item_id) * record_size;
-    if (!game_memory_accessible(record, 7, 'r')) return not_ready();
-    const int32_t class_index = record[2];
-    const int32_t stackable = (record[6] & 1u) != 0 ? 1 : 0;
-    const bool equipment = class_index >= 0 && class_index <= 21;
-    if (fn_get_damage == nullptr || fn_get_defense == nullptr ||
-        fn_item_get_ability_level == nullptr ||
-        (equipment && fn_item_get_equip_level == nullptr)) return not_ready();
-
-    alignas(8) uint8_t item[0x40]{};
-    const uint16_t type = static_cast<uint16_t>(
-        ((item_id & I_TYPE_CATEGORY_MASK) << I_TYPE_CATEGORY_SHIFT) | (raw_rarity << 2));
-    std::memcpy(item + I_TYPE, &type, sizeof(type));
+    if (fn_memorytext_get_text_e == nullptr || fn_cal_calculate == nullptr) return not_ready();
 
     const bool c18 = qol::game_variant().series == qol::GameSeries::kC18;
     const int32_t level = std::clamp(enchant_level, 0, c18 ? 63 : 31);
     const int32_t id = std::clamp(enchant_id, 0, c18 ? 15 : 31);
-    const uint32_t flags = static_cast<uint32_t>(chaos_flags & 3);
-    const uint32_t chaos_level_value = static_cast<uint32_t>(std::clamp(chaos_level, 0, 127));
-    const uint32_t chaos_rate_value = static_cast<uint32_t>(std::clamp(chaos_rate, 0, 255));
-    uint16_t enchant = 0;
-    if (c18) {
-        enchant = static_cast<uint16_t>((id << 12) | (level << 6) | flags);
-    } else {
-        enchant = static_cast<uint16_t>((id << 11) | (level << 6) | flags);
-    }
-    std::memcpy(item + I_ENCHANT, &enchant, sizeof(enchant));
+    const int32_t rate = std::clamp(chaos_rate, 0, 255);
+    const int32_t flags = chaos_flags & 3;
+    const int32_t chaos_level_value = flags != 0 ? std::clamp(chaos_level, 0, 127) : 0;
 
-    uint32_t count_field = equipment ? (100u << 25) : 0;
-    if (equipment && flags != 0) {
-        count_field |= chaos_level_value | (chaos_rate_value << 8);
-    }
-    std::memcpy(item + I_COUNT, &count_field, sizeof(count_field));
-
-    out->damage = fn_get_damage(item);
-    out->defense = fn_get_defense(item);
-    out->magic_rate = item_class_magic_rate(class_index);
-    out->need_level = equipment ? fn_item_get_equip_level(item)
-                                : fn_item_get_ability_level(item);
-    out->need_level = std::clamp(out->need_level, 0, 105);
-    out->stackable = stackable;
+    out->damage = calculate_class_stat(meta, raw_rarity, id, level, flags, rate, 9, 2);
+    out->defense = calculate_class_stat(meta, raw_rarity, id, level, flags, rate, 0x16, 4);
+    out->magic_rate = item_class_magic_rate(meta.class_index);
+    uint8_t class_record[32]{};
+    const int32_t class_ability = read_class_record(meta.class_index, class_record, 4)
+        ? static_cast<int8_t>(class_record[3]) : 0;
+    out->need_level = std::clamp(class_ability + chaos_level_value, 0, 105);
+    out->stackable = meta.stackable;
     return contracts::ok();
 }
 

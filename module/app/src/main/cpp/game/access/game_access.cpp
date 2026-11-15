@@ -273,6 +273,10 @@ bool bridge_init() {
     fn_get_cumulate_count = reinterpret_cast<GetCumulateCountFn>(g_base + fn_resolve("F_GET_CUMULATE_COUNT_VMA", F_GET_CUMULATE_COUNT_VMA));
     fn_get_damage = reinterpret_cast<GetItemStatFn>(g_base + fn_resolve("F_GET_DAMAGE_VMA", F_GET_DAMAGE_VMA));
     fn_get_defense = reinterpret_cast<GetItemStatFn>(g_base + fn_resolve("F_GET_DEFENSE_VMA", F_GET_DEFENSE_VMA));
+    fn_memorytext_get_text_e = reinterpret_cast<MemoryTextGetTextEFn>(
+        g_base + fn_resolve("F_MEMORYTEXT_GET_TEXT_E_VMA", F_MEMORYTEXT_GET_TEXT_E_VMA));
+    fn_cal_calculate = reinterpret_cast<CalCalculateFn>(
+        g_base + fn_resolve("F_CAL_CALCULATE_VMA", F_CAL_CALCULATE_VMA));
     fn_get_stat = reinterpret_cast<GetAttrFn2>(g_base + F_GET_STAT_VMA);
     fn_get_stat_base = reinterpret_cast<GetAttrFn2>(g_base + F_GET_STAT_BASE_VMA);
     fn_get_stat_bonus = reinterpret_cast<GetAttrFn2>(g_base + F_GET_STAT_BONUS_VMA);

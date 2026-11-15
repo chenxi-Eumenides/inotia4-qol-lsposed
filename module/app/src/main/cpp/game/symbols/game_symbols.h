@@ -468,6 +468,11 @@ constexpr uintptr_t G_ITEMMIXLINKBASE_N_RECORD_COUNT_VMA = 0x301a6a; // ITEMMIXL
 constexpr uintptr_t G_ITEMDATABASE_DATA_VMA = 0x301a80;  // ITEMDATABASE 数据指针全局（void*）；记录 u16[0] = 物品 id = 名称文本 id（导出表 TEXT_ID_FIELDS 已验证）
 constexpr uintptr_t G_ITEMDATABASE_N_RECORD_SIZE_VMA = 0x301a88; // ITEMDATABASE 记录大小全局（u8）
 constexpr uintptr_t G_ITEMDATABASE_N_RECORD_COUNT_VMA = 0x301a8a; // ITEMDATABASE 记录数全局（u16）
+constexpr uintptr_t G_ITEMGRADEBASE_DATA_GOT_VMA = 0x2f40b8; // ITEMGRADEBASE data 指针 GOT
+constexpr uintptr_t G_ITEMGRADEBASE_SIZE_GOT_VMA = 0x2f3508; // ITEMGRADEBASE 记录大小 GOT（u8）
+constexpr uintptr_t G_ITEMENCHANTBASE_DATA_GOT_VMA = 0x2f3ce8; // ITEMENCHANTBASE data 指针 GOT
+constexpr uintptr_t G_ITEMENCHANTBASE_SIZE_GOT_VMA = 0x2f55c0; // ITEMENCHANTBASE 记录大小 GOT（u8）
+constexpr uintptr_t G_ITEMENCHANTBASE_COUNT_GOT_VMA = 0x2f32f0; // ITEMENCHANTBASE 记录数 GOT（u16）
 constexpr uintptr_t G_TEXTDATABASE_DATA_VMA = 0x3016b0;  // TEXTDATABASE 数据指针全局（void*）；recsize=2 的纯 u16 文本 id 表
 constexpr uintptr_t G_TEXTDATABASE_N_RECORD_SIZE_VMA = 0x3016b8; // TEXTDATABASE 记录大小全局（u8）
 constexpr uintptr_t G_TEXTDATABASE_N_RECORD_COUNT_VMA = 0x3016ba; // TEXTDATABASE 记录数全局（u16）
@@ -547,6 +552,8 @@ constexpr uintptr_t F_GET_BIT_VMA = 0x140528;        // int (int,int,int)
     constexpr uintptr_t F_GET_CUMULATE_COUNT_VMA = 0x106094; // int (void*) 堆叠数量：可堆叠类返回 bit22-31，不可堆叠类（装备）返回 1
 constexpr uintptr_t F_GET_DAMAGE_VMA = 0x1099f0;     // int (void*) 物品攻击
 constexpr uintptr_t F_GET_DEFENSE_VMA = 0x109cc0;    // int (void*) 物品防御
+constexpr uintptr_t F_MEMORYTEXT_GET_TEXT_E_VMA = 0x1186cc; // const char* (i32 text id) 英文文本表
+constexpr uintptr_t F_CAL_CALCULATE_VMA = 0xd9968; // int (const char* formula, int* args, int count)
 constexpr uintptr_t F_GET_STAT_VMA = 0xdf8d0;        // int (void*, int) 主属性总属性=Base+Main+Bonus+Sub (0=力量 1=敏捷 2=体力 3=智力 4=精力)
 // ⚠️ F_GET_STAT 经 CHAR_GetStatSub(0xdf888) 在动态派生脏位置位时会重算并写回，非纯读；
 // 非游戏线程请用 game/state/game_state.h 的 char_stat_total() 直读 C_STAT_* 字段。
@@ -1469,6 +1476,8 @@ using GrpxFillRectAlphaFn = void (*)(int32_t x, int32_t y, int32_t w, int32_t h,
 using GrpxSetFontColorFn = void (*)(uint32_t abgr);
 using GrpxDrawStringWithFontFn = void (*)(char* text, int32_t x, int32_t y, int32_t align, int32_t font);
 using GrpxGetTextWidthFn = int32_t (*)(const char* text, int32_t length, int32_t font);
+using MemoryTextGetTextEFn = const char* (*)(int32_t text_id);
+using CalCalculateFn = int32_t (*)(const char* formula, int32_t* args, int32_t count);
 using GrpxSetFontColorRgbFn = void (*)(int32_t r, int32_t g, int32_t b);
 using GrpxDrawPartFn = void (*)(void* group, int32_t x, int32_t y, void* loc, int32_t type, int32_t flip, int32_t unknown);
 // Exported GRPX wrappers use the common native textured-container drawing ABI.

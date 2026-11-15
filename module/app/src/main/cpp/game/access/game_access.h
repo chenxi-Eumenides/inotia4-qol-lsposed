@@ -66,6 +66,8 @@ extern GetBitFn fn_get_bit;
 extern GetCumulateCountFn fn_get_cumulate_count;
 extern GetItemStatFn fn_get_damage;
 extern GetItemStatFn fn_get_defense;
+extern MemoryTextGetTextEFn fn_memorytext_get_text_e;
+extern CalCalculateFn fn_cal_calculate;
 // ⚠️ CHAR_GetStat(0xdf8d0) 经 CHAR_GetStatSub(0xdf888) 在动态派生脏位（[ch+0x270] bit i）置位时
 // 会调 CHAR_CalculateStatus 重算并写回 [ch+0x266]/SV，属写操作，禁止非游戏线程调用；
 // JSON 请用 char_stat_total() 直读。

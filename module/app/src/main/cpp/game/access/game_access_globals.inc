@@ -42,6 +42,8 @@ IsHavingEmptySlotFn fn_is_having_empty_slot = nullptr;
 GetBitFn fn_get_bit = nullptr;
 GetCumulateCountFn fn_get_cumulate_count = nullptr;GetItemStatFn fn_get_damage = nullptr;
 GetItemStatFn fn_get_defense = nullptr;
+MemoryTextGetTextEFn fn_memorytext_get_text_e = nullptr;
+CalCalculateFn fn_cal_calculate = nullptr;
 GetAttrFn2 fn_get_stat = nullptr;
 GetAttrFn2 fn_get_stat_base = nullptr;
 GetAttrFn2 fn_get_stat_bonus = nullptr;
