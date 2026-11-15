@@ -382,8 +382,9 @@ void add_empty_option(uint32_t section) {
         section == 0 ? QolItemInventoryOptionType::kNative
                      : (section == 1 ? QolItemInventoryOptionType::kJewel
                                      : QolItemInventoryOptionType::kEnchant));
-    // ID 0 是合法词条（力量）；空词条用 -1 表示，不能在渲染时把 0 当空。
-    const QolItemInventoryOptionView empty{-1, 0, type};
+    // QolItemInventoryOptionView 字段顺序是 {value,id,type}；ID 0 是合法词条（力量），
+    // 空词条必须把 id 设为 -1，不能把 -1 写进 value。
+    const QolItemInventoryOptionView empty{0, -1, type};
     switch (section) {
         case 0:
             if (g_draft.native_option_count >= kQolItemInventoryNativeOptionCapacity)
