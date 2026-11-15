@@ -185,4 +185,71 @@ bool draft_has_item(const ItemEditorDraft& draft) {
     return draft.item_id >= 0;
 }
 
+const char* enchant_strength_name(EnchantStrength strength) {
+    switch (strength) {
+        case EnchantStrength::kNone: return "无";
+        case EnchantStrength::kLow: return "低级";
+        case EnchantStrength::kMid: return "中级";
+        case EnchantStrength::kHigh: return "高级";
+        case EnchantStrength::kTop: return "顶级";
+        case EnchantStrength::kSpecial: return "特级";
+        case EnchantStrength::kChaos: return "混沌";
+    }
+    return "未知";
+}
+
+EnchantStrength enchant_strength_default(int32_t need_level) {
+    if (need_level <= 33) return EnchantStrength::kLow;
+    if (need_level <= 66) return EnchantStrength::kMid;
+    if (need_level <= 99) return EnchantStrength::kHigh;
+    return EnchantStrength::kTop;
+}
+
+namespace {
+
+// 0 = 武器 class0；1 = 武器 class1..3；2 = 武器 class4..8；
+// 3 = 防具 class9/12..15/17..21；4 = 防具 class10/16；5 = 防具 class11。
+int32_t enchant_class_group(int32_t class_index) {
+    if (class_index == 0) return 0;
+    if (class_index >= 1 && class_index <= 3) return 1;
+    if (class_index >= 4 && class_index <= 8) return 2;
+    if (class_index == 9 || (class_index >= 12 && class_index <= 15) ||
+        (class_index >= 17 && class_index <= 21)) return 3;
+    if (class_index == 10 || class_index == 16) return 4;
+    if (class_index == 11) return 5;
+    return -1;
+}
+
+int32_t c18_enchant_id(int32_t row_index) {
+    // C18 把 32 行表压缩进 4 位 ID；见 ITEMSYSTEM_EnchantItem 0x1077c0。
+    if (row_index >= 0 && row_index <= 14) return row_index + 1;
+    if (row_index >= 16 && row_index <= 30) return row_index - 15;
+    return 0;
+}
+
+}  // namespace
+
+int32_t enchant_id_for_strength(EnchantStrength strength, int32_t class_index,
+                                int32_t variant_series) {
+    if (strength == EnchantStrength::kNone) return 0;
+    const int32_t group = enchant_class_group(class_index);
+    if (group < 0) return 0;
+    const int32_t tier = static_cast<int32_t>(strength) - 1;
+    const int32_t row_index = group < 3 ? tier * 3 + group
+                                        : 16 + tier * 3 + (group - 3);
+    if (variant_series == 4) return c18_enchant_id(row_index);
+    return row_index + 1;
+}
+
+EnchantStrength enchant_strength_for_id(int32_t enchant_id, int32_t class_index,
+                                        int32_t variant_series) {
+    if (enchant_id <= 0) return EnchantStrength::kNone;
+    for (int32_t value = 1; value <= 6; ++value) {
+        const auto strength = static_cast<EnchantStrength>(value);
+        if (enchant_id_for_strength(strength, class_index, variant_series) == enchant_id)
+            return strength;
+    }
+    return EnchantStrength::kNone;
+}
+
 }  // namespace qol::features::item_editor

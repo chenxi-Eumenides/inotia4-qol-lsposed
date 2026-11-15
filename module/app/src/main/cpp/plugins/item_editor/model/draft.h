@@ -27,6 +27,22 @@ bool item_class_is_equipment(int32_t class_index);
 bool item_class_valid(int32_t class_index);
 contracts::QolItemType item_type_for_class(int32_t class_index);
 
+enum class EnchantStrength : int32_t {
+    kNone = 0,
+    kLow = 1,
+    kMid = 2,
+    kHigh = 3,
+    kTop = 4,
+    kSpecial = 5,
+    kChaos = 6,
+};
+const char* enchant_strength_name(EnchantStrength strength);
+EnchantStrength enchant_strength_default(int32_t need_level);
+int32_t enchant_id_for_strength(EnchantStrength strength, int32_t class_index,
+                                int32_t variant_series);
+EnchantStrength enchant_strength_for_id(int32_t enchant_id, int32_t class_index,
+                                        int32_t variant_series);
+
 struct ItemEditorDraft {
     contracts::QolItemHandle source{};
     bool source_valid = false;

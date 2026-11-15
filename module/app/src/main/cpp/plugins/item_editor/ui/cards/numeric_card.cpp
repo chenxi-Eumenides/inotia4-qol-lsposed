@@ -312,9 +312,11 @@ void numeric_card_apply() {
                 // 从 0 提高到正数时补一个与装备大类匹配的默认 ID；归零时清掉 ID。
                 if (panel_internal::g_draft.enchant_level > 0) {
                     if (panel_internal::g_draft.enchant_id == 0) {
-                        panel_internal::g_draft.enchant_id =
-                            (panel_internal::g_draft.variant_series == 4 ||
-                             panel_internal::g_draft.class_index <= 8) ? 1 : 16;
+                        const EnchantStrength strength = enchant_strength_default(
+                            panel_internal::g_draft.need_level);
+                        panel_internal::g_draft.enchant_id = enchant_id_for_strength(
+                            strength, panel_internal::g_draft.class_index,
+                            panel_internal::g_draft.variant_series);
                     }
                 } else {
                     panel_internal::g_draft.enchant_id = 0;

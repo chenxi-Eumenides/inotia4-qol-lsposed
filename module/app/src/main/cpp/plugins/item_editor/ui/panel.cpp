@@ -140,6 +140,18 @@ bool read_draft_full_stats(const ItemEditorDraft& draft, QolItemBaseStats* out) 
         draft.chaos_flags, draft.chaos_level, draft.chaos_rate, out));
 }
 
+void refresh_full_stats() {
+    QolItemBaseStats stats{};
+    if (!read_draft_full_stats(g_draft, &stats)) return;
+    g_draft.damage = stats.damage;
+    g_draft.defense = stats.defense;
+    g_draft.magic_rate = stats.magic_rate;
+    g_draft.need_level = stats.need_level;
+    g_draft.enchant_increment = stats.enchant_increment;
+    g_draft.enchant_threshold = stats.enchant_threshold;
+    g_draft.enchant_overage = stats.enchant_overage;
+}
+
 const char* static_text(QolItemStaticTextKind kind, int32_t id) {
     const auto* port = item_port();
     const char* text = nullptr;
@@ -162,6 +174,7 @@ enum class LeftRowKind : uint8_t {
     kQuantity,
     kPrefix,
     kEnchantDurability,
+    kEnchantStrength,
     kEnchantLevel,
     kSocketTotal,
     kDamage,
@@ -170,7 +183,7 @@ enum class LeftRowKind : uint8_t {
     kRequiredLevel,
     kChaosRate,
 };
-LeftRowKind g_left_rows[9]{};
+LeftRowKind g_left_rows[10]{};
 uint32_t g_left_row_count = 0;
 
 void build_left_rows() {
@@ -178,6 +191,7 @@ void build_left_rows() {
     if (item_class_is_equipment(g_draft.class_index)) {
         g_left_rows[g_left_row_count++] = LeftRowKind::kPrefix;
         g_left_rows[g_left_row_count++] = LeftRowKind::kEnchantDurability;
+        g_left_rows[g_left_row_count++] = LeftRowKind::kEnchantStrength;
         g_left_rows[g_left_row_count++] = LeftRowKind::kEnchantLevel;
         g_left_rows[g_left_row_count++] = LeftRowKind::kSocketTotal;
         if (g_draft.damage != 0)
@@ -613,12 +627,24 @@ void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
             std::snprintf(key, sizeof(key), "强化耐久度");
             std::snprintf(value, sizeof(value), "%d", g_draft.enchant_remaining);
             break;
-        case LeftRowKind::kEnchantLevel:
-            std::snprintf(key, sizeof(key), "已强化次数");
-            std::snprintf(value, sizeof(value), "%d (%d/%d/%d)", g_draft.enchant_level,
-                          g_draft.enchant_increment, g_draft.enchant_threshold,
-                          g_draft.enchant_overage);
+        case LeftRowKind::kEnchantStrength: {
+            const EnchantStrength strength = enchant_strength_for_id(
+                g_draft.enchant_id, g_draft.class_index, g_draft.variant_series);
+            std::snprintf(key, sizeof(key), "强化强度");
+            std::snprintf(value, sizeof(value), "%s (%d)",
+                          enchant_strength_name(strength), g_draft.enchant_id);
             break;
+        }
+        case LeftRowKind::kEnchantLevel: {
+            const int32_t increment = g_draft.enchant_id != 0
+                ? g_draft.enchant_increment : 1;
+            const int32_t overage = g_draft.enchant_id != 0
+                ? g_draft.enchant_overage : 1;
+            std::snprintf(key, sizeof(key), "已强化次数");
+            std::snprintf(value, sizeof(value), "%d (%d/%d)", g_draft.enchant_level,
+                          increment, overage);
+            break;
+        }
         case LeftRowKind::kSocketTotal:
             std::snprintf(key, sizeof(key), "宝石孔数");
             std::snprintf(value, sizeof(value), "%d", g_draft.socket_total);
@@ -675,6 +701,21 @@ void left_info_selected(void*, uint32_t index) {
         case LeftRowKind::kEnchantDurability:
             open_enchant_card();
             return;
+        case LeftRowKind::kEnchantStrength: {
+            const EnchantStrength current = enchant_strength_for_id(
+                g_draft.enchant_id, g_draft.class_index, g_draft.variant_series);
+            EnchantStrength next = EnchantStrength::kLow;
+            if (current != EnchantStrength::kNone) {
+                next = static_cast<EnchantStrength>(static_cast<int32_t>(current) + 1);
+                if (next > EnchantStrength::kChaos) next = EnchantStrength::kLow;
+            }
+            const int32_t id = enchant_id_for_strength(
+                next, g_draft.class_index, g_draft.variant_series);
+            g_draft.enchant_id = id;
+            g_draft.dirty = true;
+            refresh_full_stats();
+            return;
+        }
         case LeftRowKind::kEnchantLevel:
             open_enchant_level_card();
             return;
