@@ -149,10 +149,9 @@ enum class LeftRowKind : uint8_t {
     kDefense,
     kMagicDamage,
     kRequiredLevel,
-    kChaosLevel,
     kChaosRate,
 };
-LeftRowKind g_left_rows[9]{};
+LeftRowKind g_left_rows[8]{};
 uint32_t g_left_row_count = 0;
 
 void build_left_rows() {
@@ -170,7 +169,6 @@ void build_left_rows() {
         if (magic_scaled != 0)
             g_left_rows[g_left_row_count++] = LeftRowKind::kMagicDamage;
         g_left_rows[g_left_row_count++] = LeftRowKind::kRequiredLevel;
-        g_left_rows[g_left_row_count++] = LeftRowKind::kChaosLevel;
         g_left_rows[g_left_row_count++] = LeftRowKind::kChaosRate;
     } else if (item_class_valid(g_draft.class_index)) {
         g_left_rows[g_left_row_count++] = LeftRowKind::kQuantity;
@@ -612,12 +610,8 @@ void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
             std::snprintf(key, sizeof(key), "需要等级");
             std::snprintf(value, sizeof(value), "%d", g_draft.need_level);
             break;
-        case LeftRowKind::kChaosLevel:
-            std::snprintf(key, sizeof(key), "混沌等级");
-            std::snprintf(value, sizeof(value), "%d", g_draft.chaos_level);
-            break;
         case LeftRowKind::kChaosRate:
-            std::snprintf(key, sizeof(key), "混沌数值率");
+            std::snprintf(key, sizeof(key), "混沌属性倍率");
             std::snprintf(value, sizeof(value), "%d%%", g_draft.chaos_rate);
             break;
         default:
@@ -646,9 +640,6 @@ void left_info_selected(void*, uint32_t index) {
             return;
         case LeftRowKind::kSocketTotal:
             open_socket_card();
-            return;
-        case LeftRowKind::kChaosLevel:
-            open_chaos_level_card();
             return;
         case LeftRowKind::kChaosRate:
             open_chaos_rate_card();

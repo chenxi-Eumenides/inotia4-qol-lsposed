@@ -95,7 +95,7 @@ int main() {
     CHECK(draft.enchant_remaining == 4 && draft.enchant_id == 29 && draft.enchant_level == 7);
     CHECK(draft.magic_rate == 110);
     CHECK(draft.chaos_flags == 3);
-    CHECK(draft.chaos_level == 2 && draft.chaos_rate == 85);
+    CHECK(draft.chaos_level == 0 && draft.chaos_rate == 85);
     CHECK(draft.native_option_count == 2);
     CHECK(draft.jewel_option_count == 1);
     CHECK(draft.enchant_option_count == 1);
@@ -117,7 +117,7 @@ int main() {
     CHECK(draft.enchant_remaining == 4 && draft.enchant_id == 29 && draft.enchant_level == 7);
     CHECK(draft.magic_rate == 110);
     CHECK(draft.chaos_flags == 3);
-    CHECK(draft.chaos_level == 2 && draft.chaos_rate == 85);
+    CHECK(draft.chaos_level == 0 && draft.chaos_rate == 85);
     CHECK(draft.native_option_count == 2 && draft.jewel_option_count == 1 &&
           draft.enchant_option_count == 1);
     CHECK(draft.jewel_attribute_type == -1 && draft.jewel_value == 0);

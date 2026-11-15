@@ -88,11 +88,9 @@ void recalc_chaos_derived() {
     panel_internal::g_draft.damage = apply_rate(stats.damage);
     panel_internal::g_draft.defense = apply_rate(stats.defense);
     panel_internal::g_draft.magic_rate = stats.magic_rate;
-    const int32_t chaos_level = chaos ? panel_internal::g_draft.chaos_level : 0;
-    // 游戏 ITEM_GetEquipLevel：base + chaos_level，负数夹到 0；
-    // CONSTBASE 行 13 的装备等级上限为 105，不是 100。
+    // 混沌等级固定为 0；需要等级仍按 CONSTBASE 行 13 的 105 上限夹紧。
     panel_internal::g_draft.need_level =
-        std::clamp(stats.need_level + chaos_level, 0, 105);
+        std::clamp(stats.need_level, 0, 105);
 }
 
 void draw_card_button(QolUiHandle button, const char* label,
@@ -332,14 +330,10 @@ void numeric_card_apply() {
                     std::clamp(g_value, g_min, g_max);
                 panel_internal::g_draft.dirty = true;
                 break;
-            case NumericCardTarget::kChaosLevel:
             case NumericCardTarget::kChaosRate:
-                // 混沌字段改动必须置标记位 2（chaos 生效位），再按基础属性重算派生。
+                // 混沌属性倍率改动必须置标记位 2（chaos 生效位），再按基础属性重算派生。
                 panel_internal::g_draft.chaos_flags |= 2;
-                if (g_target == NumericCardTarget::kChaosLevel)
-                    panel_internal::g_draft.chaos_level = std::clamp(g_value, g_min, g_max);
-                else
-                    panel_internal::g_draft.chaos_rate = std::clamp(g_value, g_min, g_max);
+                panel_internal::g_draft.chaos_rate = std::clamp(g_value, g_min, g_max);
                 panel_internal::g_draft.dirty = true;
                 recalc_chaos_derived();
                 break;

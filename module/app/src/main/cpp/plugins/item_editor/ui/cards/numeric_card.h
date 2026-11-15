@@ -9,7 +9,6 @@ enum class NumericCardTarget : uint8_t {
     kCount,             // g_draft.count（数量卡）
     kEnchantRemaining,  // g_draft.enchant_remaining
     kSocketTotal,       // g_draft.socket_total
-    kChaosLevel,        // g_draft.chaos_level，确认后重算派生属性
     kChaosRate,         // g_draft.chaos_rate，确认后重算派生属性
 };
 

@@ -115,7 +115,8 @@ void draft_load(ItemEditorDraft* draft, contracts::QolItemHandle source,
     draft->enchant_level = view.enchant_level;
     draft->magic_rate = view.magic_rate;
     draft->chaos_flags = view.chaos;
-    draft->chaos_level = view.chaos_level;
+    // 混沌等级不参与编辑，draft 固定为 0；只保留混沌属性倍率。
+    draft->chaos_level = 0;
     draft->chaos_rate = view.chaos_rate;
     draft->jewel_attribute_type = view.jewel_attribute_type;
     draft->jewel_value = view.jewel_value;
