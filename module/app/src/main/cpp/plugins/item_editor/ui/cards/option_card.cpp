@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdint>
+#include <vector>
 
 namespace qol::features::item_editor {
 namespace {
@@ -20,6 +21,7 @@ constexpr int32_t kOptionValueMax = 32767;
 constexpr int32_t kJewelValueMax = 2047;
 int32_t g_deltas[] = {1, 10, 100, 1000, -1, -10, -100, -1000};
 uint32_t g_group_indices[] = {0, 1, 2};
+std::vector<int32_t> g_group_ids[3];
 
 struct OptionRowContext {
     int32_t id = 0;
@@ -65,16 +67,24 @@ void cancel_clicked(void*) { g_pending = Action::kCancel; }
 uint32_t group_first(uint32_t group) {
     return group == 0 ? 0u : group == 1 ? 5u : 17u;
 }
-uint32_t group_count(uint32_t group) {
-    return group == 0 ? 5u : group == 1 ? 12u : g_jewel_self ? 47u : 72u;
+void build_group_ids() {
+    for (auto& ids : g_group_ids) ids.clear();
+    for (uint32_t group = 0; group < 3; ++group) {
+        const uint32_t first = group_first(group);
+        const uint32_t count = group == 0 ? 5u : group == 1 ? 12u : g_jewel_self ? 47u : 72u;
+        for (uint32_t row = 0; row < count; ++row) {
+            const int32_t id = static_cast<int32_t>(first + row);
+            const char* name = static_text(QolItemStaticTextKind::kOptionName, id);
+            if (name != nullptr && name[0] != '\0') g_group_ids[group].push_back(id);
+        }
+    }
 }
-uint32_t display_row_count() { return g_jewel_self ? 47u : 72u; }
 void draw_option_row(void* user, uint32_t row_index, QolUiHandle row, uint8_t) {
     const auto* adapter = ui();
     if (adapter == nullptr || user == nullptr) return;
     const uint32_t group = *static_cast<const uint32_t*>(user);
-    if (group >= 3 || row_index >= group_count(group)) return;
-    const int32_t id = static_cast<int32_t>(group_first(group) + row_index);
+    if (group >= 3 || row_index >= g_group_ids[group].size()) return;
+    const int32_t id = g_group_ids[group][row_index];
     const char* name = static_text(QolItemStaticTextKind::kOptionName, id);
     char label[160]{};
     if (name == nullptr || name[0] == '\0')
@@ -194,6 +204,7 @@ void destroy_option_card() {
     g_open_requested = false;
     g_pending = Action::kNone;
     g_sync_offset = 0;
+    for (auto& ids : g_group_ids) ids.clear();
 }
 
 bool create_option_card() {
@@ -224,29 +235,33 @@ bool create_option_card() {
     if (!succeeded(c->panel_create(&card, nullptr, &g_root))) return false;
 
     constexpr int32_t col_x[] = {16, 242, 468};
-    const uint32_t rows = display_row_count();
+    build_group_ids();
+    uint32_t rows = 0;
+    for (const auto& ids : g_group_ids)
+        rows = std::max<uint32_t>(rows, static_cast<uint32_t>(ids.size()));
+    if (rows == 0) rows = 1;
     g_sync_offset = 0;
     for (uint32_t group = 0; group < 3; ++group) {
-        const uint32_t first = group_first(group);
-        const uint32_t count = group_count(group);
-        const int32_t selected = g_id >= static_cast<int32_t>(first) &&
-            g_id < static_cast<int32_t>(first + count)
-                ? static_cast<int32_t>(g_id - first) : -1;
+        const auto& ids = g_group_ids[group];
+        const uint32_t count = static_cast<uint32_t>(ids.size());
+        const int32_t selected = static_cast<int32_t>(
+            std::find(ids.begin(), ids.end(), g_id) - ids.begin());
+        const int32_t selected_row = selected < static_cast<int32_t>(count) ? selected : -1;
         const UiScrollListDesc list{{col_x[group], 54, 220, 420}, 44,
-            rows, selected, &draw_option_row, nullptr, &g_group_indices[group]};
+            rows, selected_row, &draw_option_row, nullptr, &g_group_indices[group]};
         if (!succeeded(c->scroll_list_create(&list, g_root, &g_columns[group])))
             return false;
         if (!succeeded(c->scroll_list_set_selection_enabled(g_columns[group], 0)))
             return false;
-        if (selected >= 0) {
+        if (selected_row >= 0) {
             constexpr int32_t visible_rows = 9;
-            const int64_t offset = selected > visible_rows
-                ? static_cast<int64_t>(selected - visible_rows) * 44 : 0;
+            const int64_t offset = selected_row > visible_rows
+                ? static_cast<int64_t>(selected_row - visible_rows) * 44 : 0;
             g_sync_offset = std::max(g_sync_offset, offset);
         }
         for (uint32_t row = 0; row < count; ++row) {
-            const uint32_t id = first + row;
-            g_rows[id].id = static_cast<int32_t>(id);
+            const int32_t id = ids[row];
+            g_rows[id].id = id;
             QolUiHandle button = nullptr;
             if (!succeeded(c->scroll_row_button_create(g_columns[group], row,
                     {2, 1, 214, 42}, &row_clicked, &g_rows[id], &button)))
