@@ -10,6 +10,7 @@ namespace qol::features::item_editor {
 
 bool open_quantity_card();
 bool open_enchant_card();
+bool open_enchant_level_card();
 bool open_socket_card();
 bool open_chaos_rate_card();
 

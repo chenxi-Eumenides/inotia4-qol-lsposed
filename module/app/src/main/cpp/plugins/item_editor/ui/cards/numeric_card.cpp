@@ -324,6 +324,11 @@ void numeric_card_apply() {
                     std::clamp(g_value, g_min, g_max);
                 panel_internal::g_draft.dirty = true;
                 break;
+            case NumericCardTarget::kEnchantLevel:
+                panel_internal::g_draft.enchant_level =
+                    std::clamp(g_value, g_min, g_max);
+                panel_internal::g_draft.dirty = true;
+                break;
             case NumericCardTarget::kSocketTotal:
                 // 孔数不重建列表、不重算派生属性（基础伤害/防御/需要等级不变）。
                 panel_internal::g_draft.socket_total =

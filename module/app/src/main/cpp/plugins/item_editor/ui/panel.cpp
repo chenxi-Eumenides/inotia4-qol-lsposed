@@ -145,6 +145,7 @@ enum class LeftRowKind : uint8_t {
     kQuantity,
     kPrefix,
     kEnchantDurability,
+    kEnchantLevel,
     kSocketTotal,
     kDamage,
     kDefense,
@@ -152,7 +153,7 @@ enum class LeftRowKind : uint8_t {
     kRequiredLevel,
     kChaosRate,
 };
-LeftRowKind g_left_rows[8]{};
+LeftRowKind g_left_rows[9]{};
 uint32_t g_left_row_count = 0;
 
 void build_left_rows() {
@@ -160,6 +161,7 @@ void build_left_rows() {
     if (item_class_is_equipment(g_draft.class_index)) {
         g_left_rows[g_left_row_count++] = LeftRowKind::kPrefix;
         g_left_rows[g_left_row_count++] = LeftRowKind::kEnchantDurability;
+        g_left_rows[g_left_row_count++] = LeftRowKind::kEnchantLevel;
         g_left_rows[g_left_row_count++] = LeftRowKind::kSocketTotal;
         if (g_draft.damage != 0)
             g_left_rows[g_left_row_count++] = LeftRowKind::kDamage;
@@ -594,6 +596,10 @@ void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
             std::snprintf(key, sizeof(key), "强化耐久度");
             std::snprintf(value, sizeof(value), "%d", g_draft.enchant_remaining);
             break;
+        case LeftRowKind::kEnchantLevel:
+            std::snprintf(key, sizeof(key), "已强化次数");
+            std::snprintf(value, sizeof(value), "%d", g_draft.enchant_level);
+            break;
         case LeftRowKind::kSocketTotal:
             std::snprintf(key, sizeof(key), "宝石孔数");
             std::snprintf(value, sizeof(value), "%d", g_draft.socket_total);
@@ -649,6 +655,9 @@ void left_info_selected(void*, uint32_t index) {
             return;
         case LeftRowKind::kEnchantDurability:
             open_enchant_card();
+            return;
+        case LeftRowKind::kEnchantLevel:
+            open_enchant_level_card();
             return;
         case LeftRowKind::kSocketTotal:
             open_socket_card();

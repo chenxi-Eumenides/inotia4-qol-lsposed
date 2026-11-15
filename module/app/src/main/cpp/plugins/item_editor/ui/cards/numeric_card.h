@@ -8,6 +8,7 @@ namespace qol::features::item_editor {
 enum class NumericCardTarget : uint8_t {
     kCount,             // g_draft.count（数量卡）
     kEnchantRemaining,  // g_draft.enchant_remaining
+    kEnchantLevel,      // g_draft.enchant_level（已强化次数）
     kSocketTotal,       // g_draft.socket_total
     kChaosRate,         // g_draft.chaos_rate，确认后重算派生属性
 };

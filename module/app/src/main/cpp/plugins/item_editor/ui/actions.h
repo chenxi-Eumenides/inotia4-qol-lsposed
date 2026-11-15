@@ -44,9 +44,17 @@ inline contracts::QolItemPayloadHeader action_payload_header(const ItemEditorDra
     header.magic_rate = static_cast<uint8_t>(draft.magic_rate & 0xff);
     header.socket = static_cast<uint8_t>(((draft.socket_total & 0xf) << 4) |
                                          (draft.socket_filled & 0xf));
-    header.enchant = static_cast<uint16_t>(
-        ((draft.enchant_id & 0x1f) << 11) | ((draft.enchant_level & 0x1f) << 6) |
-        ((draft.enchant_remaining & 0xf) << 2) | (draft.chaos_flags & 3));
+    // C18 把 I_ENCHANT bits6-11 当作 6 位强化等级，bits12-15 当作 4 位 ID；
+    // 其他变体仍是 bits6-10 等级、bits11-15 ID。
+    if (draft.variant_series == 4) {
+        header.enchant = static_cast<uint16_t>(
+            ((draft.enchant_id & 0x0f) << 12) | ((draft.enchant_level & 0x3f) << 6) |
+            ((draft.enchant_remaining & 0xf) << 2) | (draft.chaos_flags & 3));
+    } else {
+        header.enchant = static_cast<uint16_t>(
+            ((draft.enchant_id & 0x1f) << 11) | ((draft.enchant_level & 0x1f) << 6) |
+            ((draft.enchant_remaining & 0xf) << 2) | (draft.chaos_flags & 3));
+    }
     return header;
 }
 

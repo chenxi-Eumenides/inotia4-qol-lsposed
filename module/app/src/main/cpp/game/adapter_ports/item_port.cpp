@@ -461,8 +461,15 @@ QolResult read_inventory_item_view(contracts::QolItemHandle handle,
     // 游戏 ITEM_GetChaosValueRate/ITEM_GetChaosLevel 以 I_ENCHANT bit0|bit1 判定混沌；
     // 非混沌物品的 count 位域不是混沌数据，固定返回 level=0 / rate=100。
     out->chaos = (enchant & 0x3u) != 0 ? 1 : 0;
-    out->enchant_id = (enchant >> 11) & 0x1F;
-    out->enchant_level = (enchant >> 6) & 0x1F;
+    // C18 用 bits6-11 存 6 位强化等级、bits12-15 存 4 位 ID；其他变体为
+    // bits6-10 等级 / bits11-15 ID。
+    if (out->variant_series == 4) {
+        out->enchant_level = (enchant >> 6) & 0x3F;
+        out->enchant_id = (enchant >> 12) & 0x0F;
+    } else {
+        out->enchant_level = (enchant >> 6) & 0x1F;
+        out->enchant_id = (enchant >> 11) & 0x1F;
+    }
     const uint32_t count_field = *reinterpret_cast<const uint32_t*>(bytes + I_COUNT);
     // ITEM_GetChaosLevel 只读 I_COUNT bits0..6（7 位，0..127），不是有符号 byte；
     // 不能按 int8_t 解，否则 bit7 为 1 时会被误报成负数。
