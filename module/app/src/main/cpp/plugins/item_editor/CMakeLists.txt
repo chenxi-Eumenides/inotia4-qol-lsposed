@@ -9,6 +9,7 @@ add_library(qol_plugin_item_editor STATIC
     ui/cards/chaos_rate_card.cpp
     ui/cards/item_card.cpp
     ui/cards/numeric_card.cpp
+    ui/cards/option_card.cpp
     ui/cards/prefix_card.cpp
     ui/cards/quantity_card.cpp
     ui/cards/socket_card.cpp

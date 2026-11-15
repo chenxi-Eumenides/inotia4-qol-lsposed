@@ -295,7 +295,7 @@ uint32_t option_count(uint32_t section) {
         return std::min(g_draft.native_option_count, kQolItemInventoryNativeOptionCapacity);
     if (section == 1) {
         if (g_draft.class_index == kItemClassGem) {
-            return g_draft.jewel_attribute_type_valid ? 1u : 0u;
+            return 1u;
         }
         return std::min(g_draft.jewel_option_count, kQolItemInventoryJewelOptionCapacity);
     }
@@ -326,14 +326,14 @@ bool row_info(uint32_t row, uint32_t* section, uint32_t* index, bool* is_header)
 // 右列表行内 +/× 命中动作。行按钮由列表拥有并随列表销毁；user 上下文
 // 常驻 g_right_hits 静态池，回调只记录待处理动作，改动统一放在下一帧
 // panel_process 安全点执行，不在回调内同步重建列表。
-enum class RightRowAction : uint8_t { kAdd, kDelete };
+enum class RightRowAction : uint8_t { kAdd, kEdit, kDelete };
 struct RightRowHit {
     uint32_t section;
     uint32_t index;
     RightRowAction action;
 };
 // 上限 = 3 个标题 + 3×32 词条行（宝石段实际受 15 限制），取整留裕量。
-constexpr uint32_t kMaxRightRowHits = 128;
+constexpr uint32_t kMaxRightRowHits = 256;
 RightRowHit g_right_hits[kMaxRightRowHits]{};
 uint32_t g_right_hit_count = 0;
 RightRowHit g_pending_right_hit{};
@@ -414,6 +414,8 @@ void process_pending_right_hit() {
     g_pending_right_valid = false;
     g_pending_right_hit = {};
     if (hit.action == RightRowAction::kAdd) add_empty_option(hit.section);
+    else if (hit.action == RightRowAction::kEdit)
+        option_card_open(hit.section, hit.index);
     else delete_option_card_open(hit.section, hit.index);
 }
 
@@ -503,6 +505,8 @@ void draw_right_row(void*, uint32_t row_index, QolUiHandle row, uint8_t) {
     }
     draw_text(row, name, 20, 26, enabled ? kText : kMuted);
     draw_right_text(row, value, 300, 26, value_color, 1);
+    draw_text(row, "编辑", 310, 26,
+              enabled && index < count ? kGold : kMuted, 0, 0);
     draw_text(row, "×", 366, 18, row_delete_available(section, index) ? kGold : kMuted, 1, 2);
 }
 
@@ -655,6 +659,7 @@ void destroy() {
     destroy_prefix_card();
     destroy_numeric_card();
     destroy_delete_option_card();
+    destroy_option_card();
     g_right_hit_count = 0;
     g_pending_right_valid = false;
     g_pending_right_hit = {};
@@ -743,24 +748,32 @@ void rebuild_right_list() {
         uint32_t section = 0, index = 0;
         bool is_header = false;
         if (!row_info(row, &section, &index, &is_header)) continue;
-        const bool hit = is_header ? section_add_available(section)
-                                   : row_delete_available(section, index);
-        if (!hit) continue;
-        RightRowHit& context = g_right_hits[g_right_hit_count];
-        context = RightRowHit{section, index,
-            is_header ? RightRowAction::kAdd : RightRowAction::kDelete};
-        QolUiHandle button = nullptr;
-        if (!succeeded(c->scroll_row_button_create(g_list,row,{340,0,60,75},
-                &right_row_hit_clicked,&context,&button))) {
-            continue;
+        const RightRowAction actions[] = {
+            is_header ? RightRowAction::kAdd : RightRowAction::kEdit,
+            RightRowAction::kDelete};
+        const UiRect hit_rects[] = {{0,0,336,75},{340,0,60,75}};
+        const uint32_t action_count = is_header ? 1u : 2u;
+        for (uint32_t action_index = 0; action_index < action_count &&
+             g_right_hit_count < kMaxRightRowHits; ++action_index) {
+            const bool available = is_header
+                ? section_add_available(section)
+                : action_index == 0
+                    ? section_enabled(section) && index < option_count(section)
+                    : row_delete_available(section, index);
+            if (!available) continue;
+            RightRowHit& context = g_right_hits[g_right_hit_count];
+            context = RightRowHit{section, index, actions[action_index]};
+            QolUiHandle button = nullptr;
+            if (!succeeded(c->scroll_row_button_create(g_list,row,
+                    hit_rects[action_index],&right_row_hit_clicked,&context,&button)))
+                continue;
+            if (adapter == nullptr || adapter->set_draw_proc == nullptr ||
+                !succeeded(adapter->set_draw_proc(button,&noop_draw))) {
+                if (c->destroy != nullptr) (void)c->destroy(button);
+                continue;
+            }
+            ++g_right_hit_count;
         }
-        if (adapter == nullptr || adapter->set_draw_proc == nullptr ||
-            !succeeded(adapter->set_draw_proc(button,&noop_draw))) {
-            // 透明绘制失败时原生底图会遮住行内容；销毁该按钮并放弃命中。
-            if (c->destroy != nullptr) (void)c->destroy(button);
-            continue;
-        }
-        ++g_right_hit_count;
     }
 }
 void rebuild_item_slot() {
@@ -818,6 +831,7 @@ void panel_process() {
     prefix_card_apply();
     numeric_card_apply();
     delete_option_card_apply();
+    option_card_apply();
     process_pending_right_hit();
     if (prefix_card_open_requested()) {
         prefix_card_clear_open_request();
@@ -825,10 +839,12 @@ void panel_process() {
         item_card_clear_open_request();
         numeric_card_clear_open_request();
         delete_option_card_clear_open_request();
+        option_card_clear_open_request();
         destroy_category_card();
         destroy_item_card();
         destroy_numeric_card();
         destroy_delete_option_card();
+        destroy_option_card();
         if (!create_prefix_card()) destroy_prefix_card();
     } else if (numeric_card_open_requested()) {
         numeric_card_clear_open_request();
@@ -836,10 +852,12 @@ void panel_process() {
         item_card_clear_open_request();
         prefix_card_clear_open_request();
         delete_option_card_clear_open_request();
+        option_card_clear_open_request();
         destroy_prefix_card();
         destroy_category_card();
         destroy_item_card();
         destroy_delete_option_card();
+        destroy_option_card();
         if (!create_numeric_card()) destroy_numeric_card();
     } else if (item_card_open_requested()) {
         item_card_clear_open_request();
@@ -847,10 +865,12 @@ void panel_process() {
         prefix_card_clear_open_request();
         numeric_card_clear_open_request();
         delete_option_card_clear_open_request();
+        option_card_clear_open_request();
         destroy_prefix_card();
         destroy_category_card();
         destroy_numeric_card();
         destroy_delete_option_card();
+        destroy_option_card();
         if (!create_item_card()) destroy_item_card();
     } else if (category_card_open_requested()) {
         category_card_clear_open_request();
@@ -858,11 +878,27 @@ void panel_process() {
         item_card_clear_open_request();
         numeric_card_clear_open_request();
         delete_option_card_clear_open_request();
+        option_card_clear_open_request();
         destroy_prefix_card();
         destroy_item_card();
         destroy_numeric_card();
         destroy_delete_option_card();
+        destroy_option_card();
         if (!create_category_card()) destroy_category_card();
+    } else if (option_card_open_requested()) {
+        option_card_clear_open_request();
+        category_card_clear_open_request();
+        item_card_clear_open_request();
+        prefix_card_clear_open_request();
+        numeric_card_clear_open_request();
+        delete_option_card_clear_open_request();
+        destroy_prefix_card();
+        destroy_category_card();
+        destroy_item_card();
+        destroy_numeric_card();
+        destroy_delete_option_card();
+        destroy_option_card();
+        if (!create_option_card()) destroy_option_card();
     } else if (delete_option_card_open_requested()) {
         delete_option_card_clear_open_request();
         category_card_clear_open_request();
@@ -873,6 +909,7 @@ void panel_process() {
         destroy_category_card();
         destroy_item_card();
         destroy_numeric_card();
+        destroy_option_card();
         if (!create_delete_option_card()) destroy_delete_option_card();
     }
     const auto* adapter = ui(); const auto* c = components();
@@ -901,7 +938,7 @@ void panel_process() {
     draw_fixed_category_row();
     if (!category_card_active() && !item_card_active() &&
         !prefix_card_active() && !numeric_card_active() &&
-        !delete_option_card_active()) {
+        !delete_option_card_active() && !option_card_active()) {
         if (g_left_list != nullptr) (void)c->scroll_list_process(g_left_list);
         (void)c->scroll_list_process(g_list);
     }
@@ -913,6 +950,7 @@ void panel_process() {
     draw_prefix_card();
     if (numeric_card_active()) draw_numeric_card();
     draw_delete_option_card();
+    draw_option_card();
     if (adapter->end_frame != nullptr) (void)adapter->end_frame();
 }
 void panel_f3() { panel_destroy(); }
@@ -925,11 +963,12 @@ uint32_t panel_event(uint64_t event,uint64_t param,uint64_t param2) {
         (void)numeric_card_handle_event(event,param,param2,&numeric_consumed);
         return numeric_consumed != 0 ? numeric_consumed : 1;
     }
-    // 前缀卡/删除确认卡存活时吞掉全部事件；物品卡/类别卡未消费时事件继续
-    // 落到主面板 root，派发顺序与拆分前一致。
+    // 模态卡存活时吞掉全部事件；物品卡/类别卡未消费时继续派发给主面板。
     if (prefix_card_handle_event(event,param,param2,&consumed))
         return consumed != 0 ? consumed : 1;
     if (delete_option_card_handle_event(event,param,param2,&consumed))
+        return consumed != 0 ? consumed : 1;
+    if (option_card_handle_event(event,param,param2,&consumed))
         return consumed != 0 ? consumed : 1;
     if (item_card_handle_event(event,param,param2,&consumed) && consumed != 0)
         return consumed;

@@ -68,4 +68,16 @@ bool delete_option_card_active();
 bool delete_option_card_handle_event(uint64_t event, uint64_t param, uint64_t param2,
                                      uint32_t* consumed);
 
+// 统一词条编辑卡：section 0 原生、1 宝石、2 附魔。
+void option_card_open(uint32_t section, uint32_t index);
+bool option_card_open_requested();
+void option_card_clear_open_request();
+bool create_option_card();
+void destroy_option_card();
+void option_card_apply();
+void draw_option_card();
+bool option_card_active();
+bool option_card_handle_event(uint64_t event, uint64_t param, uint64_t param2,
+                              uint32_t* consumed);
+
 }  // namespace qol::features::item_editor
