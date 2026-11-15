@@ -37,7 +37,6 @@ constexpr contracts::UiPanelsApi kUiPanelsApi{
     &ui_panels_block_reason,
     &ui_panels_deactivate_owner,
     &ui_panels_back,
-    &ui_panels_close_if_top,
 };
 
 constexpr contracts::UiChoiceApi kUiChoiceApi{

@@ -15,7 +15,7 @@ namespace qol::contracts {
 
 constexpr const char* kUiPanelsCapabilityId = "ui_panels";
 constexpr int32_t kUiPanelsVersionMajor = 1;
-constexpr int32_t kUiPanelsVersionMinor = 4;
+constexpr int32_t kUiPanelsVersionMinor = 3;
 
 // 设置页条目类型：开关（读 config_key 门禁）/ 动作（点击打开 panel_id）。
 enum class PanelItemKind : uint8_t {
@@ -62,9 +62,6 @@ struct UiPanelsApi {
     const char* (*block_reason)();
     bool (*deactivate_owner)(const char* owner);
     bool (*back)();
-    // Minor 4: 仅当 panel_id 位于栈顶时关闭；被上层面板压住时返回 false，
-    // 避免关闭下层时把上层设置页/卡片一起弹出。
-    bool (*close_if_top)(const char* panel_id);
 };
 
 }  // namespace qol::contracts

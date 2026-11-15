@@ -835,12 +835,6 @@ void panel_process() {
         item_editor_force_disable();
         return;
     }
-    // 功能被关闭但面板可能被设置页压在下层；等它回到栈顶时再由 close_if_top
-    // 安全关闭，避免关闭下层时把上层面板一起弹出。
-    if (!item_editor_enabled()) {
-        panel_request_close();
-        return;
-    }
     category_card_apply();
     item_card_apply();
     prefix_card_apply();

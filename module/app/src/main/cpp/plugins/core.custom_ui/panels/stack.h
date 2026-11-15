@@ -35,7 +35,6 @@ inline void ui_panels_set_callback_probe(bool (*probe)()) {
     ui_panels_components_callback_probe = probe;
 }
 void ui_panels_close(const char* panel_id);
-bool ui_panels_close_if_top(const char* panel_id);
 bool ui_panels_back();
 // 延迟关闭请求：可在弹窗事件/生命周期回调（原生事件遍历中）安全调用，实际 pop/restore
 // 由常驻帧任务在下一帧执行，避免在游戏控件遍历内同步销毁。多处请求同帧合并为一次。
