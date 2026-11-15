@@ -38,6 +38,7 @@ uint32_t g_index = 0;
 int32_t g_id = 0;
 int32_t g_value = 0;
 bool g_jewel_self = false;
+int64_t g_sync_offset = 0;
 char g_error[64]{};
 enum class Action : uint8_t { kNone, kConfirm, kCancel };
 Action g_pending = Action::kNone;
@@ -67,6 +68,7 @@ uint32_t group_first(uint32_t group) {
 uint32_t group_count(uint32_t group) {
     return group == 0 ? 5u : group == 1 ? 12u : g_jewel_self ? 47u : 72u;
 }
+uint32_t display_row_count() { return g_jewel_self ? 47u : 72u; }
 void draw_option_row(void* user, uint32_t row_index, QolUiHandle row, uint8_t) {
     const auto* adapter = ui();
     if (adapter == nullptr || user == nullptr) return;
@@ -191,6 +193,7 @@ void destroy_option_card() {
     g_root = nullptr;
     g_open_requested = false;
     g_pending = Action::kNone;
+    g_sync_offset = 0;
 }
 
 bool create_option_card() {
@@ -221,23 +224,25 @@ bool create_option_card() {
     if (!succeeded(c->panel_create(&card, nullptr, &g_root))) return false;
 
     constexpr int32_t col_x[] = {16, 242, 468};
+    const uint32_t rows = display_row_count();
+    g_sync_offset = 0;
     for (uint32_t group = 0; group < 3; ++group) {
         const uint32_t first = group_first(group);
         const uint32_t count = group_count(group);
+        const int32_t selected = g_id >= static_cast<int32_t>(first) &&
+            g_id < static_cast<int32_t>(first + count)
+                ? static_cast<int32_t>(g_id - first) : -1;
         const UiScrollListDesc list{{col_x[group], 54, 220, 420}, 44,
-            count, g_id >= static_cast<int32_t>(first) &&
-                g_id < static_cast<int32_t>(first + count)
-                    ? g_id - static_cast<int32_t>(first) : -1,
-            &draw_option_row, nullptr, &g_group_indices[group]};
+            rows, selected, &draw_option_row, nullptr, &g_group_indices[group]};
         if (!succeeded(c->scroll_list_create(&list, g_root, &g_columns[group])))
             return false;
         if (!succeeded(c->scroll_list_set_selection_enabled(g_columns[group], 0)))
             return false;
-        if (list.initial_selected >= 0 && c->scroll_set_offset != nullptr) {
-            const int32_t visible_rows = 9;
-            const int32_t offset = list.initial_selected > visible_rows
-                ? (list.initial_selected - visible_rows) * 44 : 0;
-            (void)c->scroll_set_offset(g_columns[group], offset);
+        if (selected >= 0) {
+            constexpr int32_t visible_rows = 9;
+            const int64_t offset = selected > visible_rows
+                ? static_cast<int64_t>(selected - visible_rows) * 44 : 0;
+            g_sync_offset = std::max(g_sync_offset, offset);
         }
         for (uint32_t row = 0; row < count; ++row) {
             const uint32_t id = first + row;
@@ -250,6 +255,11 @@ bool create_option_card() {
                 if (c->destroy != nullptr) (void)c->destroy(button);
                 return false;
             }
+        }
+    }
+    if (g_sync_offset > 0 && c->scroll_set_offset != nullptr) {
+        for (QolUiHandle column : g_columns) {
+            if (column != nullptr) (void)c->scroll_set_offset(column, g_sync_offset);
         }
     }
 
@@ -289,14 +299,37 @@ void draw_option_card() {
         const UiContainerStyleDesc style{card, 0x0000, 60, 1};
         (void)c->draw_container_styled(&style);
     }
+    int64_t offsets[3] = {g_sync_offset, g_sync_offset, g_sync_offset};
+    for (uint32_t group = 0; group < 3; ++group) {
+        if (g_columns[group] != nullptr) {
+            (void)c->scroll_list_process(g_columns[group]);
+            if (c->scroll_list_get_offset != nullptr)
+                (void)c->scroll_list_get_offset(g_columns[group], &offsets[group]);
+        }
+    }
+    int64_t target = g_sync_offset;
+    bool moved = false;
+    for (int64_t offset : offsets) {
+        if (offset != g_sync_offset) {
+            target = offset;
+            moved = true;
+        }
+    }
+    if (moved) {
+        g_sync_offset = target;
+        if (c->scroll_set_offset != nullptr) {
+            for (uint32_t group = 0; group < 3; ++group) {
+                if (g_columns[group] != nullptr && offsets[group] != target)
+                    (void)c->scroll_set_offset(g_columns[group], target);
+            }
+        }
+    }
     for (uint32_t group = 0; group < 3; ++group) {
         constexpr const char* group_names[] = {"基本", "进阶", "特殊"};
         constexpr int32_t col_x[] = {16, 242, 468};
         draw_text(g_root, group_names[group], col_x[group] + 110, 24, kGold, 2, 1);
-        if (g_columns[group] != nullptr) {
-            (void)c->scroll_list_process(g_columns[group]);
+        if (g_columns[group] != nullptr)
             (void)c->scroll_list_draw(g_columns[group]);
-        }
     }
     char name[128]{};
     char value[48]{};

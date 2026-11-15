@@ -1919,14 +1919,21 @@ QolResult native_toggle_draw(contracts::QolUiHandle handle) {
                                          component->value, pressed != 0 ? 1 : 0);
 }
 
-void scroll_content_draw(contracts::QolUiHandle handle, int64_t) {
+void scroll_content_draw(contracts::QolUiHandle handle, int64_t displacement) {
     Component* list = find_component(handle);
     if (list == nullptr || list->pending_destroy || list->draw_item == nullptr) return;
     CallbackScope scope;
-    // 原生已完成内容平移及 clip；直接回调消费者自绘每一行，不经原生 draw_control，
-    // 以免原生按钮绘制读取/写入内联文本缓冲。
+    // 原生已完成内容平移及 clip；只回调与视口相交的行，避免长列表每帧绘制全部行。
+    const int64_t row_height = list->rows.empty()
+        ? 0 : list->content_extent / static_cast<int64_t>(list->rows.size());
+    const int64_t view_top = std::max<int64_t>(0, displacement);
+    const int64_t view_bottom = view_top + static_cast<int64_t>(list->rect.h);
     for (const auto& row : list->rows) {
         if (list->pending_destroy) break;
+        if (row_height > 0) {
+            const int64_t row_top = static_cast<int64_t>(row.index) * row_height;
+            if (row_top + row_height <= view_top || row_top >= view_bottom) continue;
+        }
         list->draw_item(list->user, row.index, row.native,
                         list->selected == static_cast<int32_t>(row.index) ? 1 : 0);
     }
