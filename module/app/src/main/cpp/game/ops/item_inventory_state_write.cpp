@@ -1554,33 +1554,19 @@ QolResult apply_payload_to_item(contracts::QolItemHandle item, const uint8_t* pa
                                             : result;
     }
 
-    size_t target_options = 0;
-    size_t temp_options = 0;
-    for (void* node = *reinterpret_cast<void**>(static_cast<uint8_t*>(target) + I_OPTION_LIST);
-         node != nullptr;
-         node = *reinterpret_cast<void**>(static_cast<uint8_t*>(node) + O_NEXT)) {
-        ++target_options;
-    }
-    for (void* node = *reinterpret_cast<void**>(static_cast<uint8_t*>(temp) + I_OPTION_LIST);
-         node != nullptr;
-         node = *reinterpret_cast<void**>(static_cast<uint8_t*>(node) + O_NEXT)) {
-        ++temp_options;
-    }
-    if (target_options != temp_options) {
-        (void)free_loaded_item(temp_handle);
-        return transfer_error(kQolErrUnsupported, "payload option structure changed");
-    }
-
+    // 词条链表节点由 ITEMOPTPOOL 独立分配，ITEMPOOL_Free 会释放 item+0x20
+    // 指向的整条链表。这里整体交换链表：目标拿临时物品的新链表，临时物品
+    // 接住目标的旧链表后随 free_loaded_item 一起释放。因此替换不再要求两边
+    // 节点数相同，也不会泄漏旧节点。
+    void** target_list = reinterpret_cast<void**>(
+        static_cast<uint8_t*>(target) + I_OPTION_LIST);
+    void** temp_list = reinterpret_cast<void**>(
+        static_cast<uint8_t*>(temp) + I_OPTION_LIST);
+    void* old_list = *target_list;
+    void* new_list = *temp_list;
     std::memcpy(target, temp, I_OPTION_LIST);
-    void* target_node =
-        *reinterpret_cast<void**>(static_cast<uint8_t*>(target) + I_OPTION_LIST);
-    void* temp_node = *reinterpret_cast<void**>(static_cast<uint8_t*>(temp) + I_OPTION_LIST);
-    while (target_node != nullptr && temp_node != nullptr) {
-        std::memcpy(static_cast<uint8_t*>(target_node) + O_INDEX,
-                    static_cast<uint8_t*>(temp_node) + O_INDEX, 4);
-        target_node = *reinterpret_cast<void**>(static_cast<uint8_t*>(target_node) + O_NEXT);
-        temp_node = *reinterpret_cast<void**>(static_cast<uint8_t*>(temp_node) + O_NEXT);
-    }
+    *target_list = new_list;
+    *temp_list = old_list;
     const QolResult freed = free_loaded_item(temp_handle);
     if (!contracts::succeeded(freed) && freed.code != kQolErrNotFound) return freed;
     return contracts::ok();
