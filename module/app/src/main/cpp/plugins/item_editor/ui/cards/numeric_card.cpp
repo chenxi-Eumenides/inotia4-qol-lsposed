@@ -56,41 +56,19 @@ void cancel_clicked(void*) {
 // 混沌改动后按基础属性重算派生值；need_level 按
 // clamp(base_need_level + chaos_level, 0, 105) 补混沌加成。读取失败保留当前派生值。
 void recalc_chaos_derived() {
-    const auto* port = item_port();
-    if (port == nullptr || port->read.read_item_base_stats_ex == nullptr) {
-        panel_internal::log_panel(
-            "fail op=chaos_derived result=failed stage=api code=-1 reason=api_unavailable");
-        return;
-    }
-    if (!draft_has_item(panel_internal::g_draft)) return;
     QolItemBaseStats stats{};
-    const QolResult result = port->read.read_item_base_stats_ex(
-        panel_internal::g_draft.item_id, panel_internal::g_draft.raw_rarity, &stats);
-    if (!succeeded(result)) {
-        char message[128]{};
-        std::snprintf(message, sizeof(message),
-            "fail item=%d op=chaos_derived result=failed stage=read code=%d"
-            " reason=base_stats_read_failed",
-            panel_internal::g_draft.item_id, result.code);
-        panel_internal::log_panel(message);
+    if (!panel_internal::read_draft_full_stats(panel_internal::g_draft, &stats)) {
+        panel_internal::log_panel(
+            "fail op=chaos_derived result=failed stage=read"
+            " reason=full_stats_read_failed");
         return;
     }
-    // 混沌数值率是伤害/防御的乘数：value * rate / 100；魔法攻击由
-    // damage * magic_rate / 100 得出，因此会随伤害一起变化。等级只加装备等级。
-    const bool chaos = (panel_internal::g_draft.chaos_flags & 3) != 0;
-    const int32_t rate = chaos
-        ? std::clamp(panel_internal::g_draft.chaos_rate, 0, 255) : 100;
-    const auto apply_rate = [rate](int32_t base) {
-        if (base <= 0) return base;
-        const int64_t scaled = static_cast<int64_t>(base) * rate / 100;
-        return scaled > 0 ? static_cast<int32_t>(scaled) : 1;
-    };
-    panel_internal::g_draft.damage = apply_rate(stats.damage);
-    panel_internal::g_draft.defense = apply_rate(stats.defense);
+    // 原版 ITEM_GetDamage/Defense/EquipLevel 已依次应用品级、强化和混沌；
+    // 这里不再二次乘混沌率。
+    panel_internal::g_draft.damage = stats.damage;
+    panel_internal::g_draft.defense = stats.defense;
     panel_internal::g_draft.magic_rate = stats.magic_rate;
-    // 混沌等级固定为 0；需要等级仍按 CONSTBASE 行 13 的 105 上限夹紧。
-    panel_internal::g_draft.need_level =
-        std::clamp(stats.need_level, 0, 105);
+    panel_internal::g_draft.need_level = stats.need_level;
 }
 
 void draw_card_button(QolUiHandle button, const char* label,
@@ -328,6 +306,7 @@ void numeric_card_apply() {
                 panel_internal::g_draft.enchant_level =
                     std::clamp(g_value, g_min, g_max);
                 panel_internal::g_draft.dirty = true;
+                recalc_chaos_derived();
                 break;
             case NumericCardTarget::kSocketTotal:
                 // 孔数不重建列表、不重算派生属性（基础伤害/防御/需要等级不变）。

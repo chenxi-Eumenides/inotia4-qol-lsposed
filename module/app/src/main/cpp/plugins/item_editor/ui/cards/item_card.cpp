@@ -261,7 +261,7 @@ bool create_item_card() {
         c->item_slot_set == nullptr || c->item_slot_set_flags == nullptr ||
         adapter->set_draw_proc == nullptr || !item_class_valid(g_draft.class_index) ||
         port->read.draw_icon_id == nullptr ||
-        port->read.read_item_base_stats_ex == nullptr) {
+        port->read.read_item_stats_full == nullptr) {
         log_panel("op=item_card_create result=failed stage=precondition code=-1");
         return false;
     }
@@ -273,8 +273,10 @@ bool create_item_card() {
     g_item_card_levels.resize(g_item_card_ids.size(),-1);
     for (size_t index = 0; index < g_item_card_ids.size(); ++index) {
         QolItemBaseStats stats{};
-        if (succeeded(port->read.read_item_base_stats_ex(
-                g_item_card_ids[index],g_draft.raw_rarity,&stats))) {
+        if (succeeded(port->read.read_item_stats_full(
+                g_item_card_ids[index],g_draft.raw_rarity,g_draft.enchant_id,
+                g_draft.enchant_level,g_draft.chaos_flags,g_draft.chaos_level,
+                g_draft.chaos_rate,&stats))) {
             g_item_card_levels[index] = stats.need_level;
         }
     }
@@ -459,28 +461,20 @@ void item_card_apply() {
     if (action == ItemCardAction::kConfirm && g_item_card_selected_id >= 0) {
         g_draft.item_id = g_item_card_selected_id;
         g_draft.item_type = item_type_for_class(g_draft.class_index);
-        const auto* port = item_port();
-        if (port != nullptr && port->read.read_item_base_stats_ex != nullptr) {
-            QolItemBaseStats stats{};
-            const QolResult result =
-                port->read.read_item_base_stats_ex(
-                    g_draft.item_id,g_draft.raw_rarity,&stats);
-            if (succeeded(result)) {
-                g_draft.damage = stats.damage;
-                g_draft.defense = stats.defense;
-                g_draft.magic_rate = stats.magic_rate;
-                g_draft.need_level = stats.need_level;
-                g_draft.stackable = stats.stackable != 0;
-                if (!g_draft.stackable) g_draft.count = 1;
-            } else {
-                char message[128]{};
-                std::snprintf(message,sizeof(message),
-                    "fail item=%d op=load_item_stats result=failed stage=read code=%d reason=base_stats_read_failed",
-                    g_draft.item_id,result.code);
-                log_panel(message);
-            }
+        QolItemBaseStats stats{};
+        if (read_draft_full_stats(g_draft, &stats)) {
+            g_draft.damage = stats.damage;
+            g_draft.defense = stats.defense;
+            g_draft.magic_rate = stats.magic_rate;
+            g_draft.need_level = stats.need_level;
+            g_draft.stackable = stats.stackable != 0;
+            if (!g_draft.stackable) g_draft.count = 1;
         } else {
-            log_panel("fail op=load_item_stats result=failed stage=api code=-1 reason=api_unavailable");
+            char message[128]{};
+            std::snprintf(message,sizeof(message),
+                "fail item=%d op=load_item_stats result=failed stage=read reason=full_stats_read_failed",
+                g_draft.item_id);
+            log_panel(message);
         }
         g_draft.dirty = true;
         changed = true;

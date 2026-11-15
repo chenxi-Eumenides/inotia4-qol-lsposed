@@ -242,27 +242,20 @@ void prefix_card_apply() {
         g_draft.raw_rarity = g_prefix_selected_raw;
         g_draft.dirty = true;
         if (draft_has_item(g_draft)) {
-            const auto* port = item_port();
-            if (port != nullptr && port->read.read_item_base_stats_ex != nullptr) {
-                QolItemBaseStats stats{};
-                const QolResult result = port->read.read_item_base_stats_ex(
-                    g_draft.item_id,g_draft.raw_rarity,&stats);
-                if (succeeded(result)) {
-                    g_draft.damage = stats.damage;
-                    g_draft.defense = stats.defense;
-                    g_draft.magic_rate = stats.magic_rate;
-                    g_draft.need_level = stats.need_level;
-                    g_draft.stackable = stats.stackable != 0;
-                    if (!g_draft.stackable) g_draft.count = 1;
-                } else {
-                    char message[128]{};
-                    std::snprintf(message,sizeof(message),
-                        "fail item=%d op=load_item_stats result=failed stage=read code=%d reason=base_stats_read_failed",
-                        g_draft.item_id,result.code);
-                    log_panel(message);
-                }
+            QolItemBaseStats stats{};
+            if (read_draft_full_stats(g_draft, &stats)) {
+                g_draft.damage = stats.damage;
+                g_draft.defense = stats.defense;
+                g_draft.magic_rate = stats.magic_rate;
+                g_draft.need_level = stats.need_level;
+                g_draft.stackable = stats.stackable != 0;
+                if (!g_draft.stackable) g_draft.count = 1;
             } else {
-                log_panel("fail op=load_item_stats result=failed stage=api code=-1 reason=api_unavailable");
+                char message[128]{};
+                std::snprintf(message,sizeof(message),
+                    "fail item=%d op=load_item_stats result=failed stage=read reason=full_stats_read_failed",
+                    g_draft.item_id);
+                log_panel(message);
             }
         }
     }

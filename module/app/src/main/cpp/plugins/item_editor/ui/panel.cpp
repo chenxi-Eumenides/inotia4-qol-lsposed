@@ -123,6 +123,15 @@ void read_item() {
     }
 }
 
+bool read_draft_full_stats(const ItemEditorDraft& draft, QolItemBaseStats* out) {
+    const auto* port = item_port();
+    if (port == nullptr || port->read.read_item_stats_full == nullptr ||
+        out == nullptr || !draft_has_item(draft)) return false;
+    return succeeded(port->read.read_item_stats_full(
+        draft.item_id, draft.raw_rarity, draft.enchant_id, draft.enchant_level,
+        draft.chaos_flags, draft.chaos_level, draft.chaos_rate, out));
+}
+
 const char* static_text(QolItemStaticTextKind kind, int32_t id) {
     const auto* port = item_port();
     const char* text = nullptr;

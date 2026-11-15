@@ -1,5 +1,6 @@
 #include "game/adapter_ports/item_port.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <mutex>
@@ -81,6 +82,71 @@ QolResult read_item_base_stats(int32_t item_id, contracts::QolItemBaseStats* out
 QolResult read_item_base_stats_ex(int32_t item_id, int32_t raw_rarity,
                                   contracts::QolItemBaseStats* out) {
     return read_item_base_stats_impl(item_id, raw_rarity, out);
+}
+
+QolResult read_item_stats_full(int32_t item_id, int32_t raw_rarity,
+                               int32_t enchant_id, int32_t enchant_level,
+                               int32_t chaos_flags, int32_t chaos_level,
+                               int32_t chaos_rate, contracts::QolItemBaseStats* out) {
+    if (out == nullptr || item_id < 0 || raw_rarity < 0 || raw_rarity > 14) {
+        return error_result(kQolErrInvalidArgument, "invalid item stats args");
+    }
+    if (g_base == 0) return not_ready();
+    const auto* count_slot = reinterpret_cast<const uint16_t*>(
+        g_base + G_ITEMDATABASE_N_RECORD_COUNT_VMA);
+    if (!game_memory_accessible(count_slot, sizeof(*count_slot), 'r')) return not_ready();
+    if (item_id >= *count_slot) {
+        return error_result(kQolErrInvalidArgument, "item id out of range");
+    }
+    auto* data_slot = reinterpret_cast<void**>(g_base + G_ITEMDATABASE_DATA_VMA);
+    auto* size_slot = reinterpret_cast<const uint8_t*>(g_base + G_ITEMDATABASE_N_RECORD_SIZE_VMA);
+    if (!game_memory_accessible(data_slot, sizeof(*data_slot), 'r') ||
+        !game_memory_accessible(size_slot, sizeof(*size_slot), 'r')) return not_ready();
+    const auto* data = static_cast<const uint8_t*>(*data_slot);
+    const uint8_t record_size = *size_slot;
+    if (data == nullptr || record_size < 7) return not_ready();
+    const auto* record = data + static_cast<size_t>(item_id) * record_size;
+    if (!game_memory_accessible(record, 7, 'r')) return not_ready();
+    const int32_t class_index = record[2];
+    const int32_t stackable = (record[6] & 1u) != 0 ? 1 : 0;
+    const bool equipment = class_index >= 0 && class_index <= 21;
+    if (fn_get_damage == nullptr || fn_get_defense == nullptr ||
+        fn_item_get_ability_level == nullptr ||
+        (equipment && fn_item_get_equip_level == nullptr)) return not_ready();
+
+    alignas(8) uint8_t item[0x40]{};
+    const uint16_t type = static_cast<uint16_t>(
+        ((item_id & I_TYPE_CATEGORY_MASK) << I_TYPE_CATEGORY_SHIFT) | (raw_rarity << 2));
+    std::memcpy(item + I_TYPE, &type, sizeof(type));
+
+    const bool c18 = qol::game_variant().series == qol::GameSeries::kC18;
+    const int32_t level = std::clamp(enchant_level, 0, c18 ? 63 : 31);
+    const int32_t id = std::clamp(enchant_id, 0, c18 ? 15 : 31);
+    const uint32_t flags = static_cast<uint32_t>(chaos_flags & 3);
+    const uint32_t chaos_level_value = static_cast<uint32_t>(std::clamp(chaos_level, 0, 127));
+    const uint32_t chaos_rate_value = static_cast<uint32_t>(std::clamp(chaos_rate, 0, 255));
+    uint16_t enchant = 0;
+    if (c18) {
+        enchant = static_cast<uint16_t>((id << 12) | (level << 6) | flags);
+    } else {
+        enchant = static_cast<uint16_t>((id << 11) | (level << 6) | flags);
+    }
+    std::memcpy(item + I_ENCHANT, &enchant, sizeof(enchant));
+
+    uint32_t count_field = equipment ? (100u << 25) : 0;
+    if (equipment && flags != 0) {
+        count_field |= chaos_level_value | (chaos_rate_value << 8);
+    }
+    std::memcpy(item + I_COUNT, &count_field, sizeof(count_field));
+
+    out->damage = fn_get_damage(item);
+    out->defense = fn_get_defense(item);
+    out->magic_rate = item_class_magic_rate(class_index);
+    out->need_level = equipment ? fn_item_get_equip_level(item)
+                                : fn_item_get_ability_level(item);
+    out->need_level = std::clamp(out->need_level, 0, 105);
+    out->stackable = stackable;
+    return contracts::ok();
 }
 
 QolResult resolve_item_handle(contracts::QolItemHandle handle, void** out_item) {
@@ -679,7 +745,7 @@ const contracts::QolItemPort kItemPort{
             &read_free_item, &read_native_bag_layout, &read_bag_capacity,
             &read_slot_occupied, &draw_icon, &draw_icon_address, &draw_icon_id,
             &read_item_class_index, &read_item_base_stats, &read_item_base_stats_ex,
-            &read_drop_item},
+            &read_drop_item, &read_item_stats_full},
 };
 
 }  // namespace

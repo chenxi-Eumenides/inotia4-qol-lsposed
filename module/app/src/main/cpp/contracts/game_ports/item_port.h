@@ -246,6 +246,13 @@ struct QolItemPortReadApi {
                                          QolItemBaseStats* out);
     // 5.6：把 detached 物品放入当前地图掉落池（角色脚下），成功后句柄失效。
     QolResult (*drop_item)(QolItemHandle item);
+    // 5.7：按完整物品字段读取游戏原版最终伤害/防御/所需等级。
+    // 字符串按当前变体写入 I_ENCHANT，count 字段写装备 marker + 混沌等级/倍率；
+    // damage/defense 依次经过原版品级、强化、混沌计算，不返回未应用混沌的中间值。
+    QolResult (*read_item_stats_full)(int32_t item_id, int32_t raw_rarity,
+                                      int32_t enchant_id, int32_t enchant_level,
+                                      int32_t chaos_flags, int32_t chaos_level,
+                                      int32_t chaos_rate, QolItemBaseStats* out);
 };
 
 struct QolItemPort {
@@ -320,6 +327,13 @@ inline bool qol_item_port_drop_size_valid(const QolItemPort* port) {
     constexpr uint32_t kRequiredSize = static_cast<uint32_t>(
         offsetof(QolItemPort, read) + offsetof(QolItemPortReadApi, drop_item) +
         sizeof(decltype(QolItemPortReadApi::drop_item)));
+    return port != nullptr && port->struct_size >= kRequiredSize;
+}
+
+inline bool qol_item_port_stats_full_size_valid(const QolItemPort* port) {
+    constexpr uint32_t kRequiredSize = static_cast<uint32_t>(
+        offsetof(QolItemPort, read) + offsetof(QolItemPortReadApi, read_item_stats_full) +
+        sizeof(decltype(QolItemPortReadApi::read_item_stats_full)));
     return port != nullptr && port->struct_size >= kRequiredSize;
 }
 
