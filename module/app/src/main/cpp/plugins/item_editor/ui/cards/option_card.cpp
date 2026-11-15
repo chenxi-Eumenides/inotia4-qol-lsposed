@@ -12,8 +12,8 @@ namespace {
 using namespace contracts;
 using namespace panel_internal;
 
-constexpr int32_t kCardW = 760;
-constexpr int32_t kCardH = 500;
+constexpr int32_t kCardW = 912;
+constexpr int32_t kCardH = 550;
 constexpr uint32_t kOptionIdCount = 89;
 constexpr int32_t kOptionValueMin = -32768;
 constexpr int32_t kOptionValueMax = 32767;
@@ -82,10 +82,10 @@ void draw_option_row(void* user, uint32_t row_index, QolUiHandle row, uint8_t) {
         int32_t pressed = 0;
         if (adapter->control_pressed != nullptr)
             (void)adapter->control_pressed(row, &pressed);
-        (void)adapter->draw_help_option_row({abs_x + 2, abs_y + 1, 164, 38},
+        (void)adapter->draw_help_option_row({abs_x + 2, abs_y + 1, 194, 42},
             static_cast<uint8_t>(id == g_id), static_cast<uint8_t>(pressed != 0));
     }
-    draw_text(row, label, 8, 12, id == g_id ? kGold : kText, 0, 0);
+    draw_text(row, label, 8, 14, id == g_id ? kGold : kText, 0, 0);
 }
 
 void draw_card_button(QolUiHandle button, const char* label,
@@ -206,11 +206,11 @@ bool create_option_card() {
     const UiPanelDesc card{card_rect, {0, 0, kCardW, kCardH}, 0, 0};
     if (!succeeded(c->panel_create(&card, nullptr, &g_root))) return false;
 
-    constexpr int32_t col_x[] = {16, 190, 364};
+    constexpr int32_t col_x[] = {16, 226, 436};
     for (uint32_t group = 0; group < 3; ++group) {
         const uint32_t first = group_first(group);
         const uint32_t count = group_count(group);
-        const UiScrollListDesc list{{col_x[group], 54, 170, 356}, 40,
+        const UiScrollListDesc list{{col_x[group], 54, 200, 420}, 44,
             count, g_id >= static_cast<int32_t>(first) &&
                 g_id < static_cast<int32_t>(first + count)
                     ? g_id - static_cast<int32_t>(first) : -1,
@@ -220,9 +220,9 @@ bool create_option_card() {
         if (!succeeded(c->scroll_list_set_selection_enabled(g_columns[group], 0)))
             return false;
         if (list.initial_selected >= 0 && c->scroll_set_offset != nullptr) {
-            const int32_t visible_rows = 8;
+            const int32_t visible_rows = 9;
             const int32_t offset = list.initial_selected > visible_rows
-                ? (list.initial_selected - visible_rows) * 40 : 0;
+                ? (list.initial_selected - visible_rows) * 44 : 0;
             (void)c->scroll_set_offset(g_columns[group], offset);
         }
         for (uint32_t row = 0; row < count; ++row) {
@@ -230,7 +230,7 @@ bool create_option_card() {
             g_rows[id].id = static_cast<int32_t>(id);
             QolUiHandle button = nullptr;
             if (!succeeded(c->scroll_row_button_create(g_columns[group], row,
-                    {2, 1, 164, 38}, &row_clicked, &g_rows[id], &button)))
+                    {2, 1, 194, 42}, &row_clicked, &g_rows[id], &button)))
                 return false;
             if (!succeeded(adapter->set_draw_proc(button, &noop_draw))) {
                 if (c->destroy != nullptr) (void)c->destroy(button);
@@ -242,7 +242,7 @@ bool create_option_card() {
     for (uint32_t index = 0; index < 8; ++index) {
         const int32_t col = static_cast<int32_t>(index % 2);
         const int32_t row = static_cast<int32_t>(index / 2);
-        const UiButtonDesc button{{548 + col * 96, 274 + row * 48, 88, 40},
+        const UiButtonDesc button{{660 + col * 106, 284 + row * 46, 96, 44},
             "", 0, &adjust_clicked, &g_deltas[index]};
         if (!succeeded(c->button_create(&button, g_root, &g_adjust[index])) ||
             !succeeded(adapter->set_draw_proc(g_adjust[index], &noop_draw)))
@@ -250,12 +250,12 @@ bool create_option_card() {
     }
 
     const UiPanelDesc footer_desc{{panel.x + (panel.w - kCardW) / 2,
-        panel.y + (panel.h - kCardH) / 2 + 438, kCardW, 48}, {0, 0, kCardW, 48}, 0, 0};
+        panel.y + (panel.h - kCardH) / 2 + 488, kCardW, 48}, {0, 0, kCardW, 48}, 0, 0};
     if (!succeeded(c->panel_create(&footer_desc, nullptr, &g_footer))) return false;
-    const UiButtonDesc confirm{{230, 0, 140, 48}, "", 0, &confirm_clicked, nullptr};
+    const UiButtonDesc confirm{{316, 0, 140, 48}, "", 0, &confirm_clicked, nullptr};
     if (!succeeded(c->button_create(&confirm, g_footer, &g_confirm)) ||
         !succeeded(adapter->set_draw_proc(g_confirm, &noop_draw))) return false;
-    const UiButtonDesc cancel{{390, 0, 140, 48}, "", 0, &cancel_clicked, nullptr};
+    const UiButtonDesc cancel{{476, 0, 140, 48}, "", 0, &cancel_clicked, nullptr};
     if (!succeeded(c->button_create(&cancel, g_footer, &g_cancel)) ||
         !succeeded(adapter->set_draw_proc(g_cancel, &noop_draw))) return false;
     return true;
@@ -277,8 +277,8 @@ void draw_option_card() {
     }
     for (uint32_t group = 0; group < 3; ++group) {
         constexpr const char* group_names[] = {"基本", "进阶", "特殊"};
-        constexpr int32_t col_x[] = {16, 190, 364};
-        draw_text(g_root, group_names[group], col_x[group] + 85, 24, kGold, 2, 1);
+        constexpr int32_t col_x[] = {16, 226, 436};
+        draw_text(g_root, group_names[group], col_x[group] + 100, 24, kGold, 2, 1);
         if (g_columns[group] != nullptr) {
             (void)c->scroll_list_process(g_columns[group]);
             (void)c->scroll_list_draw(g_columns[group]);
@@ -297,17 +297,17 @@ void draw_option_card() {
         std::snprintf(value, sizeof(value), "%+.1f%%", static_cast<double>(g_value) / 10.0);
     else
         std::snprintf(value, sizeof(value), "%+d", g_value);
-    draw_text(g_root, source_title, 548, 30, kGold, 0, 1);
-    draw_text(g_root, name, 548, 72, kText, 0, 1);
+    draw_text(g_root, source_title, 660, 30, kGold, 0, 1);
+    draw_text(g_root, name, 660, 72, kText, 0, 1);
     char id_text[32]{};
     std::snprintf(id_text, sizeof(id_text), "ID %d", g_id);
-    draw_text(g_root, id_text, 548, 112, kMuted, 0, 0);
-    draw_text(g_root, "当前数值", 548, 170, kMuted, 0, 0);
-    draw_text(g_root, value, 548, 204, kGold, 0, 1);
+    draw_text(g_root, id_text, 660, 112, kMuted, 0, 0);
+    draw_text(g_root, "当前数值", 660, 170, kMuted, 0, 0);
+    draw_text(g_root, value, 660, 204, kGold, 0, 1);
     for (uint32_t index = 0; index < 8; ++index) {
         char label[16]{};
         std::snprintf(label, sizeof(label), "%+d", g_deltas[index]);
-        draw_card_button(g_adjust[index], label, 88, 40);
+        draw_card_button(g_adjust[index], label, 96, 44);
     }
     draw_card_button(g_confirm, "确认", 140, 48);
     draw_card_button(g_cancel, "取消", 140, 48);

@@ -326,7 +326,7 @@ bool row_info(uint32_t row, uint32_t* section, uint32_t* index, bool* is_header)
 // 右列表行内 +/× 命中动作。行按钮由列表拥有并随列表销毁；user 上下文
 // 常驻 g_right_hits 静态池，回调只记录待处理动作，改动统一放在下一帧
 // panel_process 安全点执行，不在回调内同步重建列表。
-enum class RightRowAction : uint8_t { kAdd, kEdit, kDelete };
+enum class RightRowAction : uint8_t { kAdd, kDelete };
 struct RightRowHit {
     uint32_t section;
     uint32_t index;
@@ -343,6 +343,15 @@ void right_row_hit_clicked(void* user) {
     if (user == nullptr) return;
     g_pending_right_hit = *static_cast<const RightRowHit*>(user);
     g_pending_right_valid = true;
+}
+
+// 行本体点击打开词条编辑卡；行内 +/× 子按钮会先消费自己的区域。
+void right_row_selected(void*, uint32_t row_index) {
+    uint32_t section = 0, index = 0;
+    bool is_header = false;
+    if (!row_info(row_index, &section, &index, &is_header) || is_header) return;
+    if (!section_enabled(section) || index >= option_count(section)) return;
+    option_card_open(section, index);
 }
 
 // 标题行 + 是否可用：段禁用、宝石本体段或达到容量/孔数上限时不可添加。
@@ -414,8 +423,6 @@ void process_pending_right_hit() {
     g_pending_right_valid = false;
     g_pending_right_hit = {};
     if (hit.action == RightRowAction::kAdd) add_empty_option(hit.section);
-    else if (hit.action == RightRowAction::kEdit)
-        option_card_open(hit.section, hit.index);
     else delete_option_card_open(hit.section, hit.index);
 }
 
@@ -505,8 +512,6 @@ void draw_right_row(void*, uint32_t row_index, QolUiHandle row, uint8_t) {
     }
     draw_text(row, name, 20, 26, enabled ? kText : kMuted);
     draw_right_text(row, value, 300, 26, value_color, 1);
-    draw_text(row, "编辑", 310, 26,
-              enabled && index < count ? kGold : kMuted, 0, 0);
     draw_text(row, "×", 366, 18, row_delete_available(section, index) ? kGold : kMuted, 1, 2);
 }
 
@@ -738,9 +743,10 @@ void rebuild_right_list() {
     g_right_hit_count = 0;
     const uint32_t rows = 3 + option_count(0) + option_count(1) + option_count(2);
     const UiScrollListDesc list{{470,44,400,472},kRightRowH,rows,-1,
-        &draw_right_row,nullptr,nullptr};
+        &draw_right_row,&right_row_selected,nullptr};
     (void)c->scroll_list_create(&list,g_root,&g_list);
     if (g_list == nullptr) return;
+    (void)c->scroll_list_set_selection_enabled(g_list,1);
     // +/× 命中按钮：随列表销毁的行内子按钮，透明绘制，只覆盖图标区域；
     // user 指向 g_right_hits 静态池条目，回调后仍需保持有效。
     const auto* adapter = ui();
@@ -748,32 +754,24 @@ void rebuild_right_list() {
         uint32_t section = 0, index = 0;
         bool is_header = false;
         if (!row_info(row, &section, &index, &is_header)) continue;
-        const RightRowAction actions[] = {
-            is_header ? RightRowAction::kAdd : RightRowAction::kEdit,
-            RightRowAction::kDelete};
-        const UiRect hit_rects[] = {{0,0,336,75},{340,0,60,75}};
-        const uint32_t action_count = is_header ? 1u : 2u;
-        for (uint32_t action_index = 0; action_index < action_count &&
-             g_right_hit_count < kMaxRightRowHits; ++action_index) {
-            const bool available = is_header
-                ? section_add_available(section)
-                : action_index == 0
-                    ? section_enabled(section) && index < option_count(section)
-                    : row_delete_available(section, index);
-            if (!available) continue;
-            RightRowHit& context = g_right_hits[g_right_hit_count];
-            context = RightRowHit{section, index, actions[action_index]};
-            QolUiHandle button = nullptr;
-            if (!succeeded(c->scroll_row_button_create(g_list,row,
-                    hit_rects[action_index],&right_row_hit_clicked,&context,&button)))
-                continue;
-            if (adapter == nullptr || adapter->set_draw_proc == nullptr ||
-                !succeeded(adapter->set_draw_proc(button,&noop_draw))) {
-                if (c->destroy != nullptr) (void)c->destroy(button);
-                continue;
-            }
-            ++g_right_hit_count;
+        const RightRowAction action =
+            is_header ? RightRowAction::kAdd : RightRowAction::kDelete;
+        const UiRect hit_rect{340,0,60,75};
+        const bool available = is_header ? section_add_available(section)
+                                         : row_delete_available(section, index);
+        if (!available) continue;
+        RightRowHit& context = g_right_hits[g_right_hit_count];
+        context = RightRowHit{section, index, action};
+        QolUiHandle button = nullptr;
+        if (!succeeded(c->scroll_row_button_create(g_list,row,
+                hit_rect,&right_row_hit_clicked,&context,&button)))
+            continue;
+        if (adapter == nullptr || adapter->set_draw_proc == nullptr ||
+            !succeeded(adapter->set_draw_proc(button,&noop_draw))) {
+            if (c->destroy != nullptr) (void)c->destroy(button);
+            continue;
         }
+        ++g_right_hit_count;
     }
 }
 void rebuild_item_slot() {
