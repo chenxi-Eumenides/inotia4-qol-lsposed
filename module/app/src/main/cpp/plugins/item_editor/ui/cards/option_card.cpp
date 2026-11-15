@@ -98,8 +98,7 @@ void draw_option_row(void* user, uint32_t row_index, QolUiHandle row, uint8_t) {
         int32_t pressed = 0;
         if (adapter->control_pressed != nullptr)
             (void)adapter->control_pressed(row, &pressed);
-        // 普通行由整列背景承载；只有选中/按下行再画原生行底。
-        if ((id == g_id || pressed != 0) && adapter->draw_help_option_row != nullptr) {
+        if (adapter->draw_help_option_row != nullptr) {
             (void)adapter->draw_help_option_row({abs_x + 2, abs_y + 1, 214, 42},
                 static_cast<uint8_t>(id == g_id), static_cast<uint8_t>(pressed != 0));
         }
@@ -316,14 +315,6 @@ void draw_option_card() {
     if (c->draw_container_styled != nullptr) {
         const UiContainerStyleDesc style{card, 0x0000, 60, 1};
         (void)c->draw_container_styled(&style);
-    }
-    // 三列各画一次底色，普通行不再逐行画原生圆角底。
-    if (adapter->fill_rect_alpha != nullptr) {
-        constexpr int32_t col_x[] = {16, 242, 468};
-        for (int32_t x : col_x) {
-            (void)adapter->fill_rect_alpha(
-                {card.x + x, card.y + 54, 220, 420}, 0x000000u, 20);
-        }
     }
     int64_t offsets[3] = {g_sync_offset, g_sync_offset, g_sync_offset};
     for (uint32_t group = 0; group < 3; ++group) {
