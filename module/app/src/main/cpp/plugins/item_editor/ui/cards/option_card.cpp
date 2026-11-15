@@ -24,17 +24,12 @@ int32_t g_deltas[] = {1, 10, 100, 1000, -1, -10, -100, -1000};
 uint32_t g_group_indices[] = {0, 1, 2};
 std::vector<int32_t> g_group_ids[3];
 
-struct OptionRowContext {
-    int32_t id = 0;
-};
-
 QolUiHandle g_root = nullptr;
 QolUiHandle g_columns[3]{};
 QolUiHandle g_footer = nullptr;
 QolUiHandle g_confirm = nullptr;
 QolUiHandle g_cancel = nullptr;
 QolUiHandle g_adjust[8]{};
-OptionRowContext g_rows[kOptionIdCount]{};
 std::array<std::array<char, 160>, kOptionIdCount> g_row_labels{};
 bool g_open_requested = false;
 uint32_t g_section = 0;
@@ -48,12 +43,11 @@ enum class Action : uint8_t { kNone, kConfirm, kCancel };
 Action g_pending = Action::kNone;
 
 void noop_draw(void*) {}
-void row_clicked(void* user) {
-    const auto* row = static_cast<const OptionRowContext*>(user);
-    if (row != nullptr) {
-        g_id = row->id;
-        g_error[0] = '\0';
-    }
+void option_row_selected(void* user, uint32_t row_index) {
+    const uint32_t group = user == nullptr ? 3u : *static_cast<const uint32_t*>(user);
+    if (group >= 3 || row_index >= g_group_ids[group].size()) return;
+    g_id = g_group_ids[group][row_index];
+    g_error[0] = '\0';
 }
 void adjust_clicked(void* user) {
     const auto* delta = static_cast<const int32_t*>(user);
@@ -213,8 +207,7 @@ bool create_option_card() {
     const auto* c = components();
     const auto* adapter = ui();
     if (c == nullptr || adapter == nullptr || c->panel_create == nullptr ||
-        c->scroll_list_create == nullptr || c->scroll_row_button_create == nullptr ||
-        c->button_create == nullptr || c->scroll_list_set_selection_enabled == nullptr ||
+        c->scroll_list_create == nullptr || c->button_create == nullptr ||
         adapter->set_draw_proc == nullptr) return false;
     if (!valid_target()) return false;
     g_jewel_self = g_section == 1 && g_draft.class_index == kItemClassGem;
@@ -250,28 +243,15 @@ bool create_option_card() {
             std::find(ids.begin(), ids.end(), g_id) - ids.begin());
         const int32_t selected_row = selected < static_cast<int32_t>(count) ? selected : -1;
         const UiScrollListDesc list{{col_x[group], 54, 220, 420}, 44,
-            rows, selected_row, &draw_option_row, nullptr, &g_group_indices[group]};
+            rows, selected_row, &draw_option_row, &option_row_selected,
+            &g_group_indices[group]};
         if (!succeeded(c->scroll_list_create(&list, g_root, &g_columns[group])))
-            return false;
-        if (!succeeded(c->scroll_list_set_selection_enabled(g_columns[group], 0)))
             return false;
         if (selected_row >= 0) {
             constexpr int32_t visible_rows = 9;
             const int64_t offset = selected_row > visible_rows
                 ? static_cast<int64_t>(selected_row - visible_rows) * 44 : 0;
             g_sync_offset = std::max(g_sync_offset, offset);
-        }
-        for (uint32_t row = 0; row < count; ++row) {
-            const int32_t id = ids[row];
-            g_rows[id].id = id;
-            QolUiHandle button = nullptr;
-            if (!succeeded(c->scroll_row_button_create(g_columns[group], row,
-                    {2, 1, 214, 42}, &row_clicked, &g_rows[id], &button)))
-                return false;
-            if (!succeeded(adapter->set_draw_proc(button, &noop_draw))) {
-                if (c->destroy != nullptr) (void)c->destroy(button);
-                return false;
-            }
         }
     }
     if (g_sync_offset > 0 && c->scroll_set_offset != nullptr) {
