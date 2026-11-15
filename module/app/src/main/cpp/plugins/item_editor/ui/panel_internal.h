@@ -2,6 +2,7 @@
 
 #include "../plugin.h"
 #include "../../../contracts/ui.h"
+#include "../../../contracts/ui_theme.h"
 #include "../model/draft.h"
 
 #include <cstdint>
@@ -11,9 +12,11 @@
 // 各自 .cpp 的匿名命名空间内，不进入本头文件。
 namespace qol::features::item_editor::panel_internal {
 
-// draw_control_text / draw_string_with_font 的颜色是 AABBGGRR。
+// draw_control_text / draw_string_with_font 的颜色是 AABBGGRR；
+// 金色取统一主题常量。
 inline constexpr uint32_t kText = 0xFFD5E8F2u;
 inline constexpr uint32_t kMuted = 0xFF727A81u;
+inline constexpr uint32_t kGold = contracts::ui_theme::kTextGold;
 
 // 主面板草稿镜像；panel_enter 时 read_item 填充，卡片确认只写这里。
 extern ItemEditorDraft g_draft;
@@ -35,5 +38,11 @@ void build_left_rows();
 void rebuild_left_list();
 void rebuild_right_list();
 void rebuild_item_slot();
+
+// 读取静态文本表；端口不可用或无该条目时返回 nullptr。
+const char* static_text(contracts::QolItemStaticTextKind kind, int32_t id);
+
+// draft 的 variant_series 为 0 时向游戏查询当前变种并写入 draft。
+void resolve_variant_series();
 
 }  // namespace qol::features::item_editor::panel_internal

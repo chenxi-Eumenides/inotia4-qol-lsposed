@@ -14,15 +14,10 @@
 #include "cards/numeric_card.h"
 
 #include <algorithm>
-#include <array>
 #include <atomic>
-#include <cerrno>
-#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <iterator>
-#include <vector>
 
 namespace qol::features::item_editor {
 
@@ -127,6 +122,23 @@ void read_item() {
     }
 }
 
+const char* static_text(QolItemStaticTextKind kind, int32_t id) {
+    const auto* port = item_port();
+    const char* text = nullptr;
+    if (port != nullptr && port->read.static_text != nullptr &&
+        succeeded(port->read.static_text(static_cast<int32_t>(kind), id, &text))) return text;
+    return nullptr;
+}
+
+void resolve_variant_series() {
+    if (g_draft.source_valid && g_draft.variant_series != 0) return;
+    const auto* game = game_host();
+    if (game == nullptr || game->target.query_variant == nullptr) return;
+    QolTargetVariant variant{};
+    if (succeeded(game->target.query_variant(&variant)))
+        g_draft.variant_series = static_cast<int32_t>(variant.id);
+}
+
 // 左栏行集合：卡片确认只经重建函数刷新，不改行集合本身。
 enum class LeftRowKind : uint8_t {
     kQuantity,
@@ -173,8 +185,6 @@ namespace {
 using namespace contracts;
 // 行背景右边缘与右对齐文本之间保留的安全间距。
 constexpr int32_t kRowTextRightMargin = 8;
-// draw_control_text / draw_string_with_font 的颜色是 AABBGGRR；金色取统一主题常量。
-constexpr uint32_t kGold = contracts::ui_theme::kTextGold;
 QolUiHandle g_root = nullptr;
 QolUiHandle g_list = nullptr;
 QolUiHandle g_left_list = nullptr;
@@ -183,49 +193,12 @@ QolUiHandle g_icon_slot = nullptr;
 QolUiHandle g_icon_hit_button = nullptr;
 QolUiHandle g_name_row = nullptr;
 QolUiHandle g_category_row = nullptr;
-QolUiHandle g_card_root = nullptr;
-QolUiHandle g_card_footer_root = nullptr;
-QolUiHandle g_card_list = nullptr;
-QolUiHandle g_card_confirm = nullptr;
-QolUiHandle g_card_cancel = nullptr;
-QolUiHandle g_card_buttons[kItemClassCount]{};
-int32_t g_card_button_classes[kItemClassCount]{};
-int32_t g_card_selected_class = -1;
-bool g_card_open_requested = false;
-enum class CategoryCardAction : uint8_t { kNone, kConfirm, kCancel };
-CategoryCardAction g_card_pending_action = CategoryCardAction::kNone;
-QolUiHandle g_item_card_root = nullptr;
-QolUiHandle g_item_card_footer_root = nullptr;
-QolUiHandle g_item_card_list = nullptr;
-QolUiHandle g_item_card_confirm = nullptr;
-QolUiHandle g_item_card_cancel = nullptr;
-std::vector<int32_t> g_item_card_ids;
-std::vector<int32_t> g_item_card_levels;
-std::vector<QolUiHandle> g_item_card_buttons;
-constexpr size_t kItemCardSlotPoolSize = 12;
-std::array<QolUiHandle, kItemCardSlotPoolSize> g_item_card_slots{};
-int32_t g_item_card_selected_id = -1;
-bool g_item_card_open_requested = false;
-enum class ItemCardAction : uint8_t { kNone, kConfirm, kCancel };
-ItemCardAction g_item_card_pending_action = ItemCardAction::kNone;
-QolUiHandle g_prefix_card_root = nullptr;
-QolUiHandle g_prefix_buttons[15]{};
-int32_t g_prefix_option_raw[15]{};
-uint32_t g_prefix_option_count = 0;
-QolUiHandle g_prefix_confirm = nullptr;
-QolUiHandle g_prefix_cancel = nullptr;
-bool g_prefix_card_open_requested = false;
-int32_t g_prefix_selected_raw = -1;
-enum class PrefixCardAction : uint8_t { kNone, kConfirm, kCancel };
-PrefixCardAction g_prefix_card_pending_action = PrefixCardAction::kNone;
 std::atomic<bool> g_active{false};
 
 void noop_click(void*) {}
-void item_slot_clicked(void*) {
-    if (!item_class_valid(g_draft.class_index)) return;
-    g_item_card_open_requested = true;
-}
-void category_row_clicked(void*) { g_card_open_requested = true; }
+void noop_draw(void*) {}
+void item_slot_clicked(void*) { item_card_open(); }
+void category_row_clicked(void*) { category_card_open(); }
 
 const char* item_type_name(QolItemType type) {
     switch (type) {
@@ -250,13 +223,6 @@ const char* item_type_name(QolItemType type) {
     }
 }
 
-const char* static_text(QolItemStaticTextKind kind, int32_t id) {
-    const auto* port = item_port();
-    const char* text = nullptr;
-    if (port != nullptr && port->read.static_text != nullptr &&
-        succeeded(port->read.static_text(static_cast<int32_t>(kind), id, &text))) return text;
-    return nullptr;
-}
 void format_category_row(char* text, size_t capacity) {
     if (text == nullptr || capacity == 0) return;
     if (!draft_has_item(g_draft)) {
@@ -565,14 +531,6 @@ void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
                         static_cast<int32_t>(abs_y) + 14, value,
                         enabled ? kText : kMuted);
 }
-void resolve_variant_series() {
-    if (g_draft.source_valid && g_draft.variant_series != 0) return;
-    const auto* game = game_host();
-    if (game == nullptr || game->target.query_variant == nullptr) return;
-    QolTargetVariant variant{};
-    if (succeeded(game->target.query_variant(&variant)))
-        g_draft.variant_series = static_cast<int32_t>(variant.id);
-}
 void left_info_selected(void*, uint32_t index) {
     if (index >= g_left_row_count) return;
     switch (g_left_rows[index]) {
@@ -580,9 +538,7 @@ void left_info_selected(void*, uint32_t index) {
             open_quantity_card();
             return;
         case LeftRowKind::kPrefix:
-            if (g_draft.prefix_class_bits == 0) return;
-            resolve_variant_series();
-            g_prefix_card_open_requested = true;
+            prefix_card_open();
             return;
         case LeftRowKind::kEnchantDurability:
             open_enchant_card();
@@ -598,881 +554,6 @@ void left_info_selected(void*, uint32_t index) {
             return;
         default:
             return;
-    }
-}
-
-void category_card_noop_draw(void*) {}
-void category_class_clicked(void* user) {
-    const auto* class_index = static_cast<const int32_t*>(user);
-    if (class_index == nullptr || !item_class_valid(*class_index)) return;
-    g_card_selected_class = g_card_selected_class == *class_index ? -1 : *class_index;
-}
-void category_card_confirm_clicked(void*) {
-    if (item_class_valid(g_card_selected_class))
-        g_card_pending_action = CategoryCardAction::kConfirm;
-}
-void category_card_cancel_clicked(void*) {
-    g_card_pending_action = CategoryCardAction::kCancel;
-}
-bool category_card_row_classes(uint32_t row, int32_t* first, int32_t* count) {
-    if (first == nullptr || count == nullptr) return false;
-    if (row >= 1 && row <= 3) {
-        *first = static_cast<int32_t>((row - 1) * 3);
-        *count = 3;
-        return true;
-    }
-    if (row >= 5 && row <= 9) {
-        *first = 9 + static_cast<int32_t>(row - 5) * 3;
-        *count = std::min(3, 22 - *first);
-        return true;
-    }
-    if (row >= 11 && row <= 15) {
-        *first = 22 + static_cast<int32_t>(row - 11) * 3;
-        *count = std::min(3, kItemClassCount - *first);
-        return true;
-    }
-    return false;
-}
-bool category_class_location(int32_t class_index, uint32_t* row, int32_t* column) {
-    if (!item_class_valid(class_index) || row == nullptr || column == nullptr) return false;
-    if (class_index <= 8) {
-        *row = 1u + static_cast<uint32_t>(class_index / 3);
-        *column = class_index % 3;
-    } else if (class_index <= 21) {
-        *row = 5u + static_cast<uint32_t>((class_index - 9) / 3);
-        *column = (class_index - 9) % 3;
-    } else {
-        *row = 11u + static_cast<uint32_t>((class_index - 22) / 3);
-        *column = (class_index - 22) % 3;
-    }
-    return true;
-}
-void draw_category_card_row(void*, uint32_t row_index, QolUiHandle row, uint8_t) {
-    if (row_index == 0 || row_index == 4 || row_index == 10) {
-        const char* title = row_index == 0 ? "武器" : row_index == 4 ? "装备" : "物品";
-        draw_text(row, title, 304, 16, kGold, 2, 1);
-        return;
-    }
-    int32_t first = 0, count = 0;
-    if (!category_card_row_classes(row_index, &first, &count)) return;
-    const auto* adapter = ui();
-    if (adapter == nullptr) return;
-    for (int32_t column = 0; column < count; ++column) {
-        const int32_t class_index = first + column;
-        const QolUiHandle button = g_card_buttons[class_index];
-        if (button == nullptr) continue;
-        int64_t abs_x = 0, abs_y = 0;
-        if (adapter->control_absolute_origin == nullptr ||
-            !succeeded(adapter->control_absolute_origin(button, &abs_x, &abs_y))) continue;
-        int32_t pressed = 0;
-        if (adapter->control_pressed != nullptr)
-            (void)adapter->control_pressed(button, &pressed);
-        (void)adapter->draw_help_option_row({abs_x, abs_y, 186, 48},
-            static_cast<uint8_t>(g_card_selected_class == class_index),
-            static_cast<uint8_t>(pressed != 0));
-        const char* name = static_text(QolItemStaticTextKind::kItemClassList, class_index);
-        if (name == nullptr || name[0] == '\0') name = "未知类别";
-        draw_text(row, name, 15 + column * 196 + 93, 16,
-            g_card_selected_class == class_index ? kGold : kText, 2, 0);
-    }
-}
-void draw_category_card_footer_button(QolUiHandle button, const char* label,
-                                      bool enabled) {
-    const auto* adapter = ui();
-    if (adapter == nullptr || button == nullptr) return;
-    int64_t abs_x = 0, abs_y = 0;
-    if (adapter->control_absolute_origin == nullptr ||
-        !succeeded(adapter->control_absolute_origin(button, &abs_x, &abs_y))) return;
-    int32_t pressed = 0;
-    if (enabled && adapter->control_pressed != nullptr)
-        (void)adapter->control_pressed(button, &pressed);
-    (void)adapter->draw_help_option_row({abs_x, abs_y, 140, 48}, 0,
-        static_cast<uint8_t>(pressed != 0));
-    draw_text(button, label, 70, 14, enabled ? kText : kMuted, 2, 0);
-}
-
-void destroy_category_card() {
-    const auto* c = components();
-    if (c != nullptr && c->destroy != nullptr) {
-        if (g_card_list != nullptr) (void)c->destroy(g_card_list);
-        if (g_card_confirm != nullptr) (void)c->destroy(g_card_confirm);
-        if (g_card_cancel != nullptr) (void)c->destroy(g_card_cancel);
-        if (g_card_footer_root != nullptr) (void)c->destroy(g_card_footer_root);
-        if (g_card_root != nullptr) (void)c->destroy(g_card_root);
-    }
-    g_card_root = nullptr;
-    g_card_footer_root = nullptr;
-    g_card_list = nullptr;
-    g_card_confirm = nullptr;
-    g_card_cancel = nullptr;
-    for (auto& button : g_card_buttons) button = nullptr;
-}
-bool create_category_card() {
-    const auto* c = components();
-    const auto* adapter = ui();
-    if (c == nullptr || adapter == nullptr || c->panel_create == nullptr ||
-        c->scroll_list_create == nullptr || c->scroll_row_button_create == nullptr ||
-        c->button_create == nullptr || adapter->set_draw_proc == nullptr ||
-        c->scroll_list_set_selection_enabled == nullptr) {
-        log_panel("op=category_card_create result=failed stage=precondition code=-1");
-        return false;
-    }
-    const auto fail = [](const char* stage, QolResult result) {
-        char message[128]{};
-        std::snprintf(message, sizeof(message),
-            "op=category_card_create result=failed stage=%s code=%d", stage, result.code);
-        log_panel(message);
-        return false;
-    };
-    // panel_create 只接受空 parent；卡片作为独立 root 由 panel_event 单独派发。
-    // 卡片根必须落在面板绝对原点，子控件与 draw_container_styled 才共用同一坐标系。
-    const UiRect panel = panel_rect();
-    const UiPanelDesc card_desc{{panel.x+130,panel.y+30,640,500},{0,0,640,500},0,0};
-    QolResult result = c->panel_create(&card_desc, nullptr, &g_card_root);
-    if (!succeeded(result)) return fail("card_panel", result);
-    const UiScrollListDesc list{{16,16,608,400},52,16,-1,
-        &draw_category_card_row,nullptr,nullptr};
-    result = c->scroll_list_create(&list,g_card_root,&g_card_list);
-    if (!succeeded(result)) return fail("card_list", result);
-    result = c->scroll_list_set_selection_enabled(g_card_list,0);
-    if (!succeeded(result)) return fail("card_selection", result);
-    g_card_selected_class = item_class_valid(g_draft.class_index) ? g_draft.class_index : -1;
-    for (int32_t class_index = 0; class_index < kItemClassCount; ++class_index) {
-        uint32_t row = 0;
-        int32_t column = 0;
-        if (!category_class_location(class_index, &row, &column)) {
-            log_panel("op=category_card_create result=failed stage=class_location code=-1");
-            return false;
-        }
-        g_card_button_classes[class_index] = class_index;
-        const UiRect rect{15 + column * 196,2,186,48};
-        result = c->scroll_row_button_create(g_card_list,row,rect,
-                &category_class_clicked,&g_card_button_classes[class_index],
-                &g_card_buttons[class_index]);
-        if (!succeeded(result)) {
-            char message[96]{};
-            std::snprintf(message, sizeof(message),
-                "op=category_card_create result=failed stage=button code=%d class=%d",
-                result.code, class_index);
-            log_panel(message);
-            return false;
-        }
-        result = adapter->set_draw_proc(g_card_buttons[class_index],
-                &category_card_noop_draw);
-        if (!succeeded(result)) {
-            char message[96]{};
-            std::snprintf(message, sizeof(message),
-                "op=category_card_create result=failed stage=draw code=%d class=%d",
-                result.code, class_index);
-            log_panel(message);
-            return false;
-        }
-    }
-    // 列表的 scroll target group 会延伸到 viewport 外；底部按钮放到独立 root，
-    // 事件先派发给它，避免被列表内容区的命中区吞掉。
-    const UiPanelDesc footer_desc{{panel.x+130,panel.y+466,640,48},{0,0,640,48},0,0};
-    result = c->panel_create(&footer_desc, nullptr, &g_card_footer_root);
-    if (!succeeded(result)) return fail("card_footer", result);
-    const UiButtonDesc confirm{{172,0,140,48},"",0,
-        &category_card_confirm_clicked,nullptr};
-    result = c->button_create(&confirm,g_card_footer_root,&g_card_confirm);
-    if (!succeeded(result)) return fail("card_confirm", result);
-    result = adapter->set_draw_proc(g_card_confirm,&category_card_noop_draw);
-    if (!succeeded(result)) return fail("card_confirm_draw", result);
-    const UiButtonDesc cancel{{328,0,140,48},"",0,
-        &category_card_cancel_clicked,nullptr};
-    result = c->button_create(&cancel,g_card_footer_root,&g_card_cancel);
-    if (!succeeded(result)) return fail("card_cancel", result);
-    result = adapter->set_draw_proc(g_card_cancel,&category_card_noop_draw);
-    if (!succeeded(result)) return fail("card_cancel_draw", result);
-    return true;
-}
-void draw_category_card() {
-    if (g_card_root == nullptr) return;
-    const auto* adapter = ui();
-    const auto* c = components();
-    if (adapter == nullptr || c == nullptr) return;
-    const UiRect panel = panel_rect();
-    if (adapter->fill_rect_alpha != nullptr)
-        (void)adapter->fill_rect_alpha({panel.x,panel.y,panel.w,panel.h},0x0000,40);
-    if (c->draw_container_styled != nullptr) {
-        const UiContainerStyleDesc card{{panel.x+130,panel.y+30,640,500},0x0000,60,1};
-        (void)c->draw_container_styled(&card);
-    }
-    (void)c->scroll_list_process(g_card_list);
-    (void)c->scroll_list_draw(g_card_list);
-    draw_category_card_footer_button(g_card_confirm,"确认",
-        item_class_valid(g_card_selected_class));
-    draw_category_card_footer_button(g_card_cancel,"取消",true);
-}
-bool parse_item_ids(const char* csv, std::vector<int32_t>* out_ids) {
-    if (csv == nullptr || out_ids == nullptr) return false;
-    out_ids->clear();
-    const char* cursor = csv;
-    while (*cursor != '\0') {
-        while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n')
-            ++cursor;
-        if (*cursor == '\0') break;
-        if (*cursor == ',') return false;
-        errno = 0;
-        char* end = nullptr;
-        const long parsed = std::strtol(cursor, &end, 10);
-        if (end == cursor || errno == ERANGE || parsed < 0 || parsed > INT32_MAX)
-            return false;
-        out_ids->push_back(static_cast<int32_t>(parsed));
-        cursor = end;
-        while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n')
-            ++cursor;
-        if (*cursor == ',') {
-            ++cursor;
-            const char* next = cursor;
-            while (*next == ' ' || *next == '\t' || *next == '\r' || *next == '\n')
-                ++next;
-            if (*next == '\0') return false;
-        } else if (*cursor != '\0') {
-            return false;
-        }
-    }
-    return true;
-}
-void item_card_noop_draw(void*) {}
-
-void item_card_cell_clicked(void* user) {
-    const intptr_t encoded = reinterpret_cast<intptr_t>(user);
-    if (encoded <= 0 || encoded - 1 > INT32_MAX) return;
-    const int32_t item_id = static_cast<int32_t>(encoded - 1);
-    g_item_card_selected_id = g_item_card_selected_id == item_id ? -1 : item_id;
-}
-void item_card_confirm_clicked(void*) {
-    if (g_item_card_selected_id >= 0)
-        g_item_card_pending_action = ItemCardAction::kConfirm;
-}
-void item_card_cancel_clicked(void*) {
-    g_item_card_pending_action = ItemCardAction::kCancel;
-}
-void draw_item_card_row(void*, uint32_t row_index, QolUiHandle row, uint8_t) {
-    if (g_item_card_ids.empty()) {
-        draw_center_text(row, "该类别暂无物品", 364, 46, kMuted);
-        return;
-    }
-    const uint32_t first = row_index * 4;
-    for (uint32_t column = 0; column < 4; ++column) {
-        const uint32_t item_index = first + column;
-        if (item_index >= g_item_card_ids.size() ||
-            item_index >= g_item_card_buttons.size() ||
-            item_index >= g_item_card_levels.size()) break;
-        const int32_t item_id = g_item_card_ids[item_index];
-        const bool selected = item_id == g_item_card_selected_id;
-        const char* name = static_text(QolItemStaticTextKind::kItemName,item_id);
-        if (name == nullptr || name[0] == '\0') name = "未知";
-        char truncated_name[64]{};
-        char label[96]{};
-        size_t input_bytes = std::strlen(name);
-        size_t input_offset = 0;
-        size_t output_bytes = 0;
-        uint32_t codepoints = 0;
-        bool truncated = false;
-        while (input_offset < input_bytes && codepoints < 8) {
-            const unsigned char lead = static_cast<unsigned char>(name[input_offset]);
-            size_t sequence = lead < 0x80 ? 1u :
-                ((lead & 0xE0) == 0xC0 ? 2u :
-                 ((lead & 0xF0) == 0xE0 ? 3u : ((lead & 0xF8) == 0xF0 ? 4u : 1u)));
-            if (sequence > input_bytes - input_offset) sequence = 1;
-            if (output_bytes + sequence + 4 >= sizeof(truncated_name)) {
-                truncated = true;
-                break;
-            }
-            std::memcpy(truncated_name + output_bytes,name + input_offset,sequence);
-            output_bytes += sequence;
-            input_offset += sequence;
-            ++codepoints;
-        }
-        if (input_offset < input_bytes) truncated = true;
-        if (truncated) {
-            truncated_name[output_bytes++] = static_cast<char>(0xE2);
-            truncated_name[output_bytes++] = static_cast<char>(0x80);
-            truncated_name[output_bytes++] = static_cast<char>(0xA6);
-        }
-        truncated_name[output_bytes] = '\0';
-        if (item_class_is_equipment(g_draft.class_index)) {
-            if (g_item_card_levels[item_index] >= 0) {
-                std::snprintf(label,sizeof(label),"%s(%d)",truncated_name,
-                    g_item_card_levels[item_index]);
-            } else {
-                std::snprintf(label,sizeof(label),"%s(?)",truncated_name);
-            }
-        } else {
-            std::snprintf(label,sizeof(label),"%s",truncated_name);
-        }
-        draw_center_text(row,label,15 + static_cast<int32_t>(column) * 176 + 87, 81,
-                         selected ? kGold : kText);
-    }
-}
-void destroy_item_card() {
-    const auto* c = components();
-    if (c != nullptr && c->destroy != nullptr) {
-        if (g_item_card_list != nullptr) (void)c->destroy(g_item_card_list);
-        if (g_item_card_confirm != nullptr) (void)c->destroy(g_item_card_confirm);
-        if (g_item_card_cancel != nullptr) (void)c->destroy(g_item_card_cancel);
-        if (g_item_card_footer_root != nullptr) (void)c->destroy(g_item_card_footer_root);
-        for (auto& slot : g_item_card_slots) {
-            if (slot != nullptr) (void)c->destroy(slot);
-            slot = nullptr;
-        }
-        if (g_item_card_root != nullptr) (void)c->destroy(g_item_card_root);
-    }
-    g_item_card_root = nullptr;
-    g_item_card_footer_root = nullptr;
-    g_item_card_list = nullptr;
-    g_item_card_confirm = nullptr;
-    g_item_card_cancel = nullptr;
-    for (auto& slot : g_item_card_slots) slot = nullptr;
-    g_item_card_ids.clear();
-    g_item_card_levels.clear();
-    g_item_card_buttons.clear();
-    g_item_card_selected_id = -1;
-}
-bool create_item_card() {
-    const auto* c = components();
-    const auto* adapter = ui();
-    const auto* port = item_port();
-    if (c == nullptr || adapter == nullptr || port == nullptr ||
-        c->panel_create == nullptr || c->scroll_list_create == nullptr ||
-        c->scroll_row_button_create == nullptr || c->button_create == nullptr ||
-        c->scroll_list_set_selection_enabled == nullptr || c->item_slot_create == nullptr ||
-        c->item_slot_set == nullptr || c->item_slot_set_flags == nullptr ||
-        adapter->set_draw_proc == nullptr || !item_class_valid(g_draft.class_index) ||
-        port->read.draw_icon_id == nullptr ||
-        port->read.read_item_base_stats_ex == nullptr) {
-        log_panel("op=item_card_create result=failed stage=precondition code=-1");
-        return false;
-    }
-    const char* item_list = static_text(QolItemStaticTextKind::kItemList,g_draft.class_index);
-    if (!parse_item_ids(item_list,&g_item_card_ids)) {
-        log_panel("op=item_card_create result=failed stage=item_list_parse code=-1");
-        return false;
-    }
-    g_item_card_levels.resize(g_item_card_ids.size(),-1);
-    for (size_t index = 0; index < g_item_card_ids.size(); ++index) {
-        QolItemBaseStats stats{};
-        if (succeeded(port->read.read_item_base_stats_ex(
-                g_item_card_ids[index],g_draft.raw_rarity,&stats))) {
-            g_item_card_levels[index] = stats.need_level;
-        }
-    }
-    std::vector<size_t> order(g_item_card_ids.size());
-    for (size_t index = 0; index < order.size(); ++index) order[index] = index;
-    std::stable_sort(order.begin(),order.end(),[](size_t lhs,size_t rhs) {
-        const int32_t left_level = g_item_card_levels[lhs] < 0
-            ? INT32_MAX : g_item_card_levels[lhs];
-        const int32_t right_level = g_item_card_levels[rhs] < 0
-            ? INT32_MAX : g_item_card_levels[rhs];
-        if (left_level != right_level) return left_level < right_level;
-        return g_item_card_ids[lhs] < g_item_card_ids[rhs];
-    });
-    std::vector<int32_t> sorted_ids;
-    std::vector<int32_t> sorted_levels;
-    sorted_ids.reserve(order.size());
-    sorted_levels.reserve(order.size());
-    for (size_t index : order) {
-        sorted_ids.push_back(g_item_card_ids[index]);
-        sorted_levels.push_back(g_item_card_levels[index]);
-    }
-    g_item_card_ids.swap(sorted_ids);
-    g_item_card_levels.swap(sorted_levels);
-    uint32_t rows = 1;
-    if (!g_item_card_ids.empty())
-        rows = static_cast<uint32_t>((g_item_card_ids.size() + 3u) / 4u);
-    const UiRect panel = panel_rect();
-    const UiPanelDesc card{{panel.x+70,panel.y+30,760,500},{0,0,760,500},0,0};
-    QolResult result = c->panel_create(&card,nullptr,&g_item_card_root);
-    if (!succeeded(result)) {
-        char message[128]{};
-        std::snprintf(message,sizeof(message),
-            "op=item_card_create result=failed stage=card_panel code=%d",result.code);
-        log_panel(message);
-        return false;
-    }
-    // 可见格池使用真正的 core.custom_ui item_slot 组件；池先建，列表行按钮后建，
-    // 触摸仍优先命中行按钮。每帧按滚动位移重排并只绘制可见项。
-    for (auto& slot : g_item_card_slots) {
-        const UiItemSlotDesc desc{{0,-200,74,74},-1,-1,kUiItemSlotShowFrame,-1};
-        result = c->item_slot_create(&desc,g_item_card_root,&slot);
-        if (!succeeded(result)) {
-            char message[128]{};
-            std::snprintf(message,sizeof(message),
-                "op=item_card_create result=failed stage=slot_pool code=%d",result.code);
-            log_panel(message);
-            return false;
-        }
-    }
-    const UiScrollListDesc list{{16,16,728,400},122,rows,-1,
-        &draw_item_card_row,nullptr,nullptr};
-    result = c->scroll_list_create(&list,g_item_card_root,&g_item_card_list);
-    if (!succeeded(result)) {
-        char message[128]{};
-        std::snprintf(message,sizeof(message),
-            "op=item_card_create result=failed stage=card_list code=%d",result.code);
-        log_panel(message);
-        return false;
-    }
-    result = c->scroll_list_set_selection_enabled(g_item_card_list,0);
-    if (!succeeded(result)) {
-        char message[128]{};
-        std::snprintf(message,sizeof(message),
-            "op=item_card_create result=failed stage=list_selection code=%d",result.code);
-        log_panel(message);
-        return false;
-    }
-    g_item_card_buttons.assign(g_item_card_ids.size(),nullptr);
-    for (uint32_t index = 0; index < g_item_card_ids.size(); ++index) {
-        const uint32_t row = index / 4;
-        const int32_t column = static_cast<int32_t>(index % 4);
-        const UiRect cell{15 + column * 176,2,174,112};
-        const intptr_t encoded = static_cast<intptr_t>(g_item_card_ids[index]) + 1;
-        result = c->scroll_row_button_create(g_item_card_list,row,cell,
-            &item_card_cell_clicked,reinterpret_cast<void*>(encoded),
-            &g_item_card_buttons[index]);
-        if (!succeeded(result)) {
-            char message[128]{};
-            std::snprintf(message,sizeof(message),
-                "op=item_card_create result=failed stage=cell_button code=%d index=%u",
-                result.code,index);
-            log_panel(message);
-            return false;
-        }
-        result = adapter->set_draw_proc(g_item_card_buttons[index],&item_card_noop_draw);
-        if (!succeeded(result)) {
-            char message[128]{};
-            std::snprintf(message,sizeof(message),
-                "op=item_card_create result=failed stage=cell_draw code=%d index=%u",
-                result.code,index);
-            log_panel(message);
-            return false;
-        }
-    }
-    g_item_card_selected_id = -1;
-    const auto selected_item = std::find(
-        g_item_card_ids.begin(),g_item_card_ids.end(),g_draft.item_id);
-    if (draft_has_item(g_draft) && selected_item != g_item_card_ids.end()) {
-        g_item_card_selected_id = g_draft.item_id;
-        if (c->scroll_set_offset != nullptr) {
-            const auto index = static_cast<uint32_t>(
-                std::distance(g_item_card_ids.begin(),selected_item));
-            const int32_t row_top = static_cast<int32_t>((index / 4) * 122);
-            const int32_t offset = std::max(0,row_top - (400 - 122) / 2);
-            (void)c->scroll_set_offset(g_item_card_list,offset);
-        }
-    }
-    const UiPanelDesc footer{{panel.x+70,panel.y+466,760,48},{0,0,760,48},0,0};
-    result = c->panel_create(&footer,nullptr,&g_item_card_footer_root);
-    if (!succeeded(result)) {
-        char message[128]{};
-        std::snprintf(message,sizeof(message),
-            "op=item_card_create result=failed stage=footer_panel code=%d",result.code);
-        log_panel(message);
-        return false;
-    }
-    const UiButtonDesc confirm{{230,0,140,48},"",0,
-        &item_card_confirm_clicked,nullptr};
-    result = c->button_create(&confirm,g_item_card_footer_root,&g_item_card_confirm);
-    if (!succeeded(result)) {
-        char message[128]{};
-        std::snprintf(message,sizeof(message),
-            "op=item_card_create result=failed stage=confirm code=%d",result.code);
-        log_panel(message);
-        return false;
-    }
-    result = adapter->set_draw_proc(g_item_card_confirm,&item_card_noop_draw);
-    if (!succeeded(result)) {
-        char message[128]{};
-        std::snprintf(message,sizeof(message),
-            "op=item_card_create result=failed stage=confirm_draw code=%d",result.code);
-        log_panel(message);
-        return false;
-    }
-    const UiButtonDesc cancel{{394,0,140,48},"",0,
-        &item_card_cancel_clicked,nullptr};
-    result = c->button_create(&cancel,g_item_card_footer_root,&g_item_card_cancel);
-    if (!succeeded(result)) {
-        char message[128]{};
-        std::snprintf(message,sizeof(message),
-            "op=item_card_create result=failed stage=cancel code=%d",result.code);
-        log_panel(message);
-        return false;
-    }
-    result = adapter->set_draw_proc(g_item_card_cancel,&item_card_noop_draw);
-    if (!succeeded(result)) {
-        char message[128]{};
-        std::snprintf(message,sizeof(message),
-            "op=item_card_create result=failed stage=cancel_draw code=%d",result.code);
-        log_panel(message);
-        return false;
-    }
-    return true;
-}
-void draw_item_card_footer_button(QolUiHandle button,const char* label,bool enabled) {
-    const auto* adapter = ui();
-    if (adapter == nullptr || button == nullptr) return;
-    int64_t abs_x = 0,abs_y = 0;
-    if (adapter->control_absolute_origin == nullptr ||
-        !succeeded(adapter->control_absolute_origin(button,&abs_x,&abs_y))) return;
-    int32_t pressed = 0;
-    if (enabled && adapter->control_pressed != nullptr)
-        (void)adapter->control_pressed(button,&pressed);
-    if (adapter->draw_help_option_row != nullptr)
-        (void)adapter->draw_help_option_row({abs_x,abs_y,140,48},0,
-            static_cast<uint8_t>(pressed != 0));
-    draw_center_text(button,label,70,14,enabled ? kText : kMuted);
-}
-void draw_item_card_slots(const QolUiComponents* c, const QolUiAdapter* adapter,
-                          const UiRect& panel, int64_t offset) {
-    if (c == nullptr || adapter == nullptr || c->set_rect == nullptr ||
-        c->item_slot_set == nullptr || c->item_slot_set_flags == nullptr ||
-        c->item_slot_draw == nullptr) return;
-    const int64_t view_x = panel.x + 70 + 16;
-    const int64_t view_y = panel.y + 30 + 16;
-    const int64_t view_w = 728;
-    const int64_t view_h = 400;
-    if (adapter->set_clip != nullptr)
-        (void)adapter->set_clip(static_cast<int32_t>(view_x), static_cast<int32_t>(view_y),
-                                static_cast<int32_t>(view_x + view_w),
-                                static_cast<int32_t>(view_y + view_h));
-    if (c->item_slot_set_quality != nullptr) {
-        for (const QolUiHandle slot : g_item_card_slots) {
-            if (slot != nullptr) (void)c->item_slot_set_quality(slot,-1);
-        }
-    }
-    size_t pool_index = 0;
-    for (size_t index = 0; index < g_item_card_ids.size() &&
-                           pool_index < g_item_card_slots.size(); ++index) {
-        const int32_t row = static_cast<int32_t>(index / 4);
-        const int32_t column = static_cast<int32_t>(index % 4);
-        const int64_t local_y = 16 + static_cast<int64_t>(row) * 122 - offset + 5;
-        if (local_y + 74 <= 16 || local_y + 74 > 416) continue;
-        const QolUiHandle slot = g_item_card_slots[pool_index++];
-        if (slot == nullptr) continue;
-        const int32_t item_id = g_item_card_ids[index];
-        (void)c->set_rect(slot, {15 + column * 176 + 50,
-                                 static_cast<int32_t>(local_y), 74, 74});
-        (void)c->item_slot_set(slot, item_id, -1);
-        const uint32_t flags = kUiItemSlotShowFrame |
-            (item_id == g_item_card_selected_id ? kUiItemSlotSelected : 0u);
-        (void)c->item_slot_set_flags(slot, flags);
-        (void)c->item_slot_draw(slot);
-    }
-    for (; pool_index < g_item_card_slots.size(); ++pool_index) {
-        if (g_item_card_slots[pool_index] != nullptr)
-            (void)c->set_rect(g_item_card_slots[pool_index], {0, -200, 74, 74});
-    }
-    if (adapter->reset_clip != nullptr) (void)adapter->reset_clip();
-}
-
-void draw_item_card() {
-    if (g_item_card_root == nullptr) return;
-    const auto* adapter = ui();
-    const auto* c = components();
-    if (adapter == nullptr || c == nullptr) return;
-    const UiRect panel = panel_rect();
-    if (adapter->fill_rect_alpha != nullptr)
-        (void)adapter->fill_rect_alpha({panel.x,panel.y,panel.w,panel.h},0x0000,40);
-    if (c->draw_container_styled != nullptr) {
-        const UiContainerStyleDesc card{{panel.x+70,panel.y+30,760,500},0x0000,60,1};
-        (void)c->draw_container_styled(&card);
-    }
-    (void)c->scroll_list_process(g_item_card_list);
-    (void)c->scroll_list_draw(g_item_card_list);
-    int64_t offset = 0;
-    if (c->scroll_list_get_offset != nullptr)
-        (void)c->scroll_list_get_offset(g_item_card_list, &offset);
-    draw_item_card_slots(c, adapter, panel, offset < 0 ? 0 : offset);
-    draw_item_card_footer_button(g_item_card_confirm,"确认",
-        g_item_card_selected_id >= 0);
-    draw_item_card_footer_button(g_item_card_cancel,"取消",true);
-}
-void apply_item_card_action() {
-    if (g_item_card_pending_action == ItemCardAction::kNone) return;
-    const ItemCardAction action = g_item_card_pending_action;
-    g_item_card_pending_action = ItemCardAction::kNone;
-    bool changed = false;
-    if (action == ItemCardAction::kConfirm && g_item_card_selected_id >= 0) {
-        g_draft.item_id = g_item_card_selected_id;
-        g_draft.item_type = item_type_for_class(g_draft.class_index);
-        const auto* port = item_port();
-        if (port != nullptr && port->read.read_item_base_stats_ex != nullptr) {
-            QolItemBaseStats stats{};
-            const QolResult result =
-                port->read.read_item_base_stats_ex(
-                    g_draft.item_id,g_draft.raw_rarity,&stats);
-            if (succeeded(result)) {
-                g_draft.damage = stats.damage;
-                g_draft.defense = stats.defense;
-                g_draft.magic_rate = stats.magic_rate;
-                g_draft.need_level = stats.need_level;
-                g_draft.stackable = stats.stackable != 0;
-                if (!g_draft.stackable) g_draft.count = 1;
-            } else {
-                char message[128]{};
-                std::snprintf(message,sizeof(message),
-                    "fail item=%d op=load_item_stats result=failed stage=read code=%d reason=base_stats_read_failed",
-                    g_draft.item_id,result.code);
-                log_panel(message);
-            }
-        } else {
-            log_panel("fail op=load_item_stats result=failed stage=api code=-1 reason=api_unavailable");
-        }
-        g_draft.dirty = true;
-        changed = true;
-    }
-    destroy_item_card();
-    if (changed) {
-        build_left_rows();
-        rebuild_left_list();
-        rebuild_right_list();
-        rebuild_item_slot();
-    }
-}
-void apply_category_card_action() {
-    if (g_card_pending_action == CategoryCardAction::kNone) return;
-    const CategoryCardAction action = g_card_pending_action;
-    g_card_pending_action = CategoryCardAction::kNone;
-    bool changed = false;
-    if (action == CategoryCardAction::kConfirm &&
-        item_class_valid(g_card_selected_class)) {
-        changed = draft_change_class(&g_draft,g_card_selected_class);
-    }
-    destroy_category_card();
-    if (changed) {
-        build_left_rows();
-        rebuild_left_list();
-        rebuild_right_list();
-        rebuild_item_slot();
-    }
-}
-
-void prefix_option_clicked(void* user) {
-    const auto* raw = static_cast<const int32_t*>(user);
-    if (raw == nullptr || *raw < 0 || *raw > 14) return;
-    g_prefix_selected_raw = *raw;
-}
-void prefix_confirm_clicked(void*) {
-    if (g_prefix_selected_raw >= 0)
-        g_prefix_card_pending_action = PrefixCardAction::kConfirm;
-}
-void prefix_cancel_clicked(void*) {
-    g_prefix_card_pending_action = PrefixCardAction::kCancel;
-}
-void destroy_prefix_card() {
-    const auto* c = components();
-    if (c != nullptr && c->destroy != nullptr) {
-        for (auto& button : g_prefix_buttons) {
-            if (button != nullptr) (void)c->destroy(button);
-            button = nullptr;
-        }
-        if (g_prefix_confirm != nullptr) (void)c->destroy(g_prefix_confirm);
-        if (g_prefix_cancel != nullptr) (void)c->destroy(g_prefix_cancel);
-        if (g_prefix_card_root != nullptr) (void)c->destroy(g_prefix_card_root);
-    }
-    for (auto& button : g_prefix_buttons) button = nullptr;
-    g_prefix_confirm = nullptr;
-    g_prefix_cancel = nullptr;
-    g_prefix_card_root = nullptr;
-    g_prefix_option_count = 0;
-    g_prefix_selected_raw = -1;
-}
-void build_prefix_options() {
-    // raw 0..14 全部可选；空名称表示该变种/类别没有对应前缀，但 raw 仍决定品质。
-    g_prefix_option_count = 0;
-    for (int32_t raw = 0; raw <= 14; ++raw)
-        g_prefix_option_raw[g_prefix_option_count++] = raw;
-}
-bool prefix_raw_available(int32_t raw) {
-    for (uint32_t index = 0; index < g_prefix_option_count; ++index) {
-        if (g_prefix_option_raw[index] == raw) return true;
-    }
-    return false;
-}
-bool create_prefix_card() {
-    const auto* c = components();
-    const auto* adapter = ui();
-    if (c == nullptr || adapter == nullptr || c->panel_create == nullptr ||
-        c->button_create == nullptr || adapter->set_draw_proc == nullptr ||
-        g_draft.prefix_class_bits == 0) {
-        log_panel("op=prefix_card_create result=failed stage=precondition code=-1");
-        return false;
-    }
-    resolve_variant_series();
-    build_prefix_options();
-    g_prefix_selected_raw = prefix_raw_available(g_draft.raw_rarity)
-        ? g_draft.raw_rarity : -1;
-    const UiRect panel = panel_rect();
-    const UiRect card_rect{panel.x+(panel.w-760)/2,panel.y+(panel.h-400)/2,760,400};
-    const UiPanelDesc card{card_rect,{0,0,760,400},0,0};
-    QolResult result = c->panel_create(&card,nullptr,&g_prefix_card_root);
-    if (!succeeded(result)) {
-        char message[112]{};
-        std::snprintf(message,sizeof(message),
-            "op=prefix_card_create result=failed stage=card_root code=%d",result.code);
-        log_panel(message);
-        return false;
-    }
-    int32_t rows_by_quality[5]{};
-    for (uint32_t index = 0; index < g_prefix_option_count; ++index) {
-        const int32_t raw = g_prefix_option_raw[index];
-        const int32_t quality = contracts::item_rarity_from_raw_prefix(raw);
-        if (quality < 0 || quality > 4) continue;
-        const int32_t column = quality;
-        const int32_t row = rows_by_quality[quality]++;
-        const UiButtonDesc button{{14+column*146,54+row*50,138,42},"",0,
-            &prefix_option_clicked,&g_prefix_option_raw[index]};
-        result = c->button_create(&button,g_prefix_card_root,&g_prefix_buttons[index]);
-        if (!succeeded(result)) {
-            char message[112]{};
-            std::snprintf(message,sizeof(message),
-                "op=prefix_card_create result=failed stage=option_button code=%d index=%u",
-                result.code,index);
-            log_panel(message);
-            return false;
-        }
-        result = adapter->set_draw_proc(g_prefix_buttons[index],&category_card_noop_draw);
-        if (!succeeded(result)) {
-            char message[112]{};
-            std::snprintf(message,sizeof(message),
-                "op=prefix_card_create result=failed stage=option_draw code=%d index=%u",
-                result.code,index);
-            log_panel(message);
-            return false;
-        }
-    }
-    const UiButtonDesc confirm{{250,340,110,42},"",0,
-        &prefix_confirm_clicked,nullptr};
-    result = c->button_create(&confirm,g_prefix_card_root,&g_prefix_confirm);
-    if (!succeeded(result)) {
-        char message[112]{};
-        std::snprintf(message,sizeof(message),
-            "op=prefix_card_create result=failed stage=confirm_button code=%d",result.code);
-        log_panel(message);
-        return false;
-    }
-    result = adapter->set_draw_proc(g_prefix_confirm,&category_card_noop_draw);
-    if (!succeeded(result)) {
-        log_panel("op=prefix_card_create result=failed stage=confirm_draw code=-1");
-        return false;
-    }
-    const UiButtonDesc cancel{{400,340,110,42},"",0,
-        &prefix_cancel_clicked,nullptr};
-    result = c->button_create(&cancel,g_prefix_card_root,&g_prefix_cancel);
-    if (!succeeded(result)) {
-        char message[112]{};
-        std::snprintf(message,sizeof(message),
-            "op=prefix_card_create result=failed stage=cancel_button code=%d",result.code);
-        log_panel(message);
-        return false;
-    }
-    result = adapter->set_draw_proc(g_prefix_cancel,&category_card_noop_draw);
-    if (!succeeded(result)) {
-        log_panel("op=prefix_card_create result=failed stage=cancel_draw code=-1");
-        return false;
-    }
-    return true;
-}
-void draw_prefix_card_button(QolUiHandle button,const char* label,
-                             int32_t width,int32_t height,bool selected,
-                             bool enabled = true) {
-    const auto* adapter = ui();
-    if (adapter == nullptr || button == nullptr) return;
-    int64_t abs_x = 0,abs_y = 0;
-    if (adapter->control_absolute_origin == nullptr ||
-        !succeeded(adapter->control_absolute_origin(button,&abs_x,&abs_y))) return;
-    int32_t pressed = 0;
-    if (enabled && adapter->control_pressed != nullptr)
-        (void)adapter->control_pressed(button,&pressed);
-    if (adapter->draw_help_option_row != nullptr)
-        (void)adapter->draw_help_option_row({abs_x,abs_y,width,height},
-            static_cast<uint8_t>(selected),static_cast<uint8_t>(pressed != 0));
-    draw_center_text(button,label,width/2,height/2-8,
-        selected ? kGold : (enabled ? kText : kMuted));
-}
-void draw_prefix_card() {
-    if (g_prefix_card_root == nullptr) return;
-    const auto* adapter = ui();
-    const auto* c = components();
-    if (adapter == nullptr || c == nullptr) return;
-    const UiRect panel = panel_rect();
-    const UiRect card{panel.x+(panel.w-760)/2,panel.y+(panel.h-400)/2,760,400};
-    if (adapter->fill_rect_alpha != nullptr)
-        (void)adapter->fill_rect_alpha({panel.x,panel.y,panel.w,panel.h},0x0000,40);
-    if (c->draw_container_styled != nullptr) {
-        const UiContainerStyleDesc style{card,0x0000,60,1};
-        (void)c->draw_container_styled(&style);
-    }
-    static constexpr const char* kQualityNames[5] = {
-        "白装", "绿装", "蓝装", "黄装", "紫装"};
-    for (int32_t quality = 0; quality < 5; ++quality) {
-        draw_text(g_prefix_card_root,kQualityNames[quality],
-            14+quality*146+69,20,kGold,2,0);
-    }
-    int32_t rows_by_quality[5]{};
-    for (uint32_t index = 0; index < g_prefix_option_count; ++index) {
-        const int32_t raw = g_prefix_option_raw[index];
-        const int32_t quality = contracts::item_rarity_from_raw_prefix(raw);
-        if (quality < 0 || quality > 4) continue;
-        const int32_t row = rows_by_quality[quality]++;
-        const char* prefix = raw == 2 ? "" : contracts::item_rarity_prefix(
-            g_draft.variant_series,g_draft.prefix_class_bits,raw);
-        if (prefix == nullptr) prefix = "";
-        size_t trimmed = std::strlen(prefix);
-        while (trimmed > 0 && prefix[trimmed - 1] == ' ') --trimmed;
-        char label[64]{};
-        if (trimmed == 0) std::snprintf(label,sizeof(label),"无前缀 (%d)",raw);
-        else std::snprintf(label,sizeof(label),"%.*s (%d)",
-            static_cast<int>(trimmed),prefix,raw);
-        draw_prefix_card_button(g_prefix_buttons[index],label,138,42,
-            raw == g_prefix_selected_raw);
-    }
-    draw_prefix_card_button(g_prefix_confirm,"确定",110,42,false,
-        g_prefix_selected_raw >= 0);
-    draw_prefix_card_button(g_prefix_cancel,"取消",110,42,false,true);
-}
-void apply_prefix_card_action() {
-    if (g_prefix_card_pending_action == PrefixCardAction::kNone) return;
-    const PrefixCardAction action = g_prefix_card_pending_action;
-    g_prefix_card_pending_action = PrefixCardAction::kNone;
-    const bool confirmed = action == PrefixCardAction::kConfirm &&
-        prefix_raw_available(g_prefix_selected_raw);
-    if (confirmed) {
-        g_draft.raw_rarity = g_prefix_selected_raw;
-        g_draft.dirty = true;
-        if (draft_has_item(g_draft)) {
-            const auto* port = item_port();
-            if (port != nullptr && port->read.read_item_base_stats_ex != nullptr) {
-                QolItemBaseStats stats{};
-                const QolResult result = port->read.read_item_base_stats_ex(
-                    g_draft.item_id,g_draft.raw_rarity,&stats);
-                if (succeeded(result)) {
-                    g_draft.damage = stats.damage;
-                    g_draft.defense = stats.defense;
-                    g_draft.magic_rate = stats.magic_rate;
-                    g_draft.need_level = stats.need_level;
-                    g_draft.stackable = stats.stackable != 0;
-                    if (!g_draft.stackable) g_draft.count = 1;
-                } else {
-                    char message[128]{};
-                    std::snprintf(message,sizeof(message),
-                        "fail item=%d op=load_item_stats result=failed stage=read code=%d reason=base_stats_read_failed",
-                        g_draft.item_id,result.code);
-                    log_panel(message);
-                }
-            } else {
-                log_panel("fail op=load_item_stats result=failed stage=api code=-1 reason=api_unavailable");
-            }
-        }
-    }
-    destroy_prefix_card();
-    if (confirmed) {
-        build_left_rows();
-        rebuild_left_list();
-        rebuild_item_slot();
     }
 }
 
@@ -1499,12 +580,6 @@ void destroy() {
     g_name_row = nullptr;
     g_root = nullptr;
     g_close = nullptr;
-    g_card_open_requested = false;
-    g_card_pending_action = CategoryCardAction::kNone;
-    g_item_card_open_requested = false;
-    g_item_card_pending_action = ItemCardAction::kNone;
-    g_prefix_card_open_requested = false;
-    g_prefix_card_pending_action = PrefixCardAction::kNone;
     g_active.store(false, std::memory_order_release);
 }
 bool create() {
@@ -1527,7 +602,7 @@ bool create() {
     if (!succeeded(c->button_create(&category_button,g_root,&g_category_row))) return false;
     const auto* adapter = ui();
     if (adapter == nullptr || adapter->set_draw_proc == nullptr ||
-        !succeeded(adapter->set_draw_proc(g_category_row,&category_card_noop_draw))) return false;
+        !succeeded(adapter->set_draw_proc(g_category_row,&noop_draw))) return false;
     rebuild_left_list();
     rebuild_right_list();
     if (g_list == nullptr) return false;
@@ -1587,7 +662,7 @@ void rebuild_item_slot() {
         (void)c->item_slot_set_quality(g_icon_slot,quality);
     const UiButtonDesc hit{{243,68,74,74},"",0,&item_slot_clicked,nullptr};
     if (succeeded(c->button_create(&hit,g_root,&g_icon_hit_button))) {
-        if (!succeeded(adapter->set_draw_proc(g_icon_hit_button,&category_card_noop_draw))) {
+        if (!succeeded(adapter->set_draw_proc(g_icon_hit_button,&noop_draw))) {
             if (c->destroy != nullptr) (void)c->destroy(g_icon_hit_button);
             g_icon_hit_button = nullptr;
         }
@@ -1614,14 +689,14 @@ void panel_process() {
         item_editor_force_disable();
         return;
     }
-    apply_category_card_action();
-    apply_item_card_action();
-    apply_prefix_card_action();
+    category_card_apply();
+    item_card_apply();
+    prefix_card_apply();
     numeric_card_apply();
-    if (g_prefix_card_open_requested) {
-        g_prefix_card_open_requested = false;
-        g_card_open_requested = false;
-        g_item_card_open_requested = false;
+    if (prefix_card_open_requested()) {
+        prefix_card_clear_open_request();
+        category_card_clear_open_request();
+        item_card_clear_open_request();
         numeric_card_clear_open_request();
         destroy_category_card();
         destroy_item_card();
@@ -1629,34 +704,32 @@ void panel_process() {
         if (!create_prefix_card()) destroy_prefix_card();
     } else if (numeric_card_open_requested()) {
         numeric_card_clear_open_request();
-        g_card_open_requested = false;
-        g_item_card_open_requested = false;
-        g_prefix_card_open_requested = false;
+        category_card_clear_open_request();
+        item_card_clear_open_request();
+        prefix_card_clear_open_request();
         destroy_prefix_card();
         destroy_category_card();
         destroy_item_card();
         destroy_numeric_card();
         if (!create_numeric_card()) destroy_numeric_card();
-    } else if (g_item_card_open_requested) {
-        g_item_card_open_requested = false;
-        g_card_open_requested = false;
-        g_prefix_card_open_requested = false;
+    } else if (item_card_open_requested()) {
+        item_card_clear_open_request();
+        category_card_clear_open_request();
+        prefix_card_clear_open_request();
         numeric_card_clear_open_request();
         destroy_prefix_card();
         destroy_category_card();
         destroy_numeric_card();
         if (!create_item_card()) destroy_item_card();
-    } else if (g_card_open_requested) {
-        g_card_open_requested = false;
-        g_prefix_card_open_requested = false;
-        g_item_card_open_requested = false;
+    } else if (category_card_open_requested()) {
+        category_card_clear_open_request();
+        prefix_card_clear_open_request();
+        item_card_clear_open_request();
         numeric_card_clear_open_request();
         destroy_prefix_card();
         destroy_item_card();
         destroy_numeric_card();
-        if (!create_category_card()) {
-            destroy_category_card();
-        }
+        if (!create_category_card()) destroy_category_card();
     }
     const auto* adapter = ui(); const auto* c = components();
     if (adapter == nullptr || c == nullptr) return;
@@ -1682,17 +755,17 @@ void panel_process() {
     else text[0] = '\0';
     draw_name_row(text);
     draw_fixed_category_row();
-    if (g_card_root == nullptr && g_item_card_root == nullptr &&
-        g_prefix_card_root == nullptr && !numeric_card_active()) {
+    if (!category_card_active() && !item_card_active() &&
+        !prefix_card_active() && !numeric_card_active()) {
         if (g_left_list != nullptr) (void)c->scroll_list_process(g_left_list);
         (void)c->scroll_list_process(g_list);
     }
     if (g_left_list != nullptr) (void)c->scroll_list_draw(g_left_list);
     (void)c->scroll_list_draw(g_list);
     if (c->nav_button_draw != nullptr) (void)c->nav_button_draw(g_close);
-    if (g_card_root != nullptr) draw_category_card();
-    if (g_item_card_root != nullptr) draw_item_card();
-    if (g_prefix_card_root != nullptr) draw_prefix_card();
+    draw_category_card();
+    draw_item_card();
+    draw_prefix_card();
     if (numeric_card_active()) draw_numeric_card();
     if (adapter->end_frame != nullptr) (void)adapter->end_frame();
 }
@@ -1706,26 +779,14 @@ uint32_t panel_event(uint64_t event,uint64_t param,uint64_t param2) {
         (void)numeric_card_handle_event(event,param,param2,&numeric_consumed);
         return numeric_consumed != 0 ? numeric_consumed : 1;
     }
-    if (g_prefix_card_root != nullptr) {
-        (void)c->dispatch_native_event(g_prefix_card_root,event,param,param2,&consumed);
+    // 前缀卡存活时吞掉全部事件；物品卡/类别卡未消费时事件继续落到主面板
+    // root，派发顺序与拆分前一致。
+    if (prefix_card_handle_event(event,param,param2,&consumed))
         return consumed != 0 ? consumed : 1;
-    }
-    if (g_item_card_footer_root != nullptr) {
-        (void)c->dispatch_native_event(g_item_card_footer_root,event,param,param2,&consumed);
-        if (consumed != 0) return consumed;
-    }
-    if (g_card_footer_root != nullptr) {
-        (void)c->dispatch_native_event(g_card_footer_root,event,param,param2,&consumed);
-        if (consumed != 0) return consumed;
-    }
-    if (g_item_card_root != nullptr) {
-        (void)c->dispatch_native_event(g_item_card_root,event,param,param2,&consumed);
-        if (consumed != 0) return consumed;
-    }
-    if (g_card_root != nullptr) {
-        (void)c->dispatch_native_event(g_card_root,event,param,param2,&consumed);
-        if (consumed != 0) return consumed;
-    }
+    if (item_card_handle_event(event,param,param2,&consumed) && consumed != 0)
+        return consumed;
+    if (category_card_handle_event(event,param,param2,&consumed) && consumed != 0)
+        return consumed;
     (void)c->dispatch_native_event(g_root,event,param,param2,&consumed);
     return consumed;
 }
