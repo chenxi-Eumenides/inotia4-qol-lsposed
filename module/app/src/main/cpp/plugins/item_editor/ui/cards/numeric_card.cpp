@@ -54,7 +54,7 @@ void cancel_clicked(void*) {
 }
 
 // 混沌改动后按基础属性重算派生值；need_level 按
-// min(100, base_need_level + chaos_level) 补混沌加成。读取失败保留当前派生值。
+// clamp(base_need_level + chaos_level, 0, 105) 补混沌加成。读取失败保留当前派生值。
 void recalc_chaos_derived() {
     const auto* port = item_port();
     if (port == nullptr || port->read.read_item_base_stats_ex == nullptr) {
@@ -89,8 +89,10 @@ void recalc_chaos_derived() {
     panel_internal::g_draft.defense = apply_rate(stats.defense);
     panel_internal::g_draft.magic_rate = stats.magic_rate;
     const int32_t chaos_level = chaos ? panel_internal::g_draft.chaos_level : 0;
+    // 游戏 ITEM_GetEquipLevel：base + chaos_level，负数夹到 0；
+    // CONSTBASE 行 13 的装备等级上限为 105，不是 100。
     panel_internal::g_draft.need_level =
-        std::min(100, stats.need_level + chaos_level);
+        std::clamp(stats.need_level + chaos_level, 0, 105);
 }
 
 void draw_card_button(QolUiHandle button, const char* label,

@@ -464,8 +464,10 @@ QolResult read_inventory_item_view(contracts::QolItemHandle handle,
     out->enchant_id = (enchant >> 11) & 0x1F;
     out->enchant_level = (enchant >> 6) & 0x1F;
     const uint32_t count_field = *reinterpret_cast<const uint32_t*>(bytes + I_COUNT);
+    // ITEM_GetChaosLevel 只读 I_COUNT bits0..6（7 位，0..127），不是有符号 byte；
+    // 不能按 int8_t 解，否则 bit7 为 1 时会被误报成负数。
     out->chaos_level = out->chaos != 0
-        ? static_cast<int32_t>(static_cast<int8_t>(count_field & 0xFF)) : 0;
+        ? static_cast<int32_t>(count_field & 0x7F) : 0;
     out->chaos_rate = out->chaos != 0 ? static_cast<int32_t>((count_field >> 8) & 0xFF) : 100;
     out->jewel_value = static_cast<int32_t>(count_field & 0x7FF);
     out->jewel_attribute_type = static_cast<int32_t>((count_field >> 18) & 0x3F);

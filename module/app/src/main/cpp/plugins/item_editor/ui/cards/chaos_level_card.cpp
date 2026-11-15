@@ -18,7 +18,9 @@ bool open_chaos_level_card() {
     spec.id = "chaos_level";
     spec.target = NumericCardTarget::kChaosLevel;
     spec.min_value = 0;
-    spec.max_value = 100;
+    // ITEM_GetChaosLevel 读取 I_COUNT bits0..6，字段范围 0..127；
+    // 最终 ITEM_GetEquipLevel 再把 base + chaos_level 夹到 0..105。
+    spec.max_value = 127;
     spec.value = draft.chaos_level;
     spec.deltas = kValueDeltas;
     spec.delta_count = 6;
