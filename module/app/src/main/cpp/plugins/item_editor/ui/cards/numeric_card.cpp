@@ -75,11 +75,22 @@ void recalc_chaos_derived() {
         panel_internal::log_panel(message);
         return;
     }
-    panel_internal::g_draft.damage = stats.damage;
-    panel_internal::g_draft.defense = stats.defense;
+    // 混沌数值率是伤害/防御的乘数：value * rate / 100；魔法攻击由
+    // damage * magic_rate / 100 得出，因此会随伤害一起变化。等级只加装备等级。
+    const bool chaos = (panel_internal::g_draft.chaos_flags & 3) != 0;
+    const int32_t rate = chaos
+        ? std::clamp(panel_internal::g_draft.chaos_rate, 0, 255) : 100;
+    const auto apply_rate = [rate](int32_t base) {
+        if (base <= 0) return base;
+        const int64_t scaled = static_cast<int64_t>(base) * rate / 100;
+        return scaled > 0 ? static_cast<int32_t>(scaled) : 1;
+    };
+    panel_internal::g_draft.damage = apply_rate(stats.damage);
+    panel_internal::g_draft.defense = apply_rate(stats.defense);
     panel_internal::g_draft.magic_rate = stats.magic_rate;
+    const int32_t chaos_level = chaos ? panel_internal::g_draft.chaos_level : 0;
     panel_internal::g_draft.need_level =
-        std::min(100, stats.need_level + panel_internal::g_draft.chaos_level);
+        std::min(100, stats.need_level + chaos_level);
 }
 
 void draw_card_button(QolUiHandle button, const char* label,
