@@ -4,6 +4,7 @@ add_library(qol_plugin_item_editor STATIC
     ui/entry.cpp
     ui/panel.cpp
     ui/cards/category_card.cpp
+    ui/cards/delete_option_card.cpp
     ui/cards/enchant_card.cpp
     ui/cards/chaos_level_card.cpp
     ui/cards/chaos_rate_card.cpp

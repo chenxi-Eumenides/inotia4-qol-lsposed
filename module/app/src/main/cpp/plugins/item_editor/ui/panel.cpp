@@ -325,6 +325,100 @@ bool row_info(uint32_t row, uint32_t* section, uint32_t* index, bool* is_header)
     return false;
 }
 
+// 右列表行内 +/× 命中动作。行按钮由列表拥有并随列表销毁；user 上下文
+// 常驻 g_right_hits 静态池，回调只记录待处理动作，改动统一放在下一帧
+// panel_process 安全点执行，不在回调内同步重建列表。
+enum class RightRowAction : uint8_t { kAdd, kDelete };
+struct RightRowHit {
+    uint32_t section;
+    uint32_t index;
+    RightRowAction action;
+};
+// 上限 = 3 个标题 + 3×32 词条行（宝石段实际受 15 限制），取整留裕量。
+constexpr uint32_t kMaxRightRowHits = 128;
+RightRowHit g_right_hits[kMaxRightRowHits]{};
+uint32_t g_right_hit_count = 0;
+RightRowHit g_pending_right_hit{};
+bool g_pending_right_valid = false;
+
+void right_row_hit_clicked(void* user) {
+    if (user == nullptr) return;
+    g_pending_right_hit = *static_cast<const RightRowHit*>(user);
+    g_pending_right_valid = true;
+}
+
+// 标题行 + 是否可用：段禁用、宝石本体段或达到容量/孔数上限时不可添加。
+bool section_add_available(uint32_t section) {
+    if (!section_enabled(section)) return false;
+    if (section == 0)
+        return g_draft.native_option_count < kQolItemInventoryNativeOptionCapacity;
+    if (section == 1) {
+        // 宝石本体段没有“添加词条”语义；装备上的宝石词条受孔数上限 15
+        // （socket_total/filled 是 4 位字段），数组容量 32 不会先达到。
+        if (g_draft.class_index == kItemClassGem) return false;
+        return g_draft.jewel_option_count < kItemSocketTotalMax;
+    }
+    return g_draft.enchant_option_count < kQolItemInventoryEnchantOptionCapacity;
+}
+
+// 词条行 × 是否可用：宝石本体行禁用。
+bool row_delete_available(uint32_t section, uint32_t index) {
+    if (!section_enabled(section)) return false;
+    if (section == 1 && g_draft.class_index == kItemClassGem) return false;
+    return index < option_count(section);
+}
+
+// 段末尾追加空词条 {id=0,value=0}；只改 draft。宝石词条段额外把
+// socket_total/filled 抬到实际占用数，不缩小已有值。
+void add_empty_option(uint32_t section) {
+    const int32_t type = static_cast<int32_t>(
+        section == 0 ? QolItemInventoryOptionType::kNative
+                     : (section == 1 ? QolItemInventoryOptionType::kJewel
+                                     : QolItemInventoryOptionType::kEnchant));
+    const QolItemInventoryOptionView empty{0, 0, type};
+    switch (section) {
+        case 0:
+            if (g_draft.native_option_count >= kQolItemInventoryNativeOptionCapacity)
+                return;
+            g_draft.native_options[g_draft.native_option_count++] = empty;
+            break;
+        case 1:
+            if (g_draft.class_index == kItemClassGem) return;
+            if (g_draft.jewel_option_count >= kQolItemInventoryJewelOptionCapacity)
+                return;
+            if (g_draft.jewel_option_count >= kItemSocketTotalMax) return;
+            if (g_draft.socket_total > kItemSocketTotalMax ||
+                g_draft.socket_filled > kItemSocketTotalMax)
+                return;
+            g_draft.jewel_options[g_draft.jewel_option_count++] = empty;
+            g_draft.socket_total = std::max(g_draft.socket_total,
+                static_cast<int32_t>(g_draft.jewel_option_count));
+            g_draft.socket_filled = std::max(g_draft.socket_filled,
+                static_cast<int32_t>(g_draft.jewel_option_count));
+            break;
+        case 2:
+            if (g_draft.enchant_option_count >= kQolItemInventoryEnchantOptionCapacity)
+                return;
+            g_draft.enchant_options[g_draft.enchant_option_count++] = empty;
+            break;
+        default:
+            return;
+    }
+    g_draft.dirty = true;
+    rebuild_right_list();
+}
+
+// 命中回调的延迟执行点：添加立即生效；删除转成确认卡打开请求，
+// 由本轮 panel_process 的 open 路由创建确认卡。
+void process_pending_right_hit() {
+    if (!g_pending_right_valid) return;
+    const RightRowHit hit = g_pending_right_hit;
+    g_pending_right_valid = false;
+    g_pending_right_hit = {};
+    if (hit.action == RightRowAction::kAdd) add_empty_option(hit.section);
+    else delete_option_card_open(hit.section, hit.index);
+}
+
 void draw_right_row(void*, uint32_t row_index, QolUiHandle row, uint8_t) {
     const auto* adapter = ui();
     const auto* c = components();
@@ -338,7 +432,7 @@ void draw_right_row(void*, uint32_t row_index, QolUiHandle row, uint8_t) {
     if (is_header) {
         constexpr const char* titles[] = {"装备词条", "宝石词条", "附魔词条"};
         draw_text(row, titles[section], 14, 26, section_enabled(section) ? kGold : kMuted);
-        draw_text(row, "+", 366, 18, section_enabled(section) ? kGold : kMuted, 1, 2);
+        draw_text(row, "+", 366, 18, section_add_available(section) ? kGold : kMuted, 1, 2);
         return;
     }
     const bool enabled = section_enabled(section);
@@ -363,8 +457,13 @@ void draw_right_row(void*, uint32_t row_index, QolUiHandle row, uint8_t) {
         const bool jewel_self = section == 1 && g_draft.class_index == kItemClassGem;
         const int32_t option_id = jewel_self ? g_draft.jewel_attribute_type : option->id;
         const int32_t option_value = jewel_self ? g_draft.jewel_value : option->value;
-        name = static_text(QolItemStaticTextKind::kOptionName, option_id);
-        const bool unknown_name = name == nullptr || name[0] == '\0';
+        // 通过 + 添加的空词条 id=0：显示“空”且不显示值，不查静态表和品质，
+        // 避免把 id=0 的真实词条名误显示在空词条上。
+        const bool empty_option = !jewel_self && option_id == 0;
+        name = empty_option ? "空"
+                            : static_text(QolItemStaticTextKind::kOptionName, option_id);
+        const bool unknown_name = !empty_option &&
+            (name == nullptr || name[0] == '\0');
         if (unknown_name) name = "未知";
         const auto* port = item_port();
         const char* percent_text = nullptr;
@@ -393,18 +492,20 @@ void draw_right_row(void*, uint32_t row_index, QolUiHandle row, uint8_t) {
                 }
             }
         }
-        if (is_percent) {
-            std::snprintf(value, sizeof(value), "%+.1f%%",
-                          static_cast<double>(option_value) / 10.0);
-        } else {
-            std::snprintf(value, sizeof(value), "%+d", option_value);
+        if (!empty_option) {
+            if (is_percent) {
+                std::snprintf(value, sizeof(value), "%+.1f%%",
+                              static_cast<double>(option_value) / 10.0);
+            } else {
+                std::snprintf(value, sizeof(value), "%+d", option_value);
+            }
         }
     } else {
         name = "空";
     }
     draw_text(row, name, 20, 26, enabled ? kText : kMuted);
     draw_right_text(row, value, 300, 26, value_color, 1);
-    draw_text(row, "×", 366, 18, enabled ? kGold : kMuted, 1, 2);
+    draw_text(row, "×", 366, 18, row_delete_available(section, index) ? kGold : kMuted, 1, 2);
 }
 
 void draw_name_row(const char* value) {
@@ -562,6 +663,10 @@ void destroy() {
     destroy_category_card();
     destroy_prefix_card();
     destroy_numeric_card();
+    destroy_delete_option_card();
+    g_right_hit_count = 0;
+    g_pending_right_valid = false;
+    g_pending_right_hit = {};
     const auto* c = components();
     if (c != nullptr && c->destroy != nullptr) {
         if (g_list != nullptr) (void)c->destroy(g_list);
@@ -634,10 +739,38 @@ void rebuild_right_list() {
     if (c == nullptr || c->scroll_list_create == nullptr) return;
     if (g_list != nullptr && c->destroy != nullptr) (void)c->destroy(g_list);
     g_list = nullptr;
+    g_right_hit_count = 0;
     const uint32_t rows = 3 + option_count(0) + option_count(1) + option_count(2);
     const UiScrollListDesc list{{470,44,400,472},kRightRowH,rows,-1,
         &draw_right_row,nullptr,nullptr};
     (void)c->scroll_list_create(&list,g_root,&g_list);
+    if (g_list == nullptr) return;
+    // +/× 命中按钮：随列表销毁的行内子按钮，透明绘制，只覆盖图标区域；
+    // user 指向 g_right_hits 静态池条目，回调后仍需保持有效。
+    const auto* adapter = ui();
+    for (uint32_t row = 0; row < rows && g_right_hit_count < kMaxRightRowHits; ++row) {
+        uint32_t section = 0, index = 0;
+        bool is_header = false;
+        if (!row_info(row, &section, &index, &is_header)) continue;
+        const bool hit = is_header ? section_add_available(section)
+                                   : row_delete_available(section, index);
+        if (!hit) continue;
+        RightRowHit& context = g_right_hits[g_right_hit_count];
+        context = RightRowHit{section, index,
+            is_header ? RightRowAction::kAdd : RightRowAction::kDelete};
+        QolUiHandle button = nullptr;
+        if (!succeeded(c->scroll_row_button_create(g_list,row,{340,0,60,75},
+                &right_row_hit_clicked,&context,&button))) {
+            continue;
+        }
+        if (adapter == nullptr || adapter->set_draw_proc == nullptr ||
+            !succeeded(adapter->set_draw_proc(button,&noop_draw))) {
+            // 透明绘制失败时原生底图会遮住行内容；销毁该按钮并放弃命中。
+            if (c->destroy != nullptr) (void)c->destroy(button);
+            continue;
+        }
+        ++g_right_hit_count;
+    }
 }
 void rebuild_item_slot() {
     const auto* c = components();
@@ -693,43 +826,63 @@ void panel_process() {
     item_card_apply();
     prefix_card_apply();
     numeric_card_apply();
+    delete_option_card_apply();
+    process_pending_right_hit();
     if (prefix_card_open_requested()) {
         prefix_card_clear_open_request();
         category_card_clear_open_request();
         item_card_clear_open_request();
         numeric_card_clear_open_request();
+        delete_option_card_clear_open_request();
         destroy_category_card();
         destroy_item_card();
         destroy_numeric_card();
+        destroy_delete_option_card();
         if (!create_prefix_card()) destroy_prefix_card();
     } else if (numeric_card_open_requested()) {
         numeric_card_clear_open_request();
         category_card_clear_open_request();
         item_card_clear_open_request();
         prefix_card_clear_open_request();
+        delete_option_card_clear_open_request();
         destroy_prefix_card();
         destroy_category_card();
         destroy_item_card();
-        destroy_numeric_card();
+        destroy_delete_option_card();
         if (!create_numeric_card()) destroy_numeric_card();
     } else if (item_card_open_requested()) {
         item_card_clear_open_request();
         category_card_clear_open_request();
         prefix_card_clear_open_request();
         numeric_card_clear_open_request();
+        delete_option_card_clear_open_request();
         destroy_prefix_card();
         destroy_category_card();
         destroy_numeric_card();
+        destroy_delete_option_card();
         if (!create_item_card()) destroy_item_card();
     } else if (category_card_open_requested()) {
         category_card_clear_open_request();
         prefix_card_clear_open_request();
         item_card_clear_open_request();
         numeric_card_clear_open_request();
+        delete_option_card_clear_open_request();
         destroy_prefix_card();
         destroy_item_card();
         destroy_numeric_card();
+        destroy_delete_option_card();
         if (!create_category_card()) destroy_category_card();
+    } else if (delete_option_card_open_requested()) {
+        delete_option_card_clear_open_request();
+        category_card_clear_open_request();
+        item_card_clear_open_request();
+        prefix_card_clear_open_request();
+        numeric_card_clear_open_request();
+        destroy_prefix_card();
+        destroy_category_card();
+        destroy_item_card();
+        destroy_numeric_card();
+        if (!create_delete_option_card()) destroy_delete_option_card();
     }
     const auto* adapter = ui(); const auto* c = components();
     if (adapter == nullptr || c == nullptr) return;
@@ -756,7 +909,8 @@ void panel_process() {
     draw_name_row(text);
     draw_fixed_category_row();
     if (!category_card_active() && !item_card_active() &&
-        !prefix_card_active() && !numeric_card_active()) {
+        !prefix_card_active() && !numeric_card_active() &&
+        !delete_option_card_active()) {
         if (g_left_list != nullptr) (void)c->scroll_list_process(g_left_list);
         (void)c->scroll_list_process(g_list);
     }
@@ -767,6 +921,7 @@ void panel_process() {
     draw_item_card();
     draw_prefix_card();
     if (numeric_card_active()) draw_numeric_card();
+    draw_delete_option_card();
     if (adapter->end_frame != nullptr) (void)adapter->end_frame();
 }
 void panel_f3() { panel_destroy(); }
@@ -779,9 +934,11 @@ uint32_t panel_event(uint64_t event,uint64_t param,uint64_t param2) {
         (void)numeric_card_handle_event(event,param,param2,&numeric_consumed);
         return numeric_consumed != 0 ? numeric_consumed : 1;
     }
-    // 前缀卡存活时吞掉全部事件；物品卡/类别卡未消费时事件继续落到主面板
-    // root，派发顺序与拆分前一致。
+    // 前缀卡/删除确认卡存活时吞掉全部事件；物品卡/类别卡未消费时事件继续
+    // 落到主面板 root，派发顺序与拆分前一致。
     if (prefix_card_handle_event(event,param,param2,&consumed))
+        return consumed != 0 ? consumed : 1;
+    if (delete_option_card_handle_event(event,param,param2,&consumed))
         return consumed != 0 ? consumed : 1;
     if (item_card_handle_event(event,param,param2,&consumed) && consumed != 0)
         return consumed;

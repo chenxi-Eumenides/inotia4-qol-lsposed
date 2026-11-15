@@ -55,4 +55,18 @@ bool prefix_card_active();
 bool prefix_card_handle_event(uint64_t event, uint64_t param, uint64_t param2,
                               uint32_t* consumed);
 
+// ---- 删除词条确认卡 ----
+// 右列表行内 × 触发；open 携带待删段与索引，确认后从对应 draft 数组删除
+// 并压缩（宝石孔数不回缩），取消不改任何字段。生命周期与其它卡片一致。
+void delete_option_card_open(uint32_t section, uint32_t index);
+bool delete_option_card_open_requested();
+void delete_option_card_clear_open_request();
+bool create_delete_option_card();
+void destroy_delete_option_card();
+void delete_option_card_apply();
+void draw_delete_option_card();
+bool delete_option_card_active();
+bool delete_option_card_handle_event(uint64_t event, uint64_t param, uint64_t param2,
+                                     uint32_t* consumed);
+
 }  // namespace qol::features::item_editor
