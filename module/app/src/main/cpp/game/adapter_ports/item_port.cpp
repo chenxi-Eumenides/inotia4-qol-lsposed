@@ -188,10 +188,9 @@ QolResult read_item_stats_full(int32_t item_id, int32_t raw_rarity,
     out->damage = calculate_class_stat(meta, raw_rarity, id, level, flags, rate, 9, 2);
     out->defense = calculate_class_stat(meta, raw_rarity, id, level, flags, rate, 0x16, 4);
     out->magic_rate = item_class_magic_rate(meta.class_index);
-    uint8_t class_record[32]{};
-    const int32_t class_ability = read_class_record(meta.class_index, class_record, 4)
-        ? static_cast<int8_t>(class_record[3]) : 0;
-    out->need_level = std::clamp(class_ability + chaos_level_value, 0, 105);
+    // ITEMSYSTEM_GetEquipLevel(category) 读的是 ITEMDATABASE 记录 +3，
+    // 不是 ITEMCLASSBASE 记录 +3；后者在多数装备类上是 0/1 标志位。
+    out->need_level = std::clamp(meta.ability + chaos_level_value, 0, 105);
     out->stackable = meta.stackable;
     return contracts::ok();
 }
