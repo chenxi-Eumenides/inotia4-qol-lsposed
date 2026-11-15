@@ -908,7 +908,12 @@ int main() {
         CHECK(components->anchored_button_draw(&anchored).ok == kQolOk);
         CHECK(components->anchored_button_set_visible(&anchored, 0).ok == kQolOk);
         CHECK(!static_cast<FakeControl*>(anchored.handle)->visible);
+        CHECK(components->anchored_button_set_visible(&anchored, 1).ok == kQolOk);
+        // 释放必须同时隐藏原生控件并摘掉组件回调，否则会在原位留下可点的僵尸热区。
+        auto* released_control = static_cast<FakeControl*>(anchored.handle);
+        CHECK(released_control->visible && released_control->click_user != nullptr);
         CHECK(components->anchored_button_release(&anchored).ok == kQolOk);
+        CHECK(!released_control->visible && released_control->click_user == nullptr);
         CHECK(anchored.handle == nullptr && anchored.mounted == 0);
         CHECK(g_native_button_deletes == deletes_before_anchor);
         g_fake_equip_bag_root = nullptr;

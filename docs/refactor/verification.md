@@ -584,3 +584,19 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | 静态检查 | **PASS**：`uv run python scripts/maintenance/check_arch.py` 全部通过（0 error，29 条既有日志软告警）；`git diff --check` 通过。 | — |
 | 构建 | **PASS（Debug）**：`scripts/build-debug.sh` → `output/inotia4_qol_lsposed_debug_2611140137_d4f9f9e6b1eb.apk`，SHA-256 `d4f9f9e6b1eb4cf5f00a635b1b2d4d369ab9f89d9b47b0e774b942898f406f3c`。 | 构建包含同期未提交的日志域/编辑器迁移改动，APK 不代表本项单独验收。 |
 | 真机 | **NOT_ACCEPTED（未执行）**：未安装本轮 Debug 包、未复现祭司技能掉落。 | 待核验：①掉落数量 20 + 重抽 20 连打祭司佣兵技能不再闪退；②`/api/system/resources` 中 8 条池补丁 `live`；③切图/退出/新档后池重建为 1638 槽且 `ITEMPOOL` 用量统计正常；④池接近满时出现 `make_item skipped` 且游戏继续运行；⑤关闭 world_tuning 后地面掉落回落 32 槽、物品池仍 1638 槽。 |
+
+### 5.38 锚定入口生命周期日志与僵尸热区消除（2026-11-16；Host/静态/构建通过，真机待验）
+
+范围：`core.custom_ui` 的锚定入口（`anchored_button_*`）在丢失挂载根/句柄失效时的可观测性与释放语义；`item_editor` 背包页入口的日志正文。触发样本：`apk/logs/qol-物品编辑器入口按钮消失.log`（用户反馈背包页入口反复进出后消失、点击后复现）与 `apk/logs/qol.log`（主菜单入口缺失）。
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 问题定位 | **代码事实**：`release_anchored_state` 只 `forget_native` 注销组件记录，原生控件仍留在游戏控件树并保留 `text_button_execute` 与已释放的 `Component*` user → 隐形可点热区 + 点击时 UAF。`find_root` 失败、句柄不在子链表、身份失效三条释放路径均无日志；`entry.cpp` 的 ensure 失败用 `static warned` 只记一次，本次会话第二次之后的消失完全不可观测。日志证据：6 次 `entry installed` 中 5 次紧跟 `open panel=equip`，说明每次进背包都重建入口；22:28:42.904 进背包后 1.24 s 才重建（中间两次触摸），与「进去没有、点一下才出来」一致。 | 未改动 `find_root` 失效后的重试策略（用户明确本轮不做）。 |
+| 日志改动 | **代码事实**：`ui_components.cpp` 新增 `anchored_log`（source 带行号、走宿主注入的日志通道，未绑定时零输出），释放时按状态跳变写一条 `drop entry root_kind=<token> reason=<root_missing\|not_in_child_list\|handle_stale\|release_requested> handle=<ptr>`（`I`）；`entry.cpp` 5 条日志改为 `<verb> <key>=<value>`：`install entry root_kind=equip_bag result=created`（`I`）、`bind entry hook=equip_draw result=ok`（`I`）、`drop entry root_kind=equip_bag reason=disabled`（`I`）、`reject entry capability=ui_components reason=missing`（`W`）、`fail ensure entry root_kind=equip_bag code=<n> reason=<…>`（`kQolErrNotReady` 走 `D` + `reason=not_ready`，其它 code 走 `W`，去掉一次性静音）。 | 逐帧函数内的 `I` 只挂在 `mounted→未挂载` 跳变上，不做逐帧输出；`D` 先判级后格式化，满足零成本契约。 |
+| 僵尸热区 | **代码事实**：释放前先 `set_control_show(handle, 0)`，成功后（证明内存可读）再把点击回调改绑为 `anchored_inert_click`，最后才 `forget_native`。控件不可见、点击不再进入已释放的组件记录。 | 未删除 native（生命周期归游戏）；未新增 adapter 的 Active 写接口，事件门仍可能收到点击，但回调已是空实现。 |
+| 宿主注入 | **代码事实**：`ui_components_bind_log(const QolHostSdk*)` 新增，`plugin_install` 绑定、`plugin_install_rollback` 解绑；Host 测试目标只编译组件源、不链接插件入口，日志通道为空即静默。 | — |
+| Host | **PASS**：`cmake --build build -j8` 成功；`ctest --test-dir build --output-on-failure` → **168/168**。`core_ui_components_tests` 增加释放断言：释放前 `visible && click_user != nullptr`，释放后 `!visible && click_user == nullptr`。 | 未覆盖真机控件树重建与句柄复用。 |
+| 静态检查 | **PASS**：`python3 scripts/maintenance/check_arch.py` 全部通过（含 `check_log_policy`）；`git diff --check` 通过。 | — |
+| 构建 | **PASS（Debug）**：`scripts/build-debug.sh --offline` → `output/inotia4_qol_lsposed_debug_2611160030_5c2ca7f372cd.apk`，SHA-256 `5c2ca7f372cdf1c005b7697b195918b03f75416be47f4fc978c6cf8203a09458`。 | 构建包含同期未提交的 item_editor 草稿/动作改动，APK 不代表本项单独验收。 |
+| 真机 | **NOT_ACCEPTED（未执行）**：未安装本轮 Debug 包、未复现入口消失。 | 待核验：①背包页反复进出 10 次，入口每次都出现；②入口消失时 `qol.log` 出现 `drop entry root_kind=equip_bag reason=<…>`，且消失位置点击不再打开编辑器；③`install entry` 与 `drop entry` 次数成对、无逐帧刷屏；④主菜单齿轮入口同时回归（共用 `anchored_button_ensure`）。 |
+

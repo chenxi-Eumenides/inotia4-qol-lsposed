@@ -5,6 +5,7 @@
 #include "../../../contracts/panels.h"
 #include "../../../contracts/log_domain.h"
 
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 
@@ -12,12 +13,35 @@ namespace qol::features::item_editor {
 namespace {
 contracts::QolUiAnchoredButton g_entry{};
 
-void log_info(const char* message) {
+void entry_log(int32_t level, int line, const char* format, ...) {
     const auto* sdk = host_sdk();
-    if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
-    (void)sdk->log.write(1, static_cast<int32_t>(QolDomain::kUi), "item_editor/entry", message,
-                         static_cast<uint32_t>(std::strlen(message)));
+    if (sdk == nullptr || sdk->log.write == nullptr || format == nullptr) return;
+    char message[contracts::kMessageCap + 1]{};
+    va_list args;
+    va_start(args, format);
+    const int length = std::vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+    if (length < 0) return;
+    char source[64]{};
+    std::snprintf(source, sizeof(source), "item_editor/entry.cpp:%d", line);
+    const uint32_t message_len = static_cast<uint32_t>(length) < contracts::kMessageCap
+                                     ? static_cast<uint32_t>(length)
+                                     : contracts::kMessageCap;
+    (void)sdk->log.write(level, static_cast<int32_t>(QolDomain::kUi), source, message, message_len);
 }
+
+bool debug_enabled() {
+    const auto* sdk = host_sdk();
+    return sdk != nullptr && sdk->log.debug_enabled != nullptr && sdk->log.debug_enabled() != 0;
+}
+
+#define ENTRY_LOG_INFO(...) entry_log(1, __LINE__, __VA_ARGS__)
+#define ENTRY_LOG_WARN(...) entry_log(2, __LINE__, __VA_ARGS__)
+#define ENTRY_LOG_DEBUG(...)        \
+    do {                            \
+        if (debug_enabled())        \
+            entry_log(0, __LINE__, __VA_ARGS__); \
+    } while (0)
 
 const contracts::QolUiComponents* components() {
     const auto* sdk = host_sdk();
@@ -65,12 +89,12 @@ void draw_entry() {
     const auto* c = components();
     if (c == nullptr) {
         static bool warned = false;
-        if (!warned) { warned = true; log_info("components unavailable"); }
+        if (!warned) { warned = true; ENTRY_LOG_WARN("reject entry capability=ui_components reason=missing"); }
         return;
     }
     if (!item_editor_enabled()) {
         static bool warned = false;
-        if (!warned) { warned = true; log_info("entry hidden reason=disabled"); }
+        if (!warned) { warned = true; ENTRY_LOG_INFO("drop entry root_kind=equip_bag reason=disabled"); }
         if (c->anchored_button_set_visible != nullptr) (void)c->anchored_button_set_visible(&g_entry, 0);
         return;
     }
@@ -89,17 +113,18 @@ void draw_entry() {
     uint8_t created = 0;
     const QolResult ensure = c->anchored_button_ensure(&g_entry, &desc, &layout, nullptr, &created);
     if (!contracts::succeeded(ensure)) {
-        static bool warned = false;
-        if (!warned) {
-            warned = true;
-            char message[64]{};
-            snprintf(message, sizeof(message), "entry ensure failed code=%d",
-                          static_cast<int>(ensure.code));
-            log_info(message);
+        // NotReady 是装备页刚打开时的正常态（容器/布局未就位），只在 debug 下记录；
+        // 其它 code 是真实拒绝，按 W 记录并由 logger 做同调用点去重。
+        if (ensure.code == kQolErrNotReady) {
+            ENTRY_LOG_DEBUG("fail ensure entry root_kind=equip_bag code=3 reason=not_ready");
+        } else {
+            ENTRY_LOG_WARN("fail ensure entry root_kind=equip_bag code=%d reason=%s",
+                           static_cast<int>(ensure.code),
+                           ensure.message != nullptr ? ensure.message : "unknown");
         }
         return;
     }
-    if (created != 0) log_info("entry installed");
+    if (created != 0) ENTRY_LOG_INFO("install entry root_kind=equip_bag result=created");
     (void)c->anchored_button_set_visible(&g_entry, 1);
     (void)c->anchored_button_draw(&g_entry);
 }
@@ -107,7 +132,7 @@ void draw_entry() {
 
 void item_editor_equip_draw_wrapper() {
     static bool logged = false;
-    if (!logged) { logged = true; log_info("draw wrapper invoked"); }
+    if (!logged) { logged = true; ENTRY_LOG_INFO("bind entry hook=equip_draw result=ok"); }
     const auto* sdk = host_sdk();
     if (sdk != nullptr && sdk->ui != nullptr && sdk->ui->roll_dice_draw != nullptr)
         (void)sdk->ui->roll_dice_draw();

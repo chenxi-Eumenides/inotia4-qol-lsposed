@@ -200,6 +200,7 @@ void plugin_install_rollback(contracts::PluginContext& ctx, bool confirmation_bo
     text_mechanism_bind(nullptr);
     ui_panels_bind_sdk(nullptr);
     ui_components_unbind();
+    ui_components_bind_log(nullptr);
     g_choice_port = nullptr;
     g_sdk = nullptr;
 }
@@ -217,6 +218,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         plugin_install_rollback(ctx, false, false);
         return 1;
     }
+    ui_components_bind_log(ctx.sdk);
     ui_panels_bind_sdk(ctx.sdk);
     text_mechanism_bind(ctx.sdk);
     // 选择控件与物品图标组件需要游戏侧原语端口；缺失即 install 失败（宿主不启用、资源不装）。

@@ -2,8 +2,10 @@
 
 #include "../../contracts/ui_theme.h"
 #include "../../contracts/game_ports/item_port.h"
+#include "../../contracts/log_domain.h"
 
 #include <algorithm>
+#include <cstdarg>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -22,6 +24,43 @@
 
 namespace qol::features::core_ui {
 namespace {
+
+const contracts::QolHostSdk* g_log_sdk = nullptr;
+
+// 锚定入口生命周期日志：只在「已挂载 → 丢失挂载」的状态跳变时写一行，不做逐帧输出。
+// 走宿主注入的日志通道，source 带行号；正文遵循 docs/reference/logging-standards.md。
+// 未绑定日志通道时不产生任何输出（Host 测试目标只编译组件源，不链接插件入口）。
+void anchored_log(int32_t level, int line, const char* format, ...) {
+    const auto* sdk = g_log_sdk;
+    if (sdk == nullptr || sdk->log.write == nullptr || format == nullptr) return;
+    char message[contracts::kMessageCap + 1]{};
+    va_list args;
+    va_start(args, format);
+    const int length = std::vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+    if (length < 0) return;
+    char source[64]{};
+    std::snprintf(source, sizeof(source), "core.custom_ui/ui_components.cpp:%d", line);
+    const uint32_t message_len = static_cast<uint32_t>(length) < contracts::kMessageCap
+                                     ? static_cast<uint32_t>(length)
+                                     : contracts::kMessageCap;
+    (void)sdk->log.write(level, static_cast<int32_t>(QolDomain::kUi), source, message, message_len);
+}
+
+#define ANCHORED_LOG_INFO(...) anchored_log(1, __LINE__, __VA_ARGS__)
+
+const char* root_kind_token(uint32_t kind) {
+    switch (kind) {
+        case 0: return "equip_bag";
+        case 1: return "equip_item";
+        case 2: return "store_bag";
+        case 3: return "store_item";
+        case 4: return "mix_bag";
+        case 5: return "mix_item";
+        case 6: return "main_menu";
+        default: return "unknown";
+    }
+}
 
 enum class ComponentKind : uint8_t {
     kPanel,
@@ -1276,9 +1315,23 @@ bool control_in_child_list(contracts::QolUiHandle parent, contracts::QolUiHandle
 // 避免游戏绘制阶段再画一次按钮底图。
 void anchored_noop_draw(void*) {}
 
-// 注销记录但不删除 native；state 清空。不返回错误：记录不存在也视为已完成。
-void release_anchored_state(contracts::QolUiAnchoredButton* state) {
-    if (state->mounted && state->handle != nullptr) (void)forget_native(state->handle);
+// 释放后原生控件仍留在游戏控件树里（native 生命周期归游戏，不能删）。因此释放前先隐藏它
+// 并摘掉点击回调：forget_native 会释放组件记录，而 ExecuteProc 的 trampoline 仍以该记录
+// 为 user，未处理的点击会打到已释放内存，同时在原位留下看不见却可点的热区。
+void anchored_inert_click(void*) {}
+
+void release_anchored_state(contracts::QolUiAnchoredButton* state, const char* reason) {
+    if (state->mounted && state->handle != nullptr) {
+        if (g_adapter != nullptr && g_adapter->set_control_show != nullptr &&
+            contracts::succeeded(g_adapter->set_control_show(state->handle, 0)) &&
+            g_adapter->set_click_proc != nullptr) {
+            (void)g_adapter->set_click_proc(state->handle, &anchored_inert_click, nullptr);
+        }
+        ANCHORED_LOG_INFO("drop entry root_kind=%s reason=%s handle=%p",
+                          root_kind_token(state->root_kind), reason,
+                          static_cast<void*>(state->handle));
+        (void)forget_native(state->handle);
+    }
     state->handle = nullptr;
     state->parent = nullptr;
     state->mounted = 0;
@@ -1310,17 +1363,17 @@ QolResult anchored_button_ensure(contracts::QolUiAnchoredButton* state,
                                             &parent)) ||
         parent == nullptr) {
         // 挂载根不存在：游戏已销毁该面板/子树，只丢记录，不触碰 native。
-        release_anchored_state(state);
+        release_anchored_state(state, "root_missing");
         return contracts::ok();
     }
     if (state->mounted && state->handle != nullptr) {
         int32_t current = 0;
         if (!control_in_child_list(parent, state->handle)) {
-            release_anchored_state(state);
+            release_anchored_state(state, "not_in_child_list");
         } else {
             const QolResult proof = anchored_handle_is_current(state, &current);
             if (!contracts::succeeded(proof)) return proof;
-            if (current == 0) release_anchored_state(state);
+            if (current == 0) release_anchored_state(state, "handle_stale");
         }
     }
     contracts::UiRect rect{};
@@ -1367,14 +1420,14 @@ QolResult anchored_button_set_visible(contracts::QolUiAnchoredButton* state, uin
     if (!contracts::succeeded(g_adapter->find_root(static_cast<contracts::QolUiRootKind>(state->root_kind),
                                             &parent)) ||
         parent == nullptr || !control_in_child_list(parent, state->handle)) {
-        release_anchored_state(state);
+        release_anchored_state(state, "root_missing");
         return contracts::ok();
     }
     int32_t current = 0;
     const QolResult proof = anchored_handle_is_current(state, &current);
     if (!contracts::succeeded(proof)) return proof;
     if (current == 0) {
-        release_anchored_state(state);
+        release_anchored_state(state, "handle_stale");
         return contracts::ok();
     }
     return g_adapter->set_control_show(state->handle, visible);
@@ -1382,7 +1435,7 @@ QolResult anchored_button_set_visible(contracts::QolUiAnchoredButton* state, uin
 
 QolResult anchored_button_release(contracts::QolUiAnchoredButton* state) {
     if (state == nullptr) return invalid_argument();
-    release_anchored_state(state);
+    release_anchored_state(state, "release_requested");
     return contracts::ok();
 }
 
@@ -2858,6 +2911,10 @@ bool ui_components_bind(const contracts::QolUiAdapter* adapter) {
 
 void ui_components_bind_item_port(const contracts::QolItemPort* item_port) {
     g_item_port = item_port;
+}
+
+void ui_components_bind_log(const contracts::QolHostSdk* sdk) {
+    g_log_sdk = sdk;
 }
 
 void ui_components_unbind() {
