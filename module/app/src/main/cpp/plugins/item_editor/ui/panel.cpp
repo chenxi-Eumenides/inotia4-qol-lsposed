@@ -821,6 +821,11 @@ void panel_enter() {
     if (!create()) { destroy(); panel_request_close(); return; }
     g_active.store(true, std::memory_order_release);
 }
+bool card_overlay_active() {
+    return category_card_active() || item_card_active() || prefix_card_active() ||
+           numeric_card_active() || delete_option_card_active() || option_card_active();
+}
+
 void panel_process() {
     if (!g_active.load(std::memory_order_acquire) || g_root == nullptr) return;
     const auto* sdk = host_sdk();
@@ -951,14 +956,14 @@ void panel_process() {
     if (g_left_list != nullptr) (void)c->scroll_list_draw(g_left_list);
     (void)c->scroll_list_draw(g_list);
     if (c->nav_button_draw != nullptr) (void)c->nav_button_draw(g_close);
+    // 动作列是主面板的附属控件，卡片打开时不能盖在卡片上。
+    if (!card_overlay_active()) actions_draw();
     draw_category_card();
     draw_item_card();
     draw_prefix_card();
     if (numeric_card_active()) draw_numeric_card();
     draw_delete_option_card();
     draw_option_card();
-    // 动作列只负责绘制；库存写已在 begin_frame 之前处理。
-    actions_draw();
     if (adapter->end_frame != nullptr) (void)adapter->end_frame();
 }
 void panel_f3() { panel_destroy(); }
@@ -983,8 +988,9 @@ uint32_t panel_event(uint64_t event,uint64_t param,uint64_t param2) {
     if (category_card_handle_event(event,param,param2,&consumed) && consumed != 0)
         return consumed;
     (void)c->dispatch_native_event(g_root,event,param,param2,&consumed);
-    // 主面板未消费时派发给独立动作列 root。
-    if (consumed == 0) consumed = actions_dispatch_event(event,param,param2);
+    // 主面板未消费且没有模态卡片时，才派发给独立动作列 root。
+    if (consumed == 0 && !card_overlay_active())
+        consumed = actions_dispatch_event(event,param,param2);
     return consumed;
 }
 void panel_destroy() { destroy(); }

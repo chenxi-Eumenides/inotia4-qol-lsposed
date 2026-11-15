@@ -18,7 +18,7 @@ using namespace contracts;
 
 // 按钮几何：独立 root 原点 = (panel.x + panel.w + 20, panel.y + 150)，
 // 按钮 72×72、纵向步距 84；root 不画底，只承载命中控件。
-constexpr int32_t kActionGap = 20;
+constexpr int32_t kActionRightGap = 10;
 constexpr int32_t kActionFirstY = 150;
 constexpr int32_t kActionButtonSize = 72;
 constexpr int32_t kActionButtonStride = 84;
@@ -451,7 +451,8 @@ void draw_action_buttons() {
     const auto* adapter = ui();
     if (adapter == nullptr || g_action_root == nullptr) return;
     const UiRect panel = panel_rect();
-    const int32_t bx = static_cast<int32_t>(panel.x + panel.w) + kActionGap;
+    const int32_t bx = static_cast<int32_t>(panel.x * 2 + panel.w) -
+                       kActionRightGap - kActionButtonSize;
     const int32_t root_y = static_cast<int32_t>(panel.y) + kActionFirstY;
     for (int32_t index = 0; index < kActionButtonCount; ++index) {
         if (!button_visible(index)) continue;
@@ -467,8 +468,13 @@ void draw_action_buttons() {
         for (int32_t quad = 0; quad < 4; ++quad) {
             const char* glyph = kButtonLabels[index][quad];
             const int32_t width = text_pixel_width(glyph, 0);
-            const int32_t center_x = kActionButtonSize / 4 + (quad & 1) * (kActionButtonSize / 2);
-            const int32_t center_y = kActionButtonSize / 4 + (quad >> 1) * (kActionButtonSize / 2);
+            // 2×2 字块向中心收拢：中心间距从 36 缩到 18。
+            constexpr int32_t kQuadOffset = 9;
+            constexpr int32_t kQuadStep = 18;
+            const int32_t center_x = kActionButtonSize / 2 - kQuadOffset +
+                                     (quad & 1) * kQuadStep;
+            const int32_t center_y = kActionButtonSize / 2 - kQuadOffset +
+                                     (quad >> 1) * kQuadStep;
             // draw_control_text 的偏移相对 action root 原点；y 以字形上缘对齐，
             // 用字宽近似方框字高做象限居中。
             const int32_t offset_x = center_x - width / 2;
@@ -493,7 +499,8 @@ bool actions_create() {
     g_status_kind = kStatusNone;
     g_status_text[0] = '\0';
     const UiRect panel = panel_rect();
-    const int32_t bx = static_cast<int32_t>(panel.x + panel.w) + kActionGap;
+    const int32_t bx = static_cast<int32_t>(panel.x * 2 + panel.w) -
+                       kActionRightGap - kActionButtonSize;
     const int32_t by = static_cast<int32_t>(panel.y) + kActionFirstY;
     const UiPanelDesc desc{{bx, by, kActionButtonSize, kActionRootHeight},
                            {0, 0, panel.x * 2 + panel.w, 640},
