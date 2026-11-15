@@ -79,10 +79,27 @@ constexpr UiConfirmationCallback kConfirmCallbacks[kActionButtonCount] = {
 
 void noop_draw(void*) {}
 
+const UiConfirmationApi* confirmation_api();
+
+void message_ok(void*) {}
+void message_cancel(void*) {}
+
+// 动作结果统一走原生提示框，不在面板内联显示。
 void set_status(int32_t kind, const char* text) {
-    g_status_kind = kind;
-    g_status_text[0] = '\0';
-    if (text != nullptr) std::snprintf(g_status_text, sizeof(g_status_text), "%s", text);
+    (void)kind;
+    if (text == nullptr || text[0] == '\0') return;
+    const auto* api = confirmation_api();
+    if (api == nullptr) return;
+    UiConfirmationSpecText spec{};
+    spec.size = sizeof(spec);
+    std::snprintf(spec.message, sizeof(spec.message), "%s", text);
+    spec.price = 0;
+    spec.on_confirm = &message_ok;
+    spec.on_cancel = &message_cancel;
+    spec.user = nullptr;
+    uint64_t token = 0;
+    const QolResult result = api->open_text(&spec, &token);
+    if (!succeeded(result) && token != 0) (void)api->close(token);
 }
 
 void log_action(const char* text) { log_panel(text); }
@@ -336,7 +353,8 @@ void execute_replace_item() {
     transfer.count = 1;
     transfer.payload_size = blob.payload_size;
     std::memcpy(transfer.payload, blob.payload, blob.payload_size);
-    const QolResult result = api->replace_item(g_draft.source, &transfer, nullptr);
+    QolBagMutationResult replaced{};
+    const QolResult result = api->replace_item(g_draft.source, &transfer, &replaced);
     if (!succeeded(result)) {
         set_status(kStatusFailed, "替换物品失败");
         char line[128];
@@ -459,7 +477,6 @@ void draw_action_buttons() {
             draw_text(g_action_root, glyph, offset_x, offset_y, color, 0, 0);
         }
     }
-    draw_action_status();
 }
 
 }  // namespace
