@@ -44,7 +44,6 @@ QolResult toggle(contracts::PluginContext&, uint8_t enabled) {
     }
     g_feature_enabled.store(enabled != 0, std::memory_order_release);
     refresh_enabled();
-    if (enabled == 0) panel_request_close();
     return contracts::ok();
 }
 const contracts::QolPortRequirement kPorts[] = {
@@ -93,12 +92,16 @@ int install(contracts::PluginContext& ctx) {
     g_owner_token = ctx.owner_token;
     return 0;
 }
-void deactivate(contracts::PluginContext&) {
+void deactivate(contracts::PluginContext& ctx) {
     g_feature_enabled.store(false, std::memory_order_release);
     g_enabled.store(false, std::memory_order_release);
-    panel_request_close();
-    if (g_sdk != nullptr && g_sdk->panels.unregister_owner != nullptr)
-        (void)g_sdk->panels.unregister_owner(kPluginId);
+    // 与自动出售一致：面板 owner 生命周期由 deactivate_owner 统一处理，
+    // 不在停用路径里直接 close(panel_id)。
+    const auto* panels = panels_api();
+    if (panels != nullptr && panels->deactivate_owner != nullptr)
+        (void)panels->deactivate_owner(kPluginId);
+    if (ctx.sdk != nullptr && ctx.sdk->panels.unregister_owner != nullptr)
+        (void)ctx.sdk->panels.unregister_owner(kPluginId);
     g_item_port = nullptr;
     g_game = nullptr;
     g_owner_token = {};
@@ -107,12 +110,10 @@ void deactivate(contracts::PluginContext&) {
 void on_enabled(contracts::PluginContext&) {
     g_feature_enabled.store(true, std::memory_order_release);
     refresh_enabled();
-    if (!g_enabled.load(std::memory_order_acquire)) panel_request_close();
 }
 void on_disabled(contracts::PluginContext&) {
     g_feature_enabled.store(false, std::memory_order_release);
     g_enabled.store(false, std::memory_order_release);
-    panel_request_close();
 }
 void status(contracts::PluginStatusOut& out) {
     out.enabled = g_enabled.load(std::memory_order_acquire);
