@@ -33,6 +33,11 @@ inline constexpr uint32_t kMaxThunkSlots = kMaxThunkSlotsPerClaim * kMaxDeclared
 inline constexpr uint32_t kMaxActiveTransactions = kMaxPlugins;
 inline constexpr uint32_t kMaxTerminalTransactions = kMaxActiveTransactions / 8;
 
+// 面板 provider 声明表：装配期一次性登记、运行期只翻可用位（D 方案）。
+// 当前内置 provider 9 条（含 3 条 debug 面板），单插件最多 4 条。
+inline constexpr uint32_t kMaxPanelProvidersPerPlugin = 4;
+inline constexpr uint32_t kMaxPanelProviders = 32;
+
 // Feature 状态表：插件数 × 每插件 feature 上限 + 宿主 owner 预留。
 inline constexpr uint32_t kMaxFeaturesPerPlugin = 8;
 inline constexpr uint32_t kHostFeatureOwners = 4;

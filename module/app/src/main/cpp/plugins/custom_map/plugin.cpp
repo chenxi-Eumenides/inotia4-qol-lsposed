@@ -97,7 +97,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     }
     const void* components_iface = nullptr;
     const auto* sdk = ctx.sdk;
-    if (sdk->capabilities.require == nullptr || sdk->panels.register_provider == nullptr ||
+    if (sdk->capabilities.require == nullptr ||
         !contracts::succeeded(sdk->capabilities.require(contracts::kUiComponentsCapabilityId,
             {contracts::kUiContractMajor, contracts::kUiContractMinor}, &components_iface)) ||
         components_iface == nullptr) {
@@ -107,9 +107,8 @@ int plugin_install(contracts::PluginContext& ctx) {
     const auto* components = static_cast<const contracts::QolUiComponents*>(components_iface);
     if (components->size < sizeof(*components) ||
         components->major != contracts::kUiContractMajor ||
-        components->minor < contracts::kUiContractMinor ||
-        !contracts::succeeded(sdk->panels.register_provider(&kPanelProvider))) {
-        g_install_error = "install failed: map panel registration failed";
+        components->minor < contracts::kUiContractMinor) {
+        g_install_error = "install failed: UI components contract mismatch";
         return 1;
     }
     const void* confirmation_iface = nullptr;
@@ -118,8 +117,6 @@ int plugin_install(contracts::PluginContext& ctx) {
             {static_cast<uint16_t>(contracts::kUiConfirmationVersionMajor),
              static_cast<uint16_t>(contracts::kUiConfirmationVersionMinor)},
             &confirmation_iface)) || confirmation_iface == nullptr) {
-        if (sdk->panels.unregister_owner != nullptr)
-            (void)sdk->panels.unregister_owner(kPluginId);
         g_install_error = "install failed: UI confirmation unavailable";
         return 1;
     }
@@ -143,8 +140,6 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     }
     custom_map_provider_close();
     custom_map_panel_bind(nullptr, nullptr, nullptr);
-    if (ctx.sdk != nullptr && ctx.sdk->panels.unregister_owner != nullptr)
-        (void)ctx.sdk->panels.unregister_owner(kPluginId);
     g_confirmation = nullptr;
     clear_runtime();
 }
@@ -238,6 +233,9 @@ const contracts::PluginDescriptor kDescriptor = {
      kPorts, 1,    // custom map resource adapter
     nullptr, 0,   // routes
     kFeatures, 2,
+    nullptr, 0, nullptr, nullptr, 0, true,
+    &kPanelProvider,
+    1,
 };
 
 }  // namespace

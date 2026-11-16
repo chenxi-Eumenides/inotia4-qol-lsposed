@@ -149,21 +149,13 @@ QolResult fake_events_unsubscribe(uint64_t id) {
     return qol::contracts::ok();
 }
 
-QolResult fake_panels_register_provider(const qol::contracts::PanelProviderSpec* provider) {
-    if (provider == nullptr) {
-        return QolResult{kQolErrInvalidArgument, kQolErrInvalidArgument, nullptr, 0};
-    }
-    return qol::infra::panels_register_provider(*provider)
-               ? qol::contracts::ok()
-               : QolResult{kQolErrConflict, kQolErrConflict, nullptr, 0};
+// D 方案：运行时注册/注销已退役，SDK 槽位只保留 ABI 前缀。
+QolResult fake_panels_register_provider(const qol::contracts::PanelProviderSpec*) {
+    return QolResult{kQolErrUnsupported, kQolErrUnsupported, nullptr, 0};
 }
 
-QolResult fake_panels_unregister_owner(const char* owner) {
-    if (owner == nullptr) {
-        return QolResult{kQolErrInvalidArgument, kQolErrInvalidArgument, nullptr, 0};
-    }
-    qol::infra::panels_unregister_owner(owner);
-    return qol::contracts::ok();
+QolResult fake_panels_unregister_owner(const char*) {
+    return QolResult{kQolErrUnsupported, kQolErrUnsupported, nullptr, 0};
 }
 
 QolResult fake_bag_source_register(const qol::contracts::QolBagSource*) {
@@ -306,9 +298,11 @@ void test_provider_registration() {
     g_fail_require_id = nullptr;
     CHECK(qol::features::autosell::inventory_extras() == &inventory_port);
     CHECK(qol::features::autosell::item_port() == &item_port);
-    const qol::contracts::PanelProviderSpec* provider =
-        qol::infra::panels_find_provider("autosell");
-    CHECK(provider != nullptr);
+    // provider 改为描述符声明：install 不再写运行时表。
+    CHECK(d.panel_provider_count == 1);
+    CHECK(d.panel_providers != nullptr);
+    CHECK(qol::infra::panels_find_provider("autosell") == nullptr);
+    const qol::contracts::PanelProviderSpec* provider = d.panel_providers;
     CHECK(std::strcmp(provider->owner, "autosell") == 0);
     CHECK(provider->open == &qol::features::autosell::autosell_provider_open);
     CHECK(provider->close == &qol::features::autosell::autosell_provider_close);

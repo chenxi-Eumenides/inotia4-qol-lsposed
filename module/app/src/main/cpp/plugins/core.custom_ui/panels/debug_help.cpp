@@ -267,16 +267,14 @@ QolResult debug_help_http_command(const contracts::HttpReq* request,
     return command(request, response, ctx);
 }
 
+const contracts::PanelProviderSpec& debug_help_provider() { return kProvider; }
+
 bool debug_help_register(const contracts::QolHostSdk* sdk) {
-    if (sdk == nullptr || sdk->panels.register_provider == nullptr ||
-        sdk->scheduler.add == nullptr || sdk->scheduler.remove == nullptr) return false;
+    if (sdk == nullptr || sdk->scheduler.add == nullptr || sdk->scheduler.remove == nullptr)
+        return false;
     g_sdk = sdk;
     if (!contracts::succeeded(sdk->scheduler.add(1, &apply_request, nullptr, 1, 0, &g_task)) ||
         g_task == 0) { g_sdk = nullptr; return false; }
-    if (!contracts::succeeded(sdk->panels.register_provider(&kProvider))) {
-        (void)sdk->scheduler.remove(g_task);
-        g_task = 0; g_sdk = nullptr; return false;
-    }
     g_registered = true; return true;
 }
 void debug_help_unregister(const contracts::QolHostSdk* sdk) {
@@ -294,6 +292,5 @@ void debug_help_unregister(const contracts::QolHostSdk* sdk) {
 void debug_help_set_enabled(bool enabled) {
     g_enabled.store(enabled, std::memory_order_release);
     if (!enabled) g_request.store(0, std::memory_order_release);
-}
-}  // namespace qol::features::core_ui
+}}  // namespace qol::features::core_ui
 #endif

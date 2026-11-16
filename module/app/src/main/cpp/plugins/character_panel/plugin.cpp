@@ -189,15 +189,6 @@ int plugin_install(contracts::PluginContext& ctx) {
         bind_sdk(nullptr);
         return 1;
     }
-    if (ctx.sdk->panels.register_provider == nullptr ||
-        !contracts::succeeded(ctx.sdk->panels.register_provider(&kPanelProvider))) {
-        unregister_consumers();
-        overview_bind_context(nullptr, nullptr);
-        overview_bind_components(nullptr);
-        overview_bind_attributes(nullptr);
-        bind_sdk(nullptr);
-        return 1;
-    }
     // 常驻帧任务：消费原版面板点击留下的 pending，在帧安全点经 ui_panels 打开总览。
     if (!ensure_open_task()) log_info(2, "overview frame task registration failed reason=open_unavailable entry=open_task");
     return 0;
@@ -216,9 +207,6 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
             const auto* panels = static_cast<const contracts::UiPanelsApi*>(iface);
             if (panels->deactivate_owner != nullptr) (void)panels->deactivate_owner(kPluginId);
         }
-    }
-    if (ctx.sdk != nullptr && ctx.sdk->panels.unregister_owner != nullptr) {
-        (void)ctx.sdk->panels.unregister_owner(kPluginId);
     }
     (void)remove_open_task();
     character_info_reset();
@@ -295,6 +283,9 @@ const contracts::PluginDescriptor kDescriptor = {
     1,
     nullptr, 0,
     kFeatures, 2,
+    nullptr, 0, nullptr, nullptr, 0, true,
+    &kPanelProvider,
+    1,
 };
 
 }  // namespace

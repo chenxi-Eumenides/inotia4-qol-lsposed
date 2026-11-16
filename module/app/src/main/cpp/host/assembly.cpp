@@ -235,10 +235,16 @@ struct BuiltInPlugin {
     bool slot_operation_allowed = false;
     bool save_route_allowed = false;
     uint32_t resource_count = 0;
+    uint32_t provider_count = 0;
 };
 
 constexpr BuiltInPlugin with_resource_count(PluginDescriptorFn descriptor, uint32_t count) {
-    return BuiltInPlugin{descriptor, nullptr, false, false, count};
+    return BuiltInPlugin{descriptor, nullptr, false, false, count, 0};
+}
+
+constexpr BuiltInPlugin with_counts(PluginDescriptorFn descriptor, uint32_t resources,
+                                    uint32_t providers) {
+    return BuiltInPlugin{descriptor, nullptr, false, false, resources, providers};
 }
 
 // 这里只登记插件描述符，不表达 provider/consumer 业务顺序；plugin_registry 根据
@@ -258,15 +264,15 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
                         features::attribute_quality::kResourceCount),
     with_resource_count(&features::attribute_range_display::plugin_descriptor,
                         features::attribute_range_display::kResourceCount),
-    with_resource_count(&features::autosell::plugin_descriptor,
-                        features::autosell::kResourceCount),
-    with_resource_count(&features::item_editor::plugin_descriptor,
-                        features::item_editor::kResourceCount),
+    with_counts(&features::autosell::plugin_descriptor,
+                features::autosell::kResourceCount, features::autosell::kProviderCount),
+    with_counts(&features::item_editor::plugin_descriptor,
+                features::item_editor::kResourceCount, features::item_editor::kProviderCount),
     {&features::core_api::plugin_descriptor},
-    with_resource_count(&features::core_settings::plugin_descriptor,
-                        features::core_settings::kResourceCount),
-    with_resource_count(&features::core_ui::plugin_descriptor,
-                        features::core_ui::kResourceCount),
+    with_counts(&features::core_settings::plugin_descriptor,
+                features::core_settings::kResourceCount, features::core_settings::kProviderCount),
+    with_counts(&features::core_ui::plugin_descriptor,
+                features::core_ui::kResourceCount, features::core_ui::kProviderCount),
     with_resource_count(&features::custom_recipe::plugin_descriptor,
                         features::custom_recipe::kResourceCount),
     with_resource_count(&features::extension_bag::plugin_descriptor,
@@ -288,9 +294,9 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
                         features::damage_widen::kResourceCount),
     {&features::core_quest::plugin_descriptor},
     {&features::save_backup::plugin_descriptor, nullptr, true, false,
-     features::save_backup::kResourceCount},
-    with_resource_count(&features::world_tuning::plugin_descriptor,
-                        features::world_tuning::kResourceCount),
+     features::save_backup::kResourceCount, features::save_backup::kProviderCount},
+    with_counts(&features::world_tuning::plugin_descriptor,
+                features::world_tuning::kResourceCount, features::world_tuning::kProviderCount),
     with_resource_count(&features::craft_lottery::plugin_descriptor,
                         features::craft_lottery::kResourceCount),
     with_resource_count(&features::special_equip::plugin_descriptor,
@@ -299,8 +305,8 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
                         features::stack_limit::kResourceCount),
     with_resource_count(&features::core_system::plugin_descriptor,
                         features::core_system::kResourceCount),
-    with_resource_count(&features::character_panel::plugin_descriptor,
-                        features::character_panel::kResourceCount),
+    with_counts(&features::character_panel::plugin_descriptor,
+                features::character_panel::kResourceCount, features::character_panel::kProviderCount),
     with_resource_count(&features::world_teleport::plugin_descriptor,
                         features::world_teleport::kResourceCount),
     // custom_map 尚未完成（资源替换与面板未经真机验收），暂不注册：不进入 capability DAG、
@@ -330,6 +336,29 @@ constexpr uint32_t builtin_max_plugin_resources() {
     }
     return maximum;
 }
+
+constexpr uint32_t builtin_declared_providers() {
+    uint32_t total = 0;
+    for (uint32_t i = 0; i < kBuiltInPluginCount; ++i) {
+        total += kBuiltInPlugins[i].provider_count;
+    }
+    return total;
+}
+
+constexpr uint32_t builtin_max_plugin_providers() {
+    uint32_t maximum = 0;
+    for (uint32_t i = 0; i < kBuiltInPluginCount; ++i) {
+        if (kBuiltInPlugins[i].provider_count > maximum) {
+            maximum = kBuiltInPlugins[i].provider_count;
+        }
+    }
+    return maximum;
+}
+
+static_assert(builtin_declared_providers() <= qol::capacity::kMaxPanelProviders,
+              "built-in panel provider declarations exceed registry capacity");
+static_assert(builtin_max_plugin_providers() <= qol::capacity::kMaxPanelProvidersPerPlugin,
+              "a built-in plugin declares more panel providers than the per-plugin budget");
 
 constexpr uint32_t kBuiltinDeclaredResources = builtin_declared_resources();
 constexpr uint32_t kHostDeclaredClaims = kSaveEnterClaimCount + kSaveExitClaimCount +

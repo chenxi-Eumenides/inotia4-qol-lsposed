@@ -1,4 +1,4 @@
-// infra/panels.h host 单测：注册/幂等/异 owner 拒绝/容量/注销/查找/边界。
+// infra/panels.h host 单测：装配期声明校验、可用位翻转、枚举过滤、地址稳定性。
 
 #include "infra/panels.h"
 
@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "contracts/capacity.h"
 #include "contracts/panels.h"
 
 static int g_pass = 0;
@@ -18,148 +19,158 @@ static int g_fail = 0;
 
 namespace {
 
-using qol::contracts::PanelItemKind;
-using qol::contracts::PanelItemSpec;
 using qol::contracts::PanelProviderSpec;
+using qol::infra::panels_declare_provider;
 using qol::infra::panels_find_provider;
-using qol::infra::panels_item_at;
-using qol::infra::panels_item_count;
-using qol::infra::panels_register_item;
-using qol::infra::panels_register_provider;
+using qol::infra::panels_provider_at;
+using qol::infra::panels_provider_count;
 using qol::infra::panels_reset_for_test;
-using qol::infra::panels_unregister_owner;
+using qol::infra::panels_set_owner_available;
+using qol::infra::panels_validate_declaration;
 
 bool provider_open() { return true; }
 void provider_close() {}
 bool provider_active() { return false; }
 const char* provider_reason() { return "blocked"; }
 
-PanelItemSpec item_of(const char* id, const char* owner) {
-    return PanelItemSpec{id, owner, "label", PanelItemKind::kToggle, "cfg.key", nullptr, nullptr};
-}
-
 PanelProviderSpec provider_of(const char* panel_id, const char* owner) {
     return PanelProviderSpec{panel_id, owner, &provider_open, &provider_close, &provider_active,
-                             &provider_reason};
+                             &provider_reason, nullptr};
 }
 
-void reset() {
-    panels_reset_for_test();
-}
+// 声明表只保存指针，字符串必须是静态存储。
+const char* const kPanelA = "panel:a";
+const char* const kPanelB = "panel:b";
+const char* const kPanelC = "panel:c";
+const char* const kOwnerA = "owner_a";
+const char* const kOwnerB = "owner_b";
 
-void test_register_and_duplicate() {
+void reset() { panels_reset_for_test(); }
+
+void test_declare_and_duplicate() {
     reset();
-    CHECK(panels_register_item(item_of("item:a", "owner_a")));
-    CHECK(panels_item_count() == 1);
-    CHECK(panels_register_item(item_of("item:a", "owner_a")));  // 同 owner 幂等
-    CHECK(panels_item_count() == 1);
-    CHECK(!panels_register_item(item_of("item:a", "owner_b")));  // 异 owner 拒绝
-    CHECK(panels_item_count() == 1);
-    CHECK(panels_register_item(item_of("item:b", "owner_b")));
-    CHECK(panels_item_count() == 2);
-}
-
-void test_item_bounds() {
-    reset();
-    CHECK(!panels_register_item(item_of(nullptr, "owner")));
-    CHECK(!panels_register_item(item_of("", "owner")));
-    CHECK(!panels_register_item(item_of("item:a", nullptr)));
-    CHECK(!panels_register_item(item_of("item:a", "")));
-    CHECK(panels_item_count() == 0);
-    CHECK(panels_item_at(0) == nullptr);
-
-    CHECK(panels_register_item(item_of("item:a", "owner")));
-    CHECK(panels_item_at(0) != nullptr);
-    CHECK(panels_item_at(1) == nullptr);
-    CHECK(std::strcmp(panels_item_at(0)->id, "item:a") == 0);
-}
-
-void test_item_capacity() {
-    reset();
-    static char ids[40][16];  // 注册表只保存指针：id 必须在测试内持久
-    for (uint32_t i = 0; i < 32; ++i) {
-        std::snprintf(ids[i], sizeof(ids[i]), "item:%u", i);
-        CHECK(panels_register_item(item_of(ids[i], "owner")));
-    }
-    CHECK(panels_item_count() == 32);
-    CHECK(!panels_register_item(item_of("item:overflow", "owner")));
-    CHECK(panels_item_count() == 32);
-    // 满容时同 id 同 owner 幂等仍成立。
-    CHECK(panels_register_item(item_of(ids[0], "owner")));
-}
-
-void test_provider_register_find() {
-    reset();
-    CHECK(panels_register_provider(provider_of("panel:a", "owner_a")));
-    CHECK(panels_register_provider(provider_of("panel:a", "owner_a")));  // 幂等
-    CHECK(!panels_register_provider(provider_of("panel:a", "owner_b")));  // 异 owner
-    CHECK(panels_find_provider("panel:a") != nullptr);
-    CHECK(panels_find_provider("panel:a")->open == &provider_open);
-    CHECK(panels_find_provider("panel:missing") == nullptr);
+    CHECK(panels_declare_provider(provider_of(kPanelA, kOwnerA)));
+    CHECK(!panels_declare_provider(provider_of(kPanelA, kOwnerB)));  // 重复 panel_id
+    CHECK(panels_provider_count() == 0);                             // 未置可用
+    CHECK(panels_find_provider(kPanelA) == nullptr);
+    panels_set_owner_available(kOwnerA, true);
+    CHECK(panels_provider_count() == 1);
+    CHECK(panels_find_provider(kPanelA) != nullptr);
+    CHECK(panels_find_provider(kPanelA)->open == &provider_open);
+    CHECK(panels_find_provider(kPanelB) == nullptr);
     CHECK(panels_find_provider(nullptr) == nullptr);
     CHECK(panels_find_provider("") == nullptr);
-    CHECK(!panels_register_provider(provider_of(nullptr, "owner")));
-    CHECK(!panels_register_provider(provider_of("", "owner")));
-    CHECK(!panels_register_provider(provider_of("panel:b", nullptr)));
-    CHECK(!panels_register_provider(provider_of("panel:b", "")));
 }
 
-void test_provider_capacity() {
+void test_declare_rejects_bad_fields() {
     reset();
-    static char ids[20][16];  // provider 只保存 panel_id 指针：需持久
-    for (uint32_t i = 0; i < 16; ++i) {
+    CHECK(!panels_declare_provider(provider_of(nullptr, kOwnerA)));
+    CHECK(!panels_declare_provider(provider_of("", kOwnerA)));
+    CHECK(!panels_declare_provider(provider_of(kPanelA, nullptr)));
+    CHECK(!panels_declare_provider(provider_of(kPanelA, "")));
+    PanelProviderSpec no_open = provider_of(kPanelA, kOwnerA);
+    no_open.open = nullptr;
+    CHECK(!panels_declare_provider(no_open));
+    CHECK(panels_provider_count() == 0);
+}
+
+void test_validate_declaration() {
+    reset();
+    PanelProviderSpec batch[2] = {provider_of(kPanelA, kOwnerA), provider_of(kPanelB, kOwnerA)};
+    CHECK(panels_validate_declaration(kOwnerA, batch, 2) == nullptr);
+    // owner 与声明不一致
+    CHECK(panels_validate_declaration(kOwnerB, batch, 2) != nullptr);
+    // 数组内重复 panel_id
+    batch[1] = provider_of(kPanelA, kOwnerA);
+    CHECK(panels_validate_declaration(kOwnerA, batch, 2) != nullptr);
+    // 单插件预算
+    CHECK(panels_validate_declaration(
+              kOwnerA, batch, qol::capacity::kMaxPanelProvidersPerPlugin + 1) != nullptr);
+    // 声明后与表内冲突
+    CHECK(panels_declare_provider(provider_of(kPanelC, kOwnerB)));
+    CHECK(panels_validate_declaration(kOwnerA, batch, 2) != nullptr);
+}
+
+void test_capacity() {
+    reset();
+    static char ids[qol::capacity::kMaxPanelProviders + 1][16];
+    for (uint32_t i = 0; i < qol::capacity::kMaxPanelProviders; ++i) {
         std::snprintf(ids[i], sizeof(ids[i]), "panel:%u", i);
-        CHECK(panels_register_provider(provider_of(ids[i], "owner")));
+        CHECK(panels_declare_provider(provider_of(ids[i], kOwnerA)));
     }
-    CHECK(!panels_register_provider(provider_of("panel:overflow", "owner")));
-    CHECK(panels_find_provider("panel:overflow") == nullptr);
+    CHECK(!panels_declare_provider(provider_of(ids[qol::capacity::kMaxPanelProviders], kOwnerA)));
+    CHECK(panels_validate_declaration(kOwnerA, nullptr, 1) != nullptr);
 }
 
-void test_unregister_owner_preserves_order() {
+void test_available_flip_filters_enumeration() {
     reset();
-    CHECK(panels_register_item(item_of("item:a1", "owner_a")));
-    CHECK(panels_register_item(item_of("item:b1", "owner_b")));
-    CHECK(panels_register_item(item_of("item:a2", "owner_a")));
-    CHECK(panels_register_item(item_of("item:c1", "owner_c")));
-    CHECK(panels_register_provider(provider_of("panel:a", "owner_a")));
-    CHECK(panels_register_provider(provider_of("panel:b", "owner_b")));
+    CHECK(panels_declare_provider(provider_of(kPanelA, kOwnerA)));
+    CHECK(panels_declare_provider(provider_of(kPanelB, kOwnerB)));
+    panels_set_owner_available(kOwnerA, true);
+    panels_set_owner_available(kOwnerB, true);
+    CHECK(panels_provider_count() == 2);
+    CHECK(std::strcmp(panels_provider_at(0)->panel_id, kPanelA) == 0);
+    CHECK(std::strcmp(panels_provider_at(1)->panel_id, kPanelB) == 0);
+    CHECK(panels_provider_at(2) == nullptr);
 
-    panels_unregister_owner("owner_a");
-    CHECK(panels_item_count() == 2);
-    CHECK(std::strcmp(panels_item_at(0)->id, "item:b1") == 0);
-    CHECK(std::strcmp(panels_item_at(1)->id, "item:c1") == 0);
-    CHECK(panels_find_provider("panel:a") == nullptr);
-    CHECK(panels_find_provider("panel:b") != nullptr);
+    panels_set_owner_available(kOwnerA, false);
+    CHECK(panels_provider_count() == 1);
+    CHECK(std::strcmp(panels_provider_at(0)->panel_id, kPanelB) == 0);
+    CHECK(panels_find_provider(kPanelA) == nullptr);   // 不可用不对外开放
+    CHECK(panels_find_provider(kPanelB) != nullptr);
+    panels_set_owner_available(nullptr, false);        // no-op
+    CHECK(panels_provider_count() == 1);
+}
 
-    // 注销后 id 可被新 owner 复用。
-    CHECK(panels_register_item(item_of("item:a1", "owner_d")));
-    CHECK(panels_register_provider(provider_of("panel:a", "owner_d")));
+// 本次真机事故的回归：停用排在目标之前的 owner 后，先前取得的 provider 地址
+// 必须仍指向同一 panel_id（旧实现会把整表左移，槽位改读后一项）。
+void test_pointer_stability_across_owner_disable() {
+    reset();
+    CHECK(panels_declare_provider(provider_of(kPanelA, kOwnerA)));  // 先声明（如 item_editor）
+    CHECK(panels_declare_provider(provider_of(kPanelB, kOwnerB)));  // 后声明（如 settings）
+    CHECK(panels_declare_provider(provider_of(kPanelC, "owner_c")));
+    panels_set_owner_available(kOwnerA, true);
+    panels_set_owner_available(kOwnerB, true);
+    panels_set_owner_available("owner_c", true);
 
-    panels_unregister_owner(nullptr);
-    panels_unregister_owner("");
-    CHECK(panels_item_count() == 3);  // no-op
+    const PanelProviderSpec* settings_like = panels_find_provider(kPanelB);
+    CHECK(settings_like != nullptr);
+
+    // 停用排在前面的 owner：只翻可用位，不搬动任何条目。
+    panels_set_owner_available(kOwnerA, false);
+    CHECK(settings_like->panel_id != nullptr);
+    CHECK(std::strcmp(settings_like->panel_id, kPanelB) == 0);
+    CHECK(panels_find_provider(kPanelB) == settings_like);
+    CHECK(panels_find_provider(kPanelA) == nullptr);
+
+    // 重新启用后地址仍然不变。
+    panels_set_owner_available(kOwnerA, true);
+    CHECK(panels_find_provider(kPanelA) != nullptr);
+    CHECK(panels_find_provider(kPanelB) == settings_like);
+    CHECK(panels_provider_count() == 3);
 }
 
 void test_reset() {
     reset();
-    CHECK(panels_register_item(item_of("item:a", "owner")));
-    CHECK(panels_register_provider(provider_of("panel:a", "owner")));
+    CHECK(panels_declare_provider(provider_of(kPanelA, kOwnerA)));
+    panels_set_owner_available(kOwnerA, true);
+    CHECK(panels_provider_count() == 1);
     panels_reset_for_test();
-    CHECK(panels_item_count() == 0);
-    CHECK(panels_item_at(0) == nullptr);
-    CHECK(panels_find_provider("panel:a") == nullptr);
+    CHECK(panels_provider_count() == 0);
+    CHECK(panels_provider_at(0) == nullptr);
+    CHECK(panels_find_provider(kPanelA) == nullptr);
 }
 
 }  // namespace
 
 int main() {
-    test_register_and_duplicate();
-    test_item_bounds();
-    test_item_capacity();
-    test_provider_register_find();
-    test_provider_capacity();
-    test_unregister_owner_preserves_order();
+    test_declare_and_duplicate();
+    test_declare_rejects_bad_fields();
+    test_validate_declaration();
+    test_capacity();
+    test_available_flip_filters_enumeration();
+    test_pointer_stability_across_owner_disable();
     test_reset();
-    std::printf("infra_panels: pass=%d fail=%d\n", g_pass, g_fail);
+    std::printf("infra_panels_tests: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

@@ -448,23 +448,6 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_pre_save_api = pre_save;
         g_pre_save_observer = observer;
     }
-    // 自身初始化：资源由宿主声明式安装；本面板注册 provider 供 core.ui 容器打开。
-    if (ctx.sdk == nullptr || ctx.sdk->panels.register_provider == nullptr ||
-        !contracts::succeeded(ctx.sdk->panels.register_provider(&kPanelProvider))) {
-        if (g_pre_save_observer != 0 && g_pre_save_api != nullptr &&
-            g_pre_save_api->unregister_observer != nullptr) {
-            (void)g_pre_save_api->unregister_observer(ctx.owner_token, g_pre_save_observer);
-        }
-        g_pre_save_observer = 0;
-        g_pre_save_api = nullptr;
-        if (g_commands_registered) {
-            sb_unregister_commands(ctx.sdk);
-            g_commands_registered = false;
-        }
-        save_backup_bind_world_facts(nullptr);
-        save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
-        return 1;
-    }
     savebackup_set_ui_components(ui_components);
     savebackup_set_ui_confirmation_api(ui_confirmation);
     // 游戏主线程刷新槽元数据快照；HTTP 导出只读缓存，不跨线程读游戏槽结构。
@@ -502,9 +485,6 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
         (void)ctx.sdk->scheduler.remove(g_slot_meta_task);
     }
     g_slot_meta_task = 0;
-    if (ctx.sdk != nullptr && ctx.sdk->panels.unregister_owner != nullptr) {
-        (void)ctx.sdk->panels.unregister_owner(kPluginId);
-    }
     if (g_pre_save_observer != 0 && g_pre_save_api != nullptr &&
         g_pre_save_api->unregister_observer != nullptr) {
         (void)g_pre_save_api->unregister_observer(ctx.owner_token, g_pre_save_observer);
@@ -605,6 +585,9 @@ const contracts::PluginDescriptor kDescriptor = {
     static_cast<uint32_t>(sizeof(kSbHttpEndpoints) / sizeof(kSbHttpEndpoints[0])),
     nullptr,
     nullptr, 0,
+    true,
+    &kPanelProvider,
+    1,
 };
 
 }  // namespace

@@ -5,6 +5,9 @@
 
 namespace qol::features::item_editor {
 inline constexpr uint32_t kResourceCount = 1;
+
+// 面板 provider 声明数（PluginDescriptor.panel_provider_count）。
+inline constexpr uint32_t kProviderCount = 1;
 const contracts::PluginDescriptor& plugin_descriptor();
 const contracts::QolHostSdk* host_sdk();
 const contracts::QolGameHost* game_host();

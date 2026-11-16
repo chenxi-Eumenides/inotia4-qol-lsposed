@@ -834,6 +834,7 @@ add_executable(plugin_registry_tests
     ${CPP_DIR}/infra/capabilities.cpp
     ${CPP_DIR}/infra/config.cpp
     ${CPP_DIR}/infra/events.cpp
+    ${CPP_DIR}/infra/panels.cpp
     ${CPP_DIR}/infra/log/qol_log.cpp
     ${CPP_DIR}/patch/call_patch.cpp
     ${CPP_DIR}/patch/short_hook.cpp
@@ -916,6 +917,7 @@ set(FEATURE_REGISTRY_TEST_SOURCES
     ${CPP_DIR}/infra/capabilities.cpp
     ${CPP_DIR}/infra/config.cpp
     ${CPP_DIR}/infra/events.cpp
+    ${CPP_DIR}/infra/panels.cpp
     ${CPP_DIR}/infra/log/qol_log.cpp
 )
 add_executable(feature_reconciler_tests

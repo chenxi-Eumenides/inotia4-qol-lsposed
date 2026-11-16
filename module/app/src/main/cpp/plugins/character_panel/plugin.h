@@ -13,6 +13,9 @@
 namespace qol::features::character_panel {
 
 inline constexpr uint32_t kResourceCount = 2;
+
+// 面板 provider 声明数（PluginDescriptor.panel_provider_count）。
+inline constexpr uint32_t kProviderCount = 1;
 const contracts::PluginDescriptor& plugin_descriptor();
 
 }  // namespace qol::features::character_panel

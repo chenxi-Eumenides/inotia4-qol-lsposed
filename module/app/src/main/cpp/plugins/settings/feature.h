@@ -20,7 +20,10 @@ bool settings_panels_open(const char* panel_id);
 bool plugin_enabled();
 void plugin_set_enabled(bool enabled);
 
-// 注册设置页 provider + 「存档备份」动作项（install）；反注册（deactivate）。
+// 设置页面板 provider 声明（装配期由 PluginDescriptor 登记；这里只暴露声明本身）。
+const contracts::PanelProviderSpec& settings_panel_provider();
+
+// 注册设置页帧任务与面板 SDK 绑定（install）；反注册（deactivate）。
 bool panels_register();
 void panels_unregister();
 

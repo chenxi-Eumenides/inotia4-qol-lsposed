@@ -511,6 +511,8 @@ uint32_t panel_event(uint64_t event, uint64_t param, uint64_t param2) {
 
 bool provider_open() {
     if (!gate_enabled()) return false;
+    // provider 改为装配期声明：UI 能力缺失时也必须拒绝，不能进入未绑定的组件路径。
+    if (!panel_available()) return false;
     panel_enter();
     return g_active && g_root != nullptr;
 }

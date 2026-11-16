@@ -248,9 +248,6 @@ static_assert(kResourceCount == (sizeof(kResources) / sizeof(kResources[0])),
 
 // 面板 provider 注销与绑定缓存失效；deactivate 与能力撤销共用。
 void unregister_panel() {
-    if (g_sdk != nullptr && g_panel_registered && g_sdk->panels.unregister_owner != nullptr) {
-        (void)g_sdk->panels.unregister_owner(kPluginId);
-    }
     panel_unbind();
     g_panel_registered = false;
 }
@@ -275,7 +272,7 @@ void clear_install_state() {
 // 只有 ui_panels + ui_components 同时可用才注册 provider；失败不影响倍率接线。
 void ensure_panel() {
     if (g_panel_registered || g_sdk == nullptr || g_sdk->capabilities.require == nullptr ||
-        g_sdk->panels.register_provider == nullptr || g_sdk->ui == nullptr) {
+        g_sdk->ui == nullptr) {
         return;
     }
     const void* panels_iface = nullptr;
@@ -293,7 +290,7 @@ void ensure_panel() {
         components_iface == nullptr) {
         return;
     }
-    if (!contracts::succeeded(g_sdk->panels.register_provider(&panel_provider()))) return;
+    // provider 由 PluginDescriptor 声明；这里只绑定 UI 能力并置 ready。
     panel_bind(g_sdk, static_cast<const contracts::QolUiComponents*>(components_iface), g_sdk->ui);
     g_panel_registered = true;
 }
@@ -498,6 +495,8 @@ const contracts::PluginDescriptor kDescriptor = {
     &validate_rates_config,    // config schema: rates only
     nullptr, 0,                // http route metadata
     true,
+    &panel_provider(),         // panel provider（装配期登记）
+    1,
 };
 
 }  // namespace

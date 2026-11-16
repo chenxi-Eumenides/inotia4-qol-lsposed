@@ -252,6 +252,9 @@ const contracts::PluginDescriptor kDescriptor = {
     kHttpEndpoints, static_cast<uint32_t>(sizeof(kHttpEndpoints) / sizeof(kHttpEndpoints[0])),
     nullptr,
     kHttpRouteMetadata, static_cast<uint32_t>(sizeof(kHttpRouteMetadata) / sizeof(kHttpRouteMetadata[0])),
+    true,
+    &core_ui::settings_panel_provider(),
+    1,
 };
 
 }  // namespace

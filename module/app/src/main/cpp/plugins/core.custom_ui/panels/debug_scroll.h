@@ -6,6 +6,7 @@
 namespace qol::features::core_ui {
 QolResult debug_scroll_http_command(const contracts::HttpReq* request,
                                     contracts::HttpRes* response, void* ctx);
+const contracts::PanelProviderSpec& debug_scroll_provider();
 bool debug_scroll_register(const contracts::QolHostSdk* sdk);
 void debug_scroll_unregister(const contracts::QolHostSdk* sdk);
 void debug_scroll_set_enabled(bool enabled);

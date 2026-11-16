@@ -89,10 +89,10 @@ void plugin_set_enabled(bool enabled) {
     }
 }
 
+const contracts::PanelProviderSpec& settings_panel_provider() { return kSettingsProvider; }
+
 bool panels_register() {
-    if (g_sdk == nullptr || g_sdk->panels.register_provider == nullptr ||
-        contracts::feature_control_if_available(g_sdk) == nullptr) return false;
-    if (!contracts::succeeded(g_sdk->panels.register_provider(&kSettingsProvider))) return false;
+    if (g_sdk == nullptr || contracts::feature_control_if_available(g_sdk) == nullptr) return false;
     if (g_frame_task == 0 && g_sdk->scheduler.add != nullptr) {
         // 每帧（interval=1）：游戏 STATE_EnterMainMenu 会重填「更多游戏」ExecuteProc 槽为
         // 原版 GotoShowMoreGames，重绑间隔大于 1 帧时存在点击落回原版 gemshop 的窗口；
@@ -116,9 +116,6 @@ void panels_unregister() {
     settings_ui_close_panel();
     settings_release_more_games();
     g_enabled.store(false, std::memory_order_release);
-    if (g_sdk != nullptr && g_sdk->panels.unregister_owner != nullptr) {
-        (void)g_sdk->panels.unregister_owner("settings");
-    }
     g_panels_api = nullptr;
     settings_bind_sdk(nullptr, contracts::kQolOwnerTokenInvalid);
     g_sdk = nullptr;

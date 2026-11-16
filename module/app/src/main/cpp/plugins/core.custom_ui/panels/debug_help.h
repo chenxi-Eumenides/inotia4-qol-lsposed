@@ -6,6 +6,7 @@
 namespace qol::features::core_ui {
 QolResult debug_help_http_command(const contracts::HttpReq* request,
                                   contracts::HttpRes* response, void* ctx);
+const contracts::PanelProviderSpec& debug_help_provider();
 bool debug_help_register(const contracts::QolHostSdk* sdk);
 void debug_help_unregister(const contracts::QolHostSdk* sdk);
 void debug_help_set_enabled(bool enabled);

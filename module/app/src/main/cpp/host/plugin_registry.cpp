@@ -44,6 +44,7 @@
 #include "infra/capabilities.h"
 #include "infra/config.h"
 #include "infra/events.h"
+#include "infra/panels.h"
 #include "infra/status.h"
 #include "patch/instr_patch.h"
 #include "patch/ptr_slot.h"
@@ -136,6 +137,14 @@ bool g_port_invalid[kMaxPlugins] = {};
 
 void publish_runtime_actual(const char* plugin_id, bool enabled) {
     if (g_feature_mode) runtime_effects_publish_actual(plugin_id, enabled);
+}
+
+// 面板 provider 可用位：只随插件实际可运行状态翻转，不增删声明表条目。
+// 启用必须在 on_enabled 与能力发布之后；停用在停止被接受（resource 还原前）即置不可用，
+// 避免 teardown 期间新的 open 进入正在清理的插件。
+void set_panels_available(const contracts::PluginDescriptor& plugin, bool available) {
+    if (plugin.panel_provider_count == 0) return;
+    infra::panels_set_owner_available(plugin.id, available);
 }
 
 void retire_runtime_observers(const char* plugin_id) {
@@ -996,6 +1005,8 @@ bool descriptor_valid(const contracts::PluginDescriptor& plugin) {
     if (plugin.jni_count > 0 && plugin.jni == nullptr) return false;
     if (plugin.port_count > kMaxPortsPerPlugin) return false;
     if (plugin.port_count > 0 && plugin.ports == nullptr) return false;
+    if (plugin.panel_provider_count > qol::capacity::kMaxPanelProvidersPerPlugin) return false;
+    if (plugin.panel_provider_count > 0 && plugin.panel_providers == nullptr) return false;
     if (!http_endpoint_binder_validate_descriptor(plugin)) return false;
     return true;
 }
@@ -1572,6 +1583,8 @@ bool feature_stop(uint32_t index, bool failed_cleanup) {
     LifecycleTx* slot = nullptr;
     for (auto& candidate : g_lifecycle_txs) if (!candidate.in_use) { slot = &candidate; break; }
     if (!slot) return false;
+    // 停止被接受即置面板不可用：teardown 期间不得有新的 open 进入正在清理的插件。
+    set_panels_available(plugin, false);
     infra::FeatureStatus status{};
     infra::status_get(plugin.id, &status);
     *slot = LifecycleTx{};
@@ -1824,6 +1837,7 @@ void cascade_stop_plugin(uint32_t index, CascadeContext& context) {
     context.visited[index] = true;
     owner_suspend(&g_plugins[index]);
     const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    set_panels_available(plugin, false);
     const bool revoke_caps = g_cap_registration[index] == CapRegistration::kRegistered;
     const bool provider_revoke = revoke_caps && plugin_provides_http_transport(plugin);
     defer_http_stop(index, plugin.on_disabled != nullptr, revoke_caps, provider_revoke,
@@ -1886,6 +1900,7 @@ void cascade_dependents(const char* capability_id, CascadeContext& context) {
 void begin_revoke_provider(uint32_t index) {
     owner_suspend(&g_plugins[index]);
     const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    set_panels_available(plugin, false);
     if (!plugin_provides_capability(plugin)) return;
     const bool revoke_caps = g_cap_registration[index] == CapRegistration::kRegistered;
     defer_http_stop(index, plugin.on_disabled != nullptr, revoke_caps,
@@ -2137,11 +2152,13 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
         if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
         bind_http_endpoints(plugin);
         register_provided_capabilities(index);
+        set_panels_available(plugin, true);
         publish_runtime_actual(plugin.id, true);
     } else {
         owner_suspend(&g_plugins[index]);
         defer_http_stop(index, plugin.on_disabled != nullptr, false, false, false);
         (void)poll_http_stops();
+        set_panels_available(plugin, false);
         publish_runtime_actual(plugin.id, false);
     }
     return true;
@@ -2162,6 +2179,15 @@ bool register_plugin(const contracts::PluginDescriptor& plugin) {
     }
     if (g_plugin_count >= kMaxPlugins) return false;
 
+    // 面板 provider 声明在装配期校验：owner/panel_id/回调完整、全表唯一、容量足够。
+    const char* provider_conflict = infra::panels_validate_declaration(
+        plugin.id, plugin.panel_providers, plugin.panel_provider_count);
+    if (provider_conflict != nullptr) {
+        QOL_LOG_WARN(QolDomain::kCore, "plugin %s panel provider declaration rejected: %s",
+                     plugin.id, provider_conflict);
+        return false;
+    }
+
     // 资源登记在声明期完成（一资源一安装者）；登记失败即视为描述符非法。
     for (uint32_t i = 0; i < plugin.resources_count; ++i) {
         if (!hooks::register_claim(plugin.resources[i])) return false;
@@ -2170,6 +2196,17 @@ bool register_plugin(const contracts::PluginDescriptor& plugin) {
     g_plugins[g_plugin_count].descriptor = plugin;
     if (!owner_register(&g_plugins[g_plugin_count], plugin.id)) return false;
     if (!http_endpoint_binder_register_owner(g_plugins[g_plugin_count].descriptor)) return false;
+    // 已通过 validate_declaration 的同一组声明；失败只可能是并发/表被破坏，按装配失败处理。
+    for (uint32_t i = 0; i < plugin.panel_provider_count; ++i) {
+        if (!infra::panels_declare_provider(plugin.panel_providers[i])) {
+            QOL_LOG_WARN(QolDomain::kCore,
+                         "plugin %s panel provider declaration failed panel=%s", plugin.id,
+                         plugin.panel_providers[i].panel_id != nullptr
+                             ? plugin.panel_providers[i].panel_id
+                             : "(null)");
+            return false;
+        }
+    }
     ++g_plugin_count;
     return true;
 }
@@ -2379,11 +2416,13 @@ static bool lifecycle_apply_actual(const char* plugin_id, int32_t action) {
                     if (plugin->on_enabled != nullptr) plugin->on_enabled(ctx);
                     bind_http_endpoints(*plugin);
                     register_provided_capabilities(plugin_index_of(plugin->id));
+                    set_panels_available(*plugin, true);
                     publish_runtime_actual(plugin->id, true);
                 } else {
                     owner_suspend(&g_plugins[index]);
                     defer_http_stop(index, plugin->on_disabled != nullptr, false, false, false);
                     (void)poll_http_stops();
+                    set_panels_available(*plugin, false);
                     publish_runtime_actual(plugin->id, false);
                 }
                 return true;
@@ -2890,12 +2929,14 @@ static uint32_t lifecycle_step_engine() {
                         bind_http_endpoints(plugin);
                         // §3.4.4：install 成功后进入 enabled 时注册能力。
                         register_provided_capabilities(slot.plugin_index);
+                        set_panels_available(plugin, true);
                         publish_enabled_actual = true;
                     } else {
                         owner_suspend(&g_plugins[slot.plugin_index]);
                         defer_http_stop(slot.plugin_index, plugin.on_disabled != nullptr,
                                         false, false, false);
                         (void)poll_http_stops();
+                        set_panels_available(plugin, false);
                         publish_runtime_actual(plugin.id, false);
                     }
                 } else if (slot.cascade && !g_feature_mode) {

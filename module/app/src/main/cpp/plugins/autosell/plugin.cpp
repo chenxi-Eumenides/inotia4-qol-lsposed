@@ -269,8 +269,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     }
     g_inventory_extras = static_cast<const contracts::QolInventoryExtrasPort*>(ctx.ports[0]);
     g_item_port = static_cast<const contracts::QolItemPort*>(ctx.ports[1]);
-    if (g_sdk == nullptr || g_sdk->panels.register_provider == nullptr ||
-        g_sdk->panels.unregister_owner == nullptr) {
+    if (g_sdk == nullptr) {
         g_sdk = nullptr;
         g_game = nullptr;
         g_inventory_extras = nullptr;
@@ -291,12 +290,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     autosell_register_save_exit();
     // feature 为插件唯一开关：want_run 成立才会 install，故进入此路径即视为启用。
     apply_gate(true);
-    // 自身初始化：资源由宿主声明式安装；本面板登记 provider 供 core.ui 容器打开。
-    if (g_sdk->panels.register_provider(&kPanelProvider).ok != kQolOk) {
-        unsubscribe_capability_changes();
-        g_item_port = nullptr;
-        return 1;
-    }
+    // 面板 provider 由 PluginDescriptor 声明，宿主装配期登记，这里不再运行时注册。
     return 0;
 }
 
@@ -320,9 +314,6 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     g_inventory_extras = nullptr;
     g_item_port = nullptr;
     apply_gate(false);
-    if (g_sdk != nullptr && g_sdk->panels.unregister_owner != nullptr) {
-        (void)g_sdk->panels.unregister_owner(kPluginId);
-    }
 }
 
 // 有资源（2 条常驻）但无资源 gate：启停只切业务门禁与 UI 门控；资源物理装卸由宿主负责。
@@ -380,6 +371,9 @@ const contracts::PluginDescriptor kDescriptor = {
     nullptr,
     kHttpRouteMetadata,
     static_cast<uint32_t>(sizeof(kHttpRouteMetadata) / sizeof(kHttpRouteMetadata[0])),
+    true,
+    &kPanelProvider,
+    1,
 };
 
 }  // namespace

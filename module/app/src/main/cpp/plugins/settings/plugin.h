@@ -11,6 +11,9 @@ namespace qol::features::core_settings {
 
 inline constexpr uint32_t kResourceCount = 1;
 
+// 面板 provider 声明数（PluginDescriptor.panel_provider_count）。
+inline constexpr uint32_t kProviderCount = 1;
+
 const contracts::PluginDescriptor& plugin_descriptor();
 
 }  // namespace qol::features::core_settings

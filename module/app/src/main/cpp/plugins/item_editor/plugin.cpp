@@ -62,8 +62,8 @@ const contracts::PanelProviderSpec kProvider{
     kPanelId, kPluginId, &provider_open, &provider_close, &provider_active,
     &provider_block_reason, &kCallbacks};
 int install(contracts::PluginContext& ctx) {
-    if (ctx.sdk == nullptr || ctx.ports == nullptr || ctx.port_count != 1 || ctx.ports[0] == nullptr ||
-        ctx.sdk->panels.register_provider == nullptr) return 1;
+    if (ctx.sdk == nullptr || ctx.ports == nullptr || ctx.port_count != 1 || ctx.ports[0] == nullptr)
+        return 1;
     g_sdk = ctx.sdk;
     g_game = ctx.game;
     g_item_port = static_cast<const contracts::QolItemPort*>(ctx.ports[0]);
@@ -85,12 +85,6 @@ int install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         return 1;
     }
-    if (!contracts::succeeded(g_sdk->panels.register_provider(&kProvider))) {
-        g_item_port = nullptr;
-        g_game = nullptr;
-        g_sdk = nullptr;
-        return 1;
-    }
     g_owner_token = ctx.owner_token;
     return 0;
 }
@@ -102,8 +96,6 @@ void deactivate(contracts::PluginContext& ctx) {
     const auto* panels = panels_api();
     if (panels != nullptr && panels->deactivate_owner != nullptr)
         (void)panels->deactivate_owner(kPluginId);
-    if (ctx.sdk != nullptr && ctx.sdk->panels.unregister_owner != nullptr)
-        (void)ctx.sdk->panels.unregister_owner(kPluginId);
     g_item_port = nullptr;
     g_game = nullptr;
     g_owner_token = {};
@@ -128,7 +120,8 @@ constexpr contracts::FeatureDefinition kFeatures[] = {{
 const contracts::PluginDescriptor kDescriptor{
     kPluginId, "0.1.0", 0, nullptr, 0, nullptr, 0, nullptr,
     1, kResources, 0, nullptr, &install, &deactivate, &on_enabled, &on_disabled, &status,
-    nullptr, kPorts, 1, nullptr, 0, kFeatures, 1};
+    nullptr, kPorts, 1, nullptr, 0, kFeatures, 1,
+    nullptr, 0, nullptr, nullptr, 0, true, &kProvider, 1};
 }
 const contracts::PluginDescriptor& plugin_descriptor() { return kDescriptor; }
 const contracts::QolHostSdk* host_sdk() { return g_sdk; }

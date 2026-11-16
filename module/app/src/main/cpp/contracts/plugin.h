@@ -237,6 +237,11 @@ struct PluginDescriptor {
     // Legacy consumers still call this plugin's hook wrappers directly; while they remain,
     // the host rejects deactivate instead of releasing the wrappers under them.
     bool deactivate_allowed = true;
+    // 面板 provider 声明：装配期一次性登记进 infra 静态表（append-only，永不重排/删除），
+    // 运行期不再有注册/注销调用，插件启停只翻可用位。owner 必须等于 descriptor.id；
+    // 可用项才对外 enumerate / open。指针与字符串生命周期 ≥ 进程。
+    const PanelProviderSpec* panel_providers = nullptr;
+    uint32_t panel_provider_count = 0;
 };
 
 }  // namespace qol::contracts

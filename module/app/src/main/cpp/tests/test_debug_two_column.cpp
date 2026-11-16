@@ -672,6 +672,8 @@ int main() {
     sdk.scheduler.remove = &remove_task;
     sdk.capabilities.require = &require_debug_capability;
     CHECK(debug_components_register(&sdk));
+    // D 方案：provider 由描述符声明，不再经 SDK 运行时注册；测试直接取声明本身。
+    g_provider = &debug_components_provider();
     CHECK(g_provider != nullptr && g_provider->panel_id != nullptr &&
           std::strcmp(g_provider->panel_id, "debug_components") == 0);
     CHECK(!g_provider->active());

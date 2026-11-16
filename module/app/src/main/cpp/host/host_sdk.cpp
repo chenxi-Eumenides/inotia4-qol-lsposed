@@ -785,20 +785,18 @@ int32_t sdk_item_handle_finish_invalidation(contracts::QolItemHandle checkpoint,
                : contracts::kQolItemHandleStatusStale;
 }
 
-QolResult sdk_panels_register_item(const contracts::PanelItemSpec* item) {
-    if (item == nullptr) return result_error(kQolErrInvalidArgument, kNullArgument);
-    return result_from_bool(infra::panels_register_item(*item), kQolErrConflict, kConflict);
+// 运行时注册/注销已退役（D：provider 由 PluginDescriptor 在装配期声明）。
+// 函数表槽位为保持 QolHostSdk 前缀 ABI 而保留，一律返回 unsupported。
+QolResult sdk_panels_register_item(const contracts::PanelItemSpec*) {
+    return result_error(kQolErrUnsupported, "panel items are declared in the plugin descriptor");
 }
 
-QolResult sdk_panels_register_provider(const contracts::PanelProviderSpec* provider) {
-    if (provider == nullptr) return result_error(kQolErrInvalidArgument, kNullArgument);
-    return result_from_bool(infra::panels_register_provider(*provider), kQolErrConflict, kConflict);
+QolResult sdk_panels_register_provider(const contracts::PanelProviderSpec*) {
+    return result_error(kQolErrUnsupported, "panel providers are declared in the plugin descriptor");
 }
 
-QolResult sdk_panels_unregister_owner(const char* owner) {
-    if (owner == nullptr) return result_error(kQolErrInvalidArgument, kNullArgument);
-    infra::panels_unregister_owner(owner);
-    return contracts::ok();
+QolResult sdk_panels_unregister_owner(const char*) {
+    return result_error(kQolErrUnsupported, "panel providers are declared in the plugin descriptor");
 }
 
 uint32_t sdk_panels_provider_count() {

@@ -15,6 +15,12 @@
 namespace qol::features::core_ui {
 
 inline constexpr uint32_t kResourceCount = 4;
+// 面板 provider 声明数：3 个调试面板仅在 QOL_DEBUG_COMPONENTS 下声明。
+#if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
+inline constexpr uint32_t kProviderCount = 3;
+#else
+inline constexpr uint32_t kProviderCount = 0;
+#endif
 const contracts::PluginDescriptor& plugin_descriptor();
 const contracts::QolHostSdk* host_sdk();
 const contracts::QolChoicePort* choice_port();

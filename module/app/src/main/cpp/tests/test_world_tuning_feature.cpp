@@ -95,19 +95,12 @@ int g_panel_register_calls = 0;
 int g_panel_unregister_calls = 0;
 const PanelProviderSpec* g_registered_panel = nullptr;
 
-QolResult fake_panels_register_provider(const PanelProviderSpec* provider) {
-    ++g_panel_register_calls;
-    g_registered_panel = provider;
+// D 方案：provider 由描述符声明，运行时 SDK 槽位只保留 ABI 前缀。
+QolResult fake_panels_register_provider(const PanelProviderSpec*) {
     return ok();
 }
 
-QolResult fake_panels_unregister_owner(const char* owner) {
-    ++g_panel_unregister_calls;
-    if (owner != nullptr && std::strcmp(owner, "world_tuning") == 0) {
-        g_registered_panel = nullptr;
-    }
-    return ok();
-}
+QolResult fake_panels_unregister_owner(const char*) { return ok(); }
 
 QolResult fake_ui_panel_create(const UiPanelDesc*, QolUiHandle, QolUiHandle*) { return ok(); }
 QolResult fake_ui_arrow_button_create(const UiArrowButtonDesc*, QolUiHandle, QolUiHandle*) {

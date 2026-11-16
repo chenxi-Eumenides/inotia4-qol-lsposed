@@ -344,6 +344,14 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 #endif
 };
 
+#if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
+// 调试面板 provider 声明数组（装配期登记；D 方案下不再运行时注册）。
+static const contracts::PanelProviderSpec kDebugPanelProviders[] = {
+    debug_components_provider(), debug_scroll_provider(), debug_help_provider()};
+inline constexpr uint32_t kDebugPanelProviderCount =
+    sizeof(kDebugPanelProviders) / sizeof(kDebugPanelProviders[0]);
+#endif
+
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
@@ -372,6 +380,14 @@ const contracts::PluginDescriptor kDescriptor = {
 #endif
     nullptr,
     nullptr, 0,
+    true,
+#if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
+    kDebugPanelProviders,
+    kDebugPanelProviderCount,
+#else
+    nullptr,
+    0,
+#endif
 };
 
 }  // namespace
