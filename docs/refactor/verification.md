@@ -585,6 +585,19 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | 构建 | **PASS（Debug）**：`scripts/build-debug.sh` → `output/inotia4_qol_lsposed_debug_2611140137_d4f9f9e6b1eb.apk`，SHA-256 `d4f9f9e6b1eb4cf5f00a635b1b2d4d369ab9f89d9b47b0e774b942898f406f3c`。 | 构建包含同期未提交的日志域/编辑器迁移改动，APK 不代表本项单独验收。 |
 | 真机 | **NOT_ACCEPTED（未执行）**：未安装本轮 Debug 包、未复现祭司技能掉落。 | 待核验：①掉落数量 20 + 重抽 20 连打祭司佣兵技能不再闪退；②`/api/system/resources` 中 8 条池补丁 `live`；③切图/退出/新档后池重建为 1638 槽且 `ITEMPOOL` 用量统计正常；④池接近满时出现 `make_item skipped` 且游戏继续运行；⑤关闭 world_tuning 后地面掉落回落 32 槽、物品池仍 1638 槽。 |
 
+### 5.39 面板 provider 声明式登记（2026-11-17；Host/静态/构建通过，真机待验）
+
+范围：`infra/panels` provider 注册表由「运行时注册 + 保序压缩数组」改为「`PluginDescriptor` 装配期声明 + 只追加静态表 + 可用位」；`QolPanelsApi` 三个运行时注册槽位保留但返回 `unsupported`。
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 现象与根因 | **真机现场（2026-11-17 00:24，Phh rig）**：设置页打开 → 关闭「物品编辑器」→ 页面继续绘制但全部触摸无响应、返回键失效。`/api/system/game_frame` 3 s +60 帧（循环正常）、`/api/debug/settings-ui/status` `panel_active=true`、`/api/ui/state` 仍为 `module_panel_settings`；日志 `dispatch process panel=world_tuning` 自 `00:24:27` 起持续输出，但该进程从未 `panel open panel=world_tuning`。根因：`panels_unregister_owner()` 左移删除 provider 表项，`PopupHost::stack_[].provider` 保存的是表内地址；item_editor 停用使整表左移，settings 槽位改读 `world_tuning`，其 `panel_event` 在 `!g_active` 时 `return 1` 吞掉全部触摸。 | `/api/ui/state/table` 实测移位后顺序 debug_components/debug_scroll/debug_help/character_panel_overview/save_backup/settings/world_tuning/autosell 可反推 settings 原槽位的下一项即 world_tuning；现场证据保留在 `.tmp/settings-freeze/`（backtrace、java trace、全量日志、截图）。 |
+| 实现 | **已实现**：`contracts/plugin.h` 尾部追加 `panel_providers`/`panel_provider_count`；`infra/panels` 改为只追加静态表（`available` 与声明分离，永不重排/删除）；`host/plugin_registry` 在 `register_plugin` 做装配期校验与登记，并在 enable 成功后置可用、`feature_stop`/级联/撤销/门禁关闭时置不可用；`QolPanelsApi` 三个注册槽位保留为 `unsupported` 桩；10 个面板插件改为 descriptor 声明，`core.custom_ui` 三个 Debug provider 用条件数组声明；`kMaxPanelProviders=32`、单插件 4，`assembly.cpp` 用 sidecar 汇总做 `static_assert`。 | `PanelItemSpec` 类型与 SDK 槽位保留（ABI 前缀）；世界调整面板在 UI 能力缺失时 `provider_open()` 直接拒绝。 |
+| Host | **PASS**：`infra_panels_tests`、`plugin_registry_tests`、`feature_reconciler_tests`、`core_ui_panels_tests`、`core_custom_ui_host_tests`、`autosell_plugin_tests`、`world_tuning_feature_tests`、`debug_two_column_tests` 通过；全量 `ctest` 167/168（唯一失败 `host_adapter_tests` 为既有链接缺口：`item_port.cpp` 缺 `fn_memorytext_get_text_e`/`fn_cal_calculate` 桩，源与目标列表本次均未改动）。 | 新增用例：注销前序 owner 后旧 provider 地址仍解析到同一 `panel_id`；可用位过滤枚举；声明 owner 不符/重复 id/容量/回调缺失拒绝。 |
+| 静态/构建 | **PASS**：`check_arch.py` 全部通过（log_policy 30 条既有软告警）；`scripts/build-debug.sh --offline` 成功 `output/inotia4_qol_lsposed_debug_2611170200_deb4043dcb3a.apk`。 | kernel-only 构建失败为既有缺口（`host/ui_adapter.cpp` 依赖 `core.custom_ui/panels/frame_overlay.cpp`，该文件在 kernel-only 源列表外），与本次改动无关。 |
+| 真机（待执行） | **NOT_ACCEPTED**：未安装本轮 Debug 包。 | 需核验：①设置页打开 → 关「物品编辑器」→ 页面仍可点、可返回，`dispatch process panel=settings` 持续；②关/开「属性面板汉化/属性总览」（character_panel 两个 toggle 都关才停用插件）不破坏页面；③Debug 面板打开/关闭 + 停用/启用 `core.custom_ui`；④`/api/ui/state/table` 只列可用 provider，停用/启用后增删正确；⑤世界调整在 UI 能力缺失时面板拒绝打开、倍率仍生效。 |
+| 证据 | `.tmp/settings-freeze/{backtrace.txt,java-trace.txt,qol-full.log,screen.png}`（任务结束按 AGENTS.md 删除临时目录）。 | 真机通过前不置 ACCEPTED。 |
+
 ### 5.38 锚定入口生命周期日志与僵尸热区消除（2026-11-16；Host/静态/构建通过，真机待验）
 
 范围：`core.custom_ui` 的锚定入口（`anchored_button_*`）在丢失挂载根/句柄失效时的可观测性与释放语义；`item_editor` 背包页入口的日志正文。触发样本：`apk/logs/qol-物品编辑器入口按钮消失.log`（用户反馈背包页入口反复进出后消失、点击后复现）与 `apk/logs/qol.log`（主菜单入口缺失）。

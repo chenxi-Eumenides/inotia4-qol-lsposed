@@ -249,7 +249,7 @@
 
 `type` 与 `name` 一起用于识别具体场景：例如世界操作前要求 `type=3` 且 `name="world"`；死亡弹窗为 `type=4` 且 `name="game_wipeout"`；启动同意页为 `type=4` 且 `name="android_agreement"`。不得再按 `screen` 前缀判断 UI 占据。
 
-UI 状态表 `GET /api/ui/state/table` 返回当前可用状态名及来源：
+UI 状态表 `GET /api/ui/state/table` 返回当前可用状态名及来源。`module_panel_*` 只列**当前可用**的面板 provider（插件已启用且未在停用中）；provider 声明在装配期固定，停用/启用只改变是否出现在本表：
 
 ```json
 {

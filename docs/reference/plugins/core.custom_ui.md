@@ -111,6 +111,8 @@
 
 ### 3.2 面板注册与导航
 
+provider 由各面板插件在 `PluginDescriptor.panel_providers` 装配期声明，`infra/panels` 只追加、永不重排/删除/复用槽位；插件启停只翻 `available` 位（enable 成功后置可用，`feature_stop`/级联/门禁关闭时置不可用）。`QolPanelsApi.register_item/register_provider/unregister_owner` 仅为 Host SDK 前缀保留，调用一律返回 `unsupported`。对外枚举（含 `/api/ui/state/table`）只列当前可用 provider。
+
 `ui_panels` 只编排 provider，不解释面板语义；逻辑栈深 4（`panels/stack.h:27`）。语义约束集中在 `panels/stack.h:6-21`：open 幂等、失败关栈顶重试一次、每帧剔除 stale 栈顶、延迟关闭不提前弹栈记录。常驻帧任务 `ui_panels_frame_pump`（`panels/stack.cpp:214`）驱动宿主重试；`ui_panels_request_back`（`:311`）可在原生事件遍历内安全调用。宿主 `PopupHost` 是唯一 PopupState owner（`panels/host.h:36-50`），close 管线停滞超过 120 帧时强制收尾（`host.h:50`、`host.cpp:421-446`）。
 
 ### 3.3 控件挂载归属（强制）
