@@ -48,6 +48,18 @@ void anchored_log(int32_t level, int line, const char* format, ...) {
 }
 
 #define ANCHORED_LOG_INFO(...) anchored_log(1, __LINE__, __VA_ARGS__)
+#define ANCHORED_LOG_WARN(...) anchored_log(2, __LINE__, __VA_ARGS__)
+
+bool anchored_log_debug_enabled() {
+    return g_log_sdk != nullptr && g_log_sdk->log.debug_enabled != nullptr &&
+           g_log_sdk->log.debug_enabled() != 0;
+}
+
+#define ANCHORED_LOG_DEBUG(...)                      \
+    do {                                             \
+        if (anchored_log_debug_enabled())            \
+            anchored_log(0, __LINE__, __VA_ARGS__);  \
+    } while (0)
 
 const char* root_kind_token(uint32_t kind) {
     switch (kind) {
@@ -1468,10 +1480,44 @@ QolResult anchored_button_release(contracts::QolUiAnchoredButton* state) {
     return contracts::ok();
 }
 
+// 入口是否画在可信位置：绝对坐标由父链累加得出，父链指向已销毁内存时会得到离谱数值。
+// 该范围只用于区分「坐标可信」与「坐标明显异常」，不参与任何行为决策。
+constexpr int64_t kEntryAbsLimit = 32768;
+
 QolResult anchored_button_draw(const contracts::QolUiAnchoredButton* state) {
     if (state == nullptr) return invalid_argument();
     if (!state->mounted || state->handle == nullptr) return contracts::ok();
-    return icon_button_draw(state->handle);
+    const QolResult drawn = icon_button_draw(state->handle);
+    const char* kind = root_kind_token(state->root_kind);
+    if (!contracts::succeeded(drawn)) {
+        // 绘制被拒说明控件已无法按组件记录绘制（身份失效或适配器拒绝）。
+        ANCHORED_LOG_WARN("fail draw entry root_kind=%s handle=%p code=%d", kind,
+                          static_cast<void*>(state->handle), static_cast<int>(drawn.code));
+        return drawn;
+    }
+    // icon_button_draw 已成功走过同一条父链，这里再取一次绝对坐标只做范围校验。
+    // 不放进 debug 门控：它是 W 的触发条件，必须在关闭 debug 时也能发现根已失效。
+    int64_t x = 0;
+    int64_t y = 0;
+    const QolResult origin = g_adapter != nullptr && g_adapter->control_absolute_origin != nullptr
+                                 ? g_adapter->control_absolute_origin(state->handle, &x, &y)
+                                 : contracts::error(kQolErrNotReady, "origin unavailable", 18);
+    const bool sane = contracts::succeeded(origin) && x > -kEntryAbsLimit && x < kEntryAbsLimit &&
+                      y > -kEntryAbsLimit && y < kEntryAbsLimit;
+    if (!sane) {
+        // 记录仍 mounted、绘制也返回成功，但坐标明显异常：挂载根已被游戏销毁而内存尚未复用，
+        // 是「入口消失但 ensure 每帧成功」的主要形态。
+        ANCHORED_LOG_WARN("fail draw entry root_kind=%s handle=%p abs=(%lld,%lld) origin=%d "
+                          "reason=abs_out_of_range",
+                          kind, static_cast<void*>(state->handle), static_cast<long long>(x),
+                          static_cast<long long>(y), static_cast<int>(origin.ok));
+        return drawn;
+    }
+    ANCHORED_LOG_DEBUG("draw entry root_kind=%s handle=%p abs=(%lld,%lld) origin=%d result=%d",
+                       kind, static_cast<void*>(state->handle), static_cast<long long>(x),
+                       static_cast<long long>(y), static_cast<int>(origin.ok),
+                       static_cast<int>(drawn.ok));
+    return drawn;
 }
 
 // ===== 任意原生控件的锚定（minor 21）=====
