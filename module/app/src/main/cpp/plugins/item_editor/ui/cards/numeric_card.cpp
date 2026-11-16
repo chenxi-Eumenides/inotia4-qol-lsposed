@@ -299,13 +299,22 @@ void draw_numeric_card() {
         const int32_t id = enchant_id_for_strength(
             strength, panel_internal::g_draft.class_index,
             panel_internal::g_draft.variant_series);
-        char current[64]{};
-        std::snprintf(current, sizeof(current), "%s (%d)",
+        ItemEditorDraft preview = panel_internal::g_draft;
+        preview.enchant_id = id;
+        QolItemBaseStats stats{};
+        (void)panel_internal::read_draft_full_stats(preview, &stats);
+        char current[96]{};
+        std::snprintf(current, sizeof(current), "当前强化强度：%s (%d)",
                       enchant_strength_name(strength), id);
-        panel_internal::draw_center_text(g_card_root, "强化强度", 210, 40,
+        panel_internal::draw_center_text(g_card_root, current, 210, 26,
                                          panel_internal::kGold, 1);
-        panel_internal::draw_center_text(g_card_root, current, 210, 76,
-                                         panel_internal::kText, 1);
+        char detail[128]{};
+        std::snprintf(detail, sizeof(detail),
+            "每级增加：%d    %d级后额外增加：%d",
+            stats.enchant_increment, stats.enchant_threshold,
+            stats.enchant_overage);
+        panel_internal::draw_center_text(g_card_root, detail, 210, 56,
+                                         panel_internal::kText, 0);
     } else if (g_target == NumericCardTarget::kCount) {
         // 数量卡沿用原独立实现的标题行与确认文案。
         char quantity[48]{};
