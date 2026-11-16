@@ -12,6 +12,9 @@
 namespace qol::features::item_editor {
 namespace {
 contracts::QolUiAnchoredButton g_entry{};
+// 连续 ensure 失败帧数：只用于把「入口画不出来」从 debug 日志提升成一条默认可见的 W。
+uint32_t g_ensure_fail_frames = 0;
+constexpr uint32_t kEnsureFailWarnFrames = 30;
 
 void entry_log(int32_t level, int line, const char* format, ...) {
     const auto* sdk = host_sdk();
@@ -113,10 +116,18 @@ void draw_entry() {
     uint8_t created = 0;
     const QolResult ensure = c->anchored_button_ensure(&g_entry, &desc, &layout, nullptr, &created);
     if (!contracts::succeeded(ensure)) {
-        // NotReady 是装备页刚打开时的正常态（容器/布局未就位），只在 debug 下记录；
-        // 其它 code 是真实拒绝，按 W 记录并由 logger 做同调用点去重。
+        // NotReady 在装备页刚打开时是正常态（容器/布局未就位），逐次记录只放在 debug。
+        // 连续失败到阈值说明这一局入口已经画不出来，必须按 W 留一条默认可见的记录，
+        // 否则问题只存在于 debug 日志里。
         if (ensure.code == kQolErrNotReady) {
-            ENTRY_LOG_DEBUG("fail ensure entry root_kind=equip_bag code=3 reason=not_ready");
+            if (g_ensure_fail_frames < kEnsureFailWarnFrames) ++g_ensure_fail_frames;
+            ENTRY_LOG_DEBUG("fail ensure entry root_kind=equip_bag code=3 reason=%s",
+                            ensure.message != nullptr ? ensure.message : "unknown");
+            if (g_ensure_fail_frames == kEnsureFailWarnFrames) {
+                ENTRY_LOG_WARN("fail entry render root_kind=equip_bag code=3 reason=%s frames=%d",
+                               ensure.message != nullptr ? ensure.message : "unknown",
+                               static_cast<int>(kEnsureFailWarnFrames));
+            }
         } else {
             ENTRY_LOG_WARN("fail ensure entry root_kind=equip_bag code=%d reason=%s",
                            static_cast<int>(ensure.code),
@@ -124,6 +135,7 @@ void draw_entry() {
         }
         return;
     }
+    g_ensure_fail_frames = 0;
     if (created != 0) ENTRY_LOG_INFO("install entry root_kind=equip_bag result=created");
     (void)c->anchored_button_set_visible(&g_entry, 1);
     (void)c->anchored_button_draw(&g_entry);

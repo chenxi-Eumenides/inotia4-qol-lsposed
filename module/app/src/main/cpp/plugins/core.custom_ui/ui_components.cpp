@@ -1401,7 +1401,13 @@ QolResult anchored_button_ensure(contracts::QolUiAnchoredButton* state,
     }
     contracts::UiRect rect{};
     const QolResult laid_out = layout(parent, &rect, user);
-    if (!contracts::succeeded(laid_out)) return laid_out;
+    if (!contracts::succeeded(laid_out)) {
+        // 布局拿不到几何时无法证明已挂载控件仍挂在有效位置：丢掉记录，下一帧按活根重建。
+        // 否则「记录仍是 mounted、控件已被游戏销毁」的状态会被一直信任，入口画在无效坐标上
+        // 却不再产生任何日志。
+        release_anchored_state(state, "layout_not_ready");
+        return laid_out;
+    }
     if (rect.w <= 0 || rect.h <= 0) return invalid_argument();
     if (!state->mounted || state->handle == nullptr) {
         contracts::UiIconButtonDesc button = desc->button;
