@@ -139,17 +139,19 @@ bool numeric_card_open_enchant_strength() {
     const auto& draft = panel_internal::g_draft;
     const EnchantStrength current = enchant_strength_for_id(
         draft.enchant_id, draft.class_index, draft.variant_series);
+    const bool c18 = draft.variant_series == 4;
+    const uint32_t option_count = c18 ? 5u : 6u;
     g_target = NumericCardTarget::kEnchantStrength;
     g_min = 1;
-    g_max = 6;
+    g_max = static_cast<int32_t>(option_count);
     g_value = current == EnchantStrength::kNone
         ? static_cast<int32_t>(EnchantStrength::kLow)
-        : static_cast<int32_t>(current);
+        : std::min(static_cast<int32_t>(current), g_max);
     g_card_id[0] = '\0';
-    g_delta_count = 6;
+    g_delta_count = option_count;
     g_has_preset = false;
     g_choice_mode = true;
-    for (uint32_t index = 0; index < 6; ++index) {
+    for (uint32_t index = 0; index < option_count; ++index) {
         const int32_t value = static_cast<int32_t>(index) + 1;
         g_button_deltas[index] = value;
         std::snprintf(g_button_labels[index], sizeof(g_button_labels[index]), "%s",
@@ -354,8 +356,10 @@ void numeric_card_apply() {
                 panel_internal::g_draft.dirty = true;
                 break;
             case NumericCardTarget::kEnchantStrength: {
+                const int32_t max_strength =
+                    panel_internal::g_draft.variant_series == 4 ? 5 : 6;
                 const auto strength = static_cast<EnchantStrength>(
-                    std::clamp(g_value, 1, 6));
+                    std::clamp(g_value, 1, max_strength));
                 panel_internal::g_draft.enchant_id = enchant_id_for_strength(
                     strength, panel_internal::g_draft.class_index,
                     panel_internal::g_draft.variant_series);
