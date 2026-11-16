@@ -31,6 +31,7 @@ int32_t g_min = 0;
 int32_t g_max = 0;
 int32_t g_value = 0;
 bool g_open_requested = false;
+bool g_choice_mode = false;
 enum class CardAction : uint8_t { kNone, kConfirm, kCancel };
 CardAction g_pending_action = CardAction::kNone;
 
@@ -39,6 +40,10 @@ void card_noop_draw(void*) {}
 void adjust_clicked(void* user) {
     const auto* delta = static_cast<const int32_t*>(user);
     if (delta == nullptr) return;
+    if (g_choice_mode) {
+        g_value = *delta;
+        return;
+    }
     // int64 中间量避免 +step 溢出；越界值夹紧到 [min,max]。
     const int64_t adjusted = static_cast<int64_t>(g_value) + *delta;
     g_value = static_cast<int32_t>(std::clamp<int64_t>(adjusted, g_min, g_max));
@@ -94,6 +99,7 @@ void draw_card_button(QolUiHandle button, const char* label,
 }  // namespace
 
 bool numeric_card_open(const NumericCardSpec& spec) {
+    g_choice_mode = false;
     if (spec.min_value > spec.max_value || spec.deltas == nullptr ||
         spec.delta_count == 0 || spec.delta_count > kMaxButtons) {
         panel_internal::log_panel("op=numeric_card_open result=failed reason=invalid_spec");
@@ -121,6 +127,36 @@ bool numeric_card_open(const NumericCardSpec& spec) {
     }
     // 同一时间只允许一张数字卡；打开新卡前先关闭旧卡。
     destroy_numeric_card();
+    g_open_requested = true;
+    return true;
+}
+
+bool open_enchant_strength_card() {
+    return numeric_card_open_enchant_strength();
+}
+
+bool numeric_card_open_enchant_strength() {
+    const auto& draft = panel_internal::g_draft;
+    const EnchantStrength current = enchant_strength_for_id(
+        draft.enchant_id, draft.class_index, draft.variant_series);
+    g_target = NumericCardTarget::kEnchantStrength;
+    g_min = 1;
+    g_max = 6;
+    g_value = current == EnchantStrength::kNone
+        ? static_cast<int32_t>(EnchantStrength::kLow)
+        : static_cast<int32_t>(current);
+    g_card_id[0] = '\0';
+    g_delta_count = 6;
+    g_has_preset = false;
+    g_choice_mode = true;
+    for (uint32_t index = 0; index < 6; ++index) {
+        const int32_t value = static_cast<int32_t>(index) + 1;
+        g_button_deltas[index] = value;
+        std::snprintf(g_button_labels[index], sizeof(g_button_labels[index]), "%s",
+                      enchant_strength_name(static_cast<EnchantStrength>(value)));
+    }
+    destroy_numeric_card();
+    g_choice_mode = true;
     g_open_requested = true;
     return true;
 }
@@ -256,7 +292,19 @@ void draw_numeric_card() {
         const UiContainerStyleDesc style{card, 0x0000, 60, 1};
         (void)c->draw_container_styled(&style);
     }
-    if (g_target == NumericCardTarget::kCount) {
+    if (g_target == NumericCardTarget::kEnchantStrength) {
+        const auto strength = static_cast<EnchantStrength>(g_value);
+        const int32_t id = enchant_id_for_strength(
+            strength, panel_internal::g_draft.class_index,
+            panel_internal::g_draft.variant_series);
+        char current[64]{};
+        std::snprintf(current, sizeof(current), "%s (%d)",
+                      enchant_strength_name(strength), id);
+        panel_internal::draw_center_text(g_card_root, "强化强度", 210, 40,
+                                         panel_internal::kGold, 1);
+        panel_internal::draw_center_text(g_card_root, current, 210, 76,
+                                         panel_internal::kText, 1);
+    } else if (g_target == NumericCardTarget::kCount) {
         // 数量卡沿用原独立实现的标题行与确认文案。
         char quantity[48]{};
         std::snprintf(quantity, sizeof(quantity), "数量：%d", g_value);
@@ -305,6 +353,16 @@ void numeric_card_apply() {
                     std::clamp(g_value, g_min, g_max);
                 panel_internal::g_draft.dirty = true;
                 break;
+            case NumericCardTarget::kEnchantStrength: {
+                const auto strength = static_cast<EnchantStrength>(
+                    std::clamp(g_value, 1, 6));
+                panel_internal::g_draft.enchant_id = enchant_id_for_strength(
+                    strength, panel_internal::g_draft.class_index,
+                    panel_internal::g_draft.variant_series);
+                panel_internal::g_draft.dirty = true;
+                panel_internal::refresh_full_stats();
+                break;
+            }
             case NumericCardTarget::kEnchantLevel:
                 panel_internal::g_draft.enchant_level =
                     std::clamp(g_value, g_min, g_max);

@@ -635,16 +635,11 @@ void draw_left_info_row(void*, uint32_t index, QolUiHandle row, uint8_t) {
                           enchant_strength_name(strength), g_draft.enchant_id);
             break;
         }
-        case LeftRowKind::kEnchantLevel: {
-            const int32_t increment = g_draft.enchant_id != 0
-                ? g_draft.enchant_increment : 1;
-            const int32_t overage = g_draft.enchant_id != 0
-                ? g_draft.enchant_overage : 1;
+        case LeftRowKind::kEnchantLevel:
             std::snprintf(key, sizeof(key), "已强化次数");
             std::snprintf(value, sizeof(value), "%d (%d/%d)", g_draft.enchant_level,
-                          increment, overage);
+                          g_draft.enchant_increment, g_draft.enchant_overage);
             break;
-        }
         case LeftRowKind::kSocketTotal:
             std::snprintf(key, sizeof(key), "宝石孔数");
             std::snprintf(value, sizeof(value), "%d", g_draft.socket_total);
@@ -701,21 +696,9 @@ void left_info_selected(void*, uint32_t index) {
         case LeftRowKind::kEnchantDurability:
             open_enchant_card();
             return;
-        case LeftRowKind::kEnchantStrength: {
-            const EnchantStrength current = enchant_strength_for_id(
-                g_draft.enchant_id, g_draft.class_index, g_draft.variant_series);
-            EnchantStrength next = EnchantStrength::kLow;
-            if (current != EnchantStrength::kNone) {
-                next = static_cast<EnchantStrength>(static_cast<int32_t>(current) + 1);
-                if (next > EnchantStrength::kChaos) next = EnchantStrength::kLow;
-            }
-            const int32_t id = enchant_id_for_strength(
-                next, g_draft.class_index, g_draft.variant_series);
-            g_draft.enchant_id = id;
-            g_draft.dirty = true;
-            refresh_full_stats();
+        case LeftRowKind::kEnchantStrength:
+            open_enchant_strength_card();
             return;
-        }
         case LeftRowKind::kEnchantLevel:
             open_enchant_level_card();
             return;

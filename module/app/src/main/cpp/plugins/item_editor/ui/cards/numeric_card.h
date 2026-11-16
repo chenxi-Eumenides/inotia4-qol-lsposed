@@ -8,6 +8,7 @@ namespace qol::features::item_editor {
 enum class NumericCardTarget : uint8_t {
     kCount,             // g_draft.count（数量卡）
     kEnchantRemaining,  // g_draft.enchant_remaining
+    kEnchantStrength,   // 强化强度选择（低级/中级/高级/顶级/特级/混沌）
     kEnchantLevel,      // g_draft.enchant_level（已强化次数）
     kSocketTotal,       // g_draft.socket_total
     kChaosRate,         // g_draft.chaos_rate，确认后重算派生属性
@@ -30,6 +31,8 @@ struct NumericCardSpec {
 
 // 打开通用数字调整卡；打开前先关闭旧卡。spec 非法时记录日志并返回 false。
 bool numeric_card_open(const NumericCardSpec& spec);
+// 打开强化强度选择卡；用通用数字卡的 6 个选择按钮布局。
+bool numeric_card_open_enchant_strength();
 
 // 以下供 panel.cpp 路由：打开请求、创建/销毁、确认动作、绘制、事件与激活状态。
 bool numeric_card_open_requested();

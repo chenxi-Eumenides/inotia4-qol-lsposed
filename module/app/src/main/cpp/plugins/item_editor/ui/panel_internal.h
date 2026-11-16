@@ -37,6 +37,8 @@ void read_item();
 // 用游戏原版 ITEM_GetDamage/Defense/EquipLevel 计算 draft 当前完整字段
 // （含强化次数与混沌）；成功时返回最终值，不返回中间基础值。
 bool read_draft_full_stats(const ItemEditorDraft& draft, contracts::QolItemBaseStats* out);
+// 重新读取完整属性并写回 draft 的派生字段（伤害/防御/法伤率/需要等级/强化三字节）。
+void refresh_full_stats();
 void build_left_rows();
 void rebuild_left_list();
 void rebuild_right_list();
