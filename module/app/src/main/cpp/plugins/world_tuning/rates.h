@@ -10,6 +10,7 @@
 namespace qol::features::world_tuning {
 
 // 面板行与配置字段顺序。新增倍率时同步追加在这里、kRateLadder 之外的中文元数据与面板行。
+// level_cap（等级上限）为最后一行：纯整数配置，不参与百分比缩放。
 enum class RateId : uint8_t {
     kGold = 0,
     kExp,
@@ -20,6 +21,7 @@ enum class RateId : uint8_t {
     kDropReroll,
     kPotionCooldown,
     kSkillCooldown,
+    kLevelCap,
     kCount,
 };
 
@@ -67,6 +69,24 @@ inline constexpr int32_t kCooldownLadderExtended[] = {
 inline constexpr uint32_t kCooldownLadderExtendedSize =
     sizeof(kCooldownLadderExtended) / sizeof(kCooldownLadderExtended[0]);
 
+// 等级上限档位：基础 105..255 步长 5；OP 扩展允许下调到 5（步长 5）。
+inline constexpr int32_t kLevelCapLadder[] = {
+    105, 110, 115, 120, 125, 130, 135, 140, 145, 150, 155, 160, 165, 170,
+    175, 180, 185, 190, 195, 200, 205, 210, 215, 220, 225, 230, 235, 240,
+    245, 250, 255};
+inline constexpr uint32_t kLevelCapLadderSize =
+    sizeof(kLevelCapLadder) / sizeof(kLevelCapLadder[0]);
+inline constexpr int32_t kLevelCapLadderExtended[] = {
+    5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90,
+    95, 100, 105, 110, 115, 120, 125, 130, 135, 140, 145, 150, 155, 160, 165,
+    170, 175, 180, 185, 190, 195, 200, 205, 210, 215, 220, 225, 230, 235, 240,
+    245, 250, 255};
+inline constexpr uint32_t kLevelCapLadderExtendedSize =
+    sizeof(kLevelCapLadderExtended) / sizeof(kLevelCapLadderExtended[0]);
+inline constexpr int32_t kLevelCapDefault = 105;
+inline constexpr int32_t kLevelCapMin = 5;
+inline constexpr int32_t kLevelCapMax = 255;
+
 struct Rates {
     int32_t value[static_cast<uint32_t>(RateId::kCount)]{};
 };
@@ -88,7 +108,7 @@ int32_t ladder_index(RateId id, int32_t value, bool extended);
 int32_t ladder_shift(RateId id, int32_t value, int32_t delta, bool extended);
 bool ladder_can_shift(RateId id, int32_t value, int32_t delta, bool extended);
 
-// 文本：通用倍率 → "×1.5"；掉落数量/重抽 → "×N"（整数）。
+// 文本：通用倍率 → "×1.5"；掉落数量/重抽 → "×N"（整数）；等级上限 → 纯整数（如 "105"）。
 std::string rate_display(RateId id, int32_t value);
 
 Rates default_rates();

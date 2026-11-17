@@ -22,7 +22,7 @@ enum class Side {
 };
 
 constexpr uint32_t kRateCount = static_cast<uint32_t>(RateId::kCount);
-static_assert(kRateCount == 9, "rates table size");
+static_assert(kRateCount == 10, "rates table size");
 
 std::atomic<bool> g_gate{false};
 std::atomic<uint32_t> g_add_damage_trace_count{0};
@@ -44,7 +44,7 @@ bool add_damage_trace_available() {
 
 std::atomic<int32_t> g_rates[kRateCount] = {
     kRateDefault, kRateDefault, kRateDefault, kRateDefault, kRateDefault,
-    kDropQuantityDefault, kDropRerollDefault, kRateDefault, kRateDefault};
+    kDropQuantityDefault, kDropRerollDefault, kRateDefault, kRateDefault, kLevelCapDefault};
 
 // wrapper 入口函数指针类型：与游戏函数 ABI 一致。原函数入口由宿主经 on_resource_ready 交还。
 using AddDamageFn = void (*)(void*, void*, int32_t, int32_t, int32_t);
@@ -225,6 +225,25 @@ int32_t rate_value(RateId id) {
     return index < kRateCount ? g_rates[index].load(std::memory_order_relaxed) : kRateDefault;
 }
 
+// 等级上限写点：表值可能被游戏重新装载覆盖，因此每次经验结算前按当前配置校正。
+// 插件停用（gate 关闭）时恢复原版 105；表未装载或端口缺失时静默跳过。
+void reconcile_level_cap() {
+    const auto* extras = g_extras;
+    if (extras == nullptr || extras->rules.level_cap_set == nullptr) return;
+    int32_t desired = kLevelCapDefault;
+    if (g_gate.load(std::memory_order_relaxed)) {
+        const int32_t configured = rate_value(RateId::kLevelCap);
+        desired = configured < kLevelCapMin ? kLevelCapMin
+                                          : (configured > kLevelCapMax ? kLevelCapMax : configured);
+    }
+    int32_t applied = 0;
+    if (extras->rules.level_cap_get != nullptr &&
+        contracts::succeeded(extras->rules.level_cap_get(&applied)) && applied == desired) {
+        return;
+    }
+    (void)extras->rules.level_cap_set(desired);
+}
+
 bool cooldown_api_ready(const contracts::QolCharacterExtrasPort* extras) {
     if (extras == nullptr ||
         extras->abi_version.major != contracts::kQolPortCharacterExtrasVersion.major ||
@@ -403,6 +422,7 @@ int32_t char_add_experience_wrapper(void* ch, int32_t amount, uint8_t flag) {
         reinterpret_cast<AddExperienceFn>(g_backup_add_experience.load(std::memory_order_acquire));
     if (backup == nullptr) return 0;
 
+    reconcile_level_cap();
     int32_t out = amount;
     if (g_gate.load(std::memory_order_relaxed) && amount > 0 && g_extras != nullptr &&
         g_facts != nullptr && classify(ch) == Side::kPlayer) {

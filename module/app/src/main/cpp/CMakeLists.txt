@@ -120,6 +120,7 @@ add_library(gamebridge SHARED
     core/native/game_cache.cpp
     core/native/module_save.cpp
     game/access/world_read.cpp
+    game/access/level_cap.cpp
     game/access/save_preflight.cpp
     game_system.cpp
     game/state/system_events.cpp

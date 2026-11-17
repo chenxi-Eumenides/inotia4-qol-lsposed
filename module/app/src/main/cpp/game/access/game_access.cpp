@@ -241,6 +241,8 @@ bool bridge_init() {
                    "G_CHECKTIME_POTION_TICK_VMA");
     resolve_global_slot(g_mapinfo_pdata_got, G_MAPINFOBASE_PDATA_GOT_VMA,
                         "G_MAPINFOBASE_PDATA_GOT_VMA");
+    resolve_global_slot(g_constbase_pdata_got, G_CONSTBASE_PDATA_GOT_VMA,
+                        "G_CONSTBASE_PDATA_GOT_VMA");
     resolve_global(g_mapinfo_record_size, G_MAPINFOBASE_RECORD_SIZE_VMA,
                    "G_MAPINFOBASE_RECORD_SIZE_VMA");
     resolve_global(g_mapinfo_record_count, G_MAPINFOBASE_RECORD_COUNT_VMA,

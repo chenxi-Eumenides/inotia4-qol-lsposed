@@ -6,6 +6,7 @@
 #include "game/access/char.h"
 #include "game/access/craft.h"
 #include "game/access/item_handle_registry.h"
+#include "game/access/level_cap.h"
 #include "game/access/world.h"
 
 namespace qol::game {
@@ -206,6 +207,18 @@ QolResult write_potion_tick(int64_t tick) {
     return world_write_potion_tick(tick) ? contracts::ok() : not_ready();
 }
 
+QolResult read_level_cap(int32_t* out) {
+    if (out == nullptr) return error_result(kQolErrInvalidArgument, "invalid argument");
+    return level_cap_get(out) ? contracts::ok() : not_ready();
+}
+
+QolResult write_level_cap(int32_t cap) {
+    if (cap < kLevelCapFieldMin || cap > kLevelCapFieldMax) {
+        return error_result(kQolErrInvalidArgument, "level cap out of range");
+    }
+    return level_cap_set(cap) ? contracts::ok() : not_ready();
+}
+
 const contracts::QolCharacterExtrasPort kPort{
     contracts::kQolPortCharacterExtrasVersion,
     {&read_party_index, &read_is_party_member, &read_summoner, &read_level, &read_merc_slot,
@@ -215,6 +228,7 @@ const contracts::QolCharacterExtrasPort kPort{
       sizeof(contracts::QolCharacterExtrasReadApi)},
     {sizeof(contracts::QolCooldownApi), &read_active_player, &read_now_tick, &read_potion_tick,
      &write_potion_tick},
+    {sizeof(contracts::QolCharacterRulesApi), &read_level_cap, &write_level_cap},
 };
 
 }  // namespace

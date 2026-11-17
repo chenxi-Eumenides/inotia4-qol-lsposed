@@ -15,7 +15,7 @@ constexpr size_t C_SITUATION = 0x00; // u8 角色情形码（CHAR_SetSituation 0
 constexpr size_t C_TYPE = 0x09;      // int8 角色类型（取值即 CHARSYSTEM_Produce 的 type 参数：0=玩家侧角色 1=怪物 2=NPC/装饰物）。证据：GENSYSTEM_ProduceMonster 尾部扫池按 `ldrsb w1,[ch+0x9]; cmp w1,#1` 筛怪物；CHAR_UpdateAttr 对 type==1 分派 CHAR_UpdateAttrFromMonster(0xe0048)；本模块 game_world_readers.inc 的 enemies 过滤亦用 type==1。早期注释「0=英雄 1=佣兵」为错误口径，已纠正
 constexpr size_t C_NAME_ID = 0x0A;   // u16 名称相关 ID（非 text_id；角色名称须用 CHAR_GetName 获取）
 constexpr size_t C_CLASS = 0x0D;     // int8 职业索引（0-5；CHARSYSTEM_Produce type==0 分支 f39c0 strb w21(class_idx),[ch+0xd]；type==2 装饰物此字段=type 值）
-constexpr size_t C_LEVEL = 0x0E;     // int8 等级
+constexpr size_t C_LEVEL = 0x0E;     // u8 等级（strb 写 / ldrb 读）
 constexpr size_t C_ATTR = 0x24;      // int32 属性数组 [char + attr_id*4 + 0x24]
 constexpr size_t C_HP = 0x1F0;       // int32 当前 HP
 constexpr size_t C_MP = 0x1F4;       // int32 当前 MP
@@ -172,6 +172,7 @@ constexpr uintptr_t G_PLAYER_ACTIVE_VMA = 0x728fc0;  // PLAYER_pActivePlayer (8B
 constexpr uintptr_t G_GLOBAL_COOLTIME_COUNT_VMA = 0x3099b0; // g_nGlobalCoolTimeCount (i64) 全局逻辑帧 tick；GAMESTATE_ProcessPlay 每帧 +1，技能/药水冷却的“当前时间”
 constexpr uintptr_t G_CHECKTIME_POTION_TICK_VMA = 0x307568; // CHECKTIME_nPotionTick (i64) 药水冷却结束 tick；CHAR_UseItemEx 写 now+165，使用前比较 tick < now
 constexpr uintptr_t G_MAPINFOBASE_PDATA_GOT_VMA = 0x2f4000 + 0xe58; // MAPINFOBASE_pData GOT 槽（双层解引用后为地图记录数组）
+constexpr uintptr_t G_CONSTBASE_PDATA_GOT_VMA = 0x2f5000 + 0xb78; // CONSTBASE_pData GOT 槽（双层解引用后为 14×2B s16 常量表；行 0 = 角色/佣兵等级上限，行 13 = 装备需求等级上限）
 constexpr uintptr_t G_MAPINFOBASE_RECORD_SIZE_VMA = 0x3017b8; // MAPINFOBASE_nRecordSize（u8，值=6）
 constexpr uintptr_t G_MAPINFOBASE_RECORD_COUNT_VMA = 0x3017ba; // MAPINFOBASE_nRecordCount（u16，值=416）
 constexpr int MAPINFOBASE_STATIC_MAX_MAP_ID = 414; // 原版/改版共同的静态地图 ID 上限；运行时仍须受 record_count 限制

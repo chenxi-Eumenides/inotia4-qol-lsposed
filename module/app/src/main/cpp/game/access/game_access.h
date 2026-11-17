@@ -34,6 +34,7 @@ extern void* g_player_active_got;
 extern void* g_global_cooltime_count;
 extern void* g_checktime_potion_tick;
 extern void* g_mapinfo_pdata_got;
+extern void* g_constbase_pdata_got;  // CONSTBASE_pData GOT 槽（双层解引用后为 14×2B s16 常量表）
 extern void* g_mapinfo_record_size;
 extern void* g_mapinfo_record_count;
 extern void* g_uichoice_itemtext;

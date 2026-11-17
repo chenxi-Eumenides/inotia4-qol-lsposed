@@ -318,6 +318,12 @@ bool char_is_party_member(void*) { return true; }
 void* char_get_summoner(void*) { return nullptr; }
 int char_party_index(const void*) { return ::g_test_char_party_index; }
 int char_level(const void*) { return 10; }
+bool level_cap_ready() { return true; }
+bool level_cap_get(int32_t* out) {
+    if (out != nullptr) *out = 105;
+    return out != nullptr;
+}
+bool level_cap_set(int32_t) { return true; }
 int char_merc_slot(const void*) { return 0; }
 bool char_can_change_equip_resolved() { return true; }
 bool char_can_change_equip(const void*) { return true; }

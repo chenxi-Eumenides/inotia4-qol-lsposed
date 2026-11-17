@@ -46,11 +46,26 @@ inline bool qol_cooldown_api_size_valid(const QolCooldownApi* api) {
     return api != nullptr && api->struct_size >= sizeof(QolCooldownApi);
 }
 
+// 规则表访问（1.4 追加）：CONSTBASE 行 0 的角色/佣兵等级上限。
+struct QolCharacterRulesApi {
+    uint32_t struct_size;
+    // 读行 0；表未装载返回 not_ready。
+    QolResult (*level_cap_get)(int32_t* out_cap);
+    // 写行 0；只接受 1..255；仅游戏主线程调用。
+    QolResult (*level_cap_set)(int32_t cap);
+};
+
+inline bool qol_character_rules_api_size_valid(const QolCharacterRulesApi* api) {
+    return api != nullptr && api->struct_size >= sizeof(QolCharacterRulesApi);
+}
+
 struct QolCharacterExtrasPort {
     QolVersion abi_version;
     QolCharacterExtrasReadApi read;
     // 冷却 tick 访问（1.3 追加）。旧消费者只读 read，不受尾部追加影响。
     QolCooldownApi cooldown;
+    // 规则表访问（1.4 追加）。尾追加保证旧字段偏移不变。
+    QolCharacterRulesApi rules;
 };
 
 }  // namespace qol::contracts

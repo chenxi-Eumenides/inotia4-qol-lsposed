@@ -343,6 +343,22 @@ int32_t fake_money_backup(int64_t amount) {
     return 1;
 }
 
+// ---- 等级上限 fake：CONSTBASE 表行，get 读当前值，set 写入并计数 ----
+int32_t g_level_cap_value = 105;
+int g_level_cap_sets = 0;
+
+QolResult fake_level_cap_get(int32_t* out) {
+    if (out == nullptr) return error(kQolErrInvalidArgument, "bad", 3);
+    *out = g_level_cap_value;
+    return ok();
+}
+
+QolResult fake_level_cap_set(int32_t cap) {
+    g_level_cap_value = cap;
+    ++g_level_cap_sets;
+    return ok();
+}
+
 
 // ---- 掉落域 fake：ITEM* 用 FakeDropItem 承载类别/等级/稀有度，free 只记录次数 ----
 struct FakeDropItem {
@@ -477,6 +493,8 @@ void reset_counters() {
     g_drop_threshold_result = 0;
     g_last_exp = 0;
     g_last_money = 0;
+    g_level_cap_value = 105;
+    g_level_cap_sets = 0;
     g_in_flight_enters = 0;
     g_in_flight_leaves = 0;
     g_damage_enters = 0;
@@ -562,6 +580,8 @@ void setup_fake_interfaces() {
     g_extras.read.pool_slot = &fake_pool_slot;
     g_extras.read.max_hp = &fake_max_hp;
     g_extras.read.hp = &fake_hp;
+    g_extras.rules = {sizeof(qol::contracts::QolCharacterRulesApi), &fake_level_cap_get,
+                      &fake_level_cap_set};
 
     g_game.abi = {sizeof(QolGameHost), kGameHostMajor, kGameHostMinor};
     g_game.character_write.max_hp = &fake_write_max_hp;
@@ -1172,6 +1192,34 @@ void test_exp_and_money() {
     assert(g_last_money == 100);
 }
 
+// 等级上限写点：经验结算前按当前配置校正；停用（gate 关闭）后恢复原版 105。
+void test_level_cap_reconcile() {
+    install_success();
+    assert(g_level_cap_value == 105 && g_level_cap_sets == 0);
+    const auto& descriptor = plugin_descriptor();
+    descriptor.on_enabled(g_context);
+
+    Rates rates = current_rates();
+    rates.value[static_cast<uint32_t>(RateId::kLevelCap)] = 200;
+    apply_rates(rates);
+
+    Character player{};
+    player.party_member = 1;
+    (void)char_add_experience_wrapper(&player, 100, 1);
+    assert(g_level_cap_value == 200);
+    assert(g_level_cap_sets == 1);
+
+    // 表值已与配置一致时不再重复写入。
+    (void)char_add_experience_wrapper(&player, 100, 1);
+    assert(g_level_cap_sets == 1);
+
+    apply_rates(default_rates());
+    descriptor.on_disabled(g_context);
+    (void)char_add_experience_wrapper(&player, 100, 1);
+    assert(g_level_cap_value == 105);
+    assert(g_last_exp == 100);  // gate 关闭：经验透传不受影响
+}
+
 
 void set_drop_rates(int32_t quantity, int32_t quality) {
     Rates rates = default_rates();
@@ -1346,14 +1394,12 @@ void test_capability_event_subscription() {
         kUiPanelsCapabilityId, static_cast<uint16_t>(kUiPanelsVersionMajor),
         static_cast<uint16_t>(kUiPanelsVersionMinor), 1, {}};
     publish_fake_event(kEventCapabilityChanged, &panels_available_disabled);
-    assert(g_panel_register_calls == 0);
     assert(!panel_available());
 
     // 重新启用：初始探测补齐 item.use 与面板绑定。
     descriptor.on_enabled(g_context);
     assert(g_item_use_subscribe_calls == 1);
     assert(item_use_bound());
-    assert(g_panel_register_calls == 1);
     assert(panel_available());
 
     // b. item.use 注册后重复事件保持幂等。
@@ -1380,89 +1426,70 @@ void test_capability_event_subscription() {
     assert(g_item_use_unsubscribe_calls == 1);
     assert(!item_use_bound());
 
-    // d. ui 能力晚到：available=1 时补注册面板 provider。
+    // d. ui 能力晚到：available=1 时补绑定面板（provider 由描述符声明）。
     g_ui_available = true;
     const CapabilityChangedEvent panels_available{
         kUiPanelsCapabilityId, static_cast<uint16_t>(kUiPanelsVersionMajor),
         static_cast<uint16_t>(kUiPanelsVersionMinor), 1, {}};
     publish_fake_event(kEventCapabilityChanged, &panels_available);
-    assert(g_panel_register_calls == 1);
-    assert(g_registered_panel != nullptr);
     assert(panel_available());
 
-    // 另一个 UI 能力也注册时保持幂等：已注册则不再重复注册。
+    // 另一个 UI 能力也到达时保持幂等。
     const CapabilityChangedEvent components_available{kUiComponentsCapabilityId, kUiContractMajor,
                                                       kUiContractMinor, 1, {}};
     publish_fake_event(kEventCapabilityChanged, &components_available);
-    assert(g_panel_register_calls == 1);
     assert(panel_available());
 
-    // e. 任一 UI 能力撤销：注销 provider 且绑定失效。
+    // e. 任一 UI 能力撤销：解绑且 panel_available() 失效。
     const CapabilityChangedEvent components_unavailable{kUiComponentsCapabilityId, kUiContractMajor,
                                                         kUiContractMinor, 0, {}};
     publish_fake_event(kEventCapabilityChanged, &components_unavailable);
-    assert(g_panel_unregister_calls == 1);
-    assert(g_registered_panel == nullptr);
     assert(!panel_available());
 
-    // f. 再次注册后重新注册 provider（ui.panels 分支）。
+    // f. 再次可用后重新绑定（ui.panels 分支）。
     publish_fake_event(kEventCapabilityChanged, &panels_available);
-    assert(g_panel_register_calls == 2);
     assert(panel_available());
 
-    // ui.panels 撤销同样注销。
+    // ui.panels 撤销同样解绑。
     const CapabilityChangedEvent panels_unavailable{
         kUiPanelsCapabilityId, static_cast<uint16_t>(kUiPanelsVersionMajor),
         static_cast<uint16_t>(kUiPanelsVersionMinor), 0, {}};
     publish_fake_event(kEventCapabilityChanged, &panels_unavailable);
-    assert(g_panel_unregister_calls == 2);
     assert(!panel_available());
 
-    // ui.components 分支也可单独触发重新注册。
+    // ui.components 分支也可单独触发重新绑定。
     publish_fake_event(kEventCapabilityChanged, &components_available);
-    assert(g_panel_register_calls == 3);
     assert(panel_available());
 
-    // g. 无关能力与空 payload/空 id 不影响面板注册状态。
-    const int register_before_unrelated = g_panel_register_calls;
-    const int unregister_before_unrelated = g_panel_unregister_calls;
+    // g. 无关能力与空 payload/空 id 不影响面板绑定状态。
     const CapabilityChangedEvent unrelated_event{"character.facts", 1, 0, 1, {}};
     publish_fake_event(kEventCapabilityChanged, &unrelated_event);
     publish_fake_event(kEventCapabilityChanged, nullptr);
     const CapabilityChangedEvent null_ui_event{nullptr, 1, 0, 1, {}};
     publish_fake_event(kEventCapabilityChanged, &null_ui_event);
-    assert(g_panel_register_calls == register_before_unrelated);
-    assert(g_panel_unregister_calls == unregister_before_unrelated);
     assert(panel_available());
 
-    // h. 禁用期间：available=0 仍注销，available=1 不重新挂载；重新启用后恢复绑定。
+    // h. 禁用期间：available=0 仍解绑，available=1 不重新挂载；重新启用后恢复绑定。
     descriptor.on_disabled(g_context);
-    const int unregisters_before_disabled_events = g_panel_unregister_calls;
-    const int registers_before_disabled_events = g_panel_register_calls;
     const int subscribes_before_disabled_events = g_item_use_subscribe_calls;
     publish_fake_event(kEventCapabilityChanged, &panels_unavailable);
-    assert(g_panel_unregister_calls == unregisters_before_disabled_events + 1);
     assert(!panel_available());
     publish_fake_event(kEventCapabilityChanged, &panels_available);
-    assert(g_panel_register_calls == registers_before_disabled_events);
     assert(!panel_available());
     g_item_use_available = true;
     publish_fake_event(kEventCapabilityChanged, &available_event);
     assert(g_item_use_subscribe_calls == subscribes_before_disabled_events);
     assert(!item_use_bound());
     descriptor.on_enabled(g_context);
-    assert(g_panel_register_calls == registers_before_disabled_events + 1);
     assert(panel_available());
     assert(g_item_use_subscribe_calls == subscribes_before_disabled_events + 1);
     assert(item_use_bound());
 
-    // deactivate 取消事件订阅并注销面板。
+    // deactivate 取消事件订阅并解绑面板。
     const int unsubscribes_before_deactivate = g_event_unsubscribe_calls;
-    const int unregisters_before_deactivate = g_panel_unregister_calls;
     descriptor.deactivate(g_context);
     assert(g_event_unsubscribe_calls == unsubscribes_before_deactivate + 1);
     assert(g_event_subscriptions.empty());
-    assert(g_panel_unregister_calls == unregisters_before_deactivate + 1);
     assert(!panel_available());
 }
 
@@ -1489,6 +1516,7 @@ int main() {
     test_max_hp_wrapper();
     test_deactivate_residual_wrappers();
     test_exp_and_money();
+    test_level_cap_reconcile();
     test_drop_quantity_wrapper();
     test_make_item_quality_wrapper();
     test_make_equip_detail_quality_wrapper();

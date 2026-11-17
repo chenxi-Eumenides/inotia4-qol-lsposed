@@ -10,18 +10,21 @@ namespace {
 constexpr const char* kRateKeys[] = {
     "gold", "exp", "enemy_hp", "damage_out", "damage_in",
     "drop_quantity", "drop_reroll", "potion_cooldown", "skill_cooldown",
+    "level_cap",
 };
 constexpr const char* kRateNames[] = {
     "金币倍率", "经验倍率", "敌怪血量倍率", "伤害倍率", "承伤倍率",
     "掉落数量倍率", "掉落重抽次数", "药水冷却倍率", "技能冷却倍率",
+    "等级上限",
 };
 constexpr const char* kRateDescriptions[] = {
     "获得的金钱缩放", "获得的经验缩放", "怪物最大生命的缩放", "对怪物造成的伤害缩放",
     "受到的伤害缩放，数值越低越耐打",
     "每次击杀的掉落结算次数", "可重掷的掉落物取同类别最优（卷轴/宝石/背包/骰子）",
     "玩家药水冷却时间缩放", "玩家技能冷却时间缩放",
+    "角色与佣兵可升级到的最高等级",
 };
-constexpr bool kRateSupported[] = {true, true, true, true, true, true, true, true, true};
+constexpr bool kRateSupported[] = {true, true, true, true, true, true, true, true, true, true};
 constexpr uint32_t kRateCount = static_cast<uint32_t>(RateId::kCount);
 
 // 旧配置兼容：移速倍率已从面板与 encode_rates 中移除，但已持久化的 rates JSON 仍可能带
@@ -213,6 +216,13 @@ const int32_t* rate_ladder(RateId id, bool extended, uint32_t* out_size) {
             }
             if (out_size != nullptr) *out_size = kCooldownLadderSize;
             return kCooldownLadder;
+        case RateId::kLevelCap:
+            if (extended) {
+                if (out_size != nullptr) *out_size = kLevelCapLadderExtendedSize;
+                return kLevelCapLadderExtended;
+            }
+            if (out_size != nullptr) *out_size = kLevelCapLadderSize;
+            return kLevelCapLadder;
         default:
             if (extended) {
                 if (out_size != nullptr) *out_size = kRateLadderExtendedSize;
@@ -227,6 +237,7 @@ int32_t rate_default(RateId id) {
     switch (id) {
         case RateId::kDropQuantity: return kDropQuantityDefault;
         case RateId::kDropReroll: return kDropRerollDefault;
+        case RateId::kLevelCap: return kLevelCapDefault;
         default: return kRateDefault;
     }
 }
@@ -235,6 +246,7 @@ bool rate_value_valid(RateId id, int32_t value) {
     switch (id) {
         case RateId::kDropQuantity: return value >= 0;
         case RateId::kDropReroll: return value >= 0;
+        case RateId::kLevelCap: return value >= kLevelCapMin && value <= kLevelCapMax;
         case RateId::kGold:
         case RateId::kExp:
         case RateId::kEnemyHp:
@@ -284,6 +296,10 @@ bool ladder_can_shift(RateId id, int32_t value, int32_t delta, bool extended) {
 
 std::string rate_display(RateId id, int32_t value) {
     char buffer[32]{};
+    if (id == RateId::kLevelCap) {
+        std::snprintf(buffer, sizeof(buffer), "%d", value);
+        return std::string(buffer);
+    }
     if (id != RateId::kDropQuantity && id != RateId::kDropReroll && value == 0) return "×0";
     if (id == RateId::kDropQuantity || id == RateId::kDropReroll) {
         std::snprintf(buffer, sizeof(buffer), "×%d", value);

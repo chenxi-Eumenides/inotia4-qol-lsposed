@@ -17,6 +17,7 @@ void* g_player_active_got = nullptr;
 void* g_global_cooltime_count = nullptr;
 void* g_checktime_potion_tick = nullptr;
 void* g_mapinfo_pdata_got = nullptr;
+void* g_constbase_pdata_got = nullptr;
 void* g_mapinfo_record_size = nullptr;
 void* g_mapinfo_record_count = nullptr;
 void* g_uichoice_itemtext = nullptr;

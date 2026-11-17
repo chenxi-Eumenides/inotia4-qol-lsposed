@@ -68,6 +68,7 @@ void test_ladder_and_metadata() {
     assert(rate_value_valid(RateId::kDropReroll, 300));
     assert(rate_value_valid(RateId::kDropReroll, 0));
     for (uint32_t i = 0; i < static_cast<uint32_t>(RateId::kCount); ++i) {
+        if (static_cast<RateId>(i) == RateId::kLevelCap) continue;  // 值域 5..255，不接受 0。
         assert(rate_value_valid(static_cast<RateId>(i), 0));
         assert(!rate_value_valid(static_cast<RateId>(i), -1));
     }
@@ -135,6 +136,36 @@ void test_ladder_and_metadata() {
     assert(rate_display(RateId::kGold, 1000) == "×10.0");
     assert(rate_display(RateId::kGold, 100000000) == "×1000000.0");
     assert(rate_display(RateId::kGold, INT32_MAX) == "×21474836.4");
+
+    // 等级上限：纯整数行，值域 5..255，默认 105。
+    assert(std::strcmp(rate_key(RateId::kLevelCap), "level_cap") == 0);
+    assert(std::strcmp(rate_name(RateId::kLevelCap), "等级上限") == 0);
+    assert(std::strcmp(rate_description(RateId::kLevelCap), "角色与佣兵可升级到的最高等级") == 0);
+    assert(rate_supported(RateId::kLevelCap));
+    assert(rate_default(RateId::kLevelCap) == 105);
+    assert(rate_display(RateId::kLevelCap, 105) == "105");
+    assert(rate_display(RateId::kLevelCap, 5) == "5");
+    uint32_t level_cap_size = 0;
+    const int32_t* level_cap_ladder = rate_ladder(RateId::kLevelCap, false, &level_cap_size);
+    assert(level_cap_size == 31);
+    assert(level_cap_ladder[0] == 105 && level_cap_ladder[level_cap_size - 1] == 255);
+    assert(level_cap_ladder == kLevelCapLadder);
+    uint32_t level_cap_extended_size = 0;
+    const int32_t* level_cap_extended = rate_ladder(RateId::kLevelCap, true, &level_cap_extended_size);
+    assert(level_cap_extended_size == 51);
+    assert(level_cap_extended[0] == 5 && level_cap_extended[level_cap_extended_size - 1] == 255);
+    assert(level_cap_extended == kLevelCapLadderExtended);
+    assert(ladder_shift(RateId::kLevelCap, 105, 1, false) == 110);
+    assert(ladder_shift(RateId::kLevelCap, 105, -1, false) == 105);
+    assert(ladder_shift(RateId::kLevelCap, 105, 1, true) == 110);
+    assert(ladder_shift(RateId::kLevelCap, 105, -1, true) == 100);
+    assert(!ladder_can_shift(RateId::kLevelCap, 255, 1, false));
+    assert(!ladder_can_shift(RateId::kLevelCap, 5, -1, true));
+    assert(rate_value_valid(RateId::kLevelCap, 4) == false);
+    assert(rate_value_valid(RateId::kLevelCap, 5));
+    assert(rate_value_valid(RateId::kLevelCap, 105));
+    assert(rate_value_valid(RateId::kLevelCap, 255));
+    assert(rate_value_valid(RateId::kLevelCap, 256) == false);
 }
 
 void test_roundtrip_and_defaults() {
@@ -231,7 +262,8 @@ void test_legacy_move_speed_key() {
     assert(json == "{\"gold\":100,\"exp\":100,\"enemy_hp\":100,"
                    "\"damage_out\":100,\"damage_in\":100,"
                    "\"drop_quantity\":1,\"drop_reroll\":1,"
-                   "\"potion_cooldown\":100,\"skill_cooldown\":100}");
+                   "\"potion_cooldown\":100,\"skill_cooldown\":100,"
+                   "\"level_cap\":105}");
 
     // validate_config 同样容忍旧 move_speed 键。
     assert(validate_rates_config("rates", legacy, static_cast<uint32_t>(std::strlen(legacy))).ok ==

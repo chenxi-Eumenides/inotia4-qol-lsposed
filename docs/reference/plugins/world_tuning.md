@@ -2,9 +2,9 @@
 
 ## 摘要
 
-功能插件「游戏世界调整」，插件版本 `0.1.0`。设置页只有一个入口行；点击后启用插件并打开自有面板，面板内每行一个倍率，左右箭头在档位间调整；OP 关闭时使用基础档位，OP 开启时使用扩展档位。改动经 Host 配置 Store 持久化，写入 `config.json` 的 `world_tuning` namespace。
+功能插件「游戏世界调整」，插件版本 `0.1.0`。设置页只有一个入口行；点击后启用插件并打开自有面板，面板内每行一个配置项，左右箭头在档位间调整；OP 关闭时使用基础档位，OP 开启时使用扩展档位。改动经 Host 配置 Store 持久化，写入 `config.json` 的 `world_tuning` namespace。
 
-当前真正接线的倍率有九项：
+当前真正接线的配置项有十项：
 
 - 金币倍率：缩放 `INVEN_AddMoney` 的增量；
 - 经验倍率：缩放玩家侧 `CHAR_AddExperience` 的增量；
@@ -14,7 +14,8 @@
 - 掉落数量倍率（配置键 `drop_quantity`）：整数 0..INT32_MAX，重复整次 `CHARSYSTEM_DropItem` 结算；
 - 掉落重抽次数（配置键 `drop_reroll`）：整数 0..INT32_MAX；已核验比较点的概率阈值按 K² 放大，槽内造物仍按 K 候选重掷取最优；
 - 药水冷却倍率（配置键 `potion_cooldown`）：缩放玩家药水冷却；
-- 技能冷却倍率（配置键 `skill_cooldown`）：缩放玩家技能冷却。
+- 技能冷却倍率（配置键 `skill_cooldown`）：缩放玩家技能冷却；
+- 等级上限（配置键 `level_cap`）：写 `CONSTBASE` 行 0，角色与佣兵可升级到的最高等级；默认 105。
 
 地面掉落物上限（32→127 槽）与物品对象池容量（300→1638 槽）由 `core.system` 常驻提供，不占用 `rates` 配置项，不随本插件启停，见 [`core.system`](core.system.md)。
 
@@ -25,7 +26,7 @@
 - plugin id `world_tuning`，注册于 `host/assembly.cpp`。
 - `requires` 1 项：`character.facts` v1.0。
 - `optional_requires` 3 项：`ui_panels` v1.3、`ui_components` v2.23、`item.use` v1.0；界面工具被停用时倍率仍生效，仅面板不可用；`item.use` 缺失时只影响药水冷却。
-- `ports` 1 项：`QOL_PORT_CHARACTER_EXTRAS` v1.3。
+- `ports` 1 项：`QOL_PORT_CHARACTER_EXTRAS` v1.4；v1.4 尾追加 `rules.level_cap_get/set`（`CONSTBASE` 行 0 读写），旧字段顺序不变。
 - `provides` 0；JNI 0、HTTP route/endpoint 0。
 - `resources` 12 条：8 个入口 hook 与 4 个掉落 CMP `kInsnPatch` claims，均为 `kOptional` + `kFailSoft`：单个落点不可用只影响对应行为，不会把插件置 `failed`。`hook:CHAR_AddDamage` / `hook:CHAR_GetActionCoolTime` 声明 `follow_trampoline=true`；monster v29 的 mod 会周期性重写伤害入口，冷却入口则跟随到隐藏段函数体。
 - `validate_config` = `validate_rates_config`，只接受 `rates` 键。
@@ -42,11 +43,11 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 单键 `rates`，值为整数对象：
 
 ```json
-{"gold":100,"exp":100,"enemy_hp":50,"damage_out":150,"damage_in":50,"drop_quantity":1,"drop_reroll":1,"potion_cooldown":100,"skill_cooldown":100}
+{"gold":100,"exp":100,"enemy_hp":50,"damage_out":150,"damage_in":50,"drop_quantity":1,"drop_reroll":1,"potion_cooldown":100,"skill_cooldown":100,"level_cap":105}
 ```
 
-- 字段：`gold`、`exp`、`enemy_hp`、`damage_out`、`damage_in`、`drop_quantity`、`drop_reroll`、`potion_cooldown`、`skill_cooldown`；缺字段按各行默认值处理（百分比行默认 100，`drop_quantity`/`drop_reroll` 为 1）。
-- 百分比配置范围为 `0..INT32_MAX`（100 = 不修改），掉落数量和重抽范围均为 `0..INT32_MAX`。配置不限制档位上限；面板档位仅为操作预设，手写的合法非档位值原样生效。
+- 字段：`gold`、`exp`、`enemy_hp`、`damage_out`、`damage_in`、`drop_quantity`、`drop_reroll`、`potion_cooldown`、`skill_cooldown`、`level_cap`；缺字段按各行默认值处理（百分比行默认 100，`drop_quantity`/`drop_reroll` 为 1，`level_cap` 为 105）。
+- 百分比配置范围为 `0..INT32_MAX`（100 = 不修改），掉落数量和重抽范围均为 `0..INT32_MAX`，`level_cap` 范围为 `5..255`。配置不限制档位上限；面板档位仅为操作预设，手写的合法非档位值原样生效。
 - `gold`、`exp`、`damage_out`、`damage_in` 的 0 表示 ×0；`enemy_hp` 的 0 按 1e-6 缩放，结果下限为 1。`drop_quantity` 或 `drop_reroll` 为 0 时均不掉落；重抽值 1 不改变阈值，品质候选也只取首抽。
 - 单字段的非整数、溢出或负数只令该字段回退默认值，其余字段继续生效；未知字段忽略。重复字段、JSON 语法错误及结尾多余内容仍拒绝整份配置。
 - 旧配置兼容：历史 `move_speed` 键解析时跳过并忽略；`drop_quality` 作为 `drop_reroll` 别名，显式 `drop_reroll` 优先；重复旧键仍拒绝。
@@ -62,10 +63,10 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 
 - 960×640 root，单一装饰框 `{44,104,872,390}`；背景与设置页一致，先绘制 `draw_image_part` unit `0x4f`/`0x50`（中线左右各 300），再用 `draw_container_styled`（`ornamented=1`、`fill_rgb565=0x0000`、`alpha=60`，即黑色 60%）绘制边框与四角装饰；不绘制标题或说明行。迁移前使用的 `draw_container_ornamented` 已随 ui_components Major 2 移除。
 - 框内左右两列各 400 宽、列间距 24；每列 5 行、每页最多 10 项，先填满左列再进右列。行高 76，框内上下各留 5；每行：名称、数值、左右 `arrow_button`；行间 2 逻辑单位金色分割线，行本身不绘制底色，每列最后一个可见行不画下分隔线。
-- 框内不使用 `scroll_list` 或原生滚动。框下方居中放置左右翻页箭头与页码；当前 9 项单页（左 5、右 4），翻页按钮存在但禁用；项数超过 10 时自动分页，只创建当前页的箭头。
-- OP 关闭时使用基础档位：百分比 `{10,30,50,80,100,120,150,200,300,500}`，掉落数量/重抽 `{1,2,3,4,5}`，冷却倍率 `{10,30,50,80,100,200,300,500}`。因此基础档位不提供 0。
-- OP 开启时使用扩展档位：百分比与冷却倍率保留 0~5 的现有档位，之后 ×10~×100 每 +10（1000、2000……10000），×100 以上每步 ×10（100000、1000000、10000000、100000000），最高显示 `×1000000.0`；掉落数量/重抽 0~10 每 +1，10~100 每 +10，最大 100。
-- 百分比行显示 `×1.5` 形式（0 显示 `×0`）；掉落数量/重抽行显示整数。配置值无上限（int32 范围内），面板档位上限为百分比/冷却 100000000、掉落 100。
+- 框内不使用 `scroll_list` 或原生滚动。框下方居中放置左右翻页箭头与页码；当前 10 项单页（左 5、右 5），翻页按钮存在但禁用；项数超过 10 时自动分页，只创建当前页的箭头。
+- OP 关闭时使用基础档位：百分比 `{10,30,50,80,100,120,150,200,300,500}`，掉落数量/重抽 `{1,2,3,4,5}`，冷却倍率 `{10,30,50,80,100,200,300,500}`，等级上限 `{105,110,…,255}`（步长 5，共 31 档）。因此基础档位不提供 0，也不提供 105 以下的上限。
+- OP 开启时使用扩展档位：百分比与冷却倍率保留 0~5 的现有档位，之后 ×10~×100 每 +10（1000、2000……10000），×100 以上每步 ×10（100000、1000000、10000000、100000000），最高显示 `×1000000.0`；掉落数量/重抽 0~10 每 +1，10~100 每 +10，最大 100；等级上限 `{5,10,…,255}`（步长 5，共 51 档）。
+- 百分比行显示 `×1.5` 形式（0 显示 `×0`）；掉落数量/重抽行显示整数；等级上限行显示纯整数（如 `105`）。配置值受字段自身范围约束（`level_cap` 为 5..255），面板档位上限为百分比/冷却 100000000、掉落 100。
 - 点击箭头 → 生成完整 `rates` JSON → `request_set_config` → 进入 pending（全部箭头禁用）→ 持久化确认后 `apply_rates`；成功不显示提示，失败/状态未知才在底部显示错误并回滚。
 - 面板打开时重新读取配置，覆盖外部编辑；关闭/插件停用销毁全部控件与回调。
 
@@ -92,6 +93,15 @@ Kotlin 侧 `PluginRuntimeEffects` 订阅 `world_tuning` 的 Host runtime effect�
 | `hook:CHAR_GetActionCoolTime` | `F_CHAR_GET_ACTION_COOLTIME_VMA` | 技能冷却时长查询 `int(void* ch, void* action)`；唯一缩放源。c18 hook 正常入口；monster v29 跟随入口 `b 0x747400` 穿过 `cbz x0; cbz x1; b 0x74f808` 守卫桩，落到隐藏段 VM 体 `0x74f808`，用 4 字节短补丁改首条 `stp`。SetActionNextTime 与快捷栏冷却饼都读取该返回值 |
 
 经验：入口对 `ch` 做阵营判定，只缩放玩家侧（主角/队友/召唤物）；负数原样透传，倍率 0 结果为 0。
+
+等级上限：
+
+- 写入 `CONSTBASE` 行 0（s16，原版 105）；读点是 `CHAR_AddExperience` 入口与升级循环内的两处 `MEM_ReadInt16`，GOT 槽 `0x2f5b78` 双层解引用得到表数据（`game/access/level_cap.cpp`）。
+- 校正时机：`char_add_experience_wrapper` 调用原函数之前比较表值与配置，不同才写。游戏重新初始化会重载该表，下一次经验结算会重新校正。
+- 停用（gate 关闭）时下一次经验结算把表值恢复为 105，之后保持到游戏自身重载表。
+- 只改角色/佣兵经验上限；`CONSTBASE` 行 13（装备需求等级上限）不变。
+- 配置范围 5..255：等级字段 `ch+0xe` 是 u8，写超过 255 会让升级循环的 `level += 1` 在写字节时回绕成 0。
+- 上限低于当前等级时不降级：经验入口直接返回（原版丢弃该次经验，大修/monster 保留经验），等级、已发放属性点与技能点不变。
 
 金币：`INVEN_AddMoney` 是增量入口（出售、商店/网络商店、存档相关回补等）；`EVTSYSTEM_Process` 的任务奖励走 `INVEN_SetMoney` 写绝对值，不在本倍率覆盖范围内。
 
@@ -160,7 +170,7 @@ monster v29 的 `CHAR_AddDamage` 入口是 `b <隐藏段目标>`，且 mod 会�
 | 文件 | 职责 |
 |---|---|
 | `plugins/world_tuning/plugin.cpp` / `plugin.h` | descriptor、feature、install/deactivate、面板注册、配置读取 |
-| `plugins/world_tuning/feature.cpp` / `feature.h` | 九个入口 wrapper、CMP helper、`item.use` 回调、阵营判定、HP 账本、掉落上下文与重抽、倍率原子值、配置读写 |
+| `plugins/world_tuning/feature.cpp` / `feature.h` | 九个入口 wrapper、CMP helper、`item.use` 回调、阵营判定、HP 账本、掉落上下文与重抽、等级上限校正、倍率原子值、配置读写 |
 | `plugins/world_tuning/rates.cpp` / `rates.h` | 档位、字段/文案表、JSON 编解码与校验、常规及 K² 阈值缩放 |
 | `plugins/world_tuning/panel.cpp` / `panel.h` | 面板 provider、双列分页布局、箭头/文本绘制、receipt 轮询 |
 | `plugins/world_tuning/settings_contribution.cpp` / `.h` | 旧 catalog contribution 空实现 |
@@ -168,8 +178,8 @@ monster v29 的 `CHAR_AddDamage` 入口是 `b <隐藏段目标>`，且 mod 会�
 
 ## 测试
 
-- `world_tuning_rates_tests`（`tests/test_world_tuning_rates.cpp`）：基础/扩展档位、显示文本、JSON 往返、0 值缩放与 1e-6 敌怪血量、配置非负范围、越界值分字段回退、未知字段忽略、重复/语法错误拒绝、旧配置 `move_speed`/`drop_quality` 键兼容、`validate_config`；另覆盖 K=1、K²、100% cap、负 threshold 与高 K 饱和无溢出。
-- `world_tuning_feature_tests`（`tests/test_world_tuning_feature.cpp`）：descriptor（12 资源、无 provides）、安装失败出口、门禁时序、伤害/经验/金币/血量 0 倍率、伤害矩阵、HP 缩放与幂等/倍率变更、阵营失败、残留 wrapper、entry 不可用分支；掉落数量 0/1/3/17 次调用与 warning、CMP helper 的 gate/TLS 隔离、重抽 0 不掉落、品质候选仍按 K 次调用及既有过滤/取最高/释放规则。
+- `world_tuning_rates_tests`（`tests/test_world_tuning_rates.cpp`）：基础/扩展档位、显示文本、JSON 往返、0 值缩放与 1e-6 敌怪血量、配置非负范围、越界值分字段回退、未知字段忽略、重复/语法错误拒绝、旧配置 `move_speed`/`drop_quality` 键兼容、`validate_config`；`level_cap` 默认值、纯整数显示、5..255 范围与两套步长 5 档位；另覆盖 K=1、K²、100% cap、负 threshold 与高 K 饱和无溢出。
+- `world_tuning_feature_tests`（`tests/test_world_tuning_feature.cpp`）：descriptor（12 资源、无 provides）、安装失败出口、门禁时序、伤害/经验/金币/血量 0 倍率、伤害矩阵、HP 缩放与幂等/倍率变更、阵营失败、残留 wrapper、entry 不可用分支；掉落数量 0/1/3/17 次调用与 warning、CMP helper 的 gate/TLS 隔离、重抽 0 不掉落、品质候选仍按 K 次调用及既有过滤/取最高/释放规则；`level_cap` 在门禁开时写入配置值、停用后写回 105。
 - `insn_patch_tests`（`tests/test_insn_patch.cpp`）：kind5 trampoline 保存/恢复寄存器与 LR、精确重放 CMP 后用 B 返回原 `b.cond`、expected-word 拒绝与物理还原。
 - `settings_contributions_tests` 编译本插件的空 contribution。
 
@@ -177,4 +187,4 @@ monster v29 的 `CHAR_AddDamage` 入口是 `b <隐藏段目标>`，且 mod 会�
 
 ## 验证状态
 
-Host 测试与 Debug 构建状态见 `docs/refactor/verification.md` 的 VM-WT-01；2026-10-29 真机（C18L v589）只覆盖设置页/面板/配置持久化，不覆盖新增 CMP ABI。概率阈值与品质候选的游戏内效果尚无新真机证据，按验收口径登记为 `PARTIAL / NOT_ACCEPTED`。QOL 水印配色由 `world_tuning` runtime effect 驱动，本批只覆盖 Debug 构建与纯函数判定，真机颜色切换未验收。
+Host 测试与 Debug 构建状态见 `docs/refactor/verification.md` 的 VM-WT-01；2026-10-29 真机（C18L v589）只覆盖设置页/面板/配置持久化，不覆盖新增 CMP ABI。概率阈值与品质候选的游戏内效果尚无新真机证据，按验收口径登记为 `PARTIAL / NOT_ACCEPTED`。QOL 水印配色由 `world_tuning` runtime effect 驱动，本批只覆盖 Debug 构建与纯函数判定，真机颜色切换未验收。等级上限 `level_cap`（端口 v1.4）需要真机覆盖：105→110 的实际升级、停用后恢复 105、下调到当前等级以下时不降级；在此之前只算 Host 覆盖。
