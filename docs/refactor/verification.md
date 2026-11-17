@@ -640,3 +640,15 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | Host 测试 | **PASS**：`inventory_remove_wrapper_tests` rc=0；`item_editor_draft_tests` **137/0**；`host_tests` **7660/0**。 | 全量 Host 构建仍被 §5.40 记录的三个既有失败目标阻断，与本改动无关。 |
 | 构建 | **PASS**：`scripts/build-debug.sh` 成功，`output/inotia4_qol_lsposed_debug_2611180116_010e5204b244.apk`（SHA-256 `010e5204b244…`）。 | 构建成功不替代设备行为验收。 |
 | VM-ITEM-EDITOR-03 | **NOT_ACCEPTED（待真机）**。 | ①装备一件物品 → 装备详情 → 编辑器把混沌倍率改为 150 → 替换物品 → 打开人物属性页，攻击/防御应立即变化；②背包页用编辑器「放入背包」→ 不切袋/不切页，物品应立刻出现在当前网格；③在非背包场景（如角色面板装备详情）重复 ①，确认无崩溃、属性刷新；④日志无 `step=refresh result=skipped`（能力正常时）。 |
+
+### 5.42 已装备物品替换失败：来源回滚（2026-11-18；Host/构建通过，真机待验）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 现象（设备日志） | **已复现**：`192.168.3.54` 的 `qol.log` 2026-11-18 01:46:13 / 01:46:39：确认框完成后先出现 `W extension_bag bag source replace rejected reason=handle slot=97|98`，紧接 `I ui panel op=action action=replace_item step=replace result=failed code=1`（code 1 = `kQolErrInvalidArgument`）。 | `.tmp/equip-replace-log/`（临时取证，已删除）。 |
+| 根因（代码事实） | **已定位**：已装备物品不在任何袋子里，`locate_item` 的 identify / `INVEN_FindItemSlot` / 扫描全部失败 → 走兼容回落 `replace_provider`：先 `apply_payload` 原地写入成功，再逐来源 `QolBagSource::replace_item`；非本袋句柄一律返回 `kQolErrNotFound` → 旧代码执行 `rollback()` 把载荷写回旧值并返回 NotFound，`replace_item` 最终返回定位错误码 1。即替换对已装备物品**必然失败且内容被回滚**（与显示刷新改动无关，属既有缺陷）。 | `plugins/core.inventory/transfer/replace_item.cpp`。 |
+| 修复 | `replace_provider` 增加 `keep_unowned_in_place`：回落路径在“没有任何来源认领该 handle”时保留已写入的载荷并按成功返回（`out->ref` 为空、`out->item=expected`、`out->count` 取替换数量），不再回滚；定位成功且属于注册源的路径仍按原逻辑提交 descriptor。头文件契约同步注明。 | 只影响“定位失败 + 未认领”分支；袋子内物品与扩展袋物品路径不变。 |
+| Host 测试 | **PASS**：`core_inventory_store_tests` 新增 `test_transfer_replace_unowned_in_place`（handle `{9,9}` 定位失败、`apply_payload` 成功、无来源认领 → 返回 ok、不调用来源）；`ctest -R "core_inventory_store_tests\|inventory_remove_wrapper_tests\|item_editor_draft_tests\|host_tests\|custom_recipe"` **9/9** 通过。 | `host_adapter_tests` 等既有链接失败目标仍排除，见 §5.40/§5.38。 |
+| 构建 | **PASS**：`scripts/build-debug.sh` 成功，`output/inotia4_qol_lsposed_debug_2611180152_4882881d9b4b.apk`（SHA-256 `4882881d9b4b…`）。 | — |
+| VM-ITEM-EDITOR-04 | **NOT_ACCEPTED（待真机）**。 | ①装备一件物品 → 装备详情 → 编辑器改数值 → 替换物品：提示“已替换物品”，无 `step=replace result=failed code=1`；②人物属性页立即同步；③替换后物品详情数值与编辑器一致；④袋子内物品替换回归仍正常。 |
+| 既存噪声（非本次） | `qol.log` 每 ~5s 出现 `fail op=snapshot_read space=0 bag=5 code=1 reason=bag_info`：`kQolOriginalBagCount` 把任务袋（bag 5）计入快照遍历，任务袋被排除后逐次记 WARN。 | 与替换失败无关，未修；需要时单独收敛日志。 |

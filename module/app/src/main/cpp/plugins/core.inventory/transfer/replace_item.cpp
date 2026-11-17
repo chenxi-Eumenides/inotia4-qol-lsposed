@@ -54,7 +54,7 @@ QolResult replace_native(const contracts::QolBagRef& ref, int32_t slot,
 
 QolResult replace_provider(contracts::QolItemHandle expected,
                            const contracts::QolBagTransfer* replacement,
-                           contracts::QolBagMutationResult* out) {
+                           contracts::QolBagMutationResult* out, bool keep_unowned_in_place) {
     uint8_t old_payload[contracts::kQolBagTransferPayloadCapacity]{};
     uint32_t old_size = 0;
     const bool have_old =
@@ -84,6 +84,15 @@ QolResult replace_provider(contracts::QolItemHandle expected,
             rollback();
             return replaced;
         }
+        return contracts::ok();
+    }
+    // 没有任何来源认领：句柄指向的不在 provider 袋子里（典型是装备槽里的物品）。
+    // payload 已原地写回既有对象，对象地址/句柄未变，按替换成功返回；否则旧路径
+    // 会把刚写入的载荷回滚，替换对已装备物品永远失败。
+    if (keep_unowned_in_place) {
+        out->ref = contracts::QolBagRef{};
+        out->item = expected;
+        out->count = replacement->count;
         return contracts::ok();
     }
     rollback();
@@ -185,7 +194,7 @@ QolResult replace_item(contracts::QolItemHandle expected,
     const QolResult located = locate_item(expected, &ref, &slot);
     if (contracts::succeeded(located)) {
         if (ref.space_id >= contracts::kQolBagSpaceFirstRegistered) {
-            return replace_provider(expected, replacement, out);
+            return replace_provider(expected, replacement, out, false);
         }
         if (contracts::qol_bag_ref_is_task_bag(ref)) {
             return error(kQolErrBlocked, "task bag excluded");
@@ -194,7 +203,8 @@ QolResult replace_item(contracts::QolItemHandle expected,
     }
 
     // 兼容没有 identify 的注册源：定位失败时仍按旧路径把 expected 交给来源提交。
-    const QolResult provider = replace_provider(expected, replacement, out);
+    // keep_unowned_in_place=true：没有来源认领时保留原地写入（已装备物品不在任何袋子里）。
+    const QolResult provider = replace_provider(expected, replacement, out, true);
     if (provider.code != kQolErrNotFound) return provider;
     return located;
 }

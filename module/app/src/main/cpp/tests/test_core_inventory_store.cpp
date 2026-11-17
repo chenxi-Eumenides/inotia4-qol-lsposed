@@ -426,6 +426,41 @@ void test_transfer_replace_locates_without_native_scan() {
         kTransferTestSpace));
 }
 
+void test_transfer_replace_unowned_in_place() {
+    // 已装备物品：identify 与原生定位都失败，但对象仍可原地写 payload。
+    qol::contracts::QolItemPort port{};
+    port.read.serialize_item = &fake_serialize_item;
+    qol::contracts::QolItemInventoryStateWritePort state_write{};
+    state_write.apply_payload = &fake_apply_payload;
+    qol::contracts::QolGameHost game{};
+    game.abi.size = sizeof(game);
+    game.abi.major = qol::contracts::kGameHostMajor;
+    game.abi.minor = qol::contracts::kGameHostMinor;
+    game.item_abi.original_find_item_slot = &fake_original_find_item_slot;
+
+    qol::features::core_inventory::g_port = &port;
+    qol::features::core_inventory::g_item_state_write = &state_write;
+    qol::features::core_inventory::g_game = &game;
+    g_transfer_replace_calls = 0;
+
+    qol::contracts::QolBagTransfer replacement{};
+    replacement.category = 10;
+    replacement.count = 1;
+    replacement.payload_size = 1;
+    replacement.payload[0] = 0;
+    qol::contracts::QolBagMutationResult out{};
+    assert_ok(qol::features::core_inventory::transfer::replace_item::replace_item(
+        {9, 9}, &replacement, &out));
+    assert(out.item.slot == 9 && out.item.generation == 9);
+    assert(out.count == 1);
+    // 没有来源认领时不得回滚已写入的载荷，也不应交给来源提交。
+    assert(g_transfer_replace_calls == 0);
+
+    qol::features::core_inventory::g_game = nullptr;
+    qol::features::core_inventory::g_item_state_write = nullptr;
+    qol::features::core_inventory::g_port = nullptr;
+}
+
 }  // namespace
 
 int main() {
@@ -433,6 +468,7 @@ int main() {
     test_store();
     test_transfer_move_count_precheck();
     test_transfer_replace_locates_without_native_scan();
+    test_transfer_replace_unowned_in_place();
     inventory_store().clear();
     qol::features::core_inventory::reset_bag_sources();
     return 0;
