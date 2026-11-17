@@ -329,8 +329,13 @@ void draw_numeric_card() {
         std::snprintf(value_text, sizeof(value_text), "当前：%d%%", g_value);
         panel_internal::draw_center_text(g_card_root, value_text, 210, 40,
                                          panel_internal::kText, 1);
-        panel_internal::draw_center_text(g_card_root,
-                                         "仅伤害/防御与属性词条，主属性词条除外", 210, 80,
+        // C18L 把 ITEM_GetOptionValue 改成按倍率缩放，但主属性词条（行 0..4）
+        // 由 CHAR_CalculateStatusFromEquipDetail 直读节点，不经过该函数；
+        // 其他变体的词条整体不参与倍率。提示按变体区分，不改游戏口径。
+        const char* hint = panel_internal::g_draft.variant_series == 4
+                               ? "主属性词条（力/敏/体/智/精）不受倍率影响"
+                               : "仅影响伤害/防御，词条数值不变";
+        panel_internal::draw_center_text(g_card_root, hint, 210, 80,
                                          panel_internal::kMuted);
     } else {
         char value_text[48]{};
