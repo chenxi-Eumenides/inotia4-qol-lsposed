@@ -180,6 +180,17 @@ bool build_payload(QolItemPayloadBlob* out, const char** fail_step) {
         *fail_step = "draft";
         return false;
     }
+    // 附魔 ID 字段只有 5 位（C18 为 4 位）。越界值会被截断成另一个行号，
+    // 让写回后的物品数值静默回退；这里直接拒绝，避免落盘结果与 draft 不一致。
+    constexpr int32_t kEnchantIdMax = 31;
+    constexpr int32_t kEnchantIdMaxC18 = 15;
+    const int32_t enchant_id_max =
+        g_draft.variant_series == 4 ? kEnchantIdMaxC18 : kEnchantIdMax;
+    if (item_class_is_equipment(g_draft.class_index) &&
+        (g_draft.enchant_id < 0 || g_draft.enchant_id > enchant_id_max)) {
+        *fail_step = "enchant_id";
+        return false;
+    }
     QolItemPayloadOption options[kItemPayloadMaxOptionCount];
     const uint32_t needed =
         action_payload_options(g_draft, options, kItemPayloadMaxOptionCount);

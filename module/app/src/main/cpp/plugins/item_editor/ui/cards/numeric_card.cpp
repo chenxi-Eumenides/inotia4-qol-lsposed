@@ -139,8 +139,8 @@ bool numeric_card_open_enchant_strength() {
     const auto& draft = panel_internal::g_draft;
     const EnchantStrength current = enchant_strength_for_id(
         draft.enchant_id, draft.class_index, draft.variant_series);
-    const bool c18 = draft.variant_series == 4;
-    const uint32_t option_count = c18 ? 5u : 6u;
+    // 强化强度只到特级：混沌卷轴不是附魔行（只提升已强化次数），不提供选择。
+    constexpr uint32_t option_count = 5u;
     g_target = NumericCardTarget::kEnchantStrength;
     g_min = 1;
     g_max = static_cast<int32_t>(option_count);
@@ -365,8 +365,9 @@ void numeric_card_apply() {
                 panel_internal::g_draft.dirty = true;
                 break;
             case NumericCardTarget::kEnchantStrength: {
-                const int32_t max_strength =
-                    panel_internal::g_draft.variant_series == 4 ? 5 : 6;
+                // 混沌没有附魔行（见 enchant_id_for_strength），强度上限为特级。
+                constexpr int32_t max_strength =
+                    static_cast<int32_t>(EnchantStrength::kSpecial);
                 const auto strength = static_cast<EnchantStrength>(
                     std::clamp(g_value, 1, max_strength));
                 panel_internal::g_draft.enchant_id = enchant_id_for_strength(

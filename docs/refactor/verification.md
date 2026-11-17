@@ -621,3 +621,13 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | Host（含既有失败） | **PASS（排除 3 个既有失败）**：`ctest -E "host_adapter_tests\|native_scroll_list_tests\|help_page_tests"` → **165/165**（`ui_adapter_tests` 已按新语义更新：内存不可读 → `ok + live=0`，非主线程 → `NotReady`）。三个被排除项均已用「暂存本改动后重跑」验证为既有失败：`host_adapter_tests` 链接缺 `fn_memorytext_get_text_e`/`fn_cal_calculate`（`item_port.cpp` 改动）；`native_scroll_list_tests` 断言 provider callbacks 非空、`help_page_tests` SIGSEGV（均随 `873556ae refactor(panels): provider 改为装配期声明` 出现）。 | 三项与本改动无关，需在 panels 重构收口时修复。 |
 | 真机 | **NOT_ACCEPTED（未执行）**：未安装本轮 Debug 包、未复现入口消失。 | 待核验：①背包页反复进出 10 次，入口每次都出现；②入口消失时 `qol.log` 出现 `drop entry root_kind=equip_bag reason=<…>`，且消失位置点击不再打开编辑器；③`install entry` 与 `drop entry` 次数成对、无逐帧刷屏；④主菜单齿轮入口同时回归（共用 `anchored_button_ensure`）。 |
 
+
+### 5.40 `item_editor` 强化强度：混沌卷轴不是附魔行（2026-11-18；Host/静态通过，真机待验）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 游戏事实（反汇编） | **已确认**：`monster` 的 `ITEMSYSTEM_EnchantItem @0x10b330` 在 `0x10b4e4` 判定 `category==20(混沌武器卷轴) || category==25(混沌防具卷轴)`，命中后走 `0x10b4fc` 独立分支：要求已强化次数 `>0`（否则返回 5）、附加强化次数 `==0`（否则返回 6），**不写附魔 ID**、不消耗耐久，只把已强化次数 `+1`（成功判定再 `+1`）。普通卷轴才在 `0x10b6c8` 用 `rowIndex+1` 写 `I_ENCHANT` bits 11..15。`ITEMENCHANTBASE` 第 15/31 行（类别 20/25）的类别位掩码 `+2..+5` 为 0，任何类别都选不到；`ApplyEnchantValue` 以 `row = id-1` 取行，非 C18 5 位 ID 最多到行 30，C18 4 位 ID 最多到行 14。 | 反汇编：`apk/decoded/monster/lib/arm64-v8a/libgame.so`、`apk/decoded/c18/lib/arm64-v8a/libgame.so`（C18 同函数但混沌分支被改到 `0x250c00`/`0x250cc0`，仍不写附魔 ID）。 |
+| 实现（代码事实） | **已修正**：`enchant_id_for_strength` 对 `kChaos` 一律返回 0（不再生成行 15/31/32/33）；强化强度选择卡固定 5 项（低级..特级，C18 与非 C18 一致）；`build_payload` 在装备场景拒绝 `enchant_id` 超出 5 位（C18 4 位）范围，`fail_step=enchant_id`，不再静默截断成别的行号。 | `plugins/item_editor/model/draft.cpp`、`plugins/item_editor/ui/cards/numeric_card.cpp`、`plugins/item_editor/ui/actions.cpp`。 |
+| Host 测试 | **PASS**：`item_editor_draft_tests` **137/0**（新增映射断言：非 C18 各强度 → 行 1..31；`kChaos` → 0；C18 4 位映射；反查 32/0 → `kNone`）；`ctest -R "item_editor|item_payload|item_facts|attribute_quality"` **7/7 通过**。 | 全量 Host 构建仍被既有失败阻断：`host_adapter_tests`（`item_port.cpp` 引用未链接的 `fn_memorytext_get_text_e`/`fn_cal_calculate`）、`core_settings_config_tests`（链接）、`settings_catalog_abi_tests`（`PluginDescriptor` 静态断言），与本改动无关，详见 §5.38 的既有失败记录。 |
+| VM-ITEM-EDITOR-02：强化强度落盘 | **NOT_ACCEPTED（待真机）**。 | 真机步骤（monster 变体）：①对一件**无强化**的帽子/护手/鞋，把强化强度选到特级并替换物品 → 详情页防御应等于 `read_item_stats_full` 显示值；②同一物品改选混沌（若旧包仍显示）→ 新包应只提供到特级；③对已强化物品只改已强化次数后替换 → 防御按该强度行增量变化；④全程确认不会出现“编辑器显示 B、落盘仍是 A”。 |
+| 遗留 | 旧版本写入过的越界 ID（如 16/17/18 或 32+ 被截断为 0/1/2）不会自动修复：`enchant_strength_for_id` 不再把这些 ID 识别成混沌，面板显示“无 (id)”，需要用户重新选择一次强度。 | 不做数据迁移；`chaos_level` 固定 0 的既有行为本次未改（见第一节诊断）。 |

@@ -232,6 +232,12 @@ int32_t c18_enchant_id(int32_t row_index) {
 int32_t enchant_id_for_strength(EnchantStrength strength, int32_t class_index,
                                 int32_t variant_series) {
     if (strength == EnchantStrength::kNone) return 0;
+    // 混沌卷轴（ITEMDATABASE 类别 20 武器 / 25 防具）不是一种强化强度：
+    // 游戏 ITEMSYSTEM_EnchantItem 对这两个类别走独立分支，要求物品已有强化等级、
+    // 附加强化次数为 0，只把已强化次数 +1（不消耗耐久），不写附魔 ID；
+    // ITEMENCHANTBASE 第 15/31 行（混沌武器/防具）的类别位掩码为 0，任何类别都选不到，
+    // 且附魔 ID 只有 5 位（C18 4 位），行号 31 无法表示。因此混沌没有可写入的附魔行。
+    if (strength == EnchantStrength::kChaos) return 0;
     const int32_t group = enchant_class_group(class_index);
     if (group < 0) return 0;
     const int32_t tier = static_cast<int32_t>(strength) - 1;
@@ -244,7 +250,8 @@ int32_t enchant_id_for_strength(EnchantStrength strength, int32_t class_index,
 EnchantStrength enchant_strength_for_id(int32_t enchant_id, int32_t class_index,
                                         int32_t variant_series) {
     if (enchant_id <= 0) return EnchantStrength::kNone;
-    for (int32_t value = 1; value <= 6; ++value) {
+    // 混沌没有附魔行，候选只到特级。
+    for (int32_t value = 1; value <= static_cast<int32_t>(EnchantStrength::kSpecial); ++value) {
         const auto strength = static_cast<EnchantStrength>(value);
         if (enchant_id_for_strength(strength, class_index, variant_series) == enchant_id)
             return strength;
