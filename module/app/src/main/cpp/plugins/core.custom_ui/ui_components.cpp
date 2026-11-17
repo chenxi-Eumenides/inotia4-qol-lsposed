@@ -1480,6 +1480,43 @@ QolResult anchored_button_release(contracts::QolUiAnchoredButton* state) {
     return contracts::ok();
 }
 
+// 观测去重：D 级 logger 按「调用点 + 正文完全相同」去重，两个入口交替绘制时正文交替
+// 变化，250ms 门控会失效并持续刷屏（真机 5.5 小时约 4 万行、触发 4 MiB 轮转）。这里按
+// 句柄记住上次观测到的坐标，只有该句柄首次出现或坐标变化才记录一行。
+struct DrawObservation {
+    contracts::QolUiHandle handle;
+    int64_t x;
+    int64_t y;
+};
+
+constexpr size_t kDrawObservationSlots = 4;
+DrawObservation g_draw_observations[kDrawObservationSlots]{{nullptr, 0, 0}, {nullptr, 0, 0},
+                                                           {nullptr, 0, 0}, {nullptr, 0, 0}};
+
+bool note_draw_observation(contracts::QolUiHandle handle, int64_t x, int64_t y) {
+    DrawObservation* free_slot = nullptr;
+    for (auto& slot : g_draw_observations) {
+        if (slot.handle == handle) {
+            if (slot.x == x && slot.y == y) return false;
+            slot.x = x;
+            slot.y = y;
+            return true;
+        }
+        if (slot.handle == nullptr && free_slot == nullptr) free_slot = &slot;
+    }
+    if (free_slot != nullptr) {
+        free_slot->handle = handle;
+        free_slot->x = x;
+        free_slot->y = y;
+        return true;
+    }
+    // 槽满：覆盖第一格。锚定按钮最多 3 个（item_editor / autosell / settings），4 格够用。
+    g_draw_observations[0].handle = handle;
+    g_draw_observations[0].x = x;
+    g_draw_observations[0].y = y;
+    return true;
+}
+
 // 入口是否画在可信位置：绝对坐标由父链累加得出，父链指向已销毁内存时会得到离谱数值。
 // 该范围只用于区分「坐标可信」与「坐标明显异常」，不参与任何行为决策。
 constexpr int64_t kEntryAbsLimit = 32768;
@@ -1513,10 +1550,12 @@ QolResult anchored_button_draw(const contracts::QolUiAnchoredButton* state) {
                           static_cast<long long>(y), static_cast<int>(origin.ok));
         return drawn;
     }
-    ANCHORED_LOG_DEBUG("draw entry root_kind=%s handle=%p abs=(%lld,%lld) origin=%d result=%d",
-                       kind, static_cast<void*>(state->handle), static_cast<long long>(x),
-                       static_cast<long long>(y), static_cast<int>(origin.ok),
-                       static_cast<int>(drawn.ok));
+    if (anchored_log_debug_enabled() && note_draw_observation(state->handle, x, y)) {
+        ANCHORED_LOG_DEBUG("draw entry root_kind=%s handle=%p abs=(%lld,%lld) origin=%d result=%d",
+                           kind, static_cast<void*>(state->handle), static_cast<long long>(x),
+                           static_cast<long long>(y), static_cast<int>(origin.ok),
+                           static_cast<int>(drawn.ok));
+    }
     return drawn;
 }
 
