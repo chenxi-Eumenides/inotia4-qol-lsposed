@@ -1524,7 +1524,8 @@ int main() {
     CHECK(g_click_user == &click_marker);
 
     // Minor 25：通用点击绑定身份证明。命中要求绑定元组与 ExecuteProc 同时匹配；
-    // 内存不可读返回 NotReady（unknown），不得据此删除控件。
+    // 控件/按钮数据块不可读属于「已不可用」，返回 live=0 让调用方注销记录并重建（不删 native）；
+    // 只有非主线程这类瞬态情形才返回 NotReady。
     {
         int32_t live = -1;
         CHECK(adapter->click_binding_is_current(&control, &click_proc, &click_marker, &live).ok ==
@@ -1542,9 +1543,14 @@ int main() {
               kQolOk);
         CHECK(live == 0);
         g_memory_accessible = false;
+        CHECK(adapter->click_binding_is_current(&control, &click_proc, &click_marker, &live).ok ==
+              kQolOk);
+        CHECK(live == 0);
+        g_memory_accessible = true;
+        g_game_main_thread = false;
         CHECK(adapter->click_binding_is_current(&control, &click_proc, &click_marker, &live).code ==
               kQolErrNotReady);
-        g_memory_accessible = true;
+        g_game_main_thread = true;
     }
 
     // A non-main-menu screen is unknown, not proof that a retained menu component is dead.

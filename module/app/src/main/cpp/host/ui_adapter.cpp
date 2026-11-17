@@ -1419,7 +1419,11 @@ QolResult click_binding_is_current(QolUiHandle control, contracts::QolUiClickFn 
     }
     *out_live = 0;
     if (!qol::game::game_host_is_main_thread()) return not_ready();
-    if (!game_memory_accessible(control, CO_DATA + sizeof(void*), 'r')) return not_ready();
+    // 控件对象或按钮数据块已不可读：不是「暂时无法证明」，而是已不可用。游戏关闭面板时会
+    // 释放按钮私有数据块，控件对象却可能仍留在容器子链表里；此时返回 NotReady 会让锚定层
+    // 按契约保留记录、每帧重复失败，入口永久消失（真机 2026-11-17 22:12:33 起复现）。
+    // 返回 live=0 让调用方注销记录并重建；注销只摘除组件记录，不删除 native。
+    if (!game_memory_accessible(control, CO_DATA + sizeof(void*), 'r')) return contracts::ok();
     {
         std::lock_guard<std::mutex> lock(g_click_mtx);
         const auto binding = g_click_bindings.find(control);
@@ -1431,7 +1435,7 @@ QolResult click_binding_is_current(QolUiHandle control, contracts::QolUiClickFn 
     void* control_data = ui_control_data(control);
     if (control_data == nullptr ||
         !game_memory_accessible(control_data, CB_EXECUTE_PROC + sizeof(void*), 'r')) {
-        return not_ready();
+        return contracts::ok();
     }
     if (!ui_execute_proc_matches(control, &click_proc_trampoline)) return contracts::ok();
     *out_live = 1;

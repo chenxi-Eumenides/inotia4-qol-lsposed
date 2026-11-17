@@ -792,9 +792,10 @@ struct QolUiAdapter {
 
     // Minor 25 append-only slot. Proves a handle is still the live control this adapter bound
     // through set_click_proc: native memory readable, ExecuteProc is the adapter trampoline, and
-    // the binding tuple matches expected callback + owner. out_live=1 only on full proof;
-    // out_live=0 is conclusive only together with a live-parent child-list check — callers must
-    // never delete native memory merely because out_live==0. NotReady means unknown (unreadable).
+    // the binding tuple matches expected callback + owner. out_live=1 only on full proof.
+    // out_live=0 表示「已不是本模块的活控件」或「控件/按钮数据块已不可读」（游戏释放后不可恢复）；
+    // 两种情况都只用于注销记录，callers must never delete native memory merely because out_live==0。
+    // NotReady 只保留给真正瞬态的情形（非游戏主线程 / adapter 未就绪）。
     QolResult (*click_binding_is_current)(QolUiHandle control, QolUiClickFn expected, void* owner,
                                           int32_t* out_live);
 

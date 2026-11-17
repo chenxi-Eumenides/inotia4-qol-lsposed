@@ -133,7 +133,7 @@ provider 由各面板插件在 `PluginDescriptor.panel_providers` 装配期声�
 2. 先指针、后字段：先在活父控件子链表内做纯指针比对，再读 type/user_type/data/`CO_PROC`。
 3. 失效只注销记录：`forget_native` 或 `anchored_*_release`；绝不 delete 未证明存活的句柄。
 4. 身份判据：组件按钮用 `click_binding_is_current`；原生控件用创建时 `type` + `user_type` + `control_data` 快照配合 `control_proc_matches`。
-5. `NotReady` 只表示无法证明，调用方必须保留记录。
+5. `NotReady` 只表示**暂时**无法证明（非游戏主线程 / adapter 未就绪），调用方必须保留记录；`out_live=0` 既包含「已不是本模块的活控件」，也包含「控件对象或按钮数据块已不可读」（游戏关闭面板时释放按钮私有数据、控件对象仍留在容器子链表里），后者不可恢复，调用方应注销记录并重建——注销只摘除组件记录，不删除 native。若把「已不可读」继续当作 `NotReady`，记录会永久停在 mounted、每帧重复失败，入口永久消失（真机 2026-11-17 22:12:33 复现）。
 6. `unbind` 跳过 `native_externally_owned` 组件，不删除游戏拥有的 native。
 
 当前使用方：`autosell` 背包入口（`anchored_button_*`）、`extension_bag` 页签（`anchored_control_*`）、`settings` 主菜单齿轮。
