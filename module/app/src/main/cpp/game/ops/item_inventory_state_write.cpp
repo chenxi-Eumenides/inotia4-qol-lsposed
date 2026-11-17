@@ -8,6 +8,7 @@
 #include "contracts/bag.h"
 #include "contracts/inventory_identity.h"
 #include "game/access/game_access.h"
+#include "game/access/char.h"
 #include "game/access/inventory.h"
 #include "game/access/item_handle_registry.h"
 #include "game/adapter_ports/item_count_facade.h"
@@ -1533,6 +1534,25 @@ QolResult apply_payload_mutation(contracts::QolItemHandle handle,
     return transfer_error(kQolErrInvalidArgument, "unknown payload mutation");
 }
 
+// 原地覆盖 payload 时物品对象地址不变，装备槽仍指向它；角色属性按 attr 脏位缓存，
+// 不重设槽位就会继续显示替换前的数值。重设同一槽位走原版 CHAR_SetEquipItem →
+// CHAR_InitializeFromEquip，与正常穿脱同一条刷新路径（也刷新装备与动作信息显示）。
+void refresh_equipped_slots(void* item) {
+    if (item == nullptr || fn_set_equip_item == nullptr) return;
+    std::initializer_list<void*> characters{member_or_null(0), member_or_null(1),
+                                            member_or_null(2), char_menu_character()};
+    for (void* character : characters) {
+        if (character == nullptr) continue;
+        auto** slots = reinterpret_cast<void**>(static_cast<uint8_t*>(character) + C_EQUIP);
+        if (!game_memory_accessible(slots, sizeof(void*) * C_EQUIP_SLOTS, 'r')) continue;
+        for (size_t slot = 0; slot < C_EQUIP_SLOTS; ++slot) {
+            if (slots[slot] != item) continue;
+            fn_set_equip_item(character, static_cast<int32_t>(slot), item);
+            return;
+        }
+    }
+}
+
 QolResult apply_payload_to_item(contracts::QolItemHandle item, const uint8_t* payload,
                                 uint32_t payload_size) {
     if (payload == nullptr || payload_size == 0) {
@@ -1569,6 +1589,7 @@ QolResult apply_payload_to_item(contracts::QolItemHandle item, const uint8_t* pa
     *temp_list = old_list;
     const QolResult freed = free_loaded_item(temp_handle);
     if (!contracts::succeeded(freed) && freed.code != kQolErrNotFound) return freed;
+    refresh_equipped_slots(target);
     return contracts::ok();
 }
 

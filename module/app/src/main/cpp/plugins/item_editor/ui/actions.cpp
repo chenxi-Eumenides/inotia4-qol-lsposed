@@ -1,6 +1,7 @@
 #include "actions.h"
 
 #include "../../../contracts/inventory_action.h"
+#include "../../../contracts/inventory_refresh.h"
 #include "../../../contracts/inventory_transfer.h"
 #include "../../../contracts/item_payload.h"
 #include "../../../contracts/ui_confirmation.h"
@@ -103,6 +104,35 @@ void set_status(int32_t kind, const char* text) {
 }
 
 void log_action(const char* text) { log_panel(text); }
+
+// 放入背包后通知原版刷新袋内物品区：槽位已写入，但 UIEquip 的物品网格不会自动
+// 重绘，要等切袋或切页。`inventory_refresh` 的 call_original 是原版
+// UIEquip_RefreshItemArea 的 backup trampoline（模块主动刷新路径，core.item 的
+// 原版售出结算同样走它）；能力不可用时按 no-op 降级并写日志。
+void refresh_bag_item_area(const char* action_name) {
+    const char* reason = nullptr;
+    const auto* sdk = host_sdk();
+    const void* iface = nullptr;
+    if (sdk == nullptr || sdk->capabilities.require == nullptr) {
+        reason = "sdk_unavailable";
+    } else if (!succeeded(sdk->capabilities.require(
+                   contracts::kInventoryRefreshCapabilityId,
+                   {contracts::kInventoryRefreshVersionMajor,
+                    contracts::kInventoryRefreshVersionMinor},
+                   &iface)) ||
+               iface == nullptr) {
+        reason = "capability_unavailable";
+    } else {
+        const auto* api = static_cast<const contracts::InventoryRefreshApi*>(iface);
+        if (api->call_original == nullptr || !api->call_original()) reason = "original_unavailable";
+    }
+    if (reason == nullptr) return;
+    char line[160];
+    std::snprintf(line, sizeof(line),
+                  "op=action action=%s step=refresh result=skipped reason=%s", action_name,
+                  reason);
+    log_action(line);
+}
 
 bool button_visible(int32_t index) {
     return index != kReplaceButtonIndex || g_draft.source_valid;
@@ -307,6 +337,7 @@ void execute_place_bag() {
         return;
     }
     set_status(kStatusSuccess, "已放入背包");
+    refresh_bag_item_area("place_bag");
 }
 
 void execute_drop_item() {

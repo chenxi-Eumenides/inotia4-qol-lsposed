@@ -631,3 +631,12 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | Host 测试 | **PASS**：`item_editor_draft_tests` **137/0**（新增映射断言：非 C18 各强度 → 行 1..31；`kChaos` → 0；C18 4 位映射；反查 32/0 → `kNone`）；`ctest -R "item_editor|item_payload|item_facts|attribute_quality"` **7/7 通过**。 | 全量 Host 构建仍被既有失败阻断：`host_adapter_tests`（`item_port.cpp` 引用未链接的 `fn_memorytext_get_text_e`/`fn_cal_calculate`）、`core_settings_config_tests`（链接）、`settings_catalog_abi_tests`（`PluginDescriptor` 静态断言），与本改动无关，详见 §5.38 的既有失败记录。 |
 | VM-ITEM-EDITOR-02：强化强度落盘 | **NOT_ACCEPTED（待真机）**。 | 真机步骤（monster 变体）：①对一件**无强化**的帽子/护手/鞋，把强化强度选到特级并替换物品 → 详情页防御应等于 `read_item_stats_full` 显示值；②同一物品改选混沌（若旧包仍显示）→ 新包应只提供到特级；③对已强化物品只改已强化次数后替换 → 防御按该强度行增量变化；④全程确认不会出现“编辑器显示 B、落盘仍是 A”。 |
 | 遗留 | 旧版本写入过的越界 ID（如 16/17/18 或 32+ 被截断为 0/1/2）不会自动修复：`enchant_strength_for_id` 不再把这些 ID 识别成混沌，面板显示“无 (id)”，需要用户重新选择一次强度。 | 不做数据迁移；`chaos_level` 固定 0 的既有行为本次未改（见第一节诊断）。 |
+
+### 5.41 `item_editor` 动作后的显示刷新（2026-11-18；Host/构建通过，真机待验）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 实现（代码事实） | **已实现**：①**替换物品**——`apply_payload_to_item` 原地覆盖 payload 后，扫描队员 0..2 与 `PARTY_GetMenuCharacter` 的 10 个装备槽，命中该物品指针时调用 `fn_set_equip_item(ch, slot, item)`（原版 `CHAR_SetEquipItem` → `CHAR_InitializeFromEquip`），与正常穿脱同一条属性/装备刷新路径；②**放入背包**——`execute_place_bag` 成功后经 `inventory_refresh` 1.2 `call_original()`（原版 `UIEquip_RefreshItemArea` 的 backup trampoline，core.item 原版售出结算同路）刷新物品区，能力或 trampoline 不可用时按 no-op 降级并记 `op=action action=place_bag step=refresh result=skipped reason=…`。 | `game/ops/item_inventory_state_write.cpp`（`refresh_equipped_slots`）、`plugins/item_editor/ui/actions.cpp`（`refresh_bag_item_area`）。 |
+| Host 测试 | **PASS**：`inventory_remove_wrapper_tests` rc=0；`item_editor_draft_tests` **137/0**；`host_tests` **7660/0**。 | 全量 Host 构建仍被 §5.40 记录的三个既有失败目标阻断，与本改动无关。 |
+| 构建 | **PASS**：`scripts/build-debug.sh` 成功，`output/inotia4_qol_lsposed_debug_2611180116_010e5204b244.apk`（SHA-256 `010e5204b244…`）。 | 构建成功不替代设备行为验收。 |
+| VM-ITEM-EDITOR-03 | **NOT_ACCEPTED（待真机）**。 | ①装备一件物品 → 装备详情 → 编辑器把混沌倍率改为 150 → 替换物品 → 打开人物属性页，攻击/防御应立即变化；②背包页用编辑器「放入背包」→ 不切袋/不切页，物品应立刻出现在当前网格；③在非背包场景（如角色面板装备详情）重复 ①，确认无崩溃、属性刷新；④日志无 `step=refresh result=skipped`（能力正常时）。 |
