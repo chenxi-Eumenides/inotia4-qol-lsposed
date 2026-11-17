@@ -304,16 +304,10 @@ int32_t calc_physical_defense_wrapper(void* unused, void* defender, int32_t dama
         return physical_defense_fallback(unused, defender, damage, backup,
                                          "attr7_or_81", trace_caller);
     int64_t rate = static_cast<int64_t>(cal_result) + attr7;
-    if (attr81 > 0) {
-        const int64_t adjusted = safe_scale(rate, attr81);
-        if (adjusted > 0 && rate > std::numeric_limits<int64_t>::max() - adjusted)
-            rate = std::numeric_limits<int64_t>::max();
-        else if (adjusted < 0 && rate < std::numeric_limits<int64_t>::min() - adjusted)
-            rate = std::numeric_limits<int64_t>::min();
-        else {
-            rate += adjusted;
-        }
-    }
+    // attr 0x51 是防御减益项：原版在 0xe08b0-0xe08c0 先用 sign-(high>>6) 求
+    // -trunc(rate*attr51/1000) 再 add，等价于 rate -= trunc(rate*attr51/1000)，
+    // 即减伤率乘 (1000-attr51)/1000。attr51=1000 时减伤率归零、伤害不再被减免。
+    if (attr81 > 0) rate -= safe_scale(rate, attr81);
     if (damage == 0) {
         if (trace_stage_available(g_physical_trace_count)) {
             log_write(0, __FILE__, __LINE__,

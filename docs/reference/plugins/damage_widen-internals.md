@@ -24,7 +24,7 @@
 | `CHAR_AttrAttackDamage` | `0xeb1b4` | kind4：×100 分解式（除数参数化），结果写入消费寄存器 `w26`；重放原属性 ID 比较以维持 NZCV |
 | `CHAR_CalcPhysicalDefense` | `0xe07d8` | entry-hook 整函数替换，保留原 CAL 文本公式及参数 |
 
-kind4 验证乘法起始指令，生成近址 thunk，按点位重放已审计的内存加载/调用/比较等副作用；无法编码的分支/范围按 fail-closed 拒绝。结果钳制到 `[0, INT32_MAX]`。物防 wrapper 仍通过 defender 属性选择原公式文本，并以 `[scaled(attr17, attr18+1000), defender[14]]` 调 `CAL_Calculate`；再按原顺序叠加 attr7 与正 attr81 的千分比项，计算 `(1000-R)*damage/1000`。公式中间保持有符号向零截断，最终输出钳制。属性或公式读取不可用时透传原函数。
+kind4 验证乘法起始指令，生成近址 thunk，按点位重放已审计的内存加载/调用/比较等副作用；无法编码的分支/范围按 fail-closed 拒绝。结果钳制到 `[0, INT32_MAX]`。物防 wrapper 仍通过 defender 属性选择原公式文本，并以 `[scaled(attr17, attr18+1000), defender[14]]` 调 `CAL_Calculate`；再按原顺序叠加 attr7，并对正 attr81 做 `R -= trunc(R*attr81/1000)` 修正（原版 0xe08b0 用 `sign-(high>>6)` 求 `-q` 后 `add`，即减伤率乘 `(1000-attr81)/1000`），最后计算 `(1000-R)*damage/1000`。公式中间保持有符号向零截断，最终输出钳制。属性或公式读取不可用时透传原函数。
 
 ## 明确豁免
 

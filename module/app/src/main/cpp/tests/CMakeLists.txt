@@ -789,6 +789,16 @@ set_target_properties(damage_widen_critical_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME damage_widen_critical_tests COMMAND damage_widen_critical_tests)
 
+# damage_widen 物防 wrapper：attr 0x51 是减伤率乘 (1000-attr51)/1000，方向不得翻转。
+add_executable(damage_widen_physical_defense_tests
+    test_damage_widen_physical_defense.cpp
+)
+target_include_directories(damage_widen_physical_defense_tests PRIVATE ${CPP_DIR})
+target_compile_features(damage_widen_physical_defense_tests PRIVATE cxx_std_17)
+set_target_properties(damage_widen_physical_defense_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME damage_widen_physical_defense_tests COMMAND damage_widen_physical_defense_tests)
+
 # P2 纵向样板基础层：infra 配置与命令端口 host 测试（末尾追加）
 add_executable(infra_config_commands_tests
     test_infra_config_commands.cpp
