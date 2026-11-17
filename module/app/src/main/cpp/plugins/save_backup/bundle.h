@@ -262,7 +262,7 @@ InlineWarehouseStrip warehouse_strip_inline_segment(std::vector<uint8_t>& plain)
 //
 // 明文块表：块 i 数据 = plain + 8 + u16(plain + 8 + i*4)；块 1 = Player，块 2 = CharacterInfo。
 // 块 1 +0 为 i16 地图 id；块 2 +0 为 u8 count，随后 count 个 u16 记录偏移（相对块 2 基址），
-// 记录 +0 i8 level、+1 i8 class_idx（SAVE_LoadCharacterInfoBlock / SAVE_LoadCharacter）。
+// 记录 +0 u8 level、+1 i8 class_idx（SAVE_LoadCharacterInfoBlock / SAVE_LoadCharacter）。
 // 两条函数都做完整边界校验；失败返回 false 且不改写出参（调用方保留既有元数据）。
 
 // 解析块 1 +0 的地图 id（i16 小端）。

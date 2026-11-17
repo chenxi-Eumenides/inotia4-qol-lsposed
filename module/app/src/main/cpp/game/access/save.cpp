@@ -70,7 +70,7 @@ void* save_slot_hero(void* slot_struct) {
 
 int save_hero_level(const void* hero) {
     if (hero == nullptr) return -1;
-    return static_cast<int8_t>(reinterpret_cast<const uint8_t*>(hero)[C_LEVEL]);
+    return static_cast<int>(reinterpret_cast<const uint8_t*>(hero)[C_LEVEL]);
 }
 
 int save_hero_class(const void* hero) {
@@ -225,7 +225,7 @@ std::string save_preflight_for_enter(int32_t slot) {
                 slot, "character", 7,
                 "slot raw hero pointer is non-null but SAVESLOT_GetHero returned null");
         }
-        hero_level = static_cast<int8_t>(*reinterpret_cast<int8_t*>(reinterpret_cast<uint8_t*>(hero) + C_LEVEL));
+        hero_level = static_cast<int>(reinterpret_cast<const uint8_t*>(hero)[C_LEVEL]);
         uint8_t* player_indices = *reinterpret_cast<uint8_t**>(g_base + G_PLAYER_INDICES_GOT_VMA);
         if (player_indices != nullptr && g_main_merc_slot != nullptr) {
             detail = "player_indices=" + std::to_string(static_cast<int>(static_cast<int8_t>(player_indices[0])))
@@ -471,7 +471,7 @@ std::string save_slots_json() {
         s += "{\"slot\":" + std::to_string(i) + ",\"exists\":" + (exists ? "true" : "false");
         if (exists) {
             void* hero = fn_saveslot_get_hero(slot);
-            int level = hero ? static_cast<int8_t>(*reinterpret_cast<int8_t*>(reinterpret_cast<uint8_t*>(hero) + C_LEVEL)) : 0;
+            int level = hero ? static_cast<int>(reinterpret_cast<const uint8_t*>(hero)[C_LEVEL]) : 0;
             s += ",\"hero_level\":" + std::to_string(level) + ",\"hero_index\":" + std::to_string(hero_idx);
         }
         s += "}";

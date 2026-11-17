@@ -34,7 +34,7 @@ int save_slot_map_id(const void* slot_struct);
 int save_slot_hero_index(const void* slot_struct);
 // 槽内主角对象；未解析返回 nullptr。
 void* save_slot_hero(void* slot_struct);
-// hero + C_LEVEL / C_CLASS（s8 零扩展口径，与迁移前 static_cast<int8_t> 一致）。
+// hero + C_LEVEL / C_CLASS：等级按原版 u8 零扩展（strb 写 / ldrb 读），职业保持 s8。
 int save_hero_level(const void* hero);
 int save_hero_class(const void* hero);
 

@@ -83,7 +83,7 @@ Snapshot take_snapshot() {
             uint8_t* b = reinterpret_cast<uint8_t*>(ch);
             s.hp[i] = *reinterpret_cast<int32_t*>(b + C_HP);
             s.mp[i] = *reinterpret_cast<int32_t*>(b + C_MP);
-            s.level[i] = reinterpret_cast<int8_t*>(ch)[C_LEVEL];
+            s.level[i] = reinterpret_cast<const uint8_t*>(ch)[C_LEVEL];
             s.exp[i] = (fn_get_exp != nullptr) ? fn_get_exp(ch) : -1;
         }
     }

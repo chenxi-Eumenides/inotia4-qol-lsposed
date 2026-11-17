@@ -967,8 +967,8 @@ bool parse_plain_main_character(const std::vector<uint8_t>& plain, int& hero_lev
     }
     const size_t record = block2 + record_off;
     if (record < block2 || record + record_len > plain.size()) return false;
-    // 游戏按 int8 解释角色等级/职业（SAVE_LoadCharacter 的 strb + save_hero_level 的 int8 读）。
-    hero_level = static_cast<int8_t>(plain[record]);
+    // 等级字段按原版 u8 口径（SAVE_LoadCharacter 用 strb 写、ldrb 读）；职业保持 int8。
+    hero_level = static_cast<int>(plain[record]);
     class_idx = static_cast<int8_t>(plain[record + 1]);
     return true;
 }

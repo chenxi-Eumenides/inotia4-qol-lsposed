@@ -114,7 +114,7 @@ bool craft_show_yesno_from_textdata(uint32_t text_id, void* ok, void* cancel);
 
 // ---- 游戏读取（供结果层/界面层构造契约入参）----
 
-// 主角等级（PARTY_GetMember(0) + C_LEVEL int8）；读不到返回 0。
+// 主角等级（PARTY_GetMember(0) + C_LEVEL u8）；读不到返回 0。
 int craft_character_level();
 
 // 某类别当前持有总数（INVEN_GetItemCount）；未解析/非正返回 0。

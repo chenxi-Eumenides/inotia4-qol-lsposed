@@ -250,7 +250,7 @@ int craft_character_level() {
     void* member = fn_get_member(0);  // 0 = 主角（PARTY_GetMember 下标）
     if (member == nullptr) return 0;
     return static_cast<int>(
-        *reinterpret_cast<int8_t*>(static_cast<uint8_t*>(member) + C_LEVEL));
+        *reinterpret_cast<const uint8_t*>(static_cast<const uint8_t*>(member) + C_LEVEL));
 }
 
 int craft_category_held_count(uint16_t category) {

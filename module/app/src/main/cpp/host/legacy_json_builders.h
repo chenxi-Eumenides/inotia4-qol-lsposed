@@ -38,7 +38,7 @@ inline std::string legacy_member_json(void* ch) {
     s += ",\"class_idx\":" + std::to_string(static_cast<int>(reinterpret_cast<int8_t*>(ch)[C_CLASS]));
     uint16_t name_id = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(ch) + C_NAME_ID);
     s += ",\"name_id\":" + std::to_string(name_id);
-    s += ",\"level\":" + std::to_string(static_cast<int>(reinterpret_cast<int8_t*>(ch)[C_LEVEL]));
+    s += ",\"level\":" + std::to_string(static_cast<int>(reinterpret_cast<const uint8_t*>(ch)[C_LEVEL]));
     s += ",\"hp\":" + std::to_string(*reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(ch) + C_HP));
     s += ",\"mp\":" + std::to_string(*reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(ch) + C_MP));
     // 直接读属性缓存字段（attr 0x1e/0x1f），不调用 CHAR_GetAttr（attr=0x1e 有 HP 写回副作用）
@@ -200,7 +200,7 @@ inline std::string legacy_build_mercenaries_json() {
                         char* nm = fn_get_name(ch);
                         s += ",\"name\":\"" + json_escape(nm) + "\"";
                     }
-                    s += ",\"level\":" + std::to_string(static_cast<int>(reinterpret_cast<int8_t*>(ch)[C_LEVEL]));
+                    s += ",\"level\":" + std::to_string(static_cast<int>(reinterpret_cast<const uint8_t*>(ch)[C_LEVEL]));
                     append_position(s, ch);
                 } else {
                     s += ",\"name\":null";

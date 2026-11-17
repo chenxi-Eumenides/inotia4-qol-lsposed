@@ -97,7 +97,7 @@ QolResult read_member(void* character, QolCharacterStateMember* out) {
     out->type = static_cast<int32_t>(reinterpret_cast<int8_t*>(bytes)[C_TYPE]);
     out->class_idx = static_cast<int32_t>(reinterpret_cast<int8_t*>(bytes)[C_CLASS]);
     out->name_id = *reinterpret_cast<const uint16_t*>(bytes + C_NAME_ID);
-    out->level = static_cast<int32_t>(reinterpret_cast<int8_t*>(bytes)[C_LEVEL]);
+    out->level = static_cast<int32_t>(reinterpret_cast<const uint8_t*>(bytes)[C_LEVEL]);
     out->hp = *reinterpret_cast<const int32_t*>(bytes + C_HP);
     out->mp = *reinterpret_cast<const int32_t*>(bytes + C_MP);
     out->max_hp = char_max_hp(character);

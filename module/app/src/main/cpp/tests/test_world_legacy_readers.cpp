@@ -185,7 +185,7 @@ static std::string frozen_build_units_json_impl(int mode, bool include_charloc) 
                 s += ",\"y\":" + std::to_string(y >> 4);
                 s += ",\"type\":" + std::to_string(type);
                 s += ",\"status\":" + std::to_string(status);
-                s += ",\"level\":" + std::to_string(static_cast<int>(reinterpret_cast<int8_t*>(obj)[C_LEVEL]));
+                s += ",\"level\":" + std::to_string(static_cast<int>(reinterpret_cast<const uint8_t*>(obj)[C_LEVEL]));
                 s += ",\"hp\":" + std::to_string(*reinterpret_cast<int32_t*>(obj + C_HP));
                 s += ",\"mp\":" + std::to_string(*reinterpret_cast<int32_t*>(obj + C_MP));
                 if (fn_get_name != nullptr) {
