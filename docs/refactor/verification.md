@@ -652,3 +652,15 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | 构建 | **PASS**：`scripts/build-debug.sh` 成功，`output/inotia4_qol_lsposed_debug_2611180152_4882881d9b4b.apk`（SHA-256 `4882881d9b4b…`）。 | — |
 | VM-ITEM-EDITOR-04 | **NOT_ACCEPTED（待真机）**。 | ①装备一件物品 → 装备详情 → 编辑器改数值 → 替换物品：提示“已替换物品”，无 `step=replace result=failed code=1`；②人物属性页立即同步；③替换后物品详情数值与编辑器一致；④袋子内物品替换回归仍正常。 |
 | 既存噪声（非本次） | `qol.log` 每 ~5s 出现 `fail op=snapshot_read space=0 bag=5 code=1 reason=bag_info`：`kQolOriginalBagCount` 把任务袋（bag 5）计入快照遍历，任务袋被排除后逐次记 WARN。 | 与替换失败无关，未修；需要时单独收敛日志。 |
+
+### 5.43 混沌属性倍率不作用于词条（2026-11-18；诊断 + 编辑器提示，真机待验）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 现象 | 用户报告：`战斗护手` 混沌倍率 200%、词条「敏捷+6」，详情页按 6×200% 理解，实际生效仍为 6；穿脱装备对人物属性页无 12 的变化。 | 设备 `192.168.3.54`。 |
+| 现场数据（HTTP API） | `GET /api/character/party/0/equipment`：`category=358`、`bonus=[{id:1,敏捷,6},{id:2,体力,6}]`、`base.defense=48`、`chaos={is_chaos:true,level:0,rate:200}`。按原版公式复算：裸防御 `f=(a+3)/2`、`a=36`、品级 add=5/percent=12 → `22 + 19*12/100 = 24`，`24×200% = 48` 与 API 一致 ⇒ **倍率只放大防御**。 | 同一次快照。`GET /api/character/party/0/attributes` 返回 503 `attributes unavailable`（独立待查项，与本结论无关）。 |
+| 反汇编（实测变体为 **C18L v603**，日志 `variant={"series":"c18","version":"v603"}`） | ① 详情词条行：`UIDesc_MakeItem+0xb4054` 调 `ITEM_GetOptionValue`，C18L 把该函数改成 `b 0x1EFAC0`：`v=(s16)node[2]; rate=ITEM_GetChaosValueRate(item); scaled=(v*rate±50)/100; rate<=100→v; v==0→0; scaled!=v→scaled; 否则 scaled±1`，即**详情页按倍率缩放并保证至少变化 1**；② 普通属性词条（kind==1）：`CHAR_UpdateAttrFromEquipOpt @0xdaa7c` 调同一个被改写的 getter，同样乘倍率；③ **主属性词条（option 行 0..4 = 力量/敏捷/体力/智力/精力）**：`CHAR_CalculateStatusFromEquipDetail @0xdbb24` 直接 `ldrsh [node,#2]` 累加到 `ch+0x266+stat*2`，**不经过 getter、不乘倍率**；④ `ITEM_GetChaosValueRate @0x105c38` 由 `I_ENCHANT` bit0/bit1 门控，全库 5 个调用点（伤害/防御/合成）。 | 结论：**C18L 魔改内部两条口径不一致**——详情页与非主属性词条乘倍率，主属性词条不乘。 |
+| 变种对比 | `original/monster/overhaul` 的 `ITEM_GetOptionValue @0x105e68` 都是 8 字节裸实现 `ldrsh w0,[x1,#2]; ret`，主属性词条同样裸读 ⇒ 三个变体显示与生效**一致**（都不乘倍率）。只有 `c18`(C18L v603) 该函数被改成 `b 0x1EFAC0` 的缩放实现，从而出现主属性词条的显示/生效差异。 | Frida 实测：`GetOptionValue` 节点值 6 → `UIDesc_AddOption` 收到 12（同件物品体力同为 6→12；非混沌物品 19→19、129→129）。 |
+| 实现（本次） | 混沌倍率数字卡说明行改为「仅伤害/防御与属性词条，主属性词条除外」；文档同步。保持原行为，不放大词条存储值，也不改游戏口径。 | `plugins/item_editor/ui/cards/numeric_card.cpp`。 |
+| 构建 | **PASS**：`scripts/build-debug.sh` 成功，`output/inotia4_qol_lsposed_debug_2611180214_cda2fb90cf2c.apk`（SHA-256 `cda2fb90cf2c…`）。 | 构建成功不替代设备验收。 |
+| VM-ITEM-EDITOR-05 | **NOT_ACCEPTED（待真机）**。 | 打开装备的混沌倍率卡，确认显示「当前：200%」与新的说明行；调倍率后替换物品，防御按倍率变化、非主属性词条按倍率变化、主属性词条保持存储值。 |

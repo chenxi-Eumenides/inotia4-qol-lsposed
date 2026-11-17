@@ -321,6 +321,17 @@ void draw_numeric_card() {
         std::snprintf(quantity, sizeof(quantity), "数量：%d", g_value);
         panel_internal::draw_text(g_card_root, quantity, 210, 36,
                                   panel_internal::kText, 2, 2);
+    } else if (g_target == NumericCardTarget::kChaosRate) {
+        // 原版只在 ITEM_GetDamage/GetDefense 内应用倍率；词条节点值按存储值
+        // 显示与累加（UIDesc_MakeItem / CHAR_UpdateAttrFromEquipOpt 都直读 i16），
+        // 卡片里明确这一点，避免把倍率误当成词条放大系数。
+        char value_text[48]{};
+        std::snprintf(value_text, sizeof(value_text), "当前：%d%%", g_value);
+        panel_internal::draw_center_text(g_card_root, value_text, 210, 40,
+                                         panel_internal::kText, 1);
+        panel_internal::draw_center_text(g_card_root,
+                                         "仅伤害/防御与属性词条，主属性词条除外", 210, 80,
+                                         panel_internal::kMuted);
     } else {
         char value_text[48]{};
         std::snprintf(value_text, sizeof(value_text), "当前：%d", g_value);
